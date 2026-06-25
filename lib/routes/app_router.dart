@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../pages/book_detail_page.dart';
+import '../pages/category_page.dart';
 import '../pages/home_page.dart';
 import '../pages/library_page.dart';
 import '../pages/login_page.dart';
@@ -93,84 +94,102 @@ class AppRouter {
           routes: [
             GoRoute(
               path: 'edit',
-              builder: (context, state) => PlaceholderPage(
-                  title: '编辑书籍 #${state.pathParameters['id']}'),
+              builder: (context, state) =>
+                  PlaceholderPage(title: '编辑书籍 #${state.pathParameters['id']}'),
             ),
           ],
         ),
         GoRoute(
-          path: '/author/:name',
-          builder: (context, state) => PlaceholderPage(
-              title: '作者: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/publisher/:name',
-          builder: (context, state) => PlaceholderPage(
-              title: '出版社: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/series/:name',
-          builder: (context, state) => PlaceholderPage(
-              title: '系列: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/tag/:name',
+          path: '/author',
           builder: (context, state) =>
-              PlaceholderPage(title: '标签: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/format/:name',
-          builder: (context, state) =>
-              PlaceholderPage(title: '格式: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/rating/:name',
-          builder: (context, state) =>
-              PlaceholderPage(title: '评分: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/network',
-          builder: (context, state) => const PlaceholderPage(title: '网络书库'),
+              const CategoryPage(type: 'author'),
           routes: [
             GoRoute(
-              path: 'book',
+              path: ':name',
               builder: (context, state) =>
-                  const PlaceholderPage(title: '网络书库 - 搜索'),
+                  CategoryPage(type: 'author', initialValue: state.pathParameters['name']!),
             ),
+          ],
+        ),
+        GoRoute(
+          path: '/publisher',
+          builder: (context, state) =>
+              const CategoryPage(type: 'publisher'),
+          routes: [
             GoRoute(
-              path: 'read',
+              path: ':name',
               builder: (context, state) =>
-                  const PlaceholderPage(title: '网络书库 - 阅读'),
+                  CategoryPage(type: 'publisher', initialValue: state.pathParameters['name']!),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/tag',
+          builder: (context, state) =>
+              const CategoryPage(type: 'tag'),
+          routes: [
+            GoRoute(
+              path: ':name',
+              builder: (context, state) =>
+                  CategoryPage(type: 'tag', initialValue: state.pathParameters['name']!),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/format',
+          builder: (context, state) =>
+              const CategoryPage(type: 'format'),
+          routes: [
+            GoRoute(
+              path: ':name',
+              builder: (context, state) =>
+                  CategoryPage(type: 'format', initialValue: state.pathParameters['name']!),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/series',
+          builder: (context, state) =>
+              const CategoryPage(type: 'series'),
+          routes: [
+            GoRoute(
+              path: ':name',
+              builder: (context, state) =>
+                  CategoryPage(type: 'series', initialValue: state.pathParameters['name']!),
+            ),
+          ],
+        ),
+        GoRoute(
+          path: '/rating',
+          builder: (context, state) =>
+              const CategoryPage(type: 'rating'),
+          routes: [
+            GoRoute(
+              path: ':name',
+              builder: (context, state) =>
+                  CategoryPage(type: 'rating', initialValue: state.pathParameters['name']!),
             ),
           ],
         ),
         GoRoute(
           path: '/hot',
-          builder: (context, state) => const PlaceholderPage(title: '热门书籍'),
+          builder: (context, state) => const CategoryPage(type: 'hot'),
         ),
         GoRoute(
           path: '/recent',
-          builder: (context, state) => const PlaceholderPage(title: '最近更新'),
+          builder: (context, state) => const CategoryPage(type: 'recent'),
+        ),
+        GoRoute(
+          path: '/opds',
+          builder: (context, state) => const PlaceholderPage(title: 'OPDS'),
+        ),
+        GoRoute(
+          path: '/network',
+          builder: (context, state) => const PlaceholderPage(title: '网络书库'),
         ),
         GoRoute(
           path: '/scopedbooks',
           builder: (context, state) => const PlaceholderPage(title: '限权书籍'),
-        ),
-        GoRoute(
-          path: '/meta/:name',
-          builder: (context, state) =>
-              PlaceholderPage(title: '元数据: ${state.pathParameters['name']}'),
-        ),
-        GoRoute(
-          path: '/user',
-          builder: (context, state) => const PlaceholderPage(title: '用户中心'),
-          routes: [
-            GoRoute(
-              path: 'history',
-              builder: (context, state) =>
-                  const PlaceholderPage(title: '阅读历史'),
-            ),
-          ],
         ),
         GoRoute(
           path: '/admin',

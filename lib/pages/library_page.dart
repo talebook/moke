@@ -201,27 +201,36 @@ class _LibraryPageState extends State<LibraryPage> {
             ),
           ),
           Expanded(
-            child: GridView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 10,
-                childAspectRatio: 0.52,
-              ),
-              itemCount: _books.length + (_isLoadingMore ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index >= _books.length) {
-                  return const Center(
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  );
-                }
-                final book = _books[index];
-                return BookCard(
-                  book: book,
-                  compact: true,
-                  onTap: () => context.push('/book/${book.id}'),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final spacing = 12.0;
+                final maxCardWidth = 110.0;
+                final cols = ((constraints.maxWidth + spacing) / (maxCardWidth + spacing)).floor().clamp(2, 12);
+                final cardWidth = (constraints.maxWidth - (cols - 1) * spacing) / cols;
+
+                return GridView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: cols,
+                    mainAxisSpacing: spacing,
+                    crossAxisSpacing: spacing,
+                    childAspectRatio: cardWidth / (cardWidth * 15 / 11 + 40),
+                  ),
+                  itemCount: _books.length + (_isLoadingMore ? 1 : 0),
+                  itemBuilder: (ctx, index) {
+                    if (index >= _books.length) {
+                      return const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      );
+                    }
+                    final book = _books[index];
+                    return BookCard(
+                      book: book,
+                      compact: true,
+                      onTap: () => context.push('/book/${book.id}'),
+                    );
+                  },
                 );
               },
             ),

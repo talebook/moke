@@ -101,9 +101,9 @@ class _HomePageState extends State<HomePage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final contentWidth = constraints.maxWidth;
-        final maxCardWidth = 160.0;
+        final maxCardWidth = 110.0;
         final spacing = 12.0;
-        final totalCols = ((contentWidth + spacing) / (maxCardWidth + spacing)).floor().clamp(2, 8);
+        final totalCols = ((contentWidth + spacing) / (maxCardWidth + spacing)).floor().clamp(2, 12);
         final w = (contentWidth - (totalCols - 1) * spacing) / totalCols;
 
         return RefreshIndicator(
