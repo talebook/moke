@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>导入管理 - TaleBook</title>
+    <style id="theme-vars">
+/* ========================================
+   TaleBook Client — Shared Brand CSS
+   Dark Theme (inspired by reference screenshot)
+   ======================================== */
+
+:root {
+  /* ── Color System ── */
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #242424;
+  --color-bg-tertiary: #2d2d2d;
+  --color-bg-elevated: #333333;
+  --color-bg-hover: #3a3a3a;
+  --color-bg-active: #404040;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b0b0b0;
+  --color-text-tertiary: #808080;
+  --color-text-disabled: #555555;
+  --color-text-inverse: #1a1a1a;
+
+  --color-brand-primary: #5b8cff;
+  --color-brand-primary-hover: #7aa5ff;
+  --color-brand-primary-muted: rgba(91, 140, 255, 0.15);
+
+  --color-accent-red: #ff4d4f;
+  --color-accent-red-muted: rgba(255, 77, 79, 0.15);
+  --color-accent-yellow: #ffd666;
+  --color-accent-green: #52c41a;
+  --color-accent-orange: #fa8c16;
+
+  --color-border-default: #3a3a3a;
+  --color-border-light: #2d2d2d;
+  --color-border-focus: #5b8cff;
+
+  --color-surface-card: #242424;
+  --color-surface-sidebar: #1e1e1e;
+  --color-surface-input: #2d2d2d;
+
+  /* ── State Colors ── */
+  --state-success: #52c41a;
+  --state-warning: #faad14;
+  --state-error: #ff4d4f;
+  --state-info: #5b8cff;
+
+  /* ── Typography ── */
+  --font-family-base: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-family-display: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.02em;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radius ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 12px 48px rgba(0, 0, 0, 0.5);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+
+  /* ── Z-index ── */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* ── Layout ── */
+  --sidebar-width: 240px;
+  --header-height: 56px;
+  --content-max-width: 1400px;
+  --book-cover-ratio: 11 / 15;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  
+  @theme inline {
+    --color-background: #1a1a1a;
+    --color-foreground: #ffffff;
+    --color-card: #242424;
+    --color-card-foreground: #ffffff;
+    --color-primary: #5b8cff;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #2d2d2d;
+    --color-secondary-foreground: #ffffff;
+    --color-muted: #3a3a3a;
+    --color-muted-foreground: #b0b0b0;
+    --color-accent: #5b8cff;
+    --color-accent-foreground: #ffffff;
+    --color-destructive: #ff4d4f;
+    --color-destructive-foreground: #ffffff;
+    --color-border: #3a3a3a;
+    --color-input: #2d2d2d;
+    --color-ring: #5b8cff;
+    --color-sidebar: #1e1e1e;
+    --color-sidebar-foreground: #ffffff;
+    --color-sidebar-primary: #5b8cff;
+    --color-sidebar-primary-foreground: #ffffff;
+    --color-sidebar-accent: #2d2d2d;
+    --color-sidebar-accent-foreground: #ffffff;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+  }
+  @layer base {
+    body { background: var(--color-bg-primary); color: var(--color-text-primary); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="flex h-screen overflow-hidden" style="background: var(--color-bg-primary);">
+      <div class="flex flex-col w-full">
+        <div class="flex items-center h-10 shrink-0 px-4" style="background: var(--color-surface-sidebar);"><div class="flex items-center gap-2 mr-4"><div class="w-3 h-3 rounded-full" style="background: #ff5f57;"></div><div class="w-3 h-3 rounded-full" style="background: #febc2e;"></div><div class="w-3 h-3 rounded-full" style="background: #28c840;"></div></div><span class="text-sm font-medium truncate" style="color: var(--color-text-secondary);">TaleBook</span></div>
+        <div class="flex flex-1 overflow-hidden">
+          <aside class="shrink-0 flex flex-col w-60 overflow-y-auto" style="background: var(--color-surface-sidebar); border-right: 1px solid var(--color-border-light);">
+            <!-- User Profile -->
+            <div class="flex items-center gap-3 px-5 py-5">
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold shrink-0" style="background: var(--color-brand-primary-muted); color: var(--color-brand-primary);">A</div>
+              <span class="text-sm font-medium truncate" style="color: var(--color-text-primary);">admin</span>
+            </div>
+
+            <!-- Navigation -->
+            <nav class="flex flex-col gap-0.5 px-3 mt-1">
+              <a data-dom-id="nav-index" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg><span class="truncate">首页</span></a>
+              <a data-dom-id="nav-library" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="truncate">本地书库</span></a>
+              <a data-dom-id="nav-network" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg><span class="truncate">网络书库</span></a>
+              <!-- Admin Section -->
+              <div class="mt-2 mb-1">
+                <div class="flex items-center gap-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-tertiary);">管理后台</div>
+              <a data-dom-id="nav-admin-settings" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg><span class="truncate">系统设置</span></a>
+              <a data-dom-id="nav-admin-users" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg><span class="truncate">用户管理</span></a>
+              <a data-dom-id="nav-admin-books" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="truncate">书籍管理</span></a>
+              <a data-dom-id="nav-admin-imports" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150" style="background: var(--color-brand-primary-muted); color: var(--color-brand-primary); font-weight: 500;"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg><span class="truncate">导入管理</span></a>
+              <a data-dom-id="nav-admin-booksources" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg><span class="truncate">书源管理</span></a>
+              <a data-dom-id="nav-admin-logs" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg><span class="truncate">系统日志</span></a>
+              </div>
+              <!-- Categories Section -->
+              <div class="mt-2 mb-1">
+                <div class="flex items-center gap-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-tertiary);">分类浏览</div>
+              <a data-dom-id="nav-nav" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg><span class="truncate">浏览</span><span class="ml-auto text-xs" style="color: var(--color-text-tertiary);">15</span></a>
+              <a data-dom-id="nav-publisher-list" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18M19 21V11l-6-4"/></svg><span class="truncate">出版社</span><span class="ml-auto text-xs" style="color: var(--color-text-tertiary);">5</span></a>
+              <a data-dom-id="nav-author-list" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg><span class="truncate">作者</span><span class="ml-auto text-xs" style="color: var(--color-text-tertiary);">8</span></a>
+              <a data-dom-id="nav-tag-list" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><path d="M7 7h.01"/></svg><span class="truncate">标签</span><span class="ml-auto text-xs" style="color: var(--color-text-tertiary);">23</span></a>
+              <a data-dom-id="nav-format" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6M10 18H8M16 18h-8M16 14h-8"/></svg><span class="truncate">格式</span><span class="ml-auto text-xs" style="color: var(--color-text-tertiary);">4</span></a>
+              </div>
+              <!-- More Categories (2-col) -->
+              <div class="mt-2 mb-1">
+                <div class="grid grid-cols-2 gap-0.5">
+                  <a data-dom-id="nav-series" href="#" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="truncate">丛书</span></a>
+                  <a data-dom-id="nav-rating" href="#" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.14 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="truncate">评分</span></a>
+                  <a data-dom-id="nav-hot" href="#" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 6l-9.5 9.5-5-5L1 18"/><path d="M17 6h6M23 6v6"/></svg><span class="truncate">热门</span></a>
+                  <a data-dom-id="nav-recent" href="#" class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg><span class="truncate">最近更新</span></a>
+                </div>
+              </div>
+              <!-- System Section -->
+              <div class="mt-2 mb-1">
+                <div class="flex items-center gap-3 px-3 py-1.5 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-tertiary);">系统</div>
+              <a data-dom-id="nav-opds" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.14 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg><span class="truncate">OPDS</span></a>
+              </div>
+            </nav>
+
+            <!-- Spacer -->
+            <div class="flex-1"></div>
+
+            <!-- Logout -->
+            <div class="px-3 pb-4">
+              <a data-dom-id="nav-logout" href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-accent-red);">
+                <svg class="w-[18px] h-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <span class="truncate">登出</span>
+              </a>
+            </div>
+          </aside>
+          <div class="flex-1 flex flex-col overflow-hidden">
+            <div class="flex items-center gap-3 px-6 py-3 shrink-0" style="border-bottom: 1px solid var(--color-border-light);">
+              <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg max-w-md" style="background: var(--color-surface-input); border: 1px solid var(--color-border-default);"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-text-tertiary);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="text-sm truncate" style="color: var(--color-text-tertiary);">搜索...</span></div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6">
+              <h1 class="text-xl font-semibold mb-1" style="color: var(--color-text-primary);">导入管理</h1>
+<div class="h-px mb-4" style="background: var(--color-border-default);"></div>
+<div class="flex items-center gap-3 mb-4">
+  <button class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+  <div class="flex-1"></div>
+  <button class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 hover:opacity-90" style="background: var(--color-brand-primary); color: #fff;"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>手动导入</button>
+</div>
+<div class="rounded-lg overflow-hidden" style="border: 1px solid var(--color-border-light);">
+  <table class="w-full text-sm">
+    <thead><tr style="background: var(--color-bg-tertiary);"><th class="text-left px-4 py-3 font-medium whitespace-nowrap" style="color: var(--color-text-secondary);">文件名</th><th class="text-left px-4 py-3 font-medium whitespace-nowrap" style="color: var(--color-text-secondary);">状态</th><th class="text-left px-4 py-3 font-medium whitespace-nowrap" style="color: var(--color-text-secondary);">大小</th><th class="text-left px-4 py-3 font-medium whitespace-nowrap" style="color: var(--color-text-secondary);">导入时间</th><th class="text-left px-4 py-3 font-medium whitespace-nowrap" style="color: var(--color-text-secondary);">操作</th></tr></thead>
+    <tbody>
+      <tr style="border-top: 1px solid var(--color-border-light);"><td class="px-4 py-3 font-medium truncate" style="color: var(--color-text-primary);">三体全集.epub</td><td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap" style="background: rgba(82,196,26,0.15); color: #52c41a;">已导入</span></td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">12.5 MB</td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2024-10-01 14:30</td><td class="px-4 py-3"><button class="text-xs" style="color: var(--color-accent-red);">删除</button></td></tr>
+      <tr style="border-top: 1px solid var(--color-border-light);"><td class="px-4 py-3 font-medium truncate" style="color: var(--color-text-primary);">百年孤独.pdf</td><td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap" style="background: rgba(250,173,20,0.15); color: #faad14;">下载中</span></td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">8.3 MB</td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2024-10-02 09:15</td><td class="px-4 py-3"><button class="text-xs" style="color: var(--color-accent-red);">取消</button></td></tr>
+      <tr style="border-top: 1px solid var(--color-border-light);"><td class="px-4 py-3"><div><p class="font-medium truncate" style="color: var(--color-text-primary);">活着.txt</p><div class="w-full h-1.5 rounded-full mt-2" style="background: var(--color-bg-tertiary);"><div class="h-full rounded-full" style="width: 60%; background: var(--color-brand-primary);"></div></div></div></td><td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap" style="background: var(--color-brand-primary-muted); color: var(--color-brand-primary);">导入中</span></td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2.1 MB</td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2024-10-02 10:00</td><td class="px-4 py-3"><button class="text-xs" style="color: var(--color-accent-red);">取消</button></td></tr>
+      <tr style="border-top: 1px solid var(--color-border-light);"><td class="px-4 py-3 font-medium truncate" style="color: var(--color-text-primary);">1984.mobi</td><td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap" style="background: var(--color-bg-tertiary); color: var(--color-text-secondary);">待处理</span></td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">5.7 MB</td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2024-10-02 10:30</td><td class="px-4 py-3"><button class="text-xs" style="color: var(--color-accent-red);">删除</button></td></tr>
+      <tr style="border-top: 1px solid var(--color-border-light);"><td class="px-4 py-3 font-medium truncate" style="color: var(--color-text-primary);">损坏文件.epub</td><td class="px-4 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap" style="background: var(--color-accent-red-muted); color: var(--color-accent-red);">错误</span></td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">0.3 MB</td><td class="px-4 py-3 whitespace-nowrap" style="color: var(--color-text-tertiary);">2024-10-01 08:00</td><td class="px-4 py-3"><button class="text-xs" style="color: var(--color-accent-red);">重试</button></td></tr>
+    </tbody>
+  </table>
+</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+</body>
+</html>

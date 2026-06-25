@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - TaleBook</title>
+    <style id="theme-vars">
+/* ========================================
+   TaleBook Client — Shared Brand CSS
+   Dark Theme (inspired by reference screenshot)
+   ======================================== */
+
+:root {
+  /* ── Color System ── */
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #242424;
+  --color-bg-tertiary: #2d2d2d;
+  --color-bg-elevated: #333333;
+  --color-bg-hover: #3a3a3a;
+  --color-bg-active: #404040;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b0b0b0;
+  --color-text-tertiary: #808080;
+  --color-text-disabled: #555555;
+  --color-text-inverse: #1a1a1a;
+
+  --color-brand-primary: #5b8cff;
+  --color-brand-primary-hover: #7aa5ff;
+  --color-brand-primary-muted: rgba(91, 140, 255, 0.15);
+
+  --color-accent-red: #ff4d4f;
+  --color-accent-red-muted: rgba(255, 77, 79, 0.15);
+  --color-accent-yellow: #ffd666;
+  --color-accent-green: #52c41a;
+  --color-accent-orange: #fa8c16;
+
+  --color-border-default: #3a3a3a;
+  --color-border-light: #2d2d2d;
+  --color-border-focus: #5b8cff;
+
+  --color-surface-card: #242424;
+  --color-surface-sidebar: #1e1e1e;
+  --color-surface-input: #2d2d2d;
+
+  /* ── State Colors ── */
+  --state-success: #52c41a;
+  --state-warning: #faad14;
+  --state-error: #ff4d4f;
+  --state-info: #5b8cff;
+
+  /* ── Typography ── */
+  --font-family-base: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-family-display: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.02em;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radius ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 12px 48px rgba(0, 0, 0, 0.5);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+
+  /* ── Z-index ── */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* ── Layout ── */
+  --sidebar-width: 240px;
+  --header-height: 56px;
+  --content-max-width: 1400px;
+  --book-cover-ratio: 11 / 15;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  
+  @theme inline {
+    --color-background: #1a1a1a;
+    --color-foreground: #ffffff;
+    --color-card: #242424;
+    --color-card-foreground: #ffffff;
+    --color-primary: #5b8cff;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #2d2d2d;
+    --color-secondary-foreground: #ffffff;
+    --color-muted: #3a3a3a;
+    --color-muted-foreground: #b0b0b0;
+    --color-accent: #5b8cff;
+    --color-accent-foreground: #ffffff;
+    --color-destructive: #ff4d4f;
+    --color-destructive-foreground: #ffffff;
+    --color-border: #3a3a3a;
+    --color-input: #2d2d2d;
+    --color-ring: #5b8cff;
+    --color-sidebar: #1e1e1e;
+    --color-sidebar-foreground: #ffffff;
+    --color-sidebar-primary: #5b8cff;
+    --color-sidebar-primary-foreground: #ffffff;
+    --color-sidebar-accent: #2d2d2d;
+    --color-sidebar-accent-foreground: #ffffff;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+  }
+  @layer base {
+    body { background: var(--color-bg-primary); color: var(--color-text-primary); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="bg-bg text-foreground">
+  <div class="mx-auto max-w-[430px] min-h-screen flex flex-col justify-center px-8" style="padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);">
+
+    <!-- Status Bar -->
+    <div class="flex items-center justify-between px-0 pt-3 pb-6 -mx-8 px-5">
+      <span class="text-xs font-medium text-foreground-secondary">9:41</span>
+      <div class="flex items-center gap-1.5">
+        <svg class="w-4 h-4 text-foreground-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 20h.01M7 20v-4M12 20v-8M17 20V8M22 20V4"/>
+        </svg>
+        <svg class="w-4 h-4 text-foreground-secondary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>
+        </svg>
+        <svg class="w-5 h-3 text-foreground-secondary" viewBox="0 0 28 14" fill="currentColor">
+          <rect x="0" y="0" width="24" height="14" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="2" y="2" width="18" height="10" rx="1" ry="1"/>
+          <path d="M25 4.5v5a1.5 1.5 0 0 0 0-5z"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Logo -->
+    <div class="flex justify-center mb-6">
+      <div class="inline-flex h-20 w-20 items-center justify-center rounded-2xl bg-primary-muted">
+        <svg class="w-10 h-10 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Title -->
+    <div class="text-center mb-8">
+      <h1 class="text-2xl font-bold text-foreground" style="text-wrap: balance;">欢迎回来</h1>
+      <p class="text-sm text-foreground-secondary mt-2">登录以访问您的个人书库</p>
+    </div>
+
+    <!-- Login Form -->
+    <div class="flex flex-col gap-4">
+      <!-- Username -->
+      <div class="flex items-center gap-3 rounded-xl bg-bg-tertiary px-4 py-3.5 min-h-[48px]">
+        <svg class="w-5 h-5 text-foreground-tertiary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span class="text-sm text-foreground-tertiary">用户名</span>
+      </div>
+
+      <!-- Password -->
+      <div class="flex items-center gap-3 rounded-xl bg-bg-tertiary px-4 py-3.5 min-h-[48px]">
+        <svg class="w-5 h-5 text-foreground-tertiary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span class="text-sm text-foreground-tertiary">密码</span>
+      </div>
+
+      <!-- Forgot Password -->
+      <div class="flex justify-end">
+        <button class="text-sm text-primary font-medium min-h-[44px] inline-flex items-center">忘记密码?</button>
+      </div>
+
+      <!-- Login Button -->
+      <button data-dom-id="cta-index" class="inline-flex items-center justify-center h-12 rounded-xl bg-primary text-foreground text-base font-semibold mt-2">
+        登录
+      </button>
+
+      <!-- Register Link -->
+      <div class="flex justify-center">
+        <span class="text-sm text-foreground-tertiary">
+          还没有账号? <button data-dom-id="link-signup" class="text-primary font-medium">注册</button>
+        </span>
+      </div>
+
+      <!-- Divider -->
+      <div class="flex items-center gap-4 my-4">
+        <div class="flex-1 h-px bg-border"></div>
+        <span class="text-xs text-foreground-tertiary whitespace-nowrap">其他登录方式</span>
+        <div class="flex-1 h-px bg-border"></div>
+      </div>
+
+      <!-- Social Login -->
+      <div class="flex gap-3">
+        <button class="flex-1 inline-flex items-center justify-center h-12 rounded-xl border border-border text-foreground-secondary text-sm font-medium gap-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm3.96 4.606c-1.797-.072-3.746.512-5.28 1.786-1.72 1.428-2.687 3.72-1.78 6.22.942 2.453 3.666 4.229 6.884 4.229.826 0 1.622-.12 2.361-.336a.722.722 0 0 1 .598.082l1.584.926a.272.272 0 0 0 .14.045c.133 0 .241-.11.241-.246 0-.06-.024-.12-.04-.178l-.325-1.233a.492.492 0 0 1 .177-.554C21.905 18.698 23 16.953 23 15.07c0-2.476-2.072-4.392-4.442-4.473zM14.066 13.3c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982zm4.844 0c.535 0 .969.44.969.982a.976.976 0 0 1-.969.983.976.976 0 0 1-.969-.983c0-.542.434-.982.97-.982z"/>
+          </svg>
+          微信
+        </button>
+        <button class="flex-1 inline-flex items-center justify-center h-12 rounded-xl border border-border text-foreground-secondary text-sm font-medium gap-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12.003 2C6.477 2 2 6.477 2 12c0 2.136.67 4.116 1.81 5.742L2 22l4.258-1.81A9.938 9.938 0 0 0 12.003 22C17.526 22 22 17.523 22 12S17.526 2 12.003 2zm5.393 13.437c-.21.6-1.243 1.14-1.726 1.21-.44.063-.996.09-1.606-.1-.413-.127-.937-.296-1.613-.578-2.838-1.226-4.69-4.087-4.834-4.283-.144-.196-1.18-1.566-1.18-2.986 0-1.42.744-2.127.998-2.416.254-.29.553-.363.738-.363.184 0 .368.002.529.01.17.009.398-.064.622.474.224.538.762 1.86.83 1.996.067.136.1.295.02.474-.08.18-.12.29-.24.447-.12.157-.252.352-.36.474-.12.12-.244.25-.105.49.14.24.62 1.023 1.33 1.658.915.856 1.686 1.122 1.926 1.254.24.133.38.111.52-.068.14-.18.6-.7.76-.94.16-.24.32-.2.54-.12.22.08 1.396.66 1.636.78.24.12.4.18.458.28.06.1.06.578-.15 1.178z"/>
+          </svg>
+          QQ
+        </button>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

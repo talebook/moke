@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络阅读 - TaleBook</title>
+    <style id="theme-vars">
+/* ========================================
+   TaleBook Client — Shared Brand CSS
+   Dark Theme (inspired by reference screenshot)
+   ======================================== */
+
+:root {
+  /* ── Color System ── */
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #242424;
+  --color-bg-tertiary: #2d2d2d;
+  --color-bg-elevated: #333333;
+  --color-bg-hover: #3a3a3a;
+  --color-bg-active: #404040;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b0b0b0;
+  --color-text-tertiary: #808080;
+  --color-text-disabled: #555555;
+  --color-text-inverse: #1a1a1a;
+
+  --color-brand-primary: #5b8cff;
+  --color-brand-primary-hover: #7aa5ff;
+  --color-brand-primary-muted: rgba(91, 140, 255, 0.15);
+
+  --color-accent-red: #ff4d4f;
+  --color-accent-red-muted: rgba(255, 77, 79, 0.15);
+  --color-accent-yellow: #ffd666;
+  --color-accent-green: #52c41a;
+  --color-accent-orange: #fa8c16;
+
+  --color-border-default: #3a3a3a;
+  --color-border-light: #2d2d2d;
+  --color-border-focus: #5b8cff;
+
+  --color-surface-card: #242424;
+  --color-surface-sidebar: #1e1e1e;
+  --color-surface-input: #2d2d2d;
+
+  /* ── State Colors ── */
+  --state-success: #52c41a;
+  --state-warning: #faad14;
+  --state-error: #ff4d4f;
+  --state-info: #5b8cff;
+
+  /* ── Typography ── */
+  --font-family-base: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-family-display: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 14px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
+  --font-size-3xl: 30px;
+  --font-size-4xl: 36px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  --letter-spacing-tight: -0.01em;
+  --letter-spacing-normal: 0;
+  --letter-spacing-wide: 0.02em;
+
+  /* ── Spacing ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radius ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-float: 0 12px 48px rgba(0, 0, 0, 0.5);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 350ms ease;
+
+  /* ── Z-index ── */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* ── Layout ── */
+  --sidebar-width: 240px;
+  --header-height: 56px;
+  --content-max-width: 1400px;
+  --book-cover-ratio: 11 / 15;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  
+  @theme inline {
+    --color-background: #1a1a1a;
+    --color-foreground: #ffffff;
+    --color-card: #242424;
+    --color-card-foreground: #ffffff;
+    --color-primary: #5b8cff;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #2d2d2d;
+    --color-secondary-foreground: #ffffff;
+    --color-muted: #3a3a3a;
+    --color-muted-foreground: #b0b0b0;
+    --color-accent: #5b8cff;
+    --color-accent-foreground: #ffffff;
+    --color-destructive: #ff4d4f;
+    --color-destructive-foreground: #ffffff;
+    --color-border: #3a3a3a;
+    --color-input: #2d2d2d;
+    --color-ring: #5b8cff;
+    --color-sidebar: #1e1e1e;
+    --color-sidebar-foreground: #ffffff;
+    --color-sidebar-primary: #5b8cff;
+    --color-sidebar-primary-foreground: #ffffff;
+    --color-sidebar-accent: #2d2d2d;
+    --color-sidebar-accent-foreground: #ffffff;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+  }
+  @layer base {
+    body { background: var(--color-bg-primary); color: var(--color-text-primary); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="flex flex-col h-screen overflow-hidden" style="background: var(--color-bg-primary);">
+      <div class="flex items-center justify-between h-12 shrink-0 px-4" style="background: var(--color-surface-sidebar); border-bottom: 1px solid var(--color-border-light);">
+  <button data-dom-id="back-network-book" class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+  <span class="text-sm font-medium truncate" style="color: var(--color-text-primary);">三体</span>
+  <button class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+</div>
+<div class="flex flex-1 overflow-hidden">
+  <aside class="shrink-0 w-60 overflow-y-auto py-4 px-3" style="background: var(--color-surface-sidebar); border-right: 1px solid var(--color-border-light);">
+    <p class="text-xs font-medium px-3 mb-3" style="color: var(--color-text-tertiary);">目录</p>
+    <nav class="flex flex-col gap-0.5">
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150" style="background: var(--color-brand-primary-muted); color: var(--color-brand-primary);">第一章 疯狂年代</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第二章 台球</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第三章 射手和农场主</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第四章 三体问题</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第五章 叶文洁</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第六章 宇宙闪烁</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第七章 疯狂年代</a>
+      <a href="#" class="px-3 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)] truncate" style="color: var(--color-text-secondary);">第八章 叛乱</a>
+    </nav>
+  </aside>
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <div class="flex-1 overflow-y-auto px-8 py-10 lg:px-16 lg:py-12">
+      <div class="max-w-2xl mx-auto">
+        <h1 class="text-2xl font-bold mb-8 text-center" style="color: var(--color-text-primary); text-wrap: balance;">第一章 疯狂年代</h1>
+        <div class="space-y-6" style="color: var(--color-text-secondary); line-height: 1.8;">
+          <p>中国，1967年。</p>
+          <p>红色联合的武斗中，叶文洁目睹了父亲叶哲泰被批斗致死的场景。那一天，整个世界都在疯狂之中。革命的烈火烧遍大地，理智和文明在口号声中灰飞烟灭。</p>
+          <p>叶文洁站在人群中，看着父亲被推上批斗台。她的眼泪早已流干，只剩下一种冰冷的麻木。她知道，从这一刻起，她曾经相信的一切都崩塌了。</p>
+          <p>多年后，当她站在红岸基地的发射天线前，仰望着那面巨大的抛物面天线指向深邃的星空时，她做出了一个改变人类命运的决定。</p>
+          <p>她按下了发射键，将那个来自地球的信号，以光速向宇宙深处发送出去。她不知道，这个信号将在四光年外的三体世界掀起怎样的波澜。</p>
+        </div>
+      </div>
+    </div>
+    <div class="flex items-center justify-center gap-4 py-4 px-6 shrink-0" style="border-top: 1px solid var(--color-border-light);">
+      <button class="flex items-center gap-2 px-5 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>上一章</button>
+      <button class="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors duration-150" style="background: var(--color-brand-primary-muted); color: var(--color-brand-primary);"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>目录</button>
+      <button class="flex items-center gap-2 px-5 py-2 rounded-lg text-sm transition-colors duration-150 hover:bg-[var(--color-bg-hover)]" style="color: var(--color-text-secondary);">下一章<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>
+    </div>
+  </div>
+</div>
+    </main>
+</body>
+</html>
