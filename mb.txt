@@ -1,0 +1,10 @@
+# 1. 进入子模块目录
+cd readest
+
+# 2. 更换远程仓库地址
+git remote set-url origin https://github.com/talebook/readest
+
+# 3. 回到父仓库，提交这个变更（子模块的 .git/config 变了，但父仓库需要记录新的 URL）
+cd ..
+git add .gitmodules
+git commit -m "Update Readest submodule remote URL"
