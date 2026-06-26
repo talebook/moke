@@ -1,28 +1,6 @@
 {
   "data": [
     {
-      "id": "page-install",
-      "title": "安装页",
-      "type": "page",
-      "version": 1,
-      "createdAt": 1719264000000,
-      "canvasData": {
-        "x": 0,
-        "y": 0,
-        "group": 0
-      },
-      "devMetadata": {
-        "htmlSrc": "pages/install.html",
-        "interactions": [
-          {
-            "domId": "cta-login",
-            "targetPageId": "page-login",
-            "transitionLabel": "安装完成"
-          }
-        ]
-      }
-    },
-    {
       "id": "page-login",
       "title": "登录",
       "type": "page",
@@ -74,7 +52,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 1131,
+        "y": 754,
         "group": 0
       },
       "devMetadata": {
@@ -165,6 +143,28 @@
       }
     },
     {
+      "id": "page-connect",
+      "title": "连接服务器",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1719264000000,
+      "canvasData": {
+        "x": 0,
+        "y": 4147,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/connect.html",
+        "interactions": [
+          {
+            "domId": "btn-connect",
+            "targetPageId": "page-login",
+            "transitionLabel": "连接服务器"
+          }
+        ]
+      }
+    },
+    {
       "id": "page-signup",
       "title": "注册页",
       "type": "page",
@@ -172,7 +172,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 4147,
+        "y": 3770,
         "group": 0
       },
       "devMetadata": {
@@ -199,7 +199,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 7163,
+        "y": 6786,
         "group": 0
       },
       "devMetadata": {
@@ -221,7 +221,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 4147,
+        "y": 3770,
         "group": 0
       },
       "devMetadata": {
@@ -248,7 +248,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 1508,
+        "y": 1131,
         "group": 0
       },
       "devMetadata": {
@@ -270,7 +270,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 1508,
+        "y": 1131,
         "group": 0
       },
       "devMetadata": {
@@ -292,7 +292,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 3393,
+        "y": 3016,
         "group": 0
       },
       "devMetadata": {
@@ -319,7 +319,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 1885,
+        "y": 1508,
         "group": 0
       },
       "devMetadata": {
@@ -341,7 +341,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 2262,
+        "y": 1885,
         "group": 0
       },
       "devMetadata": {
@@ -363,7 +363,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 1885,
+        "y": 1508,
         "group": 0
       },
       "devMetadata": {
@@ -385,7 +385,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 3016,
+        "y": 2639,
         "group": 0
       },
       "devMetadata": {
@@ -407,7 +407,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 6786,
+        "y": 6409,
         "group": 0
       },
       "devMetadata": {
@@ -429,7 +429,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 6409,
+        "y": 6032,
         "group": 0
       },
       "devMetadata": {
@@ -451,7 +451,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 5278,
+        "y": 4901,
         "group": 0
       },
       "devMetadata": {
@@ -473,7 +473,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 2639,
+        "y": 2262,
         "group": 0
       },
       "devMetadata": {
@@ -495,7 +495,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 4901,
+        "y": 4524,
         "group": 0
       },
       "devMetadata": {
@@ -517,7 +517,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 1131,
+        "y": 754,
         "group": 0
       },
       "devMetadata": {
@@ -564,7 +564,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 754,
+        "y": 0,
         "group": 0
       },
       "devMetadata": {
@@ -613,7 +613,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 6032,
+        "y": 5655,
         "group": 0
       },
       "devMetadata": {
@@ -635,7 +635,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 4147,
+        "y": 3770,
         "group": 0
       },
       "devMetadata": {
@@ -657,7 +657,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 3770,
+        "y": 3393,
         "group": 0
       },
       "devMetadata": {
@@ -679,7 +679,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 3393,
+        "y": 3016,
         "group": 0
       },
       "devMetadata": {
@@ -701,7 +701,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 3016,
+        "y": 2639,
         "group": 0
       },
       "devMetadata": {
@@ -723,7 +723,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 2639,
+        "y": 2262,
         "group": 0
       },
       "devMetadata": {
@@ -745,7 +745,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 0,
-        "y": 2262,
+        "y": 1885,
         "group": 0
       },
       "devMetadata": {
@@ -767,7 +767,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 620,
-        "y": 3770,
+        "y": 3393,
         "group": 0
       },
       "devMetadata": {
@@ -789,7 +789,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 5655,
+        "y": 5278,
         "group": 0
       },
       "devMetadata": {
@@ -811,7 +811,7 @@
       "createdAt": 1719264000000,
       "canvasData": {
         "x": 1240,
-        "y": 4524,
+        "y": 4147,
         "group": 0
       },
       "devMetadata": {
@@ -823,6 +823,22 @@
             "transitionLabel": "查看书籍"
           }
         ]
+      }
+    },
+    {
+      "id": "page-install",
+      "title": "安装页",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1719264000000,
+      "canvasData": {
+        "x": 0,
+        "y": 7163,
+        "group": 0
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/install.html",
+        "interactions": []
       }
     }
   ],
