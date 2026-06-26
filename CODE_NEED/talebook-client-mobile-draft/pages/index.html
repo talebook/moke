@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaleBook - 首页</title>
+    <style id="theme-vars">
+/* Warm Study design tokens */
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --muted: #F5F1EB;
+  --muted-foreground: #8B8682;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --border: #E8E3DC;
+  --border-subtle: #EFEAE3;
+  --input: #F5F1EB;
+  --ring: #B8956A;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+  --radius: 8px;
+  --spacing: 0.25rem;
+}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+@theme inline { --color-foreground: var(--foreground); }
+@layer base {
+  body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+  td, th { word-break: break-all; word-break: auto-phrase; }
+  th { white-space: nowrap; }
+}
+    </style>
+    <style>
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="antialiased">
+<div class="relative flex flex-col w-full max-w-[390px] mx-auto h-dvh bg-[var(--background)] overflow-hidden">
+  <div class="flex items-center justify-between h-11 px-6 shrink-0 select-none">
+    <span class="text-[13px] font-semibold">9:41</span>
+    <div class="flex items-center gap-1.5">
+      <svg class="h-3 w-auto" viewBox="0 0 24 24" fill="none" stroke="var(--foreground)" stroke-width="1.8"><path d="M5 12.55a11 11 0 0 1 14 0"/></svg>
+    </div>
+  </div>
+  <div class="flex items-center justify-between h-11 px-4 shrink-0">
+    <span class="text-[17px] font-semibold">TaleBook</span>
+    <a href="search.html" class="flex items-center justify-center w-9 h-9 rounded-lg"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></a>
+  </div>
+
+  <main class="flex-1 overflow-y-auto px-5">
+    <section class="pt-5 mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-[16px] font-semibold" style="font-family:var(--font-serif)">继续阅读</h3>
+      </div>
+      <div class="flex gap-4 overflow-x-auto no-scrollbar" style="scroll-snap-type:x mandatory">
+        <a data-dom-id="link-book-detail" class="shrink-0 flex gap-3 snap-start no-underline min-w-0" style="width:260px">
+          <div class="w-[72px] h-[96px] rounded-[4px] flex items-end p-2 shrink-0" style="background:#2C3E50"><span class="text-white text-[10px] font-medium">三体</span></div>
+          <div class="flex-1 min-w-0 flex flex-col justify-center"><span class="text-[15px] font-semibold leading-snug" style="font-family:var(--font-serif)">三体</span><span class="text-[12px] mt-1" style="color:var(--muted-foreground)">刘慈欣</span><div class="w-full h-1 rounded-full mt-2" style="background:var(--muted)"><div class="h-full rounded-full" style="width:47%;background:var(--primary)"></div></div><span class="text-[10px] mt-1" style="color:var(--muted-foreground)">已读 47%</span></div>
+        </a>
+      </div>
+    </section>
+
+    <section class="mb-8">
+      <div class="flex items-center justify-between mb-4"><h3 class="text-[16px] font-semibold" style="font-family:var(--font-serif)">书库</h3><span class="text-[12px]" style="color:var(--muted-foreground)">128 本</span></div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-6">
+        <a data-dom-id="link-book-detail" class="flex flex-col gap-1.5 no-underline"><div class="aspect-[3/4] rounded-[4px] flex items-end p-2.5" style="background:#2C3E50"><span class="text-white text-[13px] font-medium">三体</span></div><span class="text-[14px] font-medium leading-tight" style="font-family:var(--font-serif)">三体</span><span class="text-[11px]" style="color:var(--muted-foreground)">刘慈欣</span></a>
+        <a data-dom-id="link-book-detail" class="flex flex-col gap-1.5 no-underline"><div class="aspect-[3/4] rounded-[4px] flex items-end p-2.5" style="background:#6B3A4A"><span class="text-white text-[13px] font-medium">活着</span></div><span class="text-[14px] font-medium leading-tight" style="font-family:var(--font-serif)">活着</span><span class="text-[11px]" style="color:var(--muted-foreground)">余华</span></a>
+        <a data-dom-id="link-book-detail" class="flex flex-col gap-1.5 no-underline"><div class="aspect-[3/4] rounded-[4px] flex items-end p-2.5" style="background:#3D5A40"><span class="text-white text-[13px] font-medium">百年孤独</span></div><span class="text-[14px] font-medium leading-tight" style="font-family:var(--font-serif)">百年孤独</span><span class="text-[11px]" style="color:var(--muted-foreground)">马尔克斯</span></a>
+        <a data-dom-id="link-book-detail" class="flex flex-col gap-1.5 no-underline"><div class="aspect-[3/4] rounded-[4px] flex items-end p-2.5" style="background:#546E7A"><span class="text-white text-[13px] font-medium">1984</span></div><span class="text-[14px] font-medium leading-tight" style="font-family:var(--font-serif)">1984</span><span class="text-[11px]" style="color:var(--muted-foreground)">奥威尔</span></a>
+      </div>
+    </section>
+  </main>
+
+  <nav class="flex items-stretch justify-around shrink-0 bg-white/60 border-t border-[var(--border)]" style="padding-bottom:max(0px,env(safe-area-inset-bottom))">
+    <button type="button" data-tab-key="index" aria-label="首页" class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 pt-1.5 pb-1" style="color:var(--primary)"><svg class="h-[22px] w-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9.5L12 2.5l9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 21.5 9 12.5 15 12.5 15 21.5"/></svg><span class="text-[10px] font-medium">首页</span></button>
+    <button type="button" data-tab-key="library" aria-label="书库" class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 pt-1.5 pb-1" style="color:var(--muted-foreground)"><svg class="h-[22px] w-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span class="text-[10px] font-medium">书库</span></button>
+    <button type="button" data-tab-key="network" aria-label="网络" class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 pt-1.5 pb-1" style="color:var(--muted-foreground)"><svg class="h-[22px] w-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="10"/></svg><span class="text-[10px] font-medium">网络</span></button>
+    <button type="button" data-tab-key="profile" aria-label="我的" class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 pt-1.5 pb-1" style="color:var(--muted-foreground)"><svg class="h-[22px] w-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><span class="text-[10px] font-medium">我的</span></button>
+  </nav>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

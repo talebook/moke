@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Talebook - 搜索</title>
+    <style id="theme-vars">
+/*
+ * Warm Study design tokens
+ * Brand: Talebook
+ * Domain: Personal digital library / reading tool
+ * Style: Restrained, warm, tool-like
+ * Theme mode: light
+ */
+
+:root {
+  /* Brand — muted amber-brown */
+  --brand-50: #F5F0EA;
+  --brand-100: #EDE4D7;
+  --brand-200: #DDCAB5;
+  --brand-300: #C8A88C;
+  --brand-400: #B8956A;
+  --brand-500: #A07D55;
+  --brand-600: #886845;
+  --brand-700: #6F5337;
+  --brand-800: #56402A;
+  --brand-900: #3D2D1E;
+
+  /* Background — warm off-white */
+  --background-50: #FEFDF9;
+  --background-100: #FBF9F2;
+  --background-200: #F5F1EB;
+  --background-300: #F0ECE6;
+  --background-400: #E8E3DC;
+  --background-500: #DDD8CF;
+  --background-600: #CFC9BE;
+
+  /* Text — deep charcoal */
+  --text-50: #F7F7F7;
+  --text-100: #E8E8E6;
+  --text-200: #CECECD;
+  --text-300: #9B9B9B;
+  --text-400: #7A7A7A;
+  --text-500: #6B6B6B;
+  --text-600: #4A4A4A;
+  --text-700: #3D3D3D;
+  --text-800: #2C2C2C;
+  --text-900: #1A1A1A;
+
+  /* Icon */
+  --icon-50: #F5F4F2;
+  --icon-100: #E8E6E2;
+  --icon-200: #D1CFC9;
+  --icon-300: #C5C3BC;
+  --icon-400: #ADAAA2;
+  --icon-500: #8E8B84;
+  --icon-600: #6E6B65;
+  --icon-700: #484641;
+  --icon-800: #2C2B28;
+  --icon-900: #1D1C1A;
+
+  /* State colors */
+  --state-success-50: #E8F5E9;
+  --state-success-500: #4CAF50;
+  --state-warning-50: #FFF8E1;
+  --state-warning-500: #FFA726;
+  --state-error-50: #FFEBEE;
+  --state-error-500: #D15252;
+
+  /* Semantic tokens */
+  --background: #FBF9F2;
+  --foreground: #2C2C2C;
+  --card: #FFFFFF;
+  --card-foreground: #2C2C2C;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --muted: #F5F1EB;
+  --muted-foreground: #9B9B9B;
+  --accent: #F0ECE6;
+  --accent-foreground: #B8956A;
+  --destructive: #D15252;
+  --destructive-foreground: #FFFFFF;
+  --border: #E8E3DC;
+  --input: #F5F1EB;
+  --ring: #B8956A;
+
+  /* Chart */
+  --chart-1: #B8956A;
+  --chart-2: #2C3E50;
+  --chart-3: #6B3A4A;
+  --chart-4: #3D5A40;
+  --chart-5: #8B7355;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+
+  /* Shadows — maximum alpha 0.05 for static elements */
+  --shadow-xs: 0 1px 2px rgba(44,44,44,0.04);
+  --shadow-sm: 0 1px 3px rgba(44,44,44,0.04), 0 1px 2px rgba(44,44,44,0.03);
+  --shadow-md: 0 4px 8px rgba(44,44,44,0.06);
+  --shadow-lg: 0 8px 24px -8px rgba(44,44,44,0.12);
+  --shadow-xl: 0 16px 40px -10px rgba(44,44,44,0.18);
+
+  /* Sidebar (unused but required for consistency) */
+  --sidebar-background: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+    </style>
+    <style id="component-vars">/* Free-explore — no component library */</style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+  }
+}
+    </style>
+    <style>
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+[data-icon] {
+  display: inline-flex; align-items: center; justify-content: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  background-color: currentColor;
+}
+    </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased" style="font-family:'Inter','PingFang SC','Noto Sans SC','Microsoft YaHei',system-ui,sans-serif">
+<div class="relative flex flex-col w-full max-w-[390px] mx-auto h-dvh bg-[var(--background)] overflow-hidden">
+
+  <!-- Status Bar -->
+  <div class="flex items-center justify-between h-11 px-6 shrink-0 bg-[var(--background)] select-none">
+    <span class="text-[13px] font-semibold leading-none text-[var(--foreground)] tracking-tight">9:41</span>
+    <div class="flex items-center gap-1.5">
+      <svg class="h-3 w-auto" viewBox="0 0 24 24" fill="none" stroke="var(--foreground)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1.2" fill="var(--foreground)" stroke="none"/></svg>
+      <svg class="h-3 w-auto" viewBox="0 0 26 24" fill="none" stroke="var(--foreground)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="19" height="12" rx="2.5"/><line x1="23" y1="10" x2="23" y2="14" stroke-width="1.8" stroke-linecap="round"/><rect x="3.5" y="8.5" width="14" height="7" rx="0.8" fill="var(--foreground)" stroke="none"/></svg>
+    </div>
+  </div>
+
+  <!-- Page Header -->
+  <div class="flex items-center h-11 px-5 shrink-0 bg-[var(--background)]">
+    <span class="text-[17px] font-semibold text-[var(--foreground)] tracking-[-0.01em]">搜索</span>
+  </div>
+
+  <main class="flex-1 flex flex-col overflow-y-auto">
+
+    <!-- Search Bar -->
+    <div class="px-5 pb-3 shrink-0">
+      <div class="flex items-center gap-3">
+        <div class="flex-1 flex items-center h-11 px-4 rounded-lg transition-shadow duration-150" style="background:var(--muted)" id="searchBox">
+          <i data-lucide="search" class="h-4 w-4 shrink-0" style="color:var(--muted-foreground)"></i>
+          <input type="text" value="三体" class="flex-1 ml-2.5 bg-transparent border-none outline-none text-[15px] leading-none placeholder:text-[var(--muted-foreground)]" style="color:var(--foreground);font-family:inherit" placeholder="搜索书名、作者" aria-label="搜索书名、作者">
+          <button class="shrink-0 ml-2 flex items-center justify-center w-5 h-5 rounded-full" style="background:var(--muted-foreground);opacity:0.4" aria-label="清除搜索" data-dom-id="btn-clear-search">
+            <i data-lucide="x" class="h-3 w-3" style="color:#FFFFFF"></i>
+          </button>
+        </div>
+        <button class="shrink-0 text-[15px] whitespace-nowrap" style="color:var(--muted-foreground)" data-dom-id="btn-cancel-search">取消</button>
+      </div>
+    </div>
+
+    <!-- Filter Tabs -->
+    <div class="shrink-0 overflow-x-auto no-scrollbar" data-dom-id="filter-tabs">
+      <div class="flex items-center gap-0 px-5 pb-3">
+        <button class="shrink-0 px-4 py-2 text-[14px] leading-none whitespace-nowrap border-b-2 transition-colors duration-150" style="color:var(--primary);border-color:var(--primary);font-weight:500" data-dom-id="tab-title" data-active="true" data-tab-key="title" aria-label="书名匹配">书名匹配</button>
+        <button class="shrink-0 px-4 py-2 text-[14px] leading-none whitespace-nowrap border-b-2 border-transparent transition-colors duration-150" style="color:var(--muted-foreground);font-weight:400" data-dom-id="tab-author" data-active="false" data-tab-key="author" aria-label="作者">作者</button>
+        <button class="shrink-0 px-4 py-2 text-[14px] leading-none whitespace-nowrap border-b-2 border-transparent transition-colors duration-150" style="color:var(--muted-foreground);font-weight:400" data-dom-id="tab-tag" data-active="false" data-tab-key="tag" aria-label="标签">标签</button>
+        <button class="shrink-0 px-4 py-2 text-[14px] leading-none whitespace-nowrap border-b-2 border-transparent transition-colors duration-150" style="color:var(--muted-foreground);font-weight:400" data-dom-id="tab-series" data-active="false" data-tab-key="series" aria-label="丛书">丛书</button>
+        <button class="shrink-0 px-4 py-2 text-[14px] leading-none whitespace-nowrap border-b-2 border-transparent transition-colors duration-150" style="color:var(--muted-foreground);font-weight:400" data-dom-id="tab-isbn" data-active="false" data-tab-key="isbn" aria-label="ISBN">ISBN</button>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="flex items-center justify-between px-5 pb-4 shrink-0">
+      <span class="text-[13px] leading-none truncate" style="color:var(--muted-foreground)" id="result-count">3 个结果</span>
+      <button class="flex items-center gap-1.5 h-7 px-3 rounded border text-[12px] leading-none whitespace-nowrap transition-colors duration-150" style="border-color:var(--border);color:var(--foreground);background:transparent" data-dom-id="btn-filter" aria-label="筛选" id="filterBtn">
+        <i data-lucide="sliders-horizontal" class="h-3.5 w-3.5" style="color:var(--foreground)"></i>
+        <span>筛选</span>
+        <span class="flex items-center justify-center w-4 h-4 rounded-full text-[10px] leading-none font-medium" style="background:var(--primary);color:var(--primary-foreground)" id="filterCount">2</span>
+      </button>
+    </div>
+
+    <!-- Book Results Grid -->
+    <div class="grid grid-cols-2 gap-x-4 gap-y-6 px-5 pb-6" id="resultsGrid">
+      <!-- Book 1: 三体 -->
+      <div class="flex flex-col" data-dom-id="book-card-1">
+        <div class="relative w-full rounded" style="aspect-ratio:3/4;background:#2C3E50;overflow:hidden;border-radius:4px">
+          <div class="absolute inset-0 flex items-center justify-center px-2">
+            <span class="text-white text-[16px] font-serif leading-tight text-center" style="text-wrap:balance;word-break:keep-all">三体</span>
+          </div>
+        </div>
+        <p class="mt-2.5 text-[14px] leading-snug font-serif truncate" style="color:var(--foreground)">三体</p>
+        <p class="mt-0.5 text-[11px] leading-snug truncate" style="color:var(--muted-foreground)">刘慈欣</p>
+      </div>
+
+      <!-- Book 2: 黑暗森林 -->
+      <div class="flex flex-col" data-dom-id="book-card-2">
+        <div class="relative w-full rounded" style="aspect-ratio:3/4;background:#6B3A4A;overflow:hidden;border-radius:4px">
+          <div class="absolute inset-0 flex items-center justify-center px-2">
+            <span class="text-white text-[16px] font-serif leading-tight text-center" style="text-wrap:balance;word-break:keep-all">黑暗森林</span>
+          </div>
+        </div>
+        <p class="mt-2.5 text-[14px] leading-snug font-serif truncate" style="color:var(--foreground)">黑暗森林</p>
+        <p class="mt-0.5 text-[11px] leading-snug truncate" style="color:var(--muted-foreground)">刘慈欣</p>
+      </div>
+
+      <!-- Book 3: 死神永生 -->
+      <div class="flex flex-col" data-dom-id="book-card-3">
+        <div class="relative w-full rounded" style="aspect-ratio:3/4;background:#3D5A40;overflow:hidden;border-radius:4px">
+          <div class="absolute inset-0 flex items-center justify-center px-2">
+            <span class="text-white text-[16px] font-serif leading-tight text-center" style="text-wrap:balance;word-break:keep-all">死神永生</span>
+          </div>
+        </div>
+        <p class="mt-2.5 text-[14px] leading-snug font-serif truncate" style="color:var(--foreground)">死神永生</p>
+        <p class="mt-0.5 text-[11px] leading-snug truncate" style="color:var(--muted-foreground)">刘慈欣</p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Tab Bar -->
+  <nav class="flex items-center justify-around h-[54px] shrink-0 px-4" style="background:var(--background);border-top:1px solid var(--border)" data-dom-id="bottom-tab-bar">
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 px-2" data-dom-id="tab-library" aria-label="书库">
+      <i data-lucide="library" class="h-5 w-5" style="color:var(--muted-foreground)"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap" style="color:var(--muted-foreground)">书库</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 px-2" data-dom-id="tab-search" aria-label="搜索">
+      <i data-lucide="search" class="h-5 w-5" style="color:var(--primary)"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap" style="color:var(--primary)">搜索</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 px-2" data-dom-id="tab-shelf" aria-label="书架">
+      <i data-lucide="bookmark" class="h-5 w-5" style="color:var(--muted-foreground)"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap" style="color:var(--muted-foreground)">书架</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 px-2" data-dom-id="tab-me" aria-label="我的">
+      <i data-lucide="user" class="h-5 w-5" style="color:var(--muted-foreground)"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap" style="color:var(--muted-foreground)">我的</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Bottom Sheet Backdrop -->
+<div id="filterBackdrop" class="fixed inset-0 z-40 hidden" style="background:rgba(0,0,0,0.3)" aria-hidden="true"></div>
+
+<!-- Bottom Sheet (Filter Panel) -->
+<div id="filterSheet" class="fixed bottom-0 left-0 right-0 z-50 transform translate-y-full transition-transform duration-320" style="transition-timing-function:cubic-bezier(0.3,0,0,1)">
+  <div class="mx-auto w-full max-w-[390px] rounded-t-2xl shadow-lg" style="background:var(--card);box-shadow:0 -4px 24px rgba(44,44,44,0.1)">
+    <!-- Drag Handle -->
+    <div class="flex justify-center pt-3 pb-2">
+      <div class="w-8 h-1 rounded-full" style="background:var(--border)"></div>
+    </div>
+
+    <!-- Sheet Header -->
+    <div class="flex items-center justify-between px-5 py-2">
+      <span class="text-[17px] font-semibold text-[var(--foreground)]">筛选</span>
+      <button class="text-[15px] whitespace-nowrap" style="color:var(--primary)" data-dom-id="btn-filter-done" id="filterDoneBtn">完成</button>
+    </div>
+
+    <!-- Filter Content -->
+    <div class="px-5 pb-8 max-h-[60vh] overflow-y-auto">
+
+      <!-- Format Section -->
+      <div class="mb-6">
+        <p class="text-[12px] font-medium uppercase tracking-wider mb-3" style="color:var(--muted-foreground)">格式</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:var(--accent);border-color:var(--primary);color:var(--primary)" data-dom-id="filter-format-all" data-filter-group="format" data-selected="true">全部</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-format-epub" data-filter-group="format">EPUB</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-format-pdf" data-filter-group="format">PDF</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-format-mobi" data-filter-group="format">MOBI</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-format-azw3" data-filter-group="format">AZW3</button>
+        </div>
+      </div>
+
+      <!-- Language Section -->
+      <div class="mb-6">
+        <p class="text-[12px] font-medium uppercase tracking-wider mb-3" style="color:var(--muted-foreground)">语言</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-lang-all" data-filter-group="language" data-selected="true">全部</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:var(--accent);border-color:var(--primary);color:var(--primary)" data-dom-id="filter-lang-zh" data-filter-group="language">中文</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-lang-en" data-filter-group="language">英文</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-lang-ja" data-filter-group="language">日文</button>
+        </div>
+      </div>
+
+      <!-- Status Section -->
+      <div class="mb-6">
+        <p class="text-[12px] font-medium uppercase tracking-wider mb-3" style="color:var(--muted-foreground)">状态</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-status-all" data-filter-group="status" data-selected="true">全部</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-status-read" data-filter-group="status">已读</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-status-reading" data-filter-group="status">在读</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-status-unread" data-filter-group="status">未读</button>
+        </div>
+      </div>
+
+      <!-- Tags Section -->
+      <div class="mb-6">
+        <p class="text-[12px] font-medium uppercase tracking-wider mb-3" style="color:var(--muted-foreground)">标签</p>
+        <div class="flex flex-wrap gap-2">
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-sci-fi" data-filter-group="tag">科幻</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-chinese" data-filter-group="tag">中国文学</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-classic" data-filter-group="tag">经典</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-novel" data-filter-group="tag">小说</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-philosophy" data-filter-group="tag">哲学</button>
+          <button class="flex items-center justify-center h-7 px-3 rounded border text-[13px] leading-none whitespace-nowrap transition-colors duration-150" style="background:transparent;border-color:var(--border);color:var(--foreground)" data-dom-id="filter-tag-history" data-filter-group="tag">历史</button>
+        </div>
+      </div>
+
+      <!-- Reset -->
+      <button class="text-[14px] transition-opacity duration-150 hover:opacity-70" style="color:var(--muted-foreground)" data-dom-id="btn-filter-reset" id="filterResetBtn">重置筛选</button>
+    </div>
+  </div>
+</div>
+
+<script>
+lucide.createIcons();
+
+(function() {
+  /* Filter sheet toggle */
+  var backdrop = document.getElementById('filterBackdrop');
+  var sheet = document.getElementById('filterSheet');
+  var filterBtn = document.getElementById('filterBtn');
+  var filterDoneBtn = document.getElementById('filterDoneBtn');
+  var filterResetBtn = document.getElementById('filterResetBtn');
+  var filterCountEl = document.getElementById('filterCount');
+  var isOpen = false;
+
+  function openSheet() {
+    isOpen = true;
+    backdrop.classList.remove('hidden');
+    sheet.classList.remove('translate-y-full');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSheet() {
+    isOpen = false;
+    backdrop.classList.add('hidden');
+    sheet.classList.add('translate-y-full');
+    document.body.style.overflow = '';
+  }
+
+  filterBtn.addEventListener('click', openSheet);
+  filterDoneBtn.addEventListener('click', closeSheet);
+  backdrop.addEventListener('click', closeSheet);
+
+  /* Filter chip selection */
+  var filterGroups = {};
+  var allChips = sheet.querySelectorAll('[data-filter-group]');
+  allChips.forEach(function(chip) {
+    var group = chip.getAttribute('data-filter-group');
+    if (!filterGroups[group]) filterGroups[group] = [];
+    filterGroups[group].push(chip);
+
+    chip.addEventListener('click', function() {
+      var g = this.getAttribute('data-filter-group');
+      var siblings = filterGroups[g];
+
+      siblings.forEach(function(s) {
+        s.style.background = 'transparent';
+        s.style.borderColor = 'var(--border)';
+        s.style.color = 'var(--foreground)';
+        s.setAttribute('data-selected', 'false');
+      });
+
+      this.style.background = 'var(--accent)';
+      this.style.borderColor = 'var(--primary)';
+      this.style.color = 'var(--primary)';
+      this.setAttribute('data-selected', 'true');
+
+      updateFilterCount();
+    });
+  });
+
+  function updateFilterCount() {
+    var count = 0;
+    allChips.forEach(function(chip) {
+      if (chip.getAttribute('data-selected') === 'true') count++;
+    });
+    /* Groups with "全部" selected don't count toward active filters */
+    var activePerGroup = {};
+    allChips.forEach(function(chip) {
+      var g = chip.getAttribute('data-filter-group');
+      var isAll = chip.textContent.trim() === '全部';
+      if (chip.getAttribute('data-selected') === 'true' && !isAll) {
+        activePerGroup[g] = true;
+      }
+    });
+    var activeCount = Object.keys(activePerGroup).length;
+    filterCountEl.textContent = activeCount;
+    if (activeCount === 0) {
+      filterCountEl.style.display = 'none';
+    } else {
+      filterCountEl.style.display = '';
+    }
+  }
+
+  /* Reset filters */
+  filterResetBtn.addEventListener('click', function() {
+    allChips.forEach(function(chip) {
+      var isAll = chip.textContent.trim() === '全部';
+      if (isAll) {
+        chip.style.background = 'var(--accent)';
+        chip.style.borderColor = 'var(--primary)';
+        chip.style.color = 'var(--primary)';
+        chip.setAttribute('data-selected', 'true');
+      } else {
+        chip.style.background = 'transparent';
+        chip.style.borderColor = 'var(--border)';
+        chip.style.color = 'var(--foreground)';
+        chip.setAttribute('data-selected', 'false');
+      }
+    });
+    updateFilterCount();
+  });
+
+  /* Filter tab switching */
+  var tabs = document.querySelectorAll('[data-tab-key]');
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      tabs.forEach(function(t) {
+        t.style.color = 'var(--muted-foreground)';
+        t.style.fontWeight = '400';
+        t.style.borderColor = 'transparent';
+        t.setAttribute('data-active', 'false');
+      });
+      this.style.color = 'var(--primary)';
+      this.style.fontWeight = '500';
+      this.style.borderColor = 'var(--primary)';
+      this.setAttribute('data-active', 'true');
+    });
+  });
+
+  /* Initial filter count display */
+  updateFilterCount();
+
+  /* Search box focus ring */
+  var searchBox = document.getElementById('searchBox');
+  var searchInput = searchBox.querySelector('input');
+  searchInput.addEventListener('focus', function() {
+    searchBox.style.boxShadow = '0 0 0 2px rgba(184,149,106,0.25)';
+  });
+  searchInput.addEventListener('blur', function() {
+    searchBox.style.boxShadow = 'none';
+  });
+})();
+</script>
+
+</body>
+</html>

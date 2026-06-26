@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui-tauri/dev/nicegui_tauri/assets/tauri.conf.json",
+  "productName": "Moke",
+  "version": "0.1.0",
+  "identifier": "com.moke.client",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "title": "Moke",
+    "windows": [
+      {
+        "title": "Moke",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": ["**"],
+        "deny": []
+      }
+    },
+    "http": {
+      "scope": {
+        "allow": [
+          "http://**",
+          "https://**"
+        ]
+      }
+    }
+  }
+}

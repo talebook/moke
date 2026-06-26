@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>访问码验证 - Talebook</title>
+    <style id="theme-vars">
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9DF;
+  --secondary-foreground: #2C2C2E;
+  --muted: #EDE9DF;
+  --muted-foreground: #8B8682;
+  --accent: #F0ECE3;
+  --accent-foreground: #2C2C2E;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --border: #E8E3DC;
+  --input: #F0ECE3;
+  --ring: #B8956A;
+  --font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-foreground: var(--tb-foreground);
+    --color-background: var(--tb-background);
+    --tb-primary: var(--tb-primary);
+    --tb-primary-foreground: var(--tb-primary-foreground);
+    --color-card: var(--tb-card);
+    --color-card-foreground: var(--tb-card-foreground);
+    --color-muted: var(--tb-muted);
+    --color-muted-foreground: var(--tb-muted-foreground);
+    --tb-border: var(--tb-border);
+    --color-input: var(--tb-input);
+    --color-ring: var(--tb-ring);
+    --tb-success: var(--tb-success);
+    --color-destructive: var(--tb-destructive);
+  }
+
+  
+  @layer base {
+    body { background: var(--tb-background); color: var(--tb-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+        <div class="min-h-screen flex items-center justify-center p-4">
+            <div class="w-full max-w-[390px] rounded-xl p-10 flex flex-col items-center" style="background: var(--tb-card); border: 1px solid var(--tb-border);">
+                <!-- 锁图标 -->
+                <div class="w-14 h-14 rounded-full flex items-center justify-center mb-6" style="background: var(--tb-primary);">
+                    <i data-lucide="lock" class="w-6 h-6" style="color: var(--tb-primary-foreground);"></i>
+                </div>
+                <!-- 标题 -->
+                <h1 class="text-xl font-bold mb-2" style="color: var(--tb-foreground);">输入访问码</h1>
+                <!-- 描述 -->
+                <p class="text-sm mb-8 text-center" style="color: var(--tb-muted-foreground);">此书库需要访问码才能连接</p>
+                <!-- 6 位数字输入 -->
+                <div class="flex gap-2 justify-center mb-8">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                    <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" class="w-11 h-14 border rounded-lg text-center text-xl font-bold outline-none transition-all duration-150" style="background: var(--tb-background); border-color: var(--tb-border); color: var(--tb-foreground);" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.boxShadow='0 0 0 2px var(--tb-primary)'" onblur="this.style.borderColor='var(--tb-border)'; this.style.boxShadow='none'" oninput="this.value=this.value.replace(/[^0-9]/g,''); if(this.value){const n=this.nextElementSibling; if(n)n.focus()}">
+                </div>
+                <!-- 验证按钮 -->
+                <button data-dom-id="btn-verify"  class="w-full py-3 rounded-lg text-base font-semibold transition-opacity duration-150 hover:opacity-90 active:opacity-80 whitespace-nowrap" style="background: var(--tb-primary); color: var(--tb-primary-foreground);">验证</button>
+                <!-- 返回链接 -->
+                <a href="#" class="mt-5 text-sm transition-opacity duration-150 hover:opacity-80" style="color: var(--tb-muted-foreground);">没有访问码？返回</a>
+            </div>
+        </div>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,237 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书籍详情 - Talebook</title>
+    <style id="theme-vars">
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9DF;
+  --secondary-foreground: #2C2C2E;
+  --muted: #EDE9DF;
+  --muted-foreground: #8B8682;
+  --accent: #F0ECE3;
+  --accent-foreground: #2C2C2E;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --border: #E8E3DC;
+  --input: #F0ECE3;
+  --ring: #B8956A;
+  --font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-foreground: var(--tb-foreground);
+    --color-background: var(--tb-background);
+    --tb-primary: var(--tb-primary);
+    --tb-primary-foreground: var(--tb-primary-foreground);
+    --color-card: var(--tb-card);
+    --color-card-foreground: var(--tb-card-foreground);
+    --color-muted: var(--tb-muted);
+    --color-muted-foreground: var(--tb-muted-foreground);
+    --tb-border: var(--tb-border);
+    --color-input: var(--tb-input);
+    --color-ring: var(--tb-ring);
+    --tb-success: var(--tb-success);
+    --color-destructive: var(--tb-destructive);
+  }
+
+  
+  @layer base {
+    body { background: var(--tb-background); color: var(--tb-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="flex min-h-screen">
+        <!-- Sidebar - 220px -->
+        <aside class="fixed left-0 top-0 h-full w-[220px] flex flex-col overflow-y-auto z-10" style="background-color: var(--tb-primary);">
+            <div class="px-6 pt-6 pb-5">
+                <span class="text-lg font-semibold tracking-tight" style="color: var(--tb-primary-foreground);">Talebook</span>
+            </div>
+            <nav class="flex-1 px-3">
+                <a href="#" data-dom-id="nav-shelf" class="flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm font-medium" style="background-color: rgba(255,255,255,0.08); color: var(--tb-primary-foreground);">
+                    <i data-lucide="bookmark" class="w-5 h-5"></i>
+                    <span>书架</span>
+                </a>
+                <a href="#" data-dom-id="nav-library" class="flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm transition-opacity" style="color: var(--tb-primary-foreground); opacity: 0.6;" onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='0.6'">
+                    <i data-lucide="library" class="w-5 h-5"></i>
+                    <span>书库</span>
+                </a>
+                <span data-dom-id="nav-search" class="hidden"></span>
+                <a href="#" data-dom-id="nav-settings" class="flex items-center gap-3 px-3 py-2.5 rounded-lg mb-0.5 text-sm transition-opacity" style="color: var(--tb-primary-foreground); opacity: 0.6;" onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='0.6'">
+                    <i data-lucide="settings" class="w-5 h-5"></i>
+                    <span>设置</span>
+                </a>
+            </nav>
+            <div class="px-4 py-4 border-t" style="border-color: rgba(255,255,255,0.08);">
+                <div class="flex items-center gap-2.5 px-2">
+                    <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium" style="background-color: rgba(255,255,255,0.12); color: var(--tb-primary-foreground);">
+                        <span>U</span>
+                    </div>
+                    <span class="text-sm truncate" style="color: var(--tb-primary-foreground); opacity: 0.8;">用户</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main content area -->
+        <div class="ml-[220px] flex-1 min-h-screen" style="background-color: var(--tb-background);">
+            <div class="px-8 py-8">
+                <!-- Back + Breadcrumb -->
+                <div class="mb-8">
+                    <a href="#" class="inline-flex items-center gap-1.5 text-sm mb-2 transition-opacity hover:opacity-75" style="color: var(--tb-muted-foreground);">
+                        <i data-lucide="arrow-left" class="w-4 h-4"></i>
+                        <span>返回书架</span>
+                    </a>
+                    <div class="flex items-center gap-1.5 text-xs">
+                        <span style="color: var(--tb-muted-foreground);">书架</span>
+                        <i data-lucide="chevron-right" class="w-3 h-3" style="color: var(--tb-muted-foreground);"></i>
+                        <span style="color: var(--tb-foreground);">深入理解计算机系统</span>
+                    </div>
+                </div>
+
+                <!-- Content split: Left cover + Right info -->
+                <div class="flex gap-10">
+                    <!-- Left: Cover column -->
+                    <div class="shrink-0 w-[320px] flex flex-col items-start">
+                        <!-- Book cover -->
+                        <div class="w-[240px] rounded-xl overflow-hidden" style="box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03);">
+                            <div class="aspect-[2/3] flex items-center justify-center" style="background-color: var(--tb-muted);">
+                                <i data-lucide="book-open" class="w-16 h-16" style="color: var(--tb-muted-foreground); opacity: 0.4;"></i>
+                            </div>
+                        </div>
+
+                        <!-- Reading progress -->
+                        <div class="mt-5 w-[240px]">
+                            <div class="w-full h-1 rounded-full overflow-hidden" style="background-color: var(--tb-border);">
+                                <div class="h-full rounded-full" style="width: 45%; background-color: var(--tb-primary);"></div>
+                            </div>
+                            <span class="text-xs mt-2 block" style="color: var(--tb-muted-foreground);">已读 45%</span>
+                        </div>
+
+                        <!-- Continue reading button -->
+                        <button class="w-[240px] h-11 rounded-lg font-medium text-sm mt-4 inline-flex items-center justify-center whitespace-nowrap transition-opacity hover:opacity-90" style="background-color: var(--tb-primary); color: var(--tb-primary-foreground);">
+                            继续阅读
+                        </button>
+                    </div>
+
+                    <!-- Right: Info column -->
+                    <div class="flex-1 min-w-0">
+                        <!-- Title -->
+                        <h1 class="text-2xl font-semibold tracking-tight" style="color: var(--tb-foreground); text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">深入理解计算机系统</h1>
+
+                        <!-- Author -->
+                        <p class="text-base mt-1.5" style="color: var(--tb-muted-foreground);">Randal E. Bryant · David R. O'Hallaron</p>
+
+                        <!-- Rating -->
+                        <div class="flex items-center gap-1.5 mt-3">
+                            <div class="flex gap-0.5">
+                                <i data-lucide="star" class="w-4 h-4" style="fill: var(--tb-primary); color: var(--tb-primary);"></i>
+                                <i data-lucide="star" class="w-4 h-4" style="fill: var(--tb-primary); color: var(--tb-primary);"></i>
+                                <i data-lucide="star" class="w-4 h-4" style="fill: var(--tb-primary); color: var(--tb-primary);"></i>
+                                <i data-lucide="star" class="w-4 h-4" style="fill: var(--tb-primary); color: var(--tb-primary);"></i>
+                                <i data-lucide="star" class="w-4 h-4" style="color: var(--tb-border);"></i>
+                            </div>
+                            <span class="text-sm ml-1" style="color: var(--tb-muted-foreground);">4.0</span>
+                        </div>
+
+                        <!-- Divider -->
+                        <div class="my-5 border-t" style="border-color: var(--tb-border);"></div>
+
+                        <!-- Metadata row -->
+                        <div class="flex flex-wrap items-center gap-5 text-sm">
+                            <div class="flex items-center gap-1.5">
+                                <i data-lucide="file-text" class="w-4 h-4" style="color: var(--tb-muted-foreground);"></i>
+                                <span style="color: var(--tb-foreground);">PDF</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <i data-lucide="hard-drive" class="w-4 h-4" style="color: var(--tb-muted-foreground);"></i>
+                                <span style="color: var(--tb-foreground);">12.4 MB</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <i data-lucide="calendar" class="w-4 h-4" style="color: var(--tb-muted-foreground);"></i>
+                                <span style="color: var(--tb-foreground);">2024-03-15</span>
+                            </div>
+                        </div>
+
+                        <!-- Divider -->
+                        <div class="my-5 border-t" style="border-color: var(--tb-border);"></div>
+
+                        <!-- Tags / Collections -->
+                        <div class="flex flex-wrap gap-2">
+                            <span class="inline-flex items-center justify-center px-2.5 py-1 text-xs whitespace-nowrap" style="border-radius: 4px; background-color: var(--tb-muted); color: var(--tb-foreground);">计算机科学</span>
+                            <span class="inline-flex items-center justify-center px-2.5 py-1 text-xs whitespace-nowrap" style="border-radius: 4px; background-color: var(--tb-muted); color: var(--tb-foreground);">操作系统</span>
+                            <span class="inline-flex items-center justify-center px-2.5 py-1 text-xs whitespace-nowrap" style="border-radius: 4px; background-color: var(--tb-muted); color: var(--tb-foreground);">编程</span>
+                            <span class="inline-flex items-center justify-center px-2.5 py-1 text-xs whitespace-nowrap" style="border-radius: 4px; background-color: var(--tb-muted); color: var(--tb-foreground);">经典</span>
+                            <button class="inline-flex items-center justify-center px-2.5 py-1 text-xs whitespace-nowrap transition-colors" style="border-radius: 4px; background-color: transparent; color: var(--tb-muted-foreground); border: 1px dashed; border-color: var(--tb-border);">
+                                <i data-lucide="plus" class="w-3 h-3 mr-1"></i>
+                                <span>添加标签</span>
+                            </button>
+                        </div>
+
+                        <!-- Divider -->
+                        <div class="my-5 border-t" style="border-color: var(--tb-border);"></div>
+
+                        <!-- Summary -->
+                        <div>
+                            <p class="text-sm line-clamp-4" style="color: var(--tb-foreground); line-height: 1.7;">
+                                本书从程序员的视角详细阐述计算机系统的本质概念，并展示这些概念如何影响应用程序的正确性、性能和实用性。全书共12章，主要内容包括：信息表示与处理、程序的机器级表示、处理器体系结构、优化程序性能、存储器层次结构、链接、异常控制流、虚拟存储器、系统级I/O、网络编程和并发编程等。本书适合作为高等院校计算机及相关专业本科生和研究生教材，也可供相关领域工程师和技术人员参考。
+                            </p>
+                            <button class="text-sm mt-2 transition-opacity hover:opacity-75" style="color: var(--tb-muted-foreground);">展开全部</button>
+                        </div>
+
+                        <!-- Divider -->
+                        <div class="my-6 border-t" style="border-color: var(--tb-border);"></div>
+
+                        <!-- Action buttons -->
+                        <div class="flex items-center gap-3">
+                            <button class="h-11 px-6 rounded-lg font-medium text-sm inline-flex items-center justify-center whitespace-nowrap transition-opacity hover:opacity-90" style="background-color: var(--tb-primary); color: var(--tb-primary-foreground);">
+                                开始阅读
+                            </button>
+                            <button class="h-11 px-6 rounded-lg font-medium text-sm inline-flex items-center justify-center whitespace-nowrap border transition-opacity hover:opacity-80" style="color: var(--tb-foreground); border-color: var(--tb-border); background-color: transparent;">
+                                编辑元数据
+                            </button>
+                            <button class="h-11 px-4 text-sm font-medium inline-flex items-center justify-center whitespace-nowrap transition-all" style="color: var(--tb-destructive);" onmouseenter="this.style.textDecoration='underline'" onmouseleave="this.style.textDecoration='none'">
+                                删除
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
+

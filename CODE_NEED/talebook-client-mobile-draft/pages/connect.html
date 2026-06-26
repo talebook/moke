@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>连接服务器 - TaleBook</title>
+    <style id="theme-vars">:root{--background:#FBF9F2;--foreground:#2C2C2E;--primary:#B8956A;--primary-foreground:#FFFFFF;--muted:#F5F1EB;--muted-foreground:#8B8682;--card:#F5F1EB;--card-foreground:#2C2C2E;--border:#E8E3DC;--input:#F5F1EB;--ring:#B8956A;--destructive:#C0392B;--destructive-foreground:#FFFFFF;--success:#7A8B5E;--success-foreground:#FFFFFF;--font-sans:'Inter','PingFang SC','Noto Sans SC',system-ui,sans-serif;--font-serif:'Georgia','Noto Serif SC','Songti SC',serif;--radius:8px}</style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">@theme inline{--color-foreground:var(--foreground)}@layer base{body{background:var(--background);color:var(--foreground);font-family:var(--font-sans)}td,th{word-break:break-all;word-break:auto-phrase}th{white-space:nowrap}}</style>
+</head>
+<body class="antialiased">
+<div class="relative flex flex-col w-full max-w-[390px] mx-auto h-dvh bg-[var(--background)] overflow-hidden">
+  <div class="flex items-center justify-between h-11 px-6 shrink-0"><span class="text-[13px] font-semibold">9:41</span></div>
+  <div class="flex items-center h-11 px-4 shrink-0"><span class="text-[17px] font-semibold">连接服务器</span></div>
+  <div class="flex-1 overflow-y-auto px-8 pt-8" style="background-image: none; background-color: transparent; border-image: none; border-image-source: none; border-color: transparent; border-style: none; border-width: 0px;">
+    <div class="flex items-center justify-center w-14 h-14 rounded-full mx-auto mb-6" style="background:var(--primary)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect></svg></div>
+    <h1 class="text-[22px] font-bold text-center mb-2">连接服务器</h1>
+    <p class="text-sm text-center mb-8" style="color:var(--muted-foreground)">请选择协议并填写服务器地址</p>
+    <div class="mb-5"><select class="w-full px-4 py-3 rounded-lg text-sm" style="background:var(--card);border:1px solid var(--border)"><option>http://</option><option>https://</option></select></div>
+    <div class="flex gap-2 mb-8"><input type="text" placeholder="IP 地址" class="flex-1 px-4 py-3 rounded-lg text-sm" style="background:var(--card);border:1px solid var(--border)"><span class="flex items-center text-sm">:</span><input type="text" placeholder="端口" class="w-24 px-4 py-3 rounded-lg text-sm text-center" style="background:var(--card);border:1px solid var(--border)"></div>
+    <button data-dom-id="btn-connect" class="w-full py-3.5 rounded-lg text-base font-semibold" style="background:var(--primary);color:var(--primary-foreground)">连 接</button>
+    <p class="text-xs text-center mt-6" style="color:var(--muted-foreground)">已有服务器？<a href="login.html" class="font-medium" style="color:var(--primary)">重新连接</a></p>
+  </div>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>

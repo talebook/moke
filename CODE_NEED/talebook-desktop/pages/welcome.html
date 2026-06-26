@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>欢迎 - Talebook</title>
+    <style id="theme-vars">
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9DF;
+  --secondary-foreground: #2C2C2E;
+  --muted: #EDE9DF;
+  --muted-foreground: #8B8682;
+  --accent: #F0ECE3;
+  --accent-foreground: #2C2C2E;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --border: #E8E3DC;
+  --input: #F0ECE3;
+  --ring: #B8956A;
+  --font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-foreground: var(--tb-foreground);
+    --color-background: var(--tb-background);
+    --tb-primary: var(--tb-primary);
+    --tb-primary-foreground: var(--tb-primary-foreground);
+    --color-card: var(--tb-card);
+    --color-card-foreground: var(--tb-card-foreground);
+    --color-muted: var(--tb-muted);
+    --color-muted-foreground: var(--tb-muted-foreground);
+    --tb-border: var(--tb-border);
+    --color-input: var(--tb-input);
+    --color-ring: var(--tb-ring);
+    --tb-success: var(--tb-success);
+    --color-destructive: var(--tb-destructive);
+  }
+
+  
+  @layer base {
+    body { background: var(--tb-background); color: var(--tb-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+      <div class="min-h-screen flex flex-col" style="background-color: var(--dl_builtin_minimalist-primary);">
+        <div class="flex-1 flex flex-col md:flex-row">
+          <!-- 左侧：品牌区 -->
+          <div class="flex-1 flex items-center justify-center px-8 py-12 md:p-16">
+            <div class="max-w-md">
+              <i data-lucide="book-open" class="w-16 h-16" style="color: var(--dl_builtin_minimalist-primary-foreground);"></i>
+              <h1 class="mt-6 text-[36px] font-bold" style="text-wrap: balance; word-break: keep-all; overflow-wrap: break-word; color: var(--dl_builtin_minimalist-primary-foreground);">Talebook</h1>
+              <p class="mt-2 text-lg" style="color: var(--dl_builtin_minimalist-primary-foreground); opacity: 0.85;">你的个人书库</p>
+              <p class="mt-4 text-sm leading-relaxed" style="color: var(--tb-muted-foreground);">连接 Calibre 书库，在任何设备上阅读你的藏书</p>
+            </div>
+          </div>
+          <!-- 右侧：操作区 -->
+          <div class="flex-1 flex items-center justify-center px-8 py-12 md:p-16">
+            <div class="w-full max-w-sm p-8 rounded-[14px]" style="background-color: var(--tb-card); box-shadow: 0 2px 12px rgba(0,0,0,0.05);">
+              <h2 class="text-xl font-semibold mb-6" style="color: var(--tb-card-foreground);">连接书库</h2>
+              <div class="mb-4">
+                <label for="server-url" class="block text-xs font-medium mb-1.5" style="color: var(--tb-muted-foreground);">服务器地址</label>
+                <input id="server-url" data-dom-id="input-server-url" type="text" placeholder="http://192.168.1.100:8080" class="w-full h-11 px-4 rounded-[10px] border text-sm transition-colors duration-150" style="background-color: var(--tb-muted); border-color: var(--tb-border); color: var(--tb-foreground);">
+              </div>
+              <div class="mb-5">
+                <label for="api-key" class="block text-xs font-medium mb-1.5" style="color: var(--tb-muted-foreground);">API Key</label>
+                <input id="api-key" data-dom-id="input-api-key" type="password" placeholder="输入 API Key（可选）" class="w-full h-11 px-4 rounded-[10px] border text-sm transition-colors duration-150" style="background-color: var(--tb-muted); border-color: var(--tb-border); color: var(--tb-foreground);">
+              </div>
+              <button data-dom-id="btn-connect" class="inline-flex items-center justify-center w-full h-11 rounded-[10px] text-sm font-medium whitespace-nowrap cursor-pointer transition-opacity transition-transform duration-150 hover:opacity-90 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2" style="background-color: var(--dl_builtin_minimalist-primary); color: var(--dl_builtin_minimalist-primary-foreground);">连接</button>
+              <div class="flex items-center my-5">
+                <div class="flex-1" style="border-top: 1px solid var(--tb-border);"></div>
+                <span class="mx-3 text-xs" style="color: var(--tb-muted-foreground);">或者</span>
+                <div class="flex-1" style="border-top: 1px solid var(--tb-border);"></div>
+              </div>
+              <button data-dom-id="btn-browse-demo" class="inline-flex items-center justify-center w-full h-11 rounded-[10px] text-sm font-medium whitespace-nowrap bg-transparent border cursor-pointer transition-opacity transition-transform duration-150 hover:opacity-80 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2" style="border-color: var(--tb-border); color: var(--tb-foreground);">浏览演示书库</button>
+              <p class="mt-5 text-xs text-center leading-relaxed" style="color: var(--tb-muted-foreground);">连接到你的 Calibre 服务器以开始使用 · 数据完全由你掌控</p>
+              <p class="mt-5 text-xs text-center leading-relaxed" style="color: var(--tb-muted-foreground);">已有账号？<a href="#" data-dom-id="link-login" style="color: var(--tb-foreground); font-weight: 600;">登录</a></p>
+            </div>
+          </div>
+        </div>
+        <!-- 底部信息 -->
+        <div class="flex items-center justify-center gap-4 pb-6 text-xs" style="color: var(--tb-muted-foreground);">
+          <span>v1.0.0</span>
+          <a href="https://github.com" target="_blank" rel="noopener noreferrer" class="hover:underline transition-colors duration-150" style="color: var(--tb-muted-foreground);">GitHub</a>
+        </div>
+      </div>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

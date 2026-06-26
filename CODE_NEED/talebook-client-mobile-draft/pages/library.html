@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书架 - TaleBook</title>
+    <style id="theme-vars">
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --card: #F7F4EC;
+  --card-foreground: #2C2C2E;
+  --popover: #FBF9F2;
+  --popover-foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9DF;
+  --secondary-foreground: #2C2C2E;
+  --muted: #EDE9DF;
+  --muted-foreground: #8B8B83;
+  --accent: #F0ECE3;
+  --accent-foreground: #2C2C2E;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --border: #E8E4DA;
+  --input: #F0ECE3;
+  --ring: #B8956A;
+  --radius: 0.5rem;
+  --font-sans: 'SF Pro Text', 'PingFang SC', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-foreground: var(--card-foreground);
+  }
+  @layer base {
+    body { background: var(--card-background); color: var(--card-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body style="background:var(--background);color:var(--foreground);font-family:var(--font-sans)">
+
+<div class="flex flex-col w-full max-w-[390px] mx-auto h-dvh relative overflow-hidden" style="background:var(--background)">
+
+  <!-- Status Bar -->
+  <div class="flex items-center justify-between h-11 px-6 shrink-0 select-none" style="background:var(--background)">
+    <span class="text-[13px] font-semibold leading-none" style="color:var(--foreground)">9:41</span>
+    <div class="flex items-center gap-1.5">
+      <svg class="h-3 w-auto" viewBox="0 0 24 24" fill="none" stroke="var(--foreground)" stroke-width="1.8" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1.2" fill="var(--foreground)" stroke="none"/></svg>
+      <svg class="h-3 w-auto" viewBox="0 0 26 24" fill="none" stroke="var(--foreground)" stroke-width="1.5" stroke-linecap="round"><rect x="1" y="6" width="19" height="12" rx="2.5"/><line x1="23" y1="10" x2="23" y2="14" stroke-width="1.8" stroke-linecap="round"/><rect x="3.5" y="8.5" width="14" height="7" rx="0.8" fill="var(--foreground)" stroke="none"/></svg>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between h-11 px-5 shrink-0" style="background:var(--background)">
+    <h1 class="text-[17px] font-semibold tracking-[-0.01em]" style="color:var(--foreground);font-family:var(--font-sans)">书库</h1>
+    <button class="w-8 h-8 flex items-center justify-center rounded-lg transition-opacity duration-150 hover:opacity-70" aria-label="搜索" data-dom-id="btn-search">
+      <i data-lucide="search" class="w-[18px] h-[18px]" style="color:var(--foreground)"></i>
+    </button>
+  </div>
+
+  <!-- 本地/在线 Tab -->
+  <div class="flex items-center gap-6 px-5 pb-2 border-b" style="border-color:var(--border)">
+    <button class="tab-local pb-1.5 text-[14px] font-medium transition-colors duration-200 relative" style="color:var(--foreground)">本地</button>
+    <button class="tab-online pb-1.5 text-[14px] transition-colors duration-200 relative" style="color:var(--muted-foreground)">在线</button>
+    <div class="tab-indicator absolute bottom-0 h-[2px] transition-all duration-300 ease-out rounded-full" style="background:var(--primary);margin-left:20px;width:28px"></div>
+  </div>
+
+  <!-- Main Content -->
+  <main class="flex-1 overflow-y-auto no-scrollbar px-5" style="padding-bottom:80px">
+
+    <!-- Filter Dropdowns -->
+    <div class="flex items-center gap-3 mb-5">
+      <div class="relative flex-1">
+        <select class="appearance-none w-full text-[13px] pl-3 pr-7 py-2 rounded-md cursor-pointer outline-none" style="background:var(--card);border:1px solid var(--border);color:var(--foreground)">
+          <option>全部状态</option><option>在读</option><option>已读</option><option>未读</option>
+        </select>
+        <i data-lucide="chevron-down" class="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style="color:var(--muted-foreground)"></i>
+      </div>
+      <div class="relative flex-1">
+        <select class="appearance-none w-full text-[13px] pl-3 pr-7 py-2 rounded-md cursor-pointer outline-none" style="background:var(--card);border:1px solid var(--border);color:var(--foreground)">
+          <option>全部格式</option><option>EPUB</option><option>PDF</option><option>MOBI</option><option>TXT</option>
+        </select>
+        <i data-lucide="chevron-down" class="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style="color:var(--muted-foreground)"></i>
+      </div>
+      <div class="relative flex-1">
+        <select class="appearance-none w-full text-[13px] pl-3 pr-7 py-2 rounded-md cursor-pointer outline-none" style="background:var(--card);border:1px solid var(--border);color:var(--foreground)">
+          <option>全部标签</option><option>小说</option><option>技术</option><option>历史</option><option>哲学</option><option>科幻</option>
+        </select>
+        <i data-lucide="chevron-down" class="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none" style="color:var(--muted-foreground)"></i>
+      </div>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg mb-8" style="background:var(--input)">
+      <i data-lucide="search" class="w-[15px] h-[15px] shrink-0" style="color:var(--muted-foreground)"></i>
+      <input type="text" placeholder="搜索书名或作者" class="flex-1 bg-transparent text-[14px] outline-none border-none" style="color:var(--foreground);font-family:var(--font-sans)" aria-label="搜索书籍">
+    </div>
+
+    <!-- Series Section: 三体 -->
+    <section class="mb-8">
+      <!-- Section Header -->
+      <div class="flex items-baseline justify-between mb-4">
+        <div>
+          <h2 class="text-[13px] font-medium tracking-[0.05em] uppercase" style="color:var(--muted-foreground);font-family:var(--font-sans)">系列</h2>
+        </div>
+      </div>
+      <!-- Subtle Rule Line -->
+      <div class="w-full h-px mb-4" style="background:var(--border)"></div>
+
+      <!-- Series Card -->
+      <div class="rounded-md px-4 py-3.5" style="background:var(--card)">
+        <div class="flex items-center justify-between">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline gap-2">
+              <span class="text-[15px] font-medium truncate" style="color:var(--foreground);font-family:var(--font-serif)">三体</span>
+              <span class="text-[12px] shrink-0" style="color:var(--muted-foreground);font-family:var(--font-sans)">刘慈欣</span>
+            </div>
+            <span class="text-[11px] mt-0.5 block" style="color:var(--muted-foreground);font-family:var(--font-sans)">共 3 册</span>
+          </div>
+          <button class="w-7 h-7 flex items-center justify-center rounded-md shrink-0 transition-all duration-150 hover:opacity-70" style="background:var(--muted)" aria-label="展开系列" data-dom-id="btn-series-expand">
+            <i data-lucide="chevron-down" class="w-[15px] h-[15px]" style="color:var(--foreground)"></i>
+          </button>
+        </div>
+
+        <!-- Series Books Grid (2-column) -->
+        <div class="grid grid-cols-2 gap-x-4 gap-y-5 mt-4 pt-4" style="border-top:1px solid var(--border)">
+          <!-- Book 1: 三体 -->
+          <div class="flex flex-col gap-2">
+            <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#2C3E50;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+              <div class="absolute inset-0 flex flex-col justify-end p-3">
+                <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">三体</span>
+                <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">刘慈欣</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">三体</p>
+              <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">刘慈欣</p>
+              <span class="text-[10px] mt-1 inline-block" style="color:var(--state-success);font-family:var(--font-sans)">已读</span>
+            </div>
+          </div>
+
+          <!-- Book 2: 三体II：黑暗森林 -->
+          <div class="flex flex-col gap-2">
+            <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#3D5A40;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+              <div class="absolute inset-0 flex flex-col justify-end p-3">
+                <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">黑暗森林</span>
+                <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">刘慈欣</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">三体II：黑暗森林</p>
+              <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">刘慈欣</p>
+              <span class="text-[10px] mt-1 inline-block" style="color:var(--state-warning);font-family:var(--font-sans)">阅读中</span>
+            </div>
+          </div>
+
+          <!-- Book 3: 三体III：死神永生 -->
+          <div class="flex flex-col gap-2">
+            <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#6B3A4A;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+              <div class="absolute inset-0 flex flex-col justify-end p-3">
+                <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">死神永生</span>
+                <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">刘慈欣</span>
+              </div>
+            </div>
+            <div>
+              <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">三体III：死神永生</p>
+              <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">刘慈欣</p>
+              <span class="text-[10px] mt-1 inline-block" style="color:var(--muted-foreground);font-family:var(--font-sans)">未读</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section: 所有书籍 -->
+    <section>
+      <!-- Section Header -->
+      <div class="flex items-baseline justify-between mb-4">
+        <h2 class="text-[13px] font-medium tracking-[0.05em]" style="color:var(--muted-foreground);font-family:var(--font-sans)">所有书籍</h2>
+        <span class="text-[12px]" style="color:var(--muted-foreground);font-family:var(--font-sans)">125 本</span>
+      </div>
+      <!-- Subtle Rule Line -->
+      <div class="w-full h-px mb-4" style="background:var(--border)"></div>
+
+      <!-- Books Grid (2-column) -->
+      <div class="grid grid-cols-2 gap-x-4 gap-y-6">
+        <!-- Book 4: 活着 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#8B6914;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">活着</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">余华</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">活着</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">余华</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--state-success);font-family:var(--font-sans)">已读</span>
+          </div>
+        </div>
+
+        <!-- Book 5: 百年孤独 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#546E7A;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">百年孤独</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">加西亚·马尔克斯</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">百年孤独</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">加西亚·马尔克斯</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--state-success);font-family:var(--font-sans)">已读</span>
+          </div>
+        </div>
+
+        <!-- Book 6: 围城 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#4A6B7D;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">围城</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">钱钟书</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">围城</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">钱钟书</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--muted-foreground);font-family:var(--font-sans)">未读</span>
+          </div>
+        </div>
+
+        <!-- Book 7: 1984 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#2C3E50;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">1984</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">乔治·奥威尔</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">1984</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">乔治·奥威尔</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--state-success);font-family:var(--font-sans)">已读</span>
+          </div>
+        </div>
+
+        <!-- Book 8: 红楼梦 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#6B3A4A;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">红楼梦</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">曹雪芹</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">红楼梦</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">曹雪芹</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--state-warning);font-family:var(--font-sans)">阅读中</span>
+          </div>
+        </div>
+
+        <!-- Book 9: 局外人 -->
+        <div class="flex flex-col gap-2">
+          <div class="w-full rounded-[4px] overflow-hidden relative" style="aspect-ratio:3/4;background:#3D5A40;box-shadow:1px 1px 0 0 rgba(0,0,0,0.05)">
+            <div class="absolute inset-0 flex flex-col justify-end p-3">
+              <span class="text-[13px] font-medium leading-tight line-clamp-2" style="color:#FFFFFF;font-family:var(--font-serif)">局外人</span>
+              <span class="text-[10px] mt-1 opacity-70" style="color:#FFFFFF;font-family:var(--font-sans)">阿尔贝·加缪</span>
+            </div>
+          </div>
+          <div>
+            <p class="text-[13px] font-medium leading-snug truncate" style="color:var(--foreground);font-family:var(--font-serif)">局外人</p>
+            <p class="text-[11px] leading-snug truncate mt-0.5" style="color:var(--muted-foreground);font-family:var(--font-sans)">阿尔贝·加缪</p>
+            <span class="text-[10px] mt-1 inline-block" style="color:var(--muted-foreground);font-family:var(--font-sans)">未读</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom spacing -->
+    <div class="h-6"></div>
+  </main>
+
+  <!-- Bottom Tab Bar -->
+  <nav class="w-full max-w-[390px] mx-auto flex items-center justify-around shrink-0 absolute bottom-0 left-0 right-0" style="height:50px;background:var(--background);border-top:1px solid var(--border)">
+    <a class="flex flex-col items-center gap-0.5 transition-colors duration-150" style="color:var(--muted-foreground)" data-dom-id="nav-library-shelf">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 9.5L12 2.5l9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 21.5 9 12.5 15 12.5 15 21.5"/></svg>
+      <span class="text-[10px] font-medium" style="font-family:var(--font-sans)">书架</span></a>
+    <a class="flex flex-col items-center gap-0.5 transition-colors duration-150" style="color:var(--primary)">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+      <span class="text-[10px] font-medium" style="font-family:var(--font-sans)">书库</span></a>
+    <a class="flex flex-col items-center gap-0.5 transition-colors duration-150" style="color:var(--muted-foreground)" data-dom-id="tab-user">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="text-[10px] font-medium" style="font-family:var(--font-sans)">我的</span></a>
+  </nav>
+
+  <!-- Safe Area Bottom -->
+  <div class="h-[env(safe-area-inset-bottom,0px)] shrink-0"></div>
+
+</div>
+
+<script>lucide.createIcons();</script>
+</body>
+</html>

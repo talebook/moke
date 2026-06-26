@@ -1,0 +1,406 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书库 - Talebook</title>
+    <style id="theme-vars">
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #EDE9DF;
+  --secondary-foreground: #2C2C2E;
+  --muted: #EDE9DF;
+  --muted-foreground: #8B8682;
+  --accent: #F0ECE3;
+  --accent-foreground: #2C2C2E;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --border: #E8E3DC;
+  --input: #F0ECE3;
+  --ring: #B8956A;
+  --font-sans: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', 'Songti SC', serif;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-foreground: var(--tb-foreground);
+    --color-background: var(--tb-background);
+    --tb-primary: var(--tb-primary);
+    --tb-primary-foreground: var(--tb-primary-foreground);
+    --color-card: var(--tb-card);
+    --color-card-foreground: var(--tb-card-foreground);
+    --color-muted: var(--tb-muted);
+    --color-muted-foreground: var(--tb-muted-foreground);
+    --tb-border: var(--tb-border);
+    --color-input: var(--tb-input);
+    --color-ring: var(--tb-ring);
+    --tb-success: var(--tb-success);
+    --color-destructive: var(--tb-destructive);
+  }
+
+  
+  @layer base {
+    body { background: var(--tb-background); color: var(--tb-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main class="flex min-h-screen">
+        <!-- Sidebar -->
+        <aside class="w-[220px] shrink-0 flex flex-col" style="background-color: var(--tb-primary); color: var(--tb-primary-foreground);">
+            <div class="px-6 py-8">
+                <div class="text-xl font-semibold tracking-tight flex items-center gap-2">
+                    <i data-lucide="book-open" class="w-5 h-5"></i>
+                    <span>Talebook</span>
+                </div>
+            </div>
+            <nav class="flex-1 flex flex-col gap-0.5 px-3">
+                <a href="#" data-dom-id="nav-shelf" class="flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm transition-colors hover:opacity-80" style="color: var(--tb-primary-foreground); opacity: 0.65;">
+                    <i data-lucide="bookmark" class="w-4 h-4"></i>
+                    <span>书架</span>
+                </a>
+                <a href="#" data-dom-id="nav-library" class="flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm font-medium transition-colors" style="background-color: rgba(255,255,255,0.12); color: var(--tb-primary-foreground); opacity: 1;">
+                    <i data-lucide="library" class="w-4 h-4"></i>
+                    <span>书库</span>
+                </a>
+                <span data-dom-id="nav-search" class="hidden"></span>
+                <a href="#" data-dom-id="nav-settings" class="flex items-center gap-3 px-3 py-2.5 rounded-2xl text-sm transition-colors hover:opacity-80" style="color: var(--tb-primary-foreground); opacity: 0.65;">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                    <span>设置</span>
+                </a>
+            </nav>
+            <!-- 底部用户区 -->
+            <div class="px-4 py-4 border-t" style="border-color: rgba(255,255,255,0.08);">
+                <div class="flex items-center gap-3 px-2 py-2 rounded-lg transition-colors duration-150 cursor-pointer" style="color: rgba(250,250,250,0.55);">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold" style="background-color: rgba(255,255,255,0.15); color: var(--tb-primary-foreground);">U</div>
+                    <span class="text-sm truncate">用户</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="flex-1 flex flex-col min-w-0 overflow-auto" style="background-color: var(--tb-background);">
+            <!-- Top Toolbar -->
+            <header class="flex items-center gap-4 px-8 py-4 border-b shrink-0" style="border-color: var(--tb-border);">
+                <h1 class="text-xl font-semibold shrink-0" style="color: var(--tb-foreground); text-wrap: balance; word-break: keep-all; overflow-wrap: break-word;">全部藏书</h1>
+                <div class="flex-1 min-w-0"></div>
+                <!-- Search Input -->
+                <div class="relative shrink-0" style="width: 320px;">
+                    <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" style="color: var(--tb-muted-foreground);"></i>
+                    <input type="text" placeholder="搜索书名、作者或标签..." class="w-full h-9 pl-9 pr-3 text-sm rounded-2xl border outline-none transition-colors" style="background-color: var(--tb-muted); color: var(--tb-foreground); border-color: transparent; border-radius: 12px;" onfocus="this.style.borderColor='var(--tb-primary)'; this.style.backgroundColor='var(--tb-background)';" onblur="this.style.borderColor='transparent'; this.style.backgroundColor='var(--tb-muted)';" />
+                </div>
+                <!-- View Toggle -->
+                <div class="flex items-center rounded-2xl p-0.5 shrink-0" style="background-color: var(--tb-muted);">
+                    <button class="flex items-center justify-center w-8 h-8 rounded-sm transition-colors" style="background-color: var(--tb-background); color: var(--tb-foreground);" aria-label="网格视图">
+                        <i data-lucide="grid-3x3" class="w-4 h-4"></i>
+                    </button>
+                    <button class="flex items-center justify-center w-8 h-8 rounded-sm transition-colors" style="color: var(--tb-muted-foreground);" aria-label="列表视图">
+                        <i data-lucide="list" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                <!-- Sort Dropdown -->
+                <div class="relative shrink-0" onmouseenter="this.querySelector('.sort-drop').classList.remove('hidden')" onmouseleave="this.querySelector('.sort-drop').classList.add('hidden')">
+                    <button class="flex items-center gap-1.5 h-9 px-3 text-sm rounded-xl border transition-colors" style="color: var(--tb-foreground); border-color: var(--tb-border); background-color: var(--tb-background);">
+                        <span>最近添加</span>
+                        <i data-lucide="chevron-down" class="w-3 h-3" style="color: var(--tb-muted-foreground);"></i>
+                    </button>
+                    <div class="sort-drop hidden absolute right-0 top-full mt-1 w-40 rounded-xl border shadow-md z-20 py-1" style="background-color: var(--tb-background); border-color: var(--tb-border); box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+                        <div class="px-4 py-1.5 text-sm cursor-pointer transition-colors" style="color: var(--tb-foreground); background-color: var(--tb-muted);">最近添加</div>
+                        <div class="px-4 py-1.5 text-sm cursor-pointer transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground);">最近打开</div>
+                        <div class="px-4 py-1.5 text-sm cursor-pointer transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground);">标题 A-Z</div>
+                        <div class="px-4 py-1.5 text-sm cursor-pointer transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground);">作者 A-Z</div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Source Tabs with sliding underline -->
+            <div class="px-8 border-b shrink-0 relative" style="border-color: var(--tb-border);">
+                <div class="flex items-center gap-8 relative">
+                    <button class="tab-local py-3 text-sm font-medium transition-colors duration-200" style="color: var(--tb-foreground);">本地</button>
+                    <button class="tab-online py-3 text-sm transition-colors duration-200" style="color: var(--tb-muted-foreground);">在线</button>
+                    <!-- sliding underline bar -->
+                    <div class="tab-indicator absolute bottom-0 h-[2px] transition-all duration-300 ease-out rounded-full" style="background-color: var(--tb-foreground); left: 0; width: 28px;"></div>
+                </div>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="px-8 py-3 border-b shrink-0" style="border-color: var(--tb-border);">
+                <div class="flex items-center gap-6">
+                    <!-- 状态 -->
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs shrink-0" style="color: var(--tb-muted-foreground);">状态</span>
+                        <div class="relative">
+                            <select class="appearance-none text-sm pl-3 pr-7 py-1.5 rounded-2xl cursor-pointer outline-none" style="border: 1px solid var(--tb-border); background-color: var(--tb-background); color: var(--tb-foreground);">
+                                <option>全部</option><option>在读</option><option>已读</option><option>未读</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--tb-muted-foreground);"></i>
+                        </div>
+                    </div>
+                    <!-- 格式 -->
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs shrink-0" style="color: var(--tb-muted-foreground);">格式</span>
+                        <div class="relative">
+                            <select class="appearance-none text-sm pl-3 pr-7 py-1.5 rounded-2xl cursor-pointer outline-none" style="border: 1px solid var(--tb-border); background-color: var(--tb-background); color: var(--tb-foreground);">
+                                <option>全部</option><option>EPUB</option><option>PDF</option><option>MOBI</option><option>TXT</option><option>AZW3</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--tb-muted-foreground);"></i>
+                        </div>
+                    </div>
+                    <!-- 标签 -->
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs shrink-0" style="color: var(--tb-muted-foreground);">标签</span>
+                        <div class="relative">
+                            <select class="appearance-none text-sm pl-3 pr-7 py-1.5 rounded-2xl cursor-pointer outline-none" style="border: 1px solid var(--tb-border); background-color: var(--tb-background); color: var(--tb-foreground);">
+                                <option>全部</option><option>小说</option><option>技术</option><option>历史</option><option>哲学</option><option>科幻</option><option>经济</option><option>心理</option>
+                            </select>
+                            <i data-lucide="chevron-down" class="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style="color: var(--tb-muted-foreground);"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Book Grid -->
+            <div class="flex-1 overflow-auto px-8 py-6">
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5" style="max-width: 1400px;">
+                    <!-- Book Card 1 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-muted-foreground); opacity: 0.4;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">三体</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">刘慈欣</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 2 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #d4d4d8 0%, #a1a1aa 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">活着</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">余华</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 3 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #a1a1aa 0%, #71717a 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">百年孤独</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">加西亚·马尔克斯</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 4 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-muted-foreground); opacity: 0.4;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">1984</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">乔治·奥威尔</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 5 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #d4d4d8 0%, #a1a1aa 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">人类简史</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">尤瓦尔·赫拉利</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 6 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #71717a 0%, #52525b 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">围城</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">钱钟书</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 7 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-muted-foreground); opacity: 0.4;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">小王子</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">圣埃克苏佩里</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 8 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #d4d4d8 0%, #a1a1aa 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">红楼梦</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">曹雪芹</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 9 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #52525b 0%, #3f3f46 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">经济学原理</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">曼昆</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 10 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #e4e4e7 0%, #d4d4d8 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-muted-foreground); opacity: 0.4;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">局外人</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">加缪</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 11 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #d4d4d8 0%, #a1a1aa 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">思考，快与慢</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">丹尼尔·卡尼曼</span>
+                        </div>
+                    </a>
+                    <!-- Book Card 12 -->
+                    <a href="#" class="group flex flex-col gap-2.5">
+                        <div class="relative w-full overflow-hidden rounded-2xl transition-transform duration-150 ease-out group-hover:-translate-y-0.5" style="aspect-ratio: 2/3; border-radius: 14px; background: linear-gradient(135deg, #a1a1aa 0%, #71717a 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                            <div class="absolute inset-0 flex items-center justify-center" style="background: linear-gradient(180deg, rgba(0,0,0,0.01) 0%, rgba(0,0,0,0.03) 100%);">
+                                <i data-lucide="book-open" class="w-8 h-8" style="color: var(--tb-primary-foreground); opacity: 0.3;"></i>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-0.5 px-0.5">
+                            <span class="text-sm font-medium truncate" style="color: var(--tb-foreground);">平凡的世界</span>
+                            <span class="text-xs truncate" style="color: var(--tb-muted-foreground);">路遥</span>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex items-center justify-center gap-1.5 py-5 border-t shrink-0 px-8" style="border-color: var(--tb-border);">
+                <button class="flex items-center justify-center w-8 h-8 rounded-2xl transition-colors" style="color: var(--tb-muted-foreground); border-radius: 6px;" aria-label="上一页">
+                    <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                </button>
+                <button class="flex items-center justify-center w-8 h-8 text-sm font-medium rounded-2xl transition-colors" style="background-color: var(--tb-foreground); color: var(--tb-primary-foreground); border-radius: 6px;">1</button>
+                <button class="flex items-center justify-center w-8 h-8 text-sm rounded-2xl transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground); border-radius: 6px;">2</button>
+                <button class="flex items-center justify-center w-8 h-8 text-sm rounded-2xl transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground); border-radius: 6px;">3</button>
+                <span class="flex items-center justify-center w-8 h-8 text-sm" style="color: var(--tb-muted-foreground);">...</span>
+                <button class="flex items-center justify-center w-8 h-8 text-sm rounded-2xl transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground); border-radius: 6px;">12</button>
+                <button class="flex items-center justify-center w-8 h-8 rounded-2xl transition-colors" style="color: var(--tb-muted-foreground); border-radius: 6px;" aria-label="下一页">
+                    <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                </button>
+            </div>
+
+            <!-- 在线书库 (hidden) -->
+            <div class="tab-online-content hidden flex-1 overflow-auto px-8 py-6 flex-col" style="display: none;">
+                <div class="flex items-center gap-3 mb-6 px-4 py-3 rounded-2xl" style="background-color: var(--tb-muted); border: 1px solid var(--tb-border);">
+                    <div class="w-2 h-2 rounded-full" style="background-color: var(--tb-success);"></div>
+                    <span class="text-sm font-medium" style="color: var(--tb-foreground);">已连接：Calibre 书库</span>
+                    <span class="text-xs" style="color: var(--tb-muted-foreground);">talebook.local:8080 · 1,205 本可用</span>
+                    <div class="flex-1"></div>
+                    <button class="px-3 py-1.5 text-xs rounded-2xl border transition-colors hover:opacity-80" style="color: var(--tb-muted-foreground); border-color: var(--tb-border);">断开</button>
+                </div>
+                <div class="mb-6">
+                    <h2 class="text-sm font-semibold mb-3" style="color: var(--tb-foreground);">浏览分类</h2>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="flame" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">热门推荐</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">86 本</span></a>
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="book-type" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">小说文学</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">312 本</span></a>
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="cpu" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">科技编程</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">158 本</span></a>
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="scroll-text" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">人文社科</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">203 本</span></a>
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="globe" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">外文原版</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">74 本</span></a>
+                        <a href="#" class="group flex flex-col items-center gap-2 p-4 rounded-2xl transition-all duration-150 hover:-translate-y-0.5" style="background-color: var(--tb-muted);"><div class="w-10 h-10 rounded-2xl flex items-center justify-center" style="background-color: var(--tb-muted);"><i data-lucide="atom" class="w-5 h-5" style="color: var(--tb-foreground);"></i></div><span class="text-xs font-medium" style="color: var(--tb-foreground);">自然科学</span><span class="text-[11px]" style="color: var(--tb-muted-foreground);">126 本</span></a>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex items-center justify-between mb-4"><h2 class="text-sm font-semibold" style="color: var(--tb-foreground);">最新上架</h2><a href="#" class="text-xs transition-colors hover:opacity-70" style="color: var(--tb-muted-foreground);">查看全部 <i data-lucide="arrow-right" class="inline w-3 h-3"></i></a></div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #3b82f6 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-xl font-bold" style="font-family: 'Noto Serif SC', serif;">算法导论</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">PDF · 32MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">算法导论</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">Cormen · 计算机科学</p></div>
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #b45309 0%, #92400e 50%, #d97706 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-xl font-bold" style="font-family: 'Noto Serif SC', serif;">苏东坡传</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">EPUB · 2MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">苏东坡传</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">林语堂 · 传记</p></div>
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #047857 0%, #065f46 50%, #10b981 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-xl font-bold" style="font-family: 'Noto Serif SC', serif;">原则</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">MOBI · 5MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">原则</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">达利欧 · 商业</p></div>
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #6d28d9 0%, #5b21b6 50%, #8b5cf6 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-xl font-bold" style="font-family: 'Noto Serif SC', serif;">枪炮病菌</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">EPUB · 8MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">枪炮、病菌与钢铁</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">戴蒙德 · 人类学</p></div>
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #be123c 0%, #9f1239 50%, #e11d48 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-xl font-bold" style="font-family: 'Noto Serif SC', serif;">月亮与六便士</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">EPUB · 1MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">月亮与六便士</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">毛姆 · 文学</p></div>
+                        <div class="group cursor-pointer flex flex-col gap-2.5"><div class="relative aspect-[2/3] w-full rounded-[14px] overflow-hidden transition-all duration-200 ease-out group-hover:scale-[1.02]" style="box-shadow: 0 1px 3px rgba(0,0,0,0.06); background: linear-gradient(135deg, #0e7490 0%, #155e75 50%, #06b6d4 100%);"><div class="w-full h-full flex items-center justify-center"><span class="text-white/85 text-sm font-bold text-center leading-tight px-2" style="font-family: 'Noto Serif SC', serif;">从零到一</span></div><div class="absolute bottom-0 left-0 right-0 px-2 py-1" style="background: linear-gradient(transparent, rgba(0,0,0,0.5));"><span class="text-[11px] text-white/80 font-medium">PDF · 3MB</span></div></div><p class="text-[13px] font-medium truncate" style="color: var(--tb-foreground);">从零到一</p><p class="text-[11px] truncate" style="color: var(--tb-muted-foreground);">彼得·蒂尔 · 创业</p></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <script>
+    lucide.createIcons();
+    var btnLocal = document.querySelector('.tab-local');
+    var btnOnline = document.querySelector('.tab-online');
+    var indicator = document.querySelector('.tab-indicator');
+    var localGrid = document.querySelector('.flex-1.overflow-auto.px-8.py-6');
+    var onlineView = document.querySelector('.tab-online-content');
+    var filterBar = document.querySelector('.px-8.py-3.border-b.shrink-0');
+    var pagination = document.querySelector('.border-t.shrink-0');
+    function showLocal(){btnLocal.style.color='var(--tb-foreground)';btnLocal.style.fontWeight='500';btnOnline.style.color='var(--tb-muted-foreground)';btnOnline.style.fontWeight='400';indicator.style.left='0';indicator.style.width='28px';localGrid.style.display='';onlineView.style.display='none';filterBar.style.display='';pagination.style.display='';}
+    function showOnline(){btnOnline.style.color='var(--tb-foreground)';btnOnline.style.fontWeight='500';btnLocal.style.color='var(--tb-muted-foreground)';btnLocal.style.fontWeight='400';indicator.style.left=btnOnline.offsetLeft+'px';indicator.style.width=btnOnline.offsetWidth+'px';localGrid.style.display='none';onlineView.style.display='';filterBar.style.display='none';pagination.style.display='none';}
+    btnLocal.addEventListener('click',showLocal);
+    btnOnline.addEventListener('click',showOnline);
+    </script>
+</body>
+</html>
+

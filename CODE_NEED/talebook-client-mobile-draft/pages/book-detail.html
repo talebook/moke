@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>书籍详情</title>
+    <style id="theme-vars">
+/*
+ * Warm Study design tokens
+ * Theme: 私人图书馆 · 阅读空间
+ * Style: Restrained, literary, editorial
+ * Theme mode: light
+ */
+:root {
+  --background: #FBF9F2;
+  --foreground: #2C2C2E;
+  --primary: #B8956A;
+  --primary-foreground: #FFFFFF;
+  --muted: #F5F1EB;
+  --muted-foreground: #8B8682;
+  --card: #F5F1EB;
+  --card-foreground: #2C2C2E;
+  --border: #E8E3DC;
+  --border-subtle: #EFEAE3;
+  --input: #F5F1EB;
+  --ring: #B8956A;
+  --destructive: #C0392B;
+  --destructive-foreground: #FFFFFF;
+  --success: #7A8B5E;
+  --success-foreground: #FFFFFF;
+  --icon: #6B6560;
+  --icon-muted: #A09992;
+  --cover-bg: #2C3E50;
+  --cover-fg: #E8E0D5;
+  --font-sans: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-serif: 'Georgia', 'Noto Serif SC', serif;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+}
+    </style>
+    <style id="component-vars"></style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">@theme inline{--color-background:var(--background);--color-foreground:var(--foreground);--color-primary:var(--primary);--color-primary-foreground:var(--primary-foreground);--color-muted:var(--muted);--color-muted-foreground:var(--muted-foreground);--color-card:var(--card);--color-card-foreground:var(--card-foreground);--color-border:var(--border);--color-success:var(--success);--color-cover-bg:var(--cover-bg);--color-cover-fg:var(--cover-fg)}@layer base{body{background:var(--background);color:var(--foreground)}td,th{word-break:break-all;word-break:auto-phrase}th{white-space:nowrap}}</style>
+    <style>.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}[data-icon]{display:inline-flex;align-items:center;justify-content:center;-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;background-color:currentColor}</style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased" style="font-family:var(--font-sans)">
+<div class="relative flex flex-col w-full max-w-[390px] mx-auto h-dvh bg-[var(--background)] overflow-hidden">
+
+  <!-- Status Bar -->
+  <div class="flex items-center justify-between h-11 px-6 shrink-0 bg-[var(--background)] select-none">
+    <span class="text-[13px] font-semibold leading-none text-[var(--foreground)] tracking-tight">9:41</span>
+    <div class="flex items-center gap-1.5">
+      <svg class="h-3 w-auto" viewBox="0 0 24 24" fill="none" stroke="var(--foreground)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1.2" fill="var(--foreground)" stroke="none"/></svg>
+      <svg class="h-3 w-auto" viewBox="0 0 26 24" fill="none" stroke="var(--foreground)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="19" height="12" rx="2.5"/><line x1="23" y1="10" x2="23" y2="14" stroke-width="1.8" stroke-linecap="round"/><rect x="3.5" y="8.5" width="14" height="7" rx="0.8" fill="var(--foreground)" stroke="none"/></svg>
+    </div>
+  </div>
+
+  <!-- Nav Bar -->
+  <div class="flex items-center h-11 px-4 shrink-0 bg-[var(--background)]">
+    <button data-dom-id="back-library" class="inline-flex items-center gap-1 text-[var(--icon)] transition-colors duration-150 hover:text-[var(--foreground)]" aria-label="返回书库" style="min-height:44px;min-width:44px">
+      <i data-lucide="chevron-left" class="w-5 h-5"></i>
+    </button>
+    <span class="flex-1 text-center text-[16px] font-medium text-[var(--foreground)] mr-11">书籍详情</span>
+  </div>
+
+  <main class="flex-1 overflow-y-auto">
+    <div class="px-5 pt-6 pb-8">
+
+      <!-- Cover + Info Row -->
+      <div class="flex gap-4 mb-7">
+        <!-- Cover -->
+        <div class="shrink-0 w-[140px] h-[187px] flex items-center justify-center overflow-hidden" style="background:var(--cover-bg);border-radius:var(--radius-sm)">
+          <div class="text-center px-2">
+            <span class="block text-[15px] font-semibold leading-snug tracking-wide" style="color:var(--cover-fg);font-family:var(--font-serif)">活着</span>
+          </div>
+        </div>
+        <!-- Info -->
+        <div class="flex-1 min-w-0 flex flex-col justify-center gap-3">
+          <div>
+            <h1 class="text-[22px] font-semibold leading-tight tracking-[-0.01em] mb-1.5" style="font-family:var(--font-serif);color:var(--foreground);text-wrap:balance;word-break:keep-all;overflow-wrap:break-word">活着</h1>
+            <p class="text-[15px] leading-snug truncate" style="color:var(--muted-foreground)">余华</p>
+          </div>
+          <div class="flex flex-col gap-1">
+            <div class="flex items-center gap-2 text-[11px] tracking-[0.08em] uppercase" style="color:var(--muted-foreground)">
+              <i data-lucide="building-2" class="w-3 h-3 shrink-0"></i>
+              <span class="truncate">作家出版社</span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] tracking-[0.08em] uppercase" style="color:var(--muted-foreground)">
+              <i data-lucide="calendar" class="w-3 h-3 shrink-0"></i>
+              <span class="truncate">2012</span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] tracking-[0.08em] uppercase" style="color:var(--muted-foreground)">
+              <i data-lucide="book-open" class="w-3 h-3 shrink-0"></i>
+              <span class="truncate">小说 · 中文</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tags -->
+      <div class="flex items-center gap-4 mb-7" style="border-bottom:1px solid var(--border-subtle);padding-bottom:20px">
+        <span class="text-[13px] whitespace-nowrap" style="color:var(--muted-foreground);text-decoration-style:dotted;text-underline-offset:3px;text-decoration-color:var(--border)">文学经典</span>
+        <span class="text-[13px] whitespace-nowrap" style="color:var(--muted-foreground);text-decoration-style:dotted;text-underline-offset:3px;text-decoration-color:var(--border)">现实主义</span>
+        <span class="text-[13px] whitespace-nowrap" style="color:var(--muted-foreground);text-decoration-style:dotted;text-underline-offset:3px;text-decoration-color:var(--border)">当代中国</span>
+      </div>
+
+      <!-- Reading Progress -->
+      <div class="mb-7">
+        <div class="flex items-baseline justify-between mb-3">
+          <span class="text-[12px] tracking-[0.05em] uppercase" style="color:var(--muted-foreground)">阅读进度</span>
+          <span class="text-[13px] font-medium" style="color:var(--foreground)">42%</span>
+        </div>
+        <div class="w-full h-[2px] rounded-full overflow-hidden" style="background:var(--border-subtle)">
+          <div class="h-full rounded-full transition-all duration-300" style="width:42%;background:var(--primary)"></div>
+        </div>
+        <div class="flex justify-between mt-2">
+          <span class="text-[11px]" style="color:var(--muted-foreground)">已读 168 页</span>
+          <span class="text-[11px]" style="color:var(--muted-foreground)">共 400 页</span>
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div class="mb-7">
+        <h2 class="text-[12px] tracking-[0.05em] uppercase mb-3" style="color:var(--muted-foreground)">内容简介</h2>
+        <p class="text-[14px] leading-relaxed" style="line-height:1.7;font-family:var(--font-serif);color:var(--foreground);text-wrap:pretty">
+          《活着》是余华的代表作之一，讲述了一个普通农民福贵在大时代背景下历经苦难却始终坚韧地活着的故事。小说通过福贵的一生，展现了中国社会几十年的巨大变迁，以及在历史和命运面前个体的渺小与伟大。
+        </p>
+      </div>
+
+      <!-- Format List -->
+      <div class="mb-7">
+        <h2 class="text-[12px] tracking-[0.05em] uppercase mb-3" style="color:var(--muted-foreground)">电子书格式</h2>
+        <div class="flex flex-col" style="border-radius:var(--radius-md);overflow:hidden">
+          <div class="flex items-center justify-between py-3" style="border-bottom:1px solid var(--border-subtle)">
+            <div class="flex items-center gap-3">
+              <span class="inline-flex items-center justify-center text-[10px] font-semibold tracking-[0.05em] uppercase px-2 py-0.5 whitespace-nowrap" style="background:var(--muted);color:var(--muted-foreground);border-radius:var(--radius-sm)">EPUB</span>
+              <span class="text-[14px] truncate" style="color:var(--foreground)">活着.epub</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[12px] whitespace-nowrap" style="color:var(--muted-foreground)">2.4 MB</span>
+              <i data-lucide="download" class="w-4 h-4" style="color:var(--icon-muted)"></i>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-3" style="border-bottom:1px solid var(--border-subtle)">
+            <div class="flex items-center gap-3">
+              <span class="inline-flex items-center justify-center text-[10px] font-semibold tracking-[0.05em] uppercase px-2 py-0.5 whitespace-nowrap" style="background:var(--muted);color:var(--muted-foreground);border-radius:var(--radius-sm)">MOBI</span>
+              <span class="text-[14px] truncate" style="color:var(--foreground)">活着.mobi</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[12px] whitespace-nowrap" style="color:var(--muted-foreground)">1.8 MB</span>
+              <i data-lucide="download" class="w-4 h-4" style="color:var(--icon-muted)"></i>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-3" style="border-bottom:1px solid var(--border-subtle)">
+            <div class="flex items-center gap-3">
+              <span class="inline-flex items-center justify-center text-[10px] font-semibold tracking-[0.05em] uppercase px-2 py-0.5 whitespace-nowrap" style="background:var(--muted);color:var(--muted-foreground);border-radius:var(--radius-sm)">AZW3</span>
+              <span class="text-[14px] truncate" style="color:var(--foreground)">活着.azw3</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[12px] whitespace-nowrap" style="color:var(--muted-foreground)">1.5 MB</span>
+              <i data-lucide="download" class="w-4 h-4" style="color:var(--icon-muted)"></i>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-3">
+            <div class="flex items-center gap-3">
+              <span class="inline-flex items-center justify-center text-[10px] font-semibold tracking-[0.05em] uppercase px-2 py-0.5 whitespace-nowrap" style="background:var(--muted);color:var(--muted-foreground);border-radius:var(--radius-sm)">TXT</span>
+              <span class="text-[14px] truncate" style="color:var(--foreground)">活着.txt</span>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span class="text-[12px] whitespace-nowrap" style="color:var(--muted-foreground)">0.3 MB</span>
+              <i data-lucide="download" class="w-4 h-4" style="color:var(--icon-muted)"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CTA Button -->
+      <button type="button" data-dom-id="btn-read" class="w-full h-12 flex items-center justify-center gap-2 text-[16px] font-semibold transition-all duration-150 active:scale-[0.98] hover:opacity-90 whitespace-nowrap" style="background:var(--primary);color:var(--primary-foreground);border-radius:var(--radius-md);min-height:48px" aria-label="开始阅读">
+        <i data-lucide="book-open-text" class="w-5 h-5"></i>
+        <span>开始阅读</span>
+      </button>
+
+      <!-- Cache Toggle (only bordered card) -->
+      <div class="mt-7 p-4 flex items-center justify-between" style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius-md)">
+        <div class="flex-1 min-w-0 mr-3">
+          <p class="text-[14px] font-medium truncate" style="color:var(--foreground)">离线缓存</p>
+          <p class="text-[12px] truncate" style="color:var(--muted-foreground)">下载到本地，无网络也可阅读</p>
+        </div>
+        <button type="button" class="relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-1" style="background:var(--border)" role="switch" aria-checked="false" aria-label="离线缓存开关">
+          <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200"></span>
+        </button>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Bottom Tab Bar -->
+  <nav class="shrink-0 flex items-center justify-around h-[64px] px-2 pb-[env(safe-area-inset-bottom,0px)]" style="background:var(--background);border-top:1px solid var(--border-subtle)">
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 h-full transition-opacity duration-150 hover:opacity-70" style="color:var(--icon-muted)" aria-label="首页">
+      <i data-lucide="home" class="w-5 h-5"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap">首页</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 h-full transition-opacity duration-150 hover:opacity-70" style="color:var(--icon-muted)" aria-label="书库">
+      <i data-lucide="library" class="w-5 h-5"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap">书库</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 h-full transition-opacity duration-150" style="color:var(--primary)" aria-label="当前页面">
+      <i data-lucide="book-marked" class="w-5 h-5"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap">详情</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 h-full transition-opacity duration-150 hover:opacity-70" style="color:var(--icon-muted)" aria-label="搜索">
+      <i data-lucide="search" class="w-5 h-5"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap">搜索</span>
+    </button>
+    <button class="flex flex-col items-center justify-center gap-0.5 min-w-0 flex-1 h-full transition-opacity duration-150 hover:opacity-70" style="color:var(--icon-muted)" aria-label="我的">
+      <i data-lucide="user" class="w-5 h-5"></i>
+      <span class="text-[10px] leading-none whitespace-nowrap">我的</span>
+    </button>
+  </nav>
+</div>
+<script>lucide.createIcons();</script>
+</body>
+</html>
