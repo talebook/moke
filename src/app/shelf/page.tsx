@@ -90,6 +90,7 @@ export default function ShelfPage() {
   const [finished, setFinished] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requiresLogin, setRequiresLogin] = useState(false);
+  const viewMode = 'grid';
 
   useEffect(() => {
     loadBooks();
@@ -164,13 +165,13 @@ export default function ShelfPage() {
         ) : (
           <>
             {reading.length > 0 && (
-              <Section title="阅读中" count={reading.length} books={reading} bg />
+              <Section title="阅读中" count={reading.length} books={reading} bg viewMode={viewMode} />
             )}
             {toread.length > 0 && (
-              <Section title="待读" count={toread.length} books={toread} />
+              <Section title="待读" count={toread.length} books={toread} viewMode={viewMode} />
             )}
             {finished.length > 0 && (
-              <Section title="已读完" count={finished.length} books={finished} />
+              <Section title="已读完" count={finished.length} books={finished} viewMode={viewMode} />
             )}
           </>
         )}
@@ -179,18 +180,18 @@ export default function ShelfPage() {
   );
 }
 
-function Section({ title, count, books, bg }: { title: string; count: number; books: BookItem[]; bg?: boolean }) {
+function Section({ title, count, books, bg, viewMode = 'grid' }: { title: string; count: number; books: BookItem[]; bg?: boolean; viewMode?: string }) {
   return (
     <section className={`px-8 pt-7 pb-6 ${bg ? 'bg-muted' : ''}`}>
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
         <span className="text-xs text-muted-foreground">{count} 本</span>
       </div>
-      <div className={cn('gap-x-4 gap-y-6', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
-          {books.map((book) => (
-            <BookCard key={String(book.id)} book={book} viewGrid={viewGrid} />
-          ))}
-        </div>
+      <div className={cn('gap-x-4 gap-y-6', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
+        {books.map((book) => (
+          <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
+        ))}
+      </div>
     </section>
   );
 }

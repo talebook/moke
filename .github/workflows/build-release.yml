@@ -97,7 +97,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           buildRunner: npm run build
-          args: ${{ matrix.platform == 'android' && '--android' || '' }}
+          args: ${{ matrix.platform == 'android' && '-- --android' || '' }}
 
       - name: Build and Release Tauri app (Tags)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -109,4 +109,4 @@ jobs:
           # 不指定 releaseName、releaseBody、releaseDraft、prerelease，
           # 这样如果 Release 已存在，则只上传构建产物，不修改任何元数据。
           buildRunner: npm run build
-          args: ${{ matrix.platform == 'android' && '--android' || '' }}
+          args: ${{ matrix.platform == 'android' && '-- --android' || '' }}

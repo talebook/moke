@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useServerStore } from '@/lib/store/server';
+import { request } from '@/lib/api';
 
 export default function UserPage() {
   const router = useRouter();
