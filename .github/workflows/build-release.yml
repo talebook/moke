@@ -9,7 +9,7 @@ on:
       - '.vscode/**'
       - 'CODE_NEED/**'
     tags:
-      - 'v*'                 # 标签推送也属于 push 事件，过滤 v* 标签
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -86,6 +86,11 @@ jobs:
         run: |
           yes | sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
           echo "NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+
+      - name: Initialize Android project (Android Only)
+        if: matrix.platform == 'android'
+        run: npx tauri android init
 
       - name: Install Frontend Dependencies
         run: npm ci
@@ -96,7 +101,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          buildRunner: npm run build
           args: ${{ matrix.platform == 'android' && '-- --android' || '' }}
 
       - name: Build and Release Tauri app (Tags)
@@ -106,5 +110,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          buildRunner: npm run build
           args: ${{ matrix.platform == 'android' && '-- --android' || '' }}

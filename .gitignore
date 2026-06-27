@@ -24,6 +24,7 @@ yarn-error.log*
 
 # tauri
 src-tauri/target/
+src-tauri/gen/
 
 # IDE
 .vscode/
