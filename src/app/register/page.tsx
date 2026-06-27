@@ -18,7 +18,7 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
 
-  const handleRegister = async (captchaCode?: string) => {
+  const handleRegister = async (captchaData?: any) => {
     if (!username.trim() || !password.trim()) return;
     setLoading(true);
     setError('');
@@ -28,8 +28,14 @@ export default function RegisterPage() {
       body.append('nickname', username.trim());
       body.append('password', password);
       body.append('email', email.trim());
-      if (captchaCode) {
-        body.append('captcha_code', captchaCode);
+      if (captchaData) {
+        if (typeof captchaData === 'string') {
+          body.append('captcha_code', captchaData);
+        } else {
+          Object.keys(captchaData).forEach(key => {
+            body.append(key, captchaData[key]);
+          });
+        }
       }
 
       const res = await request(`${serverUrl}/api/user/sign_up`, {
@@ -103,7 +109,7 @@ export default function RegisterPage() {
           isOpen={showCaptcha} 
           serverUrl={serverUrl} 
           onClose={() => setShowCaptcha(false)} 
-          onSuccess={(code) => handleRegister(code)} 
+          onSuccess={(data) => handleRegister(data)} 
         />
       </div>
     </main>

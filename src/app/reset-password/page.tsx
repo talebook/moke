@@ -13,14 +13,20 @@ interface TalebookResetResponse {
   msg?: string;
 }
 
-async function resetPassword(email: string, username: string, captchaCode?: string): Promise<TalebookResetResponse> {
+async function resetPassword(email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
   const { serverUrl } = useServerStore.getState();
   const body = new URLSearchParams();
   body.append('email', email);
   body.append('username', username);
   
-  if (captchaCode) {
-    body.append('captcha_code', captchaCode);
+  if (captchaData) {
+    if (typeof captchaData === 'string') {
+      body.append('captcha_code', captchaData);
+    } else {
+      Object.keys(captchaData).forEach(key => {
+        body.append(key, captchaData[key]);
+      });
+    }
   }
 
   const response = await request(`${serverUrl}/api/user/reset`, {
@@ -43,14 +49,14 @@ export default function ResetPasswordPage() {
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
 
-  const handleReset = async (captchaCode?: string) => {
+  const handleReset = async (captchaData?: any) => {
     if (!email.trim() || !username.trim()) return;
     setLoading(true);
     setError('');
     setSuccess(false);
 
     try {
-      const res = await resetPassword(email, username, captchaCode);
+      const res = await resetPassword(email, username, captchaData);
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
@@ -143,7 +149,7 @@ export default function ResetPasswordPage() {
           isOpen={showCaptcha} 
           serverUrl={serverUrl} 
           onClose={() => setShowCaptcha(false)} 
-          onSuccess={(code) => handleReset(code)} 
+          onSuccess={(data) => handleReset(data)} 
         />
       </div>
     </main>

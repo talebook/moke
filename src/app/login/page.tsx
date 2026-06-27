@@ -13,14 +13,20 @@ interface TalebookLoginResponse {
   msg?: string;
 }
 
-async function login(username: string, password: string, captchaCode?: string): Promise<TalebookLoginResponse> {
+async function login(username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
   const { serverUrl } = useServerStore.getState();
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
   
-  if (captchaCode) {
-    body.append('captcha_code', captchaCode);
+  if (captchaData) {
+    if (typeof captchaData === 'string') {
+      body.append('captcha_code', captchaData);
+    } else {
+      Object.keys(captchaData).forEach(key => {
+        body.append(key, captchaData[key]);
+      });
+    }
   }
 
   const response = await request(`${serverUrl}/api/user/sign_in`, {
@@ -44,13 +50,13 @@ export default function LoginPage() {
   const [showCaptcha, setShowCaptcha] = useState(false);
   const { serverUrl } = useServerStore.getState();
 
-  const handleLogin = async (captchaCode?: string) => {
+  const handleLogin = async (captchaData?: any) => {
     if (!username.trim() || !password.trim()) return;
     setLoading(true);
     setError('');
 
     try {
-      const res = await login(username, password, captchaCode);
+      const res = await login(username, password, captchaData);
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
@@ -162,7 +168,7 @@ export default function LoginPage() {
           isOpen={showCaptcha} 
           serverUrl={serverUrl} 
           onClose={() => setShowCaptcha(false)} 
-          onSuccess={(code) => handleLogin(code)} 
+          onSuccess={(data) => handleLogin(data)} 
         />
       </div>
     </main>
