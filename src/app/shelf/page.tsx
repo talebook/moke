@@ -18,7 +18,7 @@ interface BookItem {
   thumb?: string;
 }
 
-function BookCard({ book }: { book: BookItem }) {
+function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolean }) {
   const { serverUrl } = useServerStore();
   const authorName = book.author || book.authors?.[0]?.name || '';
   const bookId = String(book.id);
@@ -32,27 +32,52 @@ function BookCard({ book }: { book: BookItem }) {
   ];
   const ci = Math.abs(bookId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % colors.length;
 
+  if (viewGrid) {
+    return (
+      <Link href={`/detail?id=${bookId}`}
+        className="group flex flex-col gap-2.5 cursor-pointer"
+      >
+        <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
+          style={{ aspectRatio: '2/3' }}>
+          {coverUrl ? (
+            <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+          ) : (
+            <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
+              <span className="text-white/70 text-lg font-bold font-serif px-3 text-center leading-tight">
+                {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col gap-0.5 px-0.5">
+          <span className="text-[13px] font-medium truncate text-foreground">{book.title}</span>
+          {authorName && <span className="text-[11px] truncate text-muted-foreground">{authorName}</span>}
+        </div>
+      </Link>
+    );
+  }
+
   return (
-    <Link
-      href={`/detail/${bookId}`}
-      className="group flex flex-col gap-2.5 cursor-pointer"
-    >
-      <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
-        style={{ aspectRatio: '2/3' }}>
+      <Link href={`/detail?id=${bookId}`}
+      className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted border border-transparent hover:border-border">
+      <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
         {coverUrl ? (
           <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
-            <span className="text-white/70 text-lg font-bold font-serif px-3 text-center leading-tight">
-              {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
+            <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
+              {book.title.length > 2 ? book.title.slice(0, 2) : book.title}
             </span>
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-0.5 px-0.5">
-        <span className="text-[13px] font-medium truncate text-foreground">{book.title}</span>
-        {authorName && <span className="text-[11px] truncate text-muted-foreground">{authorName}</span>}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate text-foreground">{book.title}</p>
+        {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
       </div>
+      <span className="text-[11px] text-muted-foreground shrink-0">
+        {(book as any).files?.[0]?.format?.toUpperCase() || 'EPUB'}
+      </span>
     </Link>
   );
 }
@@ -108,7 +133,7 @@ export default function ShelfPage() {
     <DesktopLayout>
       <header className="flex items-center justify-between px-8 h-16 shrink-0 border-b border-border">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">我的书架</h1>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 ">
           <div className="relative shrink-0 w-[280px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <input
@@ -161,11 +186,11 @@ function Section({ title, count, books, bg }: { title: string; count: number; bo
         <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
         <span className="text-xs text-muted-foreground">{count} 本</span>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-x-4 gap-y-6">
-        {books.map((book) => (
-          <BookCard key={String(book.id)} book={book} />
-        ))}
-      </div>
+      <div className={cn('gap-x-4 gap-y-6', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+          {books.map((book) => (
+            <BookCard key={String(book.id)} book={book} viewGrid={viewGrid} />
+          ))}
+        </div>
     </section>
   );
 }

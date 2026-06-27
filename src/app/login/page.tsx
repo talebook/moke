@@ -6,17 +6,22 @@ import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
+import { CaptchaModal } from '@/components/auth/CaptchaModal';
 
 interface TalebookLoginResponse {
   err: string;
   msg?: string;
 }
 
-async function login(username: string, password: string): Promise<TalebookLoginResponse> {
+async function login(username: string, password: string, captchaCode?: string): Promise<TalebookLoginResponse> {
   const { serverUrl } = useServerStore.getState();
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
+  
+  if (captchaCode) {
+    body.append('captcha_code', captchaCode);
+  }
 
   const response = await request(`${serverUrl}/api/user/sign_in`, {
     method: 'POST',
@@ -34,16 +39,21 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  
+  // Captcha state
+  const [showCaptcha, setShowCaptcha] = useState(false);
+  const { serverUrl } = useServerStore.getState();
 
-  const handleLogin = async () => {
+  const handleLogin = async (captchaCode?: string) => {
     if (!username.trim() || !password.trim()) return;
     setLoading(true);
     setError('');
 
     try {
-      const res = await login(username, password);
+      const res = await login(username, password, captchaCode);
 
       if (res.err === 'ok') {
+        setShowCaptcha(false);
         const info = await fetchCurrentUser();
         if (!info.isLogin || !info.user) {
           logout();
@@ -56,6 +66,9 @@ export default function LoginPage() {
         router.push('/shelf');
       } else if (res.err === 'user.private.not_valid') {
         router.push('/access');
+      } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
+        setError(res.msg || '请输入人机验证码');
+        setShowCaptcha(true);
       } else {
         setError(res.msg || '登录失败，请检查用户名和密码');
       }
@@ -136,7 +149,21 @@ export default function LoginPage() {
           >
             注册
           </Link>
+          <span className="mx-2 text-border">|</span>
+          <Link
+            href="/reset-password"
+            className="font-medium text-primary hover:underline"
+          >
+            忘记密码？
+          </Link>
         </p>
+
+        <CaptchaModal 
+          isOpen={showCaptcha} 
+          serverUrl={serverUrl} 
+          onClose={() => setShowCaptcha(false)} 
+          onSuccess={(code) => handleLogin(code)} 
+        />
       </div>
     </main>
   );

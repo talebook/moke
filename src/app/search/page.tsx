@@ -4,10 +4,10 @@ import { Suspense, useState, useEffect } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Search } from 'lucide-react';
+import { Search, Grid3X3, List } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
-import { resolveServerAssetUrl } from '@/lib/utils';
+import { cn, resolveServerAssetUrl } from '@/lib/utils';
 
 interface BookItem {
   id: string | number;
@@ -26,6 +26,7 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [activeFilter, setActiveFilter] = useState('全部');
+  const [viewGrid, setViewGrid] = useState(true);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -64,13 +65,24 @@ function SearchContent() {
           </button>
         </div>
 
-        <div className="flex items-center gap-3 mb-6">
-          {['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'].map((f) => (
-            <button key={f} onClick={() => setActiveFilter(f)}
-              className={`text-xs px-3 py-1.5 rounded-2xl border transition-colors ${activeFilter === f ? 'border-foreground text-foreground bg-muted' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-              {f}
+        <div className="flex items-center gap-3 mb-6 justify-between">
+          <div className="flex gap-3">
+            {['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'].map((f) => (
+              <button key={f} onClick={() => setActiveFilter(f)}
+                className={`text-xs px-3 py-1.5 rounded-2xl border transition-colors ${activeFilter === f ? 'border-foreground text-foreground bg-muted' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                {f}
+              </button>
+            ))}
+          </div>
+          
+          <div className="flex items-center rounded-lg p-1 shrink-0 bg-muted border border-border">
+            <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+              <Grid3X3 className="w-4 h-4" />
             </button>
-          ))}
+            <button onClick={() => setViewGrid(false)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', !viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+              <List className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -85,26 +97,48 @@ function SearchContent() {
         ) : results.length > 0 ? (
           <div>
             <p className="text-sm text-muted-foreground mb-5">找到 {results.length} 本书</p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+            <div className={cn('gap-5', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
               {results.map((book) => {
                 const bookId = String(book.id);
                 const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
+                const authorName = book.author || book.authors?.[0]?.name || '';
+
+                if (viewGrid) {
+                  return (
+                    <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-2.5">
+                      <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
+                        style={{ aspectRatio: '2/3' }}>
+                        {coverUrl ? (
+                          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+                            <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-0.5 px-0.5">
+                        <span className="text-sm font-medium truncate text-foreground">{book.title}</span>
+                        {authorName && <span className="text-xs truncate text-muted-foreground">{authorName}</span>}
+                      </div>
+                    </Link>
+                  );
+                }
 
                 return (
-                  <Link key={bookId} href={`/detail/${bookId}`} className="group flex flex-col gap-2.5">
-                    <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
-                      style={{ aspectRatio: '2/3' }}>
+                  <Link key={bookId} href={`/detail?id=${bookId}`}
+                    className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted border border-transparent hover:border-border">
+                    <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
                       {coverUrl ? (
                         <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                          <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
+                          <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col gap-0.5 px-0.5">
-                      <span className="text-sm font-medium truncate text-foreground">{book.title}</span>
-                      <span className="text-xs truncate text-muted-foreground">{book.author || book.authors?.[0]?.name || ''}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate text-foreground">{book.title}</p>
+                      {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
                     </div>
                   </Link>
                 );

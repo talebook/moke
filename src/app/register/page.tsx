@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { request } from '@/lib/api';
+import { CaptchaModal } from '@/components/auth/CaptchaModal';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -15,8 +16,9 @@ export default function RegisterPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showCaptcha, setShowCaptcha] = useState(false);
 
-  const handleRegister = async () => {
+  const handleRegister = async (captchaCode?: string) => {
     if (!username.trim() || !password.trim()) return;
     setLoading(true);
     setError('');
@@ -26,6 +28,9 @@ export default function RegisterPage() {
       body.append('nickname', username.trim());
       body.append('password', password);
       body.append('email', email.trim());
+      if (captchaCode) {
+        body.append('captcha_code', captchaCode);
+      }
 
       const res = await request(`${serverUrl}/api/user/sign_up`, {
         method: 'POST',
@@ -34,7 +39,11 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (data.err === 'ok') {
+        setShowCaptcha(false);
         router.push('/login');
+      } else if (data.err === 'captcha.invalid' || data.err === 'captcha.expired' || data.err === 'captcha.required') {
+        setError(data.msg || '请输入人机验证码');
+        setShowCaptcha(true);
       } else {
         setError(data.msg || '注册失败');
       }
@@ -89,6 +98,13 @@ export default function RegisterPage() {
             登录
           </Link>
         </p>
+
+        <CaptchaModal 
+          isOpen={showCaptcha} 
+          serverUrl={serverUrl} 
+          onClose={() => setShowCaptcha(false)} 
+          onSuccess={(code) => handleRegister(code)} 
+        />
       </div>
     </main>
   );

@@ -69,11 +69,11 @@ export default function LibraryPage() {
           />
         </div>
 
-        <div className="flex items-center rounded-2xl p-0.5 shrink-0 bg-muted">
-          <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-8 h-8 rounded-sm transition-colors', viewGrid ? 'bg-background text-foreground' : 'text-muted-foreground')}>
+        <div className="flex items-center rounded-lg p-1 shrink-0 bg-muted border border-border">
+          <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
             <Grid3X3 className="w-4 h-4" />
           </button>
-          <button onClick={() => setViewGrid(false)} className={cn('flex items-center justify-center w-8 h-8 rounded-sm transition-colors', !viewGrid ? 'bg-background text-foreground' : 'text-muted-foreground')}>
+          <button onClick={() => setViewGrid(false)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', !viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
             <List className="w-4 h-4" />
           </button>
         </div>
@@ -119,7 +119,7 @@ export default function LibraryPage() {
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
               </div>
             ) : (
-              <div className={cn('gap-5', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'flex flex-col gap-3')} style={{ maxWidth: '1400px' }}>
+              <div className={cn('gap-5', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
                 {books.map((book) => {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
@@ -128,7 +128,7 @@ export default function LibraryPage() {
 
                   if (viewGrid) {
                     return (
-                      <Link key={bookId} href={`/detail/${bookId}`} className="group flex flex-col gap-2.5">
+                      <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-2.5">
                         <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
                           style={{ aspectRatio: '2/3' }}>
                           {coverUrl ? (
@@ -148,10 +148,16 @@ export default function LibraryPage() {
                   }
 
                   return (
-                    <Link key={bookId} href={`/detail/${bookId}`}
-                      className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted">
-                      <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                        <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
+                    <Link key={bookId} href={`/detail?id=${bookId}`}
+                      className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted border border-transparent hover:border-border">
+                      <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
+                        {coverUrl ? (
+                          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+                        ) : (
+                          <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
+                            <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate text-foreground">{book.title}</p>
