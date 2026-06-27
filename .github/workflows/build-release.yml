@@ -8,6 +8,8 @@ on:
       - '**.md'
       - '.vscode/**'
       - 'CODE_NEED/**'
+    tags:
+      - 'v*'                 # 标签推送也属于 push 事件，过滤 v* 标签
   pull_request:
     branches:
       - main
@@ -15,8 +17,6 @@ on:
       - '**.md'
       - '.vscode/**'
       - 'CODE_NEED/**'
-  tags:
-    - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -106,5 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
+          # 不指定 releaseName、releaseBody、releaseDraft、prerelease，
+          # 这样如果 Release 已存在，则只上传构建产物，不修改任何元数据。
           buildRunner: npm run build
           args: ${{ matrix.platform == 'android' && '--android' || '' }}
