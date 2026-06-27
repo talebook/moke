@@ -51,12 +51,23 @@ export function Sidebar() {
 
       <div className="px-4 py-4 border-t border-white/10">
         {user ? (
-          <div className="flex items-center gap-3 px-2 py-2 rounded-lg text-white/55">
-            <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center text-xs font-semibold text-primary-foreground">
+          <Link
+            href="/user"
+            className={cn(
+              'flex items-center gap-3 px-2 py-2 rounded-lg transition-colors',
+              pathname === '/user'
+                ? 'bg-white/10 text-primary-foreground'
+                : 'text-white/55 hover:text-white hover:bg-white/5'
+            )}
+          >
+            <div className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center text-xs font-semibold text-primary-foreground shrink-0">
               {user.name?.[0] || 'U'}
             </div>
-            <span className="text-sm truncate">{user.name}</span>
-          </div>
+            <div className="min-w-0">
+              <p className="text-sm truncate">{user.name}</p>
+              <p className="text-[11px] text-white/45 truncate">个人信息</p>
+            </div>
+          </Link>
         ) : (
           <Link
             href="/login"
