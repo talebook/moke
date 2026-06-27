@@ -96,18 +96,37 @@ jobs:
         run: npx tauri android init
 
       - name: Build Tauri app (Push / PR)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: ${{ matrix.platform == 'android' && '-- --android' || '' }}
 
       - name: Build and Release Tauri app (Tags)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          args: ${{ matrix.platform == 'android' && '-- --android' || '' }}
+
+      - name: Build Android app
+        if: matrix.platform == 'android'
+        run: npx tauri android build
+
+      - name: Upload Android artifact (Push / PR)
+        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moke-Android
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+
+      - name: Upload Android artifact to Release (Tags)
+        if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
