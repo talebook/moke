@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
-import { Search } from 'lucide-react';
+import { Search, History } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
@@ -134,7 +134,7 @@ export default function ShelfPage() {
     <DesktopLayout>
       <header className="flex items-center justify-between px-8 h-16 shrink-0 border-b border-border">
         <h1 className="text-xl font-semibold tracking-tight text-foreground">我的书架</h1>
-        <div className="flex items-center gap-4 ">
+        <div className="flex items-center gap-3">
           <div className="relative shrink-0 w-[280px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
             <input
@@ -144,6 +144,14 @@ export default function ShelfPage() {
               className="w-full h-9 pl-9 pr-3 text-sm rounded-xl border border-transparent bg-muted text-foreground outline-none transition-colors focus:border-primary focus:bg-background"
             />
           </div>
+          <Link
+            href="/user/history"
+            aria-label="查看历史记录"
+            title="查看历史记录"
+            className="shrink-0 flex items-center justify-center w-9 h-9 rounded-xl border border-border bg-background text-muted-foreground transition hover:text-foreground hover:bg-muted"
+          >
+            <History className="w-4 h-4" />
+          </Link>
         </div>
       </header>
 

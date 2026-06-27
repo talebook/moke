@@ -205,7 +205,11 @@ export async function submitWelcomeCode(code: string): Promise<{ err: string; ms
   return response.json();
 }
 
-export async function downloadBookBlob(bookId: string | number, format = 'epub'): Promise<Blob> {
+export async function downloadBookBlob(
+  bookId: string | number,
+  format = 'epub',
+  options?: { onProgress?: (progress: number) => void },
+): Promise<Blob> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
@@ -219,6 +223,7 @@ export async function downloadBookBlob(bookId: string | number, format = 'epub')
       throw new Error(`http.${response.status}`);
     }
 
+    options?.onProgress?.(100);
     return response.blob();
   }
 
@@ -231,7 +236,38 @@ export async function downloadBookBlob(bookId: string | number, format = 'epub')
       throw new Error(`http.${response.status}`);
     }
 
-    return response.blob();
+    const total = Number(response.headers.get('content-length') || 0);
+    const reader = response.body?.getReader();
+
+    if (!reader) {
+      options?.onProgress?.(100);
+      return response.blob();
+    }
+
+    const chunks: ArrayBuffer[] = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) break;
+      if (!value) continue;
+
+      chunks.push(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+      received += value.length;
+
+      if (total > 0) {
+        options?.onProgress?.(Math.min(100, Math.round((received / total) * 100)));
+      }
+    }
+
+    if (total === 0) {
+      options?.onProgress?.(100);
+    }
+
+    return new Blob(chunks, {
+      type: response.headers.get('content-type') || 'application/octet-stream',
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
     throw new Error(reason || 'network.error');
