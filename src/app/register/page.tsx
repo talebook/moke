@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
+import { request } from '@/lib/api';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -26,7 +27,7 @@ export default function RegisterPage() {
       body.append('password', password);
       body.append('email', email.trim());
 
-      const res = await fetch(`${serverUrl}/api/user/sign_up`, {
+      const res = await request(`${serverUrl}/api/user/sign_up`, {
         method: 'POST',
         body,
         credentials: 'include',

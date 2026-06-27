@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { fetchServerInfo } from '@/lib/api';
+import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 
 export default function SettingsPage() {
@@ -42,7 +42,7 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
+      await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
     } catch {}
     logout();
     localStorage.removeItem('moke-auth-token');

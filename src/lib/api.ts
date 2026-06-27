@@ -23,6 +23,15 @@ interface UserInfoResponse {
 
 const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
+export async function request(url: string | URL, options?: RequestInit): Promise<Response> {
+  if (isTauriApp) {
+    const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+    return tauriFetch(url.toString(), options as any);
+  }
+  
+  return fetch(url, options);
+}
+
 export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: string }> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const body = new URLSearchParams();
@@ -31,7 +40,7 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
     body.append('invite_code', code);
   }
 
-  const response = await fetch(`${serverUrl}/api/welcome`, {
+  const response = await request(`${serverUrl}/api/welcome`, {
     method: code ? 'POST' : 'GET',
     body: code ? body : undefined,
     credentials: 'include',
@@ -41,7 +50,7 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
 
 export async function fetchCurrentUser(): Promise<{ err: string; msg?: string; user: ReaderInfo | null; isLogin: boolean }> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
-  const response = await fetch(`${serverUrl}/api/user/info`, {
+  const response = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
   const data: UserInfoResponse = await response.json();
@@ -75,7 +84,7 @@ export async function fetchCurrentUser(): Promise<{ err: string; msg?: string; u
 
 export async function fetchServerInfo(): Promise<{ err: string; msg?: string; title: string; version: string }> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
-  const response = await fetch(`${serverUrl}/api/user/info`, {
+  const response = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
   const data: UserInfoResponse = await response.json();
@@ -92,13 +101,15 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
   let response: Response;
 
   try {
-    response = await fetch(`${serverUrl}/api/user/info`, {
+    response = await request(`${serverUrl}/api/user/info`, {
       credentials: 'include',
     });
-  } catch {
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    console.error('Network error detail:', errorMsg, e);
     return {
       err: 'network.error',
-      msg: '无法连接到服务器，请检查地址和网络',
+      msg: `无法连接到服务器，请检查地址和网络 (${errorMsg})`,
     };
   }
 
@@ -134,7 +145,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   let response: Response;
 
   try {
-    response = await fetch(`${serverUrl}/api/welcome`, {
+    response = await request(`${serverUrl}/api/welcome`, {
       credentials: 'include',
     });
   } catch {
@@ -185,7 +196,7 @@ export async function submitWelcomeCode(code: string): Promise<{ err: string; ms
   const body = new URLSearchParams();
   body.append('invite_code', code);
 
-  const response = await fetch(`${serverUrl}/api/welcome`, {
+  const response = await request(`${serverUrl}/api/welcome`, {
     method: 'POST',
     body,
     credentials: 'include',
@@ -199,11 +210,10 @@ export async function downloadBookBlob(bookId: string | number, format = 'epub')
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
   if (isTauriApp) {
-    const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-    const response = await tauriFetch(url, {
+    const response = await request(url, {
       method: 'GET',
       connectTimeout: 30_000,
-    });
+    } as any);
 
     if (!response.ok) {
       throw new Error(`http.${response.status}`);
@@ -213,7 +223,7 @@ export async function downloadBookBlob(bookId: string | number, format = 'epub')
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await request(url, {
       credentials: 'include',
     });
 

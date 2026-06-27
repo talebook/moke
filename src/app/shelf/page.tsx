@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
+import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { useServerStore } from '@/lib/store/server';
+import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 
 interface BookItem {
@@ -74,9 +75,9 @@ export default function ShelfPage() {
     setRequiresLogin(false);
     try {
       const [readingRes, wantsRes, finishedRes] = await Promise.all([
-        fetch(`${serverUrl}/api/reading`, { credentials: 'include' }),
-        fetch(`${serverUrl}/api/wants`, { credentials: 'include' }),
-        fetch(`${serverUrl}/api/read-done`, { credentials: 'include' }),
+        request(`${serverUrl}/api/reading`, { credentials: 'include' }),
+        request(`${serverUrl}/api/wants`, { credentials: 'include' }),
+        request(`${serverUrl}/api/read-done`, { credentials: 'include' }),
       ]);
 
       const [readingData, wantsData, finishedData] = await Promise.all([

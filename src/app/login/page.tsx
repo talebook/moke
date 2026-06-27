@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
-import { fetchCurrentUser } from '@/lib/api';
+import { fetchCurrentUser, request } from '@/lib/api';
 
 interface TalebookLoginResponse {
   err: string;
@@ -18,7 +18,7 @@ async function login(username: string, password: string): Promise<TalebookLoginR
   body.append('username', username);
   body.append('password', password);
 
-  const response = await fetch(`${serverUrl}/api/user/sign_in`, {
+  const response = await request(`${serverUrl}/api/user/sign_in`, {
     method: 'POST',
     body,
     credentials: 'include',

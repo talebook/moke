@@ -1,11 +1,12 @@
 'use client';
 
 import { Suspense, useState, useEffect } from 'react';
+import { useServerStore } from '@/lib/store/server';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { useServerStore } from '@/lib/store/server';
+import { request } from '@/lib/api';
 import { resolveServerAssetUrl } from '@/lib/utils';
 
 interface BookItem {
@@ -40,7 +41,7 @@ function SearchContent() {
     setLoading(true);
     setSearched(true);
     try {
-      const res = await fetch(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
+      const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
       const data = await res.json();
       if (data.err === 'ok') setResults(data.books || data.items || []);
     } finally { setLoading(false); }

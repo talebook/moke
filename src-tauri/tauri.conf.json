@@ -10,7 +10,6 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "title": "Moke",
     "windows": [
       {
         "title": "Moke",
@@ -28,18 +27,7 @@
   },
   "plugins": {
     "fs": {
-      "scope": {
-        "allow": ["**"],
-        "deny": []
-      }
-    },
-    "http": {
-      "scope": {
-        "allow": [
-          "http://**",
-          "https://**"
-        ]
-      }
+      "requireLiteralLeadingDot": false
     }
   }
 }

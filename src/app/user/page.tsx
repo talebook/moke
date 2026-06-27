@@ -20,7 +20,7 @@ export default function UserPage() {
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch(`${serverUrl}/api/user/update`, {
+      const res = await request(`${serverUrl}/api/user/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nickname: nickname.trim() }),
@@ -41,7 +41,7 @@ export default function UserPage() {
     setSaving(true);
     setMessage('');
     try {
-      const res = await fetch(`${serverUrl}/api/user/update`, {
+      const res = await request(`${serverUrl}/api/user/update`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password0: oldPassword, password1: newPassword, password2: newPassword }),

@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Grid3X3, List, ChevronDown } from 'lucide-react';
-import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useServerStore } from '@/lib/store/server';
+import { DesktopLayout } from '@/components/layout/DesktopLayout';
+import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 
 interface BookItem {
@@ -35,7 +36,7 @@ export default function LibraryPage() {
   const loadBooks = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${serverUrl}/api/recent?size=50`, { credentials: 'include' });
+      const res = await request(`${serverUrl}/api/recent?size=50`, { credentials: 'include' });
       const data = await res.json();
       if (data.err === 'user.need_login') { router.push('/login'); return; }
       setBooks(data.books || data.items || []);
