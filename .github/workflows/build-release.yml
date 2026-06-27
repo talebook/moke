@@ -113,13 +113,31 @@ jobs:
         if: matrix.platform == 'android'
         run: npx tauri android build
 
-      - name: Upload Android artifact (Push / PR)
+      - name: Upload Tauri artifact (Push / PR)
+        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifact
+          path: |
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.dmg
+
+      - name: Upload APK artifact (Push / PR)
         if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
-          name: Moke-Android
+          name: Moke-Android-APK
           path: |
             src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+
+      - name: Upload AAB artifact (Push / PR)
+        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moke-Android-AAB
+          path: |
             src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
 
       - name: Upload Android artifact to Release (Tags)
