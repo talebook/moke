@@ -11,7 +11,10 @@
     "os:default",
     "shell:default",
     "opener:default",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }]
+    },
     {
       "identifier": "fs:allow-read",
       "allow": [{ "path": "**" }]
