@@ -13,6 +13,7 @@ export interface OfflineBookRecord {
   mimeType: string;
   blob: Blob;
   updatedAt: number;
+  filePath?: string;
 }
 
 function makeKey(serverUrl: string, bookId: string) {
@@ -57,6 +58,30 @@ export async function saveOfflineBook(input: {
   blob: Blob;
 }): Promise<void> {
   const db = await openDatabase();
+  let filePath: string | undefined;
+
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+    try {
+      const { writeFile, BaseDirectory, mkdir } = await import('@tauri-apps/plugin-fs');
+      const { appDataDir, join } = await import('@tauri-apps/api/path');
+
+      try {
+        await mkdir('books', { baseDir: BaseDirectory.AppData, recursive: true });
+      } catch (e) {
+        // Ignore if directory already exists
+      }
+
+      const relativePath = await join('books', input.fileName);
+      const arrayBuffer = await input.blob.arrayBuffer();
+      await writeFile(relativePath, new Uint8Array(arrayBuffer), { baseDir: BaseDirectory.AppData });
+
+      const dir = await appDataDir();
+      filePath = await join(dir, 'books', input.fileName);
+    } catch (e) {
+      console.error('Failed to save book to file system:', e);
+    }
+  }
+
   const record: OfflineBookRecord = {
     id: makeKey(input.serverUrl, input.bookId),
     serverUrl: input.serverUrl,
@@ -66,6 +91,7 @@ export async function saveOfflineBook(input: {
     mimeType: input.mimeType,
     blob: input.blob,
     updatedAt: Date.now(),
+    filePath,
   };
 
   await new Promise<void>((resolve, reject) => {

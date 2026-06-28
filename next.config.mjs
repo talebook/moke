@@ -10,15 +10,6 @@ const nextConfig = {
   },
   devIndicators: false,
   reactStrictMode: true,
-  transpilePackages: isDev ? [] : ['foliate-js'],
-  async rewrites() {
-    return [
-      {
-        source: '/reader/:ids',
-        destination: '/reader?ids=:ids',
-      },
-    ];
-  },
 };
 
 export default nextConfig;

@@ -153,7 +153,18 @@ function DetailContent() {
   const handleOfflineRead = async () => {
     if (!book) return;
 
-    router.push(`/reader?ids=${encodeURIComponent(String(book.id || ''))}`);
+    try {
+      const record = await getOfflineBook(serverUrl, id!);
+      if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+        const { openPath } = await import('@tauri-apps/plugin-opener');
+        await openPath(record.filePath);
+      } else {
+        setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
+      }
+    } catch (e) {
+      console.error('Failed to open book:', e);
+      setMessage('打开书籍失败。');
+    }
   };
 
   if (loading) {

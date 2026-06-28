@@ -29,9 +29,6 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
-      foliate-js:
-        specifier: file:readest/packages/foliate-js
-        version: file:readest/packages/foliate-js
       lucide-react:
         specifier: ^0.562.0
         version: 0.562.0(react@19.2.7)
@@ -502,9 +499,6 @@ packages:
     resolution: {integrity: sha512-SEa2abMBTZuEjLVYpNrAFoRgxPwG4rXP3+SGY6CM/HZGeDzIA7Pzp+7H3AHDukKEpyy2SoSGGPShKqqfH9T9AQ==}
     engines: {node: '>= 6'}
 
-  construct-style-sheets-polyfill@3.1.0:
-    resolution: {integrity: sha512-HBLKP0chz8BAY6rBdzda11c3wAZeCZ+kIG4weVC2NM3AXzxx09nhe8t0SQNdloAvg5GLuHwq/0SPOOSPvtCcKw==}
-
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
@@ -569,9 +563,6 @@ packages:
   fill-range@7.1.1:
     resolution: {integrity: sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==}
     engines: {node: '>=8'}
-
-  foliate-js@file:readest/packages/foliate-js:
-    resolution: {directory: readest/packages/foliate-js, type: directory}
 
   fraction.js@5.3.4:
     resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
@@ -1227,8 +1218,6 @@ snapshots:
 
   commander@4.0.0: {}
 
-  construct-style-sheets-polyfill@3.1.0: {}
-
   cross-spawn@7.0.6:
     dependencies:
       path-key: 3.1.1
@@ -1282,10 +1271,6 @@ snapshots:
   fill-range@7.1.1:
     dependencies:
       to-regex-range: 5.0.1
-
-  foliate-js@file:readest/packages/foliate-js:
-    dependencies:
-      construct-style-sheets-polyfill: 3.1.0
 
   fraction.js@5.3.4: {}
 
