@@ -79,6 +79,7 @@ export async function saveOfflineBook(input: {
       filePath = await join(dir, 'books', input.fileName);
     } catch (e) {
       console.error('Failed to save book to file system:', e);
+      throw new Error('Failed to save book to file system');
     }
   }
 

@@ -16,7 +16,8 @@
         {
           "name": "bin/readest",
           "cmd": "bin/readest",
-          "args": true
+          "args": true,
+          "sidecar": true
         }
       ]
     },

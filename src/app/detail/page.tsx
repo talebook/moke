@@ -139,6 +139,8 @@ function DetailContent() {
       const reason = error instanceof Error ? error.message : '';
       if (reason.startsWith('http.')) {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
+      } else if (reason === 'Failed to save book to file system') {
+        setMessage('下载失败：保存文件到本地时出错。');
       } else if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
         setMessage('下载失败：当前浏览器模式下可能被跨域策略拦截。桌面版会走 Tauri 原生下载通道。');
       } else {
