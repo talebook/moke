@@ -37,7 +37,7 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
       <Link href={`/detail?id=${bookId}`}
         className="group flex flex-col gap-3 cursor-pointer rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]"
       >
-        <div className="relative w-full overflow-hidden rounded-[18px] bg-white shadow-[0_14px_28px_-18px_rgba(37,30,20,0.9),0_2px_8px_rgba(37,30,20,0.08)] ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5 group-hover:shadow-[0_24px_40px_-22px_rgba(37,30,20,0.75),0_6px_16px_rgba(37,30,20,0.08)]"
+        <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
           style={{ aspectRatio: '2/3' }}>
           {coverUrl ? (
             <img src={coverUrl} alt={book.title} className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105" loading="lazy" />
