@@ -49,6 +49,29 @@ export async function getOfflineBook(serverUrl: string, bookId: string): Promise
   });
 }
 
+export async function deleteOfflineBook(serverUrl: string, bookId: string): Promise<void> {
+  const db = await openDatabase();
+  const record = await getOfflineBook(serverUrl, bookId);
+
+  if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+    try {
+      const { remove } = await import('@tauri-apps/plugin-fs');
+      await remove(record.filePath);
+    } catch (e) {
+      console.error('Failed to delete book file:', e);
+    }
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.delete(makeKey(serverUrl, bookId));
+
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function saveOfflineBook(input: {
   serverUrl: string;
   bookId: string;

@@ -2,10 +2,10 @@
 
 import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { downloadBookBlob, request } from '@/lib/api';
-import { getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
+import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
 import { useServerStore } from '@/lib/store/server';
 import { resolveServerAssetUrl } from '@/lib/utils';
 
@@ -31,6 +31,7 @@ interface BookDetail {
     read_state?: number;
     online_read?: number;
     download?: number;
+    wants?: boolean;
   };
 }
 
@@ -46,6 +47,10 @@ function DetailContent() {
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloaded, setDownloaded] = useState(false);
+  const [deletingDownload, setDeletingDownload] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [inShelf, setInShelf] = useState(false);
+  const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
@@ -88,8 +93,25 @@ function DetailContent() {
     try {
       const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include' });
       const data = await res.json();
-      if (data.err === 'ok') setBook(data.book || data.data);
+      const nextBook = data.book || data.data;
+      if (data.err === 'ok') {
+        setBook(nextBook);
+        setInShelf(Boolean(nextBook?.state?.wants));
+        loadReadingState(nextBook?.id || id);
+      }
     } catch {} finally { setLoading(false); }
+  };
+
+  const loadReadingState = async (bookId: string | number) => {
+    try {
+      const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.err === 'ok') {
+        setInShelf(Boolean(data.wants));
+      }
+    } catch {}
   };
 
   const updateReadingState = async (payload: { read_state?: number; online_read?: number; download?: number }) => {
@@ -103,6 +125,45 @@ function DetailContent() {
         body: JSON.stringify(payload),
       });
     } catch {}
+  };
+
+  const toggleShelf = async () => {
+    if (!book || shelfUpdating) return;
+
+    const nextInShelf = !inShelf;
+    setShelfUpdating(true);
+    setMessage('');
+
+    try {
+      const res = await request(`${serverUrl}/api/book/${book.id}/wants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ wants: nextInShelf }),
+      });
+      const data = await res.json();
+
+      if (data.err === 'user.need_login') {
+        router.push('/login');
+        return;
+      }
+
+      if (data.err !== 'ok') {
+        setMessage(data.msg || '书架状态更新失败。');
+        return;
+      }
+
+      setInShelf(nextInShelf);
+      setBook((current) => current ? {
+        ...current,
+        state: { ...current.state, wants: nextInShelf },
+      } : current);
+      setMessage(nextInShelf ? '已加入书籍。' : '已移出书籍。');
+    } catch {
+      setMessage('书架状态更新失败，请检查服务器连接后重试。');
+    } finally {
+      setShelfUpdating(false);
+    }
   };
 
   const handleDownload = async () => {
@@ -128,11 +189,11 @@ function DetailContent() {
       });
 
       setDownloadProgress(100);
-      await updateReadingState({ download: 1, online_read: 1 });
+      await updateReadingState({ read_state: 1 });
       setDownloaded(true);
       setBook((current) => current ? {
         ...current,
-        state: { ...current.state, download: 1, online_read: 1 },
+        state: { ...current.state, read_state: 1 },
       } : current);
       setMessage('已下载到本地，现在可以阅读。');
     } catch (error) {
@@ -167,6 +228,25 @@ function DetailContent() {
     } catch (e) {
       console.error('Failed to open book:', e);
       setMessage('打开书籍失败。');
+    }
+  };
+
+  const handleDeleteDownload = async () => {
+    if (!book || deletingDownload) return;
+
+    setDeletingDownload(true);
+    setMessage('');
+
+    try {
+      await deleteOfflineBook(serverUrl, String(book.id));
+      setDownloaded(false);
+      setDownloadProgress(0);
+      setShowDeleteConfirm(false);
+      setMessage('已删除下载书籍。');
+    } catch {
+      setMessage('删除下载书籍失败。');
+    } finally {
+      setDeletingDownload(false);
     }
   };
 
@@ -232,6 +312,24 @@ function DetailContent() {
                 {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
               </span>
             </button>
+            <button
+              onClick={toggleShelf}
+              disabled={shelfUpdating}
+              className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-border bg-background text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60"
+            >
+              <Bookmark className="w-4 h-4" fill={inShelf ? 'currentColor' : 'none'} />
+              {shelfUpdating ? '更新中' : inShelf ? '移出书架' : '加入书架'}
+            </button>
+            {downloaded && (
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                disabled={deletingDownload}
+                className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-destructive/30 bg-destructive/10 text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deletingDownload ? '删除中' : '删除下载书籍'}
+              </button>
+            )}
             {message && <p className="mt-3 w-[220px] text-xs text-muted-foreground leading-relaxed px-1">{message}</p>}
           </div>
 
@@ -335,6 +433,40 @@ function DetailContent() {
           </div>
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-3xl border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-center gap-3 text-destructive">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-foreground">确认删除下载书籍？</h2>
+                <p className="mt-1 text-xs text-muted-foreground">删除后需要重新下载才能离线阅读。</p>
+              </div>
+            </div>
+
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingDownload}
+                className="h-10 flex-1 rounded-xl border border-border bg-background text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteDownload}
+                disabled={deletingDownload}
+                className="h-10 flex-1 rounded-xl bg-destructive text-sm font-medium text-destructive-foreground transition hover:opacity-90 disabled:opacity-60"
+              >
+                {deletingDownload ? '删除中' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DesktopLayout>
   );
 }

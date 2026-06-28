@@ -86,9 +86,7 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
 export default function ShelfPage() {
   const { serverUrl } = useServerStore();
   const router = useRouter();
-  const [reading, setReading] = useState<BookItem[]>([]);
-  const [toread, setToread] = useState<BookItem[]>([]);
-  const [finished, setFinished] = useState<BookItem[]>([]);
+  const [books, setBooks] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requiresLogin, setRequiresLogin] = useState(false);
   const viewMode = 'grid';
@@ -101,33 +99,16 @@ export default function ShelfPage() {
     setLoading(true);
     setRequiresLogin(false);
     try {
-      const [readingRes, wantsRes, finishedRes] = await Promise.all([
-        request(`${serverUrl}/api/reading`, { credentials: 'include' }),
-        request(`${serverUrl}/api/wants`, { credentials: 'include' }),
-        request(`${serverUrl}/api/read-done`, { credentials: 'include' }),
-      ]);
+      const res = await request(`${serverUrl}/api/wants`, { credentials: 'include' });
+      const data = await res.json();
 
-      const [readingData, wantsData, finishedData] = await Promise.all([
-        readingRes.json(),
-        wantsRes.json(),
-        finishedRes.json(),
-      ]);
-
-      if (
-        readingData.err === 'user.need_login' ||
-        wantsData.err === 'user.need_login' ||
-        finishedData.err === 'user.need_login'
-      ) {
-        setReading([]);
-        setToread([]);
-        setFinished([]);
+      if (data.err === 'user.need_login') {
+        setBooks([]);
         setRequiresLogin(true);
         return;
       }
 
-      setReading(readingData.books || []);
-      setToread(wantsData.books || []);
-      setFinished(finishedData.books || []);
+      setBooks(data.books || []);
     } catch {} finally { setLoading(false); }
   };
 
@@ -161,46 +142,25 @@ export default function ShelfPage() {
           <div className="flex items-center justify-center h-64">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
           </div>
-        ) : reading.length === 0 && toread.length === 0 && finished.length === 0 ? (
+        ) : books.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-8 py-24 text-center">
             <div className="w-24 h-24 mb-6 rounded-full bg-muted flex items-center justify-center">
               <Search className="w-10 h-10 text-muted-foreground" />
             </div>
             <p className="text-base font-medium mb-2 text-foreground">{requiresLogin ? '登录后查看你的书架' : '书架还是空的'}</p>
             <p className="text-sm mb-8 max-w-xs text-muted-foreground">
-              {requiresLogin ? '当前服务器已连接，但书架状态属于个人数据，请先登录后查看在读、待读和已读完书籍。' : '去书库挑几本书，开始你的阅读之旅。'}
+              {requiresLogin ? '当前服务器已连接，但书架状态属于个人数据，请先登录后查看书架。' : '去书库挑几本书，开始你的阅读之旅。'}
             </p>
           </div>
         ) : (
-          <>
-            {reading.length > 0 && (
-              <Section title="阅读中" count={reading.length} books={reading} bg viewMode={viewMode} />
-            )}
-            {toread.length > 0 && (
-              <Section title="待读" count={toread.length} books={toread} viewMode={viewMode} />
-            )}
-            {finished.length > 0 && (
-              <Section title="已读完" count={finished.length} books={finished} viewMode={viewMode} />
-            )}
-          </>
+          <div className={cn('px-8 py-7 gap-x-4 gap-y-6', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
+            {books.map((book) => (
+              <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
+            ))}
+          </div>
         )}
       </div>
     </DesktopLayout>
   );
 }
 
-function Section({ title, count, books, bg, viewMode = 'grid' }: { title: string; count: number; books: BookItem[]; bg?: boolean; viewMode?: string }) {
-  return (
-    <section className={`px-8 pt-7 pb-6 ${bg ? 'bg-muted' : ''}`}>
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-base font-semibold tracking-tight text-foreground">{title}</h2>
-        <span className="text-xs text-muted-foreground">{count} 本</span>
-      </div>
-      <div className={cn('gap-x-4 gap-y-6', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
-        {books.map((book) => (
-          <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
-        ))}
-      </div>
-    </section>
-  );
-}

@@ -9,14 +9,18 @@ import { request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 
-type HistoryType = 'read_history' | 'download_history' | 'push_history' | 'upload_history';
+type HistoryType = 'reading' | 'finished' | 'read_history' | 'download_history' | 'push_history' | 'upload_history';
 
 interface HistoryItem {
   id: string | number;
   title: string;
-  timestamp: number;
+  timestamp?: number;
   img?: string;
+  thumb?: string;
   href?: string;
+  state?: {
+    read_state?: number;
+  };
 }
 
 interface HistoryGroup {
@@ -26,6 +30,8 @@ interface HistoryGroup {
 }
 
 const historyGroups: HistoryGroup[] = [
+  { key: 'reading', label: '在读', icon: BookOpen },
+  { key: 'finished', label: '读完', icon: BookOpen },
   { key: 'read_history', label: '阅读记录', icon: BookOpen },
   { key: 'download_history', label: '下载记录', icon: Download },
   { key: 'push_history', label: '推送记录', icon: Send },
@@ -33,6 +39,16 @@ const historyGroups: HistoryGroup[] = [
 ];
 
 const emptyStateConfig: Record<HistoryType, { description: string; actionLabel: string; actionHref: string }> = {
+  reading: {
+    description: '开始阅读一本书后，这里会显示你的在读书籍。',
+    actionLabel: '去书库',
+    actionHref: '/library',
+  },
+  finished: {
+    description: '读完一本书后，这里会显示你的读完书籍。',
+    actionLabel: '去书库',
+    actionHref: '/library',
+  },
   read_history: {
     description: '去搜索或阅读一本书后，这里会显示你的阅读记录。',
     actionLabel: '去搜索',
@@ -58,10 +74,12 @@ const emptyStateConfig: Record<HistoryType, { description: string; actionLabel: 
 export default function UserHistoryPage() {
   const router = useRouter();
   const { serverUrl } = useServerStore();
-  const [activeTab, setActiveTab] = useState<HistoryType>('read_history');
+  const [activeTab, setActiveTab] = useState<HistoryType>('reading');
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [historyMap, setHistoryMap] = useState<Record<HistoryType, HistoryItem[]>>({
+    reading: [],
+    finished: [],
     read_history: [],
     download_history: [],
     push_history: [],
@@ -89,8 +107,12 @@ export default function UserHistoryPage() {
         }
 
         const extra = data.user?.extra || {};
+        const readHistory = Array.isArray(extra.read_history) ? extra.read_history : [];
+        const { reading, finished } = await filterReadingStateBooks(serverUrl, readHistory);
         setHistoryMap({
-          read_history: Array.isArray(extra.read_history) ? extra.read_history : [],
+          reading,
+          finished,
+          read_history: readHistory,
           download_history: Array.isArray(extra.download_history) ? extra.download_history : [],
           push_history: Array.isArray(extra.push_history) ? extra.push_history : [],
           upload_history: Array.isArray(extra.upload_history) ? extra.upload_history : [],
@@ -177,7 +199,7 @@ export default function UserHistoryPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {currentItems.map((item) => {
               const detailHref = `/detail?id=${item.id}`;
-              const coverUrl = resolveServerAssetUrl(serverUrl, item.img);
+              const coverUrl = resolveServerAssetUrl(serverUrl, item.img || item.thumb);
               return (
                 <Link
                   key={`${activeTab}-${item.id}`}
@@ -205,6 +227,29 @@ export default function UserHistoryPage() {
       </div>
     </DesktopLayout>
   );
+}
+
+async function filterReadingStateBooks(serverUrl: string, books: HistoryItem[]) {
+  const states = await Promise.all(
+    books.map(async (book) => {
+      if (typeof book.state?.read_state === 'number') return book.state.read_state;
+
+      try {
+        const res = await request(`${serverUrl}/api/book/${book.id}/readstate`, {
+          credentials: 'include',
+        });
+        const data = await res.json();
+        return data.err === 'ok' ? data.read_state : 0;
+      } catch {
+        return 0;
+      }
+    }),
+  );
+
+  return {
+    reading: books.filter((_, index) => states[index] === 1),
+    finished: books.filter((_, index) => states[index] === 2),
+  };
 }
 
 function formatTimestamp(timestamp?: number) {
