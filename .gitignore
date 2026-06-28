@@ -25,6 +25,7 @@ yarn-error.log*
 # tauri
 src-tauri/target/
 src-tauri/gen/
+src-tauri/bin/readest-*
 
 # IDE
 .vscode/

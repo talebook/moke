@@ -67,7 +67,18 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          workspaces: |
+            ./src-tauri -> target
+            ./readest -> target
+
+      - name: Cache readest Next.js
+        if: matrix.platform != 'android'
+        uses: actions/cache@v4
+        with:
+          path: readest/apps/readest-app/.next/cache
+          key: ${{ runner.os }}-nextjs-readest-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-readest-
 
       - name: Install Linux Dependencies
         if: matrix.platform == 'ubuntu'
@@ -99,6 +110,26 @@ jobs:
       - name: Initialize Android project (Android Only)
         if: matrix.platform == 'android'
         run: pnpm tauri android init
+
+      - name: Build readest sidecar
+        if: matrix.platform != 'android'
+        run: |
+          cd readest
+          pnpm install
+          pnpm --filter @readest/readest-app build
+          cd apps/readest-app/src-tauri
+          cargo build --release
+          cd ../../../../
+
+          TARGET=$(rustc -vV | grep host | awk '{print $2}')
+          mkdir -p src-tauri/bin
+
+          if [ "${{ matrix.platform }}" == "windows" ]; then
+            cp readest/target/release/[rR]eadest.exe src-tauri/bin/readest-$TARGET.exe
+          else
+            cp readest/target/release/[rR]eadest src-tauri/bin/readest-$TARGET
+          fi
+        shell: bash
 
       - name: Build Tauri app (Push / PR)
         if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
