@@ -10,6 +10,16 @@
     "http:default",
     "os:default",
     "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "bin/readest",
+          "cmd": "bin/readest",
+          "args": true
+        }
+      ]
+    },
     "opener:default",
     {
       "identifier": "opener:allow-open-path",

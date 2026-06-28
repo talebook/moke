@@ -156,8 +156,9 @@ function DetailContent() {
     try {
       const record = await getOfflineBook(serverUrl, id!);
       if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
-        const { openPath } = await import('@tauri-apps/plugin-opener');
-        await openPath(record.filePath);
+        const { Command } = await import('@tauri-apps/plugin-shell');
+        const command = Command.sidecar('bin/readest', [record.filePath]);
+        await command.execute();
       } else {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
