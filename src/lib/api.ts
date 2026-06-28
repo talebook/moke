@@ -244,7 +244,7 @@ export async function downloadBookBlob(
       return response.blob();
     }
 
-    const chunks: ArrayBuffer[] = [];
+    const chunks: Uint8Array[] = [];
     let received = 0;
 
     while (true) {
@@ -253,7 +253,7 @@ export async function downloadBookBlob(
       if (done) break;
       if (!value) continue;
 
-      chunks.push(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+      chunks.push(value);
       received += value.length;
 
       if (total > 0) {
