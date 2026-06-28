@@ -29,18 +29,42 @@ export default function LibraryPage() {
   const [viewGrid, setViewGrid] = useState(true);
   const [searchQ, setSearchQ] = useState('');
 
-  useEffect(() => {
-    if (activeTab === 'local') loadBooks();
-  }, [serverUrl, activeTab]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 30;
 
-  const loadBooks = async () => {
+  useEffect(() => {
+    if (activeTab === 'local') loadBooks(currentPage);
+  }, [serverUrl, activeTab, currentPage]);
+
+  const loadBooks = async (page: number) => {
     setLoading(true);
     try {
-      const res = await request(`${serverUrl}/api/recent?size=50`, { credentials: 'include' });
+      const start = (page - 1) * pageSize;
+      const res = await request(`${serverUrl}/api/recent?start=${start}&size=${pageSize}`, { credentials: 'include' });
       const data = await res.json();
       if (data.err === 'user.need_login') { router.push('/login'); return; }
       setBooks(data.books || data.items || []);
+      setTotal(data.total || 0);
     } catch {} finally { setLoading(false); }
+  };
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      if (currentPage <= 4) {
+        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+      } else if (currentPage >= totalPages - 3) {
+        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+      } else {
+        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+      }
+    }
+    return pages;
   };
 
   const colors = [
@@ -173,16 +197,35 @@ export default function LibraryPage() {
             )}
           </div>
 
-          <div className="flex items-center justify-center gap-1.5 py-5 border-t border-border shrink-0 px-8">
-            {['上一页', '1', '2', '3', '...', '12', '下一页'].map((label, i) => (
-              <button key={i}
-                className={cn(
-                  'flex items-center justify-center w-8 h-8 text-sm rounded-sm transition-colors',
-                  label === '1' ? 'bg-foreground text-primary-foreground font-medium' : 'text-muted-foreground hover:opacity-70'
-                )}
-              >{label}</button>
-            ))}
-          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-1.5 py-5 border-t border-border shrink-0 px-8">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="flex items-center justify-center h-8 px-3 text-sm rounded-sm transition-colors text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                上一页
+              </button>
+              {getPageNumbers().map((label, i) => (
+                <button key={i}
+                  onClick={() => typeof label === 'number' && setCurrentPage(label)}
+                  disabled={label === '...'}
+                  className={cn(
+                    'flex items-center justify-center w-8 h-8 text-sm rounded-sm transition-colors',
+                    label === currentPage ? 'bg-foreground text-primary-foreground font-medium' : 'text-muted-foreground hover:bg-muted',
+                    label === '...' && 'hover:bg-transparent cursor-default'
+                  )}
+                >{label}</button>
+              ))}
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="flex items-center justify-center h-8 px-3 text-sm rounded-sm transition-colors text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
+              >
+                下一页
+              </button>
+            </div>
+          )}
         </>
       ) : (
         <div className="flex-1 overflow-auto px-8 py-6">

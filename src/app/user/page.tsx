@@ -131,14 +131,14 @@ export default function UserPage() {
         ) : (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
-              <div className="rounded-3xl border border-border bg-card p-6">
+              <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
                 <div className="flex items-center gap-4 mb-6">
-                  <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xl font-semibold">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary via-primary/90 to-primary/70 flex items-center justify-center text-primary-foreground text-xl font-bold shadow-md">
                     {displayName[0] || 'U'}
                   </div>
                   <div className="min-w-0">
                     <h2 className="text-xl font-semibold text-foreground truncate">{displayName}</h2>
-                    <p className="text-sm text-muted-foreground truncate">@{username}</p>
+                    <p className="text-sm text-muted-foreground truncate mt-0.5">@{username}</p>
                   </div>
                 </div>
 
@@ -150,7 +150,7 @@ export default function UserPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-border bg-card p-6">
+              <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-foreground">快捷入口</h3>
                 </div>
@@ -161,14 +161,15 @@ export default function UserPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-border bg-card p-6">
+            <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">个人数据概览</h3>
                   <p className="text-sm text-muted-foreground mt-1">你最近积累的历史数据统计</p>
                 </div>
-                <Link href="/user/history" className="text-sm text-primary hover:underline">
-                  查看全部
+                <Link href="/user/history" className="text-sm font-medium text-primary hover:underline flex items-center gap-1 group">
+                  <span>查看全部</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                 </Link>
               </div>
 
@@ -177,16 +178,16 @@ export default function UserPage() {
                   <Link
                     key={key}
                     href="/user/history"
-                    className="rounded-2xl border border-border bg-background px-5 py-5 transition hover:bg-muted"
+                    className="rounded-2xl border border-border/60 bg-background/50 backdrop-blur-xs px-5 py-5 transition-all duration-300 hover:bg-muted/80 hover:shadow-md hover:-translate-y-0.5 group"
                   >
                     <div className="flex items-center justify-between mb-4">
-                      <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center text-foreground">
+                      <div className="w-10 h-10 rounded-xl bg-muted/80 border border-border/40 flex items-center justify-center text-muted-foreground group-hover:text-primary group-hover:border-primary/30 transition-colors duration-200">
                         <Icon className="w-5 h-5" />
                       </div>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all duration-200" />
                     </div>
-                    <p className="text-sm text-muted-foreground">{label}</p>
-                    <p className="mt-1 text-2xl font-semibold text-foreground">{historyMap[key].length}</p>
+                    <p className="text-sm font-medium text-muted-foreground">{label}</p>
+                    <p className="mt-1.5 text-2xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors duration-200">{historyMap[key].length}</p>
                   </Link>
                 ))}
               </div>
@@ -200,12 +201,12 @@ export default function UserPage() {
 
 function InfoCard({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-background border border-border px-4 py-4">
-      <div className="flex items-center gap-2 text-muted-foreground text-sm mb-2">
-        <Icon className="w-4 h-4" />
-        <span>{label}</span>
+    <div className="rounded-2xl bg-background/50 border border-border/60 px-4 py-4 hover:bg-muted/30 transition-colors duration-200">
+      <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
+        <Icon className="w-3.5 h-3.5" />
+        <span className="font-medium">{label}</span>
       </div>
-      <p className="text-sm font-medium text-foreground break-words">{value}</p>
+      <p className="text-sm font-semibold text-foreground break-words">{value}</p>
     </div>
   );
 }
@@ -214,13 +215,13 @@ function QuickLink({ href, title, description }: { href: string; title: string; 
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-background px-4 py-4 transition hover:bg-muted"
+      className="flex items-center justify-between gap-4 rounded-2xl border border-border/60 bg-background/50 px-4 py-4 transition-all duration-300 hover:bg-muted/80 hover:shadow-xs active:scale-[0.99] group"
     >
-      <div>
-        <p className="text-sm font-medium text-foreground">{title}</p>
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors duration-200">{title}</p>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
       </div>
-      <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />
+      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all duration-200 shrink-0" />
     </Link>
   );
 }

@@ -74,9 +74,9 @@ export default function AboutPage() {
         </div>
 
         <div className="space-y-6">
-          <section className="rounded-3xl border border-border bg-card p-6">
+          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
             <div className="flex items-center gap-4 mb-5">
-              <div className="w-14 h-14 rounded-2xl bg-primary flex items-center justify-center text-primary-foreground">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center text-primary-foreground shadow-inner">
                 <BookOpen className="w-7 h-7" />
               </div>
               <div>
@@ -90,9 +90,9 @@ export default function AboutPage() {
             </p>
           </section>
 
-          <section className="rounded-3xl border border-border bg-card p-6">
+          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
             <div className="flex items-center gap-2 mb-4 text-foreground">
-              <Info className="w-5 h-5" />
+              <Info className="w-5 h-5 text-primary" />
               <h3 className="text-lg font-semibold">应用信息</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -102,9 +102,9 @@ export default function AboutPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-border bg-card p-6">
+          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
             <div className="flex items-center gap-2 mb-4 text-foreground">
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-5 h-5 text-amber-500" />
               <h3 className="text-lg font-semibold">后续规划</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
@@ -114,9 +114,9 @@ export default function AboutPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-border bg-card p-6">
+          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
             <div className="flex items-center gap-2 mb-4 text-foreground">
-              <HeartHandshake className="w-5 h-5" />
+              <HeartHandshake className="w-5 h-5 text-rose-500" />
               <h3 className="text-lg font-semibold">贡献者</h3>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -124,16 +124,16 @@ export default function AboutPage() {
                 <div
                   key={c.name}
                   onClick={() => handleContributorClick(c)}
-                  className="flex items-center justify-between gap-3.5 rounded-2xl border border-border bg-background px-4 py-4 transition hover:bg-muted select-none cursor-pointer group"
+                  className="flex items-center justify-between gap-3.5 rounded-2xl border border-border/60 bg-background/50 backdrop-blur-xs px-4 py-4 transition-all duration-300 hover:bg-muted/80 hover:shadow-md hover:-translate-y-0.5 select-none cursor-pointer group"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
                     <img
                       src={c.avatarUrl}
                       alt={c.name}
-                      className="w-12 h-12 rounded-full object-cover shrink-0 pointer-events-none"
+                      className="w-12 h-12 rounded-full object-cover shrink-0 pointer-events-none ring-2 ring-border/50 group-hover:ring-primary/40 transition-all duration-300"
                     />
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">{c.name}</p>
+                      <p className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">{c.name}</p>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">{c.role}</p>
                     </div>
                   </div>
@@ -142,10 +142,10 @@ export default function AboutPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-card border border-transparent hover:border-border transition shrink-0"
+                    className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-card border border-transparent hover:border-border/60 hover:shadow-xs transition shrink-0"
                     title="访问 GitHub 主页"
                   >
-                    <img src="/contributors/github.svg" alt="GitHub" className="w-4 h-4 dark:invert" />
+                    <img src="/contributors/github.svg" alt="GitHub" className="w-4 h-4 dark:invert opacity-70 group-hover/btn:opacity-100 transition-opacity" />
                   </a>
                 </div>
               ))}
@@ -155,15 +155,15 @@ export default function AboutPage() {
       </div>
 
       {activeEgg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative max-w-lg w-[90%] rounded-3xl bg-card border border-border p-6 shadow-2xl flex flex-col items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="relative max-w-lg w-[90%] rounded-3xl bg-card/95 border border-border/80 p-6 shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-300">
             <button
               onClick={() => setActiveEgg(null)}
-              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground hover:text-foreground transition"
+              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted/80 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
             >
               <X className="w-4 h-4" />
             </button>
-            <div className="w-full overflow-hidden rounded-2xl mb-4 bg-black/5">
+            <div className="w-full overflow-hidden rounded-2xl mb-4 bg-black/5 border border-border/40 shadow-inner">
               <img
                 src={activeEgg.image}
                 alt="彩蛋"

@@ -119,20 +119,20 @@ export default function SettingsPage() {
 
 function SettingsSection({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
   return (
-    <section>
-      <div className="mb-3">
-        <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+    <section className="space-y-3">
+      <div className="px-1">
+        <h2 className="text-sm font-semibold text-foreground tracking-tight">{title}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
-      <div className="space-y-1 rounded-2xl border border-border bg-card p-1.5">{children}</div>
+      <div className="divide-y divide-border/40 rounded-2xl border border-border/60 bg-card p-1 shadow-sm hover:shadow-md transition-shadow duration-300">{children}</div>
     </section>
   );
 }
 
 function SettingsRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted">
-      <span className="text-sm text-foreground shrink-0">{label}</span>
+    <div className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-xl transition-colors hover:bg-muted/60">
+      <span className="text-sm font-medium text-foreground shrink-0">{label}</span>
       <span className="text-sm text-muted-foreground truncate text-right">{value}</span>
     </div>
   );
@@ -140,15 +140,17 @@ function SettingsRow({ label, value }: { label: string; value: string }) {
 
 function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { icon: typeof User; label: string; description: string; href: string; disabled?: boolean }) {
   const content = (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : 'hover:bg-muted'}`}>
-      <div className="flex items-start gap-3 min-w-0">
-        <Icon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
-        <div className="min-w-0">
-          <p className="text-sm text-foreground">{label}</p>
-          <p className="text-xs text-muted-foreground mt-1">{description}</p>
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/80 active:scale-[0.99]'}`}>
+      <div className="flex items-start gap-3.5 min-w-0">
+        <div className="p-2 rounded-lg bg-background border border-border/40 text-muted-foreground group-hover:text-primary group-hover:border-primary/20 transition-colors duration-200 shrink-0">
+          <Icon className="w-4 h-4" />
+        </div>
+        <div className="min-w-0 py-0.5">
+          <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors duration-200">{label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
         </div>
       </div>
-      {!disabled && <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+      {!disabled && <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-0.5 transition-all duration-200 shrink-0" />}
     </div>
   );
 
@@ -163,21 +165,28 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-colors ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted'}`}
+      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
     >
-      <Icon className={`w-4 h-4 shrink-0 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
-      <span className={`text-sm ${tone === 'danger' ? 'font-medium text-destructive' : 'text-foreground'}`}>{label}</span>
+      <div className="flex items-center gap-3.5 min-w-0">
+        <div className={`p-2 rounded-lg bg-background border border-border/40 shrink-0 transition-colors duration-200 ${tone === 'danger' ? 'group-hover:border-destructive/20 group-hover:text-destructive' : 'group-hover:text-primary'}`}>
+          <Icon className={`w-4 h-4 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
+        </div>
+        <span className={`text-sm font-medium ${tone === 'danger' ? 'text-destructive' : 'text-foreground'}`}>{label}</span>
+      </div>
+      <ArrowRight className={`w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-200 shrink-0 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
     </button>
   );
 }
 
 function StaticInfoRow({ icon: Icon, label, description }: { icon: typeof User; label: string; description: string }) {
   return (
-    <div className="flex items-start gap-3 px-4 py-3 rounded-xl">
-      <Icon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
-      <div>
-        <p className="text-sm text-foreground">{label}</p>
-        <p className="text-xs text-muted-foreground mt-1">{description}</p>
+    <div className="flex items-start gap-3.5 px-4 py-3 rounded-xl">
+      <div className="p-2 rounded-lg bg-background border border-border/40 text-muted-foreground shrink-0">
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="min-w-0 py-0.5">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
       </div>
     </div>
   );

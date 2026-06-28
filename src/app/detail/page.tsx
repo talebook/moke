@@ -134,7 +134,7 @@ function DetailContent() {
         ...current,
         state: { ...current.state, download: 1, online_read: 1 },
       } : current);
-      setMessage('已下载到本地，现在可以离线阅读。');
+      setMessage('已下载到本地，现在可以阅读。');
     } catch (error) {
       const reason = error instanceof Error ? error.message : '';
       if (reason.startsWith('http.')) {
@@ -178,21 +178,21 @@ function DetailContent() {
     <DesktopLayout>
       <div className="px-8 py-8">
         <div className="mb-8">
-          <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-opacity hover:opacity-75">
-            <ArrowLeft className="w-4 h-4" />
+          <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             <span>返回</span>
           </button>
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">书架</span>
-            <ChevronRight className="w-3 h-3 text-muted-foreground" />
-            <span className="text-foreground truncate">{book.title}</span>
+            <ChevronRight className="w-3 h-3 text-muted-foreground/60" />
+            <span className="text-foreground font-medium truncate max-w-[300px]">{book.title}</span>
           </div>
         </div>
 
         <div className="flex gap-10">
-          <div className="shrink-0 w-[320px] flex flex-col items-start">
-            <div className="w-[240px] rounded-xl overflow-hidden shadow-card">
-              <div className="aspect-[2/3] flex items-center justify-center bg-muted">
+          <div className="shrink-0 w-[240px] flex flex-col items-start">
+            <div className="w-[220px] rounded-2xl overflow-hidden shadow-xl border border-border/40 transition-transform duration-300 hover:scale-[1.02]">
+              <div className="aspect-[2/3] flex items-center justify-center bg-muted/60 relative group">
                 {coverUrl ? (
                   <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" />
                 ) : (
@@ -204,7 +204,7 @@ function DetailContent() {
             <button
               onClick={downloaded ? handleOfflineRead : handleDownload}
               disabled={downloading}
-              className={`relative overflow-hidden w-[240px] h-11 rounded-lg font-medium text-sm mt-4 inline-flex items-center justify-center transition-opacity hover:opacity-90 disabled:opacity-100 ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground'}`}
+              className={`relative overflow-hidden w-[220px] h-11 rounded-xl font-semibold text-sm mt-6 inline-flex items-center justify-center shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
             >
               {downloading && <span className="absolute inset-0 bg-primary/15" />}
               {downloading && (
@@ -214,31 +214,32 @@ function DetailContent() {
                 />
               )}
               <span className="relative z-10 flex items-center justify-center gap-2 text-primary-foreground">
-                {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '离线阅读' : '下载'}
+                {downloaded && <BookOpen className="w-4 h-4" />}
+                {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
               </span>
             </button>
-            {message && <p className="mt-3 w-[240px] text-sm text-muted-foreground">{message}</p>}
+            {message && <p className="mt-3 w-[220px] text-xs text-muted-foreground leading-relaxed px-1">{message}</p>}
           </div>
 
-          <div className="flex-1 min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{book.title}</h1>
+          <div className="flex-1 min-w-0 bg-card/40 border border-border/60 rounded-3xl px-6 pt-5 pb-6 shadow-sm">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">{book.title}</h1>
 
-            <p className="text-base mt-1.5 text-muted-foreground">
+            <p className="text-base mt-1 text-muted-foreground font-medium">
               {authorNames.join(' · ') || '未知作者'}
             </p>
 
             {typeof ratingValue === 'number' && ratingValue > 0 && (
-              <div className="flex items-center gap-1.5 mt-3">
+              <div className="flex items-center gap-2 mt-2 bg-amber-500/10 border border-amber-500/20 w-fit px-3 py-1 rounded-xl">
                 <div className="flex gap-0.5">
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <Star key={i} className="w-4 h-4" fill={i < Math.round(ratingValue) ? '#B8956A' : 'none'} color={i < Math.round(ratingValue) ? '#B8956A' : '#E8E3DC'} />
+                    <Star key={i} className="w-4 h-4" fill={i < Math.round(ratingValue) ? '#F59E0B' : 'none'} color={i < Math.round(ratingValue) ? '#F59E0B' : '#D1D5DB'} />
                   ))}
                 </div>
-                <span className="text-sm ml-1 text-muted-foreground">{ratingValue}</span>
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400 ml-0.5">{ratingValue}</span>
               </div>
             )}
 
-            <div className="my-5 border-t border-border" />
+            <div className="my-2 border-t border-border/40" />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-4 text-sm">
               <MetaRow icon={Users} label="作者" text={authorNames.join(' · ')} />
@@ -250,14 +251,15 @@ function DetailContent() {
                 {!metaExpanded && (
                   <button
                     onClick={() => setMetaExpanded(true)}
-                    className="inline-flex items-center gap-1 mt-4 text-sm text-muted-foreground transition-opacity hover:opacity-75"
+                    className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-primary hover:underline transition-all"
                   >
-                    <span>展开更多信息</span>
+                    <span>展开更多出版信息</span>
+                    <ChevronRight className="w-3.5 h-3.5 rotate-90" />
                   </button>
                 )}
 
                 {metaExpanded && (
-                  <div className="mt-4">
+                  <div className="mt-2 pt-2 border-t border-dashed border-border/40">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-4 text-sm">
                       <MetaRow icon={Barcode} label="ISBN" text={book.isbn} />
                       <MetaRow icon={LibraryBig} label="丛书" text={book.series} />
@@ -268,9 +270,10 @@ function DetailContent() {
                     </div>
                     <button
                       onClick={() => setMetaExpanded(false)}
-                      className="inline-flex items-center gap-1 mt-4 text-sm text-muted-foreground transition-opacity hover:opacity-75"
+                      className="inline-flex items-center gap-1 mt-3 text-xs font-medium text-muted-foreground hover:text-foreground transition-all"
                     >
-                      <span>收起更多信息</span>
+                      <span>收起扩展信息</span>
+                      <ChevronRight className="w-3.5 h-3.5 -rotate-90" />
                     </button>
                   </div>
                 )}
@@ -279,15 +282,15 @@ function DetailContent() {
 
             {tagNames.length > 0 && (
               <>
-                <div className="my-5 border-t border-border" />
+                <div className="my-4 border-t border-border/40" />
                 <div>
-                  <div className="flex items-center gap-2 mb-3 text-sm font-medium text-foreground">
-                    <Tags className="w-4 h-4 text-muted-foreground" />
+                  <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-foreground">
+                    <Tags className="w-4 h-4 text-primary" />
                     <span>标签</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {tagNames.map((tag, index) => (
-                      <span key={`${tag}-${index}`} className="inline-flex items-center justify-center px-2.5 py-1 text-xs rounded-sm bg-muted text-foreground">
+                      <span key={`${tag}-${index}`} className="inline-flex items-center justify-center px-3 py-1 text-xs font-medium rounded-xl bg-muted/80 border border-border/40 text-foreground/90 hover:bg-muted transition-colors">
                         {tag}
                       </span>
                     ))}
@@ -298,25 +301,23 @@ function DetailContent() {
 
             {summary && (
               <>
-                <div className="my-5 border-t border-border" />
+                <div className="my-4 border-t border-border/40" />
                 <div>
-                  <div className="flex items-center gap-2 mb-3 text-sm font-medium text-foreground">
-                    <BookOpen className="w-4 h-4 text-muted-foreground" />
+                  <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-foreground">
+                    <BookOpen className="w-4 h-4 text-primary" />
                     <span>简介</span>
                   </div>
-                  <p className={expanded ? 'text-sm text-foreground leading-relaxed whitespace-pre-wrap' : 'text-sm text-foreground leading-relaxed line-clamp-6 whitespace-pre-wrap'}>
+                  <p className={expanded ? 'text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap' : 'text-sm text-foreground/90 leading-relaxed line-clamp-6 whitespace-pre-wrap'}>
                     {summary}
                   </p>
                   {summary.length > 200 && (
-                    <button onClick={() => setExpanded(!expanded)} className="text-sm mt-2 text-muted-foreground transition-opacity hover:opacity-75">
-                      {expanded ? '收起' : '展开全部'}
+                    <button onClick={() => setExpanded(!expanded)} className="text-xs font-medium mt-2 text-primary hover:underline transition-all">
+                      {expanded ? '收起简介' : '查看完整简介'}
                     </button>
                   )}
                 </div>
               </>
             )}
-
-            <div className="my-6 border-t border-border" />
           </div>
         </div>
       </div>
@@ -328,11 +329,13 @@ function MetaRow({ icon: Icon, label, text }: { icon: React.ElementType; label: 
   if (!text) return null;
 
   return (
-    <div className="flex items-start gap-2.5">
-      <Icon className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+    <div className="flex items-start gap-3 px-2 py-1 rounded-xl hover:bg-muted/40 transition-colors">
+      <div className="p-1.5 rounded-lg bg-background border border-border/40 text-muted-foreground shrink-0 mt-0.5">
+        <Icon className="w-3.5 h-3.5" />
+      </div>
       <div className="min-w-0">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm text-foreground break-words">{text}</p>
+        <p className="text-sm font-medium text-foreground break-words mt-0.5">{text}</p>
       </div>
     </div>
   );
