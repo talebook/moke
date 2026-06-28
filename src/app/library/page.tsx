@@ -20,6 +20,16 @@ interface BookItem {
   timestamp?: number;
 }
 
+interface NavTag {
+  name: string;
+  count: number;
+}
+
+interface NavGroup {
+  legend: string;
+  tags?: NavTag[];
+}
+
 export default function LibraryPage() {
   const { serverUrl } = useServerStore();
   const router = useRouter();
@@ -28,6 +38,9 @@ export default function LibraryPage() {
   const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
   const [viewGrid, setViewGrid] = useState(true);
   const [searchQ, setSearchQ] = useState('');
+  const [selectedFormat, setSelectedFormat] = useState('全部');
+  const [selectedTag, setSelectedTag] = useState('全部');
+  const [tagOptions, setTagOptions] = useState<string[]>(['全部']);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -35,13 +48,24 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (activeTab === 'local') loadBooks(currentPage);
-  }, [serverUrl, activeTab, currentPage]);
+  }, [serverUrl, activeTab, currentPage, selectedFormat, selectedTag]);
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    loadTags();
+  }, [serverUrl]);
 
   const loadBooks = async (page: number) => {
     setLoading(true);
     try {
-      const start = (page - 1) * pageSize;
-      const res = await request(`${serverUrl}/api/recent?start=${start}&size=${pageSize}`, { credentials: 'include' });
+      const params = new URLSearchParams({
+        start: String((page - 1) * pageSize),
+        size: String(pageSize),
+      });
+      if (selectedTag !== '全部') params.set('tag', selectedTag);
+      if (selectedFormat !== '全部') params.set('format', selectedFormat.toLowerCase());
+
+      const res = await request(`${serverUrl}/api/library?${params.toString()}`, { credentials: 'include' });
       const data = await res.json();
       if (data.err === 'user.need_login') { router.push('/login'); return; }
       setBooks(data.books || data.items || []);
@@ -49,7 +73,26 @@ export default function LibraryPage() {
     } catch {} finally { setLoading(false); }
   };
 
+  const loadTags = async () => {
+    try {
+      const res = await request(`${serverUrl}/api/book/nav`, { credentials: 'include' });
+      const data = await res.json();
+      if (data.err === 'user.need_login') { router.push('/login'); return; }
+      const groups = Array.isArray(data.navs) ? (data.navs as NavGroup[]) : [];
+      const tags = groups.flatMap((group) => group.tags ?? []).map((tag) => tag.name).filter(Boolean);
+      setTagOptions(['全部', ...Array.from(new Set(tags))]);
+    } catch {
+      setTagOptions(['全部']);
+    }
+  };
+
   const totalPages = Math.ceil(total / pageSize);
+
+  const updateFilter = (type: 'format' | 'tag', value: string) => {
+    setCurrentPage(1);
+    if (type === 'format') setSelectedFormat(value);
+    if (type === 'tag') setSelectedTag(value);
+  };
 
   const getPageNumbers = () => {
     const pages: (number | string)[] = [];
@@ -134,9 +177,18 @@ export default function LibraryPage() {
         <>
           <div className="px-8 py-4 border-b border-amber-950/10 bg-white/25 shrink-0">
             <div className="flex items-center gap-6 rounded-3xl app-card px-4 py-3">
-              <FilterSelect label="状态" options={['全部', '在读', '已读', '未读']} />
-              <FilterSelect label="格式" options={['全部', 'EPUB', 'PDF', 'MOBI', 'TXT', 'AZW3']} />
-              <FilterSelect label="标签" options={['全部', '小说', '技术', '历史', '哲学', '科幻']} />
+              <FilterSelect
+                label="格式"
+                value={selectedFormat}
+                options={['全部', 'EPUB', 'PDF', 'MOBI', 'TXT', 'AZW3']}
+                onChange={(value) => updateFilter('format', value)}
+              />
+              <FilterSelect
+                label="标签"
+                value={selectedTag}
+                options={tagOptions}
+                onChange={(value) => updateFilter('tag', value)}
+              />
             </div>
           </div>
 
@@ -144,6 +196,11 @@ export default function LibraryPage() {
             {loading ? (
               <div className="flex items-center justify-center h-64">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
+              </div>
+            ) : books.length === 0 ? (
+              <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+                <p className="text-lg font-semibold text-foreground">没有找到匹配的书籍</p>
+                <p className="mt-2 text-sm text-muted-foreground">可以调整格式或分类筛选条件后再试。</p>
               </div>
             ) : (
               <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
@@ -263,12 +320,16 @@ export default function LibraryPage() {
   );
 }
 
-function FilterSelect({ label, options }: { label: string; options: string[] }) {
+function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-xs shrink-0 text-muted-foreground">{label}</span>
       <div className="relative">
-        <select className="appearance-none text-sm pl-3 pr-7 py-1.5 rounded-2xl border border-border bg-background text-foreground cursor-pointer outline-none">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="appearance-none text-sm pl-3 pr-7 py-1.5 rounded-2xl border border-border bg-background text-foreground cursor-pointer outline-none"
+        >
           {options.map((o) => <option key={o}>{o}</option>)}
         </select>
         <ChevronDown className="w-3.5 h-3.5 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground" />
