@@ -124,7 +124,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
         <h2 className="text-sm font-semibold text-foreground tracking-tight">{title}</h2>
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
-      <div className="divide-y divide-border/40 rounded-2xl border border-border/60 bg-card p-1 shadow-sm hover:shadow-md transition-shadow duration-300">{children}</div>
+      <div className="divide-y divide-amber-950/10 rounded-[28px] app-glass p-1 transition-all duration-300 hover:bg-white/70">{children}</div>
     </section>
   );
 }
@@ -142,7 +142,7 @@ function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { i
   const content = (
     <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/80 active:scale-[0.99]'}`}>
       <div className="flex items-start gap-3.5 min-w-0">
-        <div className="p-2 rounded-lg bg-background border border-border/40 text-muted-foreground group-hover:text-primary group-hover:border-primary/20 transition-colors duration-200 shrink-0">
+        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 text-muted-foreground group-hover:text-primary group-hover:border-primary/20 transition-colors duration-200 shrink-0">
           <Icon className="w-4 h-4" />
         </div>
         <div className="min-w-0 py-0.5">
@@ -168,7 +168,7 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
       className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
     >
       <div className="flex items-center gap-3.5 min-w-0">
-        <div className={`p-2 rounded-lg bg-background border border-border/40 shrink-0 transition-colors duration-200 ${tone === 'danger' ? 'group-hover:border-destructive/20 group-hover:text-destructive' : 'group-hover:text-primary'}`}>
+        <div className={`p-2 rounded-lg bg-white/60 border border-amber-950/10 shrink-0 transition-colors duration-200 ${tone === 'danger' ? 'group-hover:border-destructive/20 group-hover:text-destructive' : 'group-hover:text-primary'}`}>
           <Icon className={`w-4 h-4 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
         </div>
         <span className={`text-sm font-medium ${tone === 'danger' ? 'text-destructive' : 'text-foreground'}`}>{label}</span>
@@ -181,7 +181,7 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
 function StaticInfoRow({ icon: Icon, label, description }: { icon: typeof User; label: string; description: string }) {
   return (
     <div className="flex items-start gap-3.5 px-4 py-3 rounded-xl">
-      <div className="p-2 rounded-lg bg-background border border-border/40 text-muted-foreground shrink-0">
+      <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 text-muted-foreground shrink-0">
         <Icon className="w-4 h-4" />
       </div>
       <div className="min-w-0 py-0.5">

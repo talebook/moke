@@ -76,10 +76,12 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <main className="flex items-center justify-center min-h-screen bg-background">
-      <div className="w-full max-w-[390px] mx-4 my-8 rounded-xl p-10 bg-card border border-border">
+    <main className="flex items-center justify-center min-h-screen app-warm-bg px-4">
+      <div className="relative w-full max-w-[410px] my-8 overflow-hidden rounded-[32px] app-glass p-10">
+        <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
+        <div className="relative">
         <div className="flex justify-center mb-8">
-          <div className="w-14 h-14 rounded-full bg-primary flex items-center justify-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-[#6f5134] shadow-lg shadow-primary/15 flex items-center justify-center">
             <BookOpen className="w-7 h-7 text-primary-foreground" />
           </div>
         </div>
@@ -110,7 +112,7 @@ export default function ResetPasswordPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring"
+              className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring"
             />
           </div>
 
@@ -122,14 +124,14 @@ export default function ResetPasswordPage() {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
-              className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring"
+              className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading || !email.trim() || !username.trim()}
-            className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
+            className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
           >
             {loading ? '提交中...' : '重置密码'}
           </button>
@@ -145,12 +147,13 @@ export default function ResetPasswordPage() {
           </Link>
         </p>
 
-        <CaptchaModal 
-          isOpen={showCaptcha} 
-          serverUrl={serverUrl} 
-          onClose={() => setShowCaptcha(false)} 
-          onSuccess={(data) => handleReset(data)} 
+        <CaptchaModal
+          isOpen={showCaptcha}
+          serverUrl={serverUrl}
+          onClose={() => setShowCaptcha(false)}
+          onSuccess={(data) => handleReset(data)}
         />
+        </div>
       </div>
     </main>
   );

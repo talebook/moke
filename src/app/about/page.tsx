@@ -66,7 +66,7 @@ export default function AboutPage() {
           </div>
           <Link
             href="/settings"
-            className="inline-flex items-center gap-2 h-10 rounded-[10px] border border-border bg-background px-4 text-sm text-foreground transition hover:bg-muted"
+            className="inline-flex items-center gap-2 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm px-4 text-sm text-foreground transition hover:bg-muted"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>返回设置</span>
@@ -74,7 +74,7 @@ export default function AboutPage() {
         </div>
 
         <div className="space-y-6">
-          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
             <div className="flex items-center gap-4 mb-5">
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center text-primary-foreground shadow-inner">
                 <BookOpen className="w-7 h-7" />
@@ -90,7 +90,7 @@ export default function AboutPage() {
             </p>
           </section>
 
-          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
             <div className="flex items-center gap-2 mb-4 text-foreground">
               <Info className="w-5 h-5 text-primary" />
               <h3 className="text-lg font-semibold">应用信息</h3>
@@ -102,7 +102,7 @@ export default function AboutPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
             <div className="flex items-center gap-2 mb-4 text-foreground">
               <Sparkles className="w-5 h-5 text-amber-500" />
               <h3 className="text-lg font-semibold">后续规划</h3>
@@ -114,7 +114,7 @@ export default function AboutPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+          <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
             <div className="flex items-center gap-2 mb-4 text-foreground">
               <HeartHandshake className="w-5 h-5 text-rose-500" />
               <h3 className="text-lg font-semibold">贡献者</h3>
@@ -182,7 +182,7 @@ export default function AboutPage() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-2xl bg-background border border-border px-4 py-3">
+    <div className="flex items-start justify-between gap-4 rounded-2xl bg-white/55 border border-amber-950/10 px-4 py-3">
       <span className="text-muted-foreground shrink-0">{label}</span>
       <span className="text-foreground text-right break-all">{value}</span>
     </div>
@@ -191,7 +191,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 function FeatureCard({ title, description }: { title: string; description: string }) {
   return (
-    <div className="rounded-2xl bg-background border border-border px-4 py-4">
+    <div className="rounded-2xl bg-white/55 border border-amber-950/10 px-4 py-4">
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="text-xs text-muted-foreground mt-2 leading-6">{description}</p>
     </div>

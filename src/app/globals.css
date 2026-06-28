@@ -24,4 +24,24 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .app-warm-bg {
+    background:
+      radial-gradient(circle at top left, rgba(184, 149, 106, 0.18), transparent 32%),
+      linear-gradient(180deg, #fffdf8 0%, #fbf9f2 44%, #f6f0e6 100%);
+  }
+  .app-glass {
+    background: rgba(255, 255, 255, 0.62);
+    border: 1px solid rgba(74, 57, 35, 0.1);
+    box-shadow: 0 24px 70px -45px rgba(74, 57, 35, 0.65);
+    backdrop-filter: blur(18px);
+  }
+  .app-card {
+    background: rgba(255, 255, 255, 0.58);
+    border: 1px solid rgba(74, 57, 35, 0.1);
+    box-shadow: 0 18px 50px -40px rgba(74, 57, 35, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(12px);
+  }
+  .book-cover-shadow {
+    box-shadow: 0 14px 28px -18px rgba(37, 30, 20, 0.9), 0 2px 8px rgba(37, 30, 20, 0.08);
+  }
 }

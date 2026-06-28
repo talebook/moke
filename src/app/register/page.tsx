@@ -61,10 +61,12 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="flex items-center justify-center min-h-screen bg-background">
-      <div className="w-full max-w-[390px] mx-4 my-8 rounded-xl p-10 bg-card border border-border">
+    <main className="flex items-center justify-center min-h-screen app-warm-bg px-4">
+      <div className="relative w-full max-w-[410px] my-8 overflow-hidden rounded-[32px] app-glass p-10">
+        <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
+        <div className="relative">
         <div className="flex justify-center mb-8">
-          <div className="w-14 h-14 rounded-full bg-primary flex items-center justify-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-[#6f5134] shadow-lg shadow-primary/15 flex items-center justify-center">
             <BookOpen className="w-7 h-7 text-primary-foreground" />
           </div>
         </div>
@@ -80,20 +82,20 @@ export default function RegisterPage() {
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">用户名</label>
             <input type="text" placeholder="请输入用户名" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username"
-              className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
+              className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">邮箱</label>
             <input type="email" placeholder="请输入邮箱" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
-              className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
+              className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">密码</label>
             <input type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
-              className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
+              className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
           <button type="submit" disabled={loading || !username.trim() || !password.trim()}
-            className="w-full h-11 rounded-lg bg-primary text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50">
+            className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50">
             {loading ? '注册中...' : '注册'}
           </button>
         </form>
@@ -105,12 +107,13 @@ export default function RegisterPage() {
           </Link>
         </p>
 
-        <CaptchaModal 
-          isOpen={showCaptcha} 
-          serverUrl={serverUrl} 
-          onClose={() => setShowCaptcha(false)} 
-          onSuccess={(data) => handleRegister(data)} 
+        <CaptchaModal
+          isOpen={showCaptcha}
+          serverUrl={serverUrl}
+          onClose={() => setShowCaptcha(false)}
+          onSuccess={(data) => handleRegister(data)}
         />
+        </div>
       </div>
     </main>
   );

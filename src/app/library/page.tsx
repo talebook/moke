@@ -77,8 +77,11 @@ export default function LibraryPage() {
 
   return (
     <DesktopLayout>
-      <header className="flex items-center gap-4 px-8 py-4 border-b border-border shrink-0">
-        <h1 className="text-xl font-semibold shrink-0 text-foreground">全部藏书</h1>
+      <header className="sticky top-0 z-10 flex items-center gap-4 px-8 py-5 border-b border-amber-950/10 bg-[#fffdf8]/80 backdrop-blur-xl shrink-0">
+        <div className="shrink-0">
+          <p className="text-xs font-medium text-primary/80">共 {total} 本藏书</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">全部藏书</h1>
+        </div>
         <div className="flex-1" />
 
         <div className="relative shrink-0 w-[320px]">
@@ -89,11 +92,11 @@ export default function LibraryPage() {
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && searchQ.trim()) router.push(`/search?q=${encodeURIComponent(searchQ.trim())}`); }}
-            className="w-full h-9 pl-9 pr-3 text-sm rounded-xl bg-muted border border-transparent text-foreground outline-none transition-colors focus:border-primary focus:bg-background"
+            className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white"
           />
         </div>
 
-        <div className="flex items-center rounded-lg p-1 shrink-0 bg-muted border border-border">
+        <div className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 shadow-sm">
           <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
             <Grid3X3 className="w-4 h-4" />
           </button>
@@ -110,7 +113,7 @@ export default function LibraryPage() {
         </div>
       </header>
 
-      <div className="px-8 border-b border-border shrink-0 relative">
+      <div className="px-8 border-b border-amber-950/10 bg-white/35 shrink-0 relative backdrop-blur-sm">
         <div className="flex items-center gap-8 relative">
           <button
             onClick={() => setActiveTab('local')}
@@ -129,21 +132,21 @@ export default function LibraryPage() {
 
       {activeTab === 'local' ? (
         <>
-          <div className="px-8 py-3 border-b border-border shrink-0">
-            <div className="flex items-center gap-6">
+          <div className="px-8 py-4 border-b border-amber-950/10 bg-white/25 shrink-0">
+            <div className="flex items-center gap-6 rounded-3xl app-card px-4 py-3">
               <FilterSelect label="状态" options={['全部', '在读', '已读', '未读']} />
               <FilterSelect label="格式" options={['全部', 'EPUB', 'PDF', 'MOBI', 'TXT', 'AZW3']} />
               <FilterSelect label="标签" options={['全部', '小说', '技术', '历史', '哲学', '科幻']} />
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto px-8 py-6">
+          <div className="flex-1 overflow-auto px-8 py-8">
             {loading ? (
               <div className="flex items-center justify-center h-64">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
               </div>
             ) : (
-              <div className={cn('gap-5', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
                 {books.map((book) => {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
@@ -152,16 +155,18 @@ export default function LibraryPage() {
 
                   if (viewGrid) {
                     return (
-                      <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-2.5">
-                        <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
+                      <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
+                        <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
                           style={{ aspectRatio: '2/3' }}>
                           {coverUrl ? (
-                            <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+                            <img src={coverUrl} alt={book.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
                           ) : (
                             <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
                               <span className="text-foreground/20 text-2xl font-bold font-serif">{book.title[0]}</span>
                             </div>
                           )}
+                          <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
+                          <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
                         </div>
                         <div className="flex flex-col gap-0.5 px-0.5">
                           <span className="text-sm font-medium truncate text-foreground">{book.title}</span>
@@ -173,7 +178,7 @@ export default function LibraryPage() {
 
                   return (
                     <Link key={bookId} href={`/detail?id=${bookId}`}
-                      className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted border border-transparent hover:border-border">
+                      className="group flex items-center gap-4 px-4 py-3 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm">
                       <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
                         {coverUrl ? (
                           <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
@@ -198,7 +203,7 @@ export default function LibraryPage() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-1.5 py-5 border-t border-border shrink-0 px-8">
+            <div className="flex items-center justify-center gap-1.5 py-5 border-t border-amber-950/10 bg-white/35 shrink-0 px-8 backdrop-blur-sm">
               <button
                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
@@ -228,8 +233,8 @@ export default function LibraryPage() {
           )}
         </>
       ) : (
-        <div className="flex-1 overflow-auto px-8 py-6">
-          <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-2xl bg-muted border border-border">
+        <div className="flex-1 overflow-auto px-8 py-8">
+          <div className="flex items-center gap-3 mb-6 px-5 py-4 rounded-3xl app-card">
             <div className="w-2 h-2 rounded-full bg-success" />
             <span className="text-sm font-medium text-foreground">已连接：Calibre 书库</span>
             <span className="text-xs text-muted-foreground">{serverUrl} · 在线书库</span>
@@ -245,7 +250,7 @@ export default function LibraryPage() {
               { icon: '🌍', label: '外文原版', count: '74' },
               { icon: '🔬', label: '自然科学', count: '126' },
             ].map((cat) => (
-              <a key={cat.label} href="#" className="group flex flex-col items-center gap-2 p-4 rounded-2xl bg-muted transition-all duration-150 hover:-translate-y-0.5">
+              <a key={cat.label} href="#" className="group flex flex-col items-center gap-2 p-4 rounded-3xl app-card transition-all duration-300 hover:-translate-y-1 hover:bg-white/75">
                 <div className="w-10 h-10 rounded-2xl bg-muted flex items-center justify-center text-lg">{cat.icon}</div>
                 <span className="text-xs font-medium text-foreground">{cat.label}</span>
                 <span className="text-[11px] text-muted-foreground">{cat.count} 本</span>

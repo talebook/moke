@@ -58,8 +58,8 @@ export default function WelcomePage() {
   };
 
   return (
-    <main className="h-screen flex flex-col md:flex-row bg-primary">
-        <div className="flex-1 flex items-center justify-center px-8 py-12 md:p-16">
+    <main className="min-h-screen flex flex-col md:flex-row app-warm-bg">
+        <div className="flex-1 flex items-center justify-center px-8 py-12 md:p-16 bg-primary">
           <div className="max-w-md">
             <BookOpen className="w-16 h-16 text-primary-foreground" />
             <h1 className="mt-6 text-[36px] font-bold text-primary-foreground">墨客</h1>
@@ -70,8 +70,8 @@ export default function WelcomePage() {
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 md:p-16 bg-background">
-          <div className="w-full max-w-sm p-8 rounded-[14px] bg-card shadow-welcome">
+        <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 md:p-16">
+          <div className="w-full max-w-sm p-8 rounded-[32px] app-glass">
             <h2 className="text-xl font-semibold mb-6 text-card-foreground">连接书库</h2>
 
             {error && (
@@ -94,7 +94,7 @@ export default function WelcomePage() {
                     handleConnect(serverUrl);
                   }
                 }}
-                className="w-full h-11 px-4 rounded-[10px] border border-border bg-muted text-foreground text-sm outline-none transition-colors duration-150 focus:ring-2 focus:ring-ring focus:border-ring"
+                className="w-full h-11 px-4 rounded-2xl border border-amber-950/10 bg-white/65 shadow-sm text-foreground text-sm outline-none transition-colors duration-150 focus:ring-2 focus:ring-ring focus:border-ring"
               />
             </div>
 
@@ -102,7 +102,7 @@ export default function WelcomePage() {
               data-dom-id="btn-connect"
               onClick={() => handleConnect(serverUrl)}
               disabled={loading || !serverUrl.trim()}
-              className="inline-flex items-center justify-center w-full h-11 rounded-[10px] text-sm font-medium bg-primary text-primary-foreground cursor-pointer transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium bg-primary shadow-lg shadow-primary/15 text-primary-foreground cursor-pointer transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? '连接中...' : '连接'}
             </button>
@@ -117,7 +117,7 @@ export default function WelcomePage() {
               data-dom-id="btn-browse-demo"
               onClick={() => handleConnect('https://demo.talebook.org')}
               disabled={loading}
-              className="inline-flex items-center justify-center w-full h-11 rounded-[10px] text-sm font-medium border border-border bg-transparent text-foreground cursor-pointer transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/50 text-foreground cursor-pointer transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               浏览演示书库
             </button>

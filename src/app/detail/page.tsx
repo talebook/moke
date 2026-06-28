@@ -271,7 +271,7 @@ function DetailContent() {
   return (
     <DesktopLayout>
       <div className="px-8 py-8">
-        <div className="mb-8">
+        <div className="mb-8 rounded-[28px] app-card px-5 py-4">
           <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             <span>返回</span>
@@ -285,7 +285,7 @@ function DetailContent() {
 
         <div className="flex gap-10">
           <div className="shrink-0 w-[240px] flex flex-col items-start">
-            <div className="w-[220px] rounded-2xl overflow-hidden shadow-xl border border-border/40 transition-transform duration-300 hover:scale-[1.02]">
+            <div className="w-[220px] rounded-[24px] overflow-hidden book-cover-shadow border border-amber-950/10 bg-white transition-transform duration-300 hover:scale-[1.02]">
               <div className="aspect-[2/3] flex items-center justify-center bg-muted/60 relative group">
                 {coverUrl ? (
                   <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" />
@@ -315,7 +315,7 @@ function DetailContent() {
             <button
               onClick={toggleShelf}
               disabled={shelfUpdating}
-              className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-border bg-background text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60"
+              className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-amber-950/10 bg-white/60 text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60"
             >
               <Bookmark className="w-4 h-4" fill={inShelf ? 'currentColor' : 'none'} />
               {shelfUpdating ? '更新中' : inShelf ? '移出书架' : '加入书架'}
@@ -333,7 +333,7 @@ function DetailContent() {
             {message && <p className="mt-3 w-[220px] text-xs text-muted-foreground leading-relaxed px-1">{message}</p>}
           </div>
 
-          <div className="flex-1 min-w-0 bg-card/40 border border-border/60 rounded-3xl px-6 pt-5 pb-6 shadow-sm">
+          <div className="flex-1 min-w-0 app-glass rounded-[32px] px-7 pt-6 pb-7">
             <h1 className="text-2xl font-bold tracking-tight text-foreground">{book.title}</h1>
 
             <p className="text-base mt-1 text-muted-foreground font-medium">
@@ -452,7 +452,7 @@ function DetailContent() {
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 disabled={deletingDownload}
-                className="h-10 flex-1 rounded-xl border border-border bg-background text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-60"
+                className="h-10 flex-1 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-60"
               >
                 取消
               </button>

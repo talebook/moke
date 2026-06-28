@@ -140,7 +140,7 @@ export default function UserHistoryPage() {
         <div className="flex items-center gap-3 mb-8">
           <button
             onClick={() => router.back()}
-            className="flex items-center justify-center w-10 h-10 rounded-[10px] border border-border bg-background text-muted-foreground transition hover:text-foreground hover:bg-muted"
+            className="flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm text-muted-foreground transition hover:text-foreground hover:bg-muted"
             aria-label="返回"
             title="返回"
           >
@@ -163,7 +163,7 @@ export default function UserHistoryPage() {
               key={key}
               onClick={() => setActiveTab(key)}
               className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-xl border text-sm transition-colors',
+                'flex items-center gap-2 px-4 py-2 rounded-2xl border text-sm transition-all shadow-sm',
                 activeTab === key
                   ? 'border-foreground bg-muted text-foreground'
                   : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted',
@@ -185,7 +185,7 @@ export default function UserHistoryPage() {
             {message}
           </div>
         ) : currentItems.length === 0 ? (
-          <div className="rounded-3xl border border-border bg-card px-8 py-16 text-center">
+          <div className="rounded-[32px] app-glass px-8 py-16 text-center">
             <p className="text-lg font-medium text-foreground">暂无记录</p>
             <p className="mt-2 text-sm text-muted-foreground">{emptyState.description}</p>
             <Link
@@ -204,7 +204,7 @@ export default function UserHistoryPage() {
                 <Link
                   key={`${activeTab}-${item.id}`}
                   href={detailHref}
-                  className="flex items-center gap-4 rounded-2xl border border-border bg-card px-4 py-4 transition-colors hover:bg-muted"
+                  className="flex items-center gap-4 rounded-2xl border border-amber-950/10 bg-white/55 shadow-sm px-4 py-4 transition-colors hover:bg-muted"
                 >
                   <div className="w-12 h-[72px] rounded-lg overflow-hidden shadow-card shrink-0 flex items-center justify-center bg-muted">
                     {coverUrl ? (

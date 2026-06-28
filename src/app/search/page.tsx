@@ -51,21 +51,25 @@ function SearchContent() {
   return (
     <DesktopLayout>
       <div className="px-8 py-8" style={{ maxWidth: '1400px' }}>
-        <div className="flex items-center gap-3 mb-8">
+        <div className="mb-6">
+          <p className="text-xs font-medium text-primary/80">探索书库</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">搜索</h1>
+        </div>
+        <div className="flex items-center gap-3 mb-8 rounded-[28px] app-card p-3">
           <div className="relative flex-1 max-w-xl">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <input type="text" placeholder="搜索书名、作者、标签..."
               value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
-              className="w-full h-12 pl-11 pr-4 rounded-xl bg-muted border border-transparent text-foreground text-base outline-none transition-colors focus:border-primary focus:bg-background" />
+              className="w-full h-12 pl-11 pr-4 rounded-2xl bg-white/70 border border-amber-950/10 shadow-sm text-foreground text-base outline-none transition-colors focus:border-primary focus:bg-background" />
           </div>
           <button onClick={() => handleSearch()} disabled={loading || !query.trim()}
-            className="h-11 px-6 rounded-[10px] bg-primary text-primary-foreground text-sm font-semibold transition hover:opacity-90 disabled:opacity-50">
+            className="h-11 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-sm font-semibold transition hover:opacity-90 disabled:opacity-50">
             {loading ? '搜索中...' : '搜索'}
           </button>
         </div>
 
-        <div className="flex items-center gap-3 mb-6 justify-between">
+        <div className="flex items-center gap-3 mb-6 justify-between rounded-3xl app-card px-4 py-3">
           <div className="flex gap-3">
             {['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'].map((f) => (
               <button key={f} onClick={() => setActiveFilter(f)}
@@ -90,14 +94,14 @@ function SearchContent() {
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
           </div>
         ) : searched && results.length === 0 ? (
-          <div className="text-center py-20 text-muted-foreground">
-            <p className="text-lg">未找到相关书籍</p>
+          <div className="rounded-[32px] app-glass px-8 py-16 text-center text-muted-foreground">
+            <p className="text-lg font-semibold text-foreground">未找到相关书籍</p>
             <p className="text-sm mt-2">尝试使用不同的关键词搜索</p>
           </div>
         ) : results.length > 0 ? (
           <div>
             <p className="text-sm text-muted-foreground mb-5">找到 {results.length} 本书</p>
-            <div className={cn('gap-5', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+            <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
               {results.map((book) => {
                 const bookId = String(book.id);
                 const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
@@ -105,16 +109,18 @@ function SearchContent() {
 
                 if (viewGrid) {
                   return (
-                    <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-2.5">
-                      <div className="relative w-full overflow-hidden rounded-[14px] transition-transform duration-150 ease-out group-hover:-translate-y-0.5 shadow-card"
+                    <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
+                      <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
                         style={{ aspectRatio: '2/3' }}>
                         {coverUrl ? (
-                          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+                          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
                             <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
                           </div>
                         )}
+                        <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
+                        <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
                       </div>
                       <div className="flex flex-col gap-0.5 px-0.5">
                         <span className="text-sm font-medium truncate text-foreground">{book.title}</span>
@@ -126,7 +132,7 @@ function SearchContent() {
 
                 return (
                   <Link key={bookId} href={`/detail?id=${bookId}`}
-                    className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors hover:bg-muted border border-transparent hover:border-border">
+                    className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm">
                     <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
                       {coverUrl ? (
                         <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />

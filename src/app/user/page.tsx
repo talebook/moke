@@ -113,7 +113,7 @@ export default function UserPage() {
           </div>
           <Link
             href="/settings"
-            className="inline-flex items-center gap-2 h-10 rounded-[10px] border border-border bg-background px-4 text-sm text-foreground transition hover:bg-muted"
+            className="inline-flex items-center gap-2 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm px-4 text-sm text-foreground transition hover:bg-muted"
           >
             <Settings className="w-4 h-4" />
             <span>前往设置</span>
@@ -131,7 +131,7 @@ export default function UserPage() {
         ) : (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
-              <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
                 <div className="flex items-center gap-4 mb-6">
                   <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary via-primary/90 to-primary/70 flex items-center justify-center text-primary-foreground text-xl font-bold shadow-md">
                     {displayName[0] || 'U'}
@@ -150,7 +150,7 @@ export default function UserPage() {
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-foreground">快捷入口</h3>
                 </div>
@@ -161,7 +161,7 @@ export default function UserPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-border/60 bg-card p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+            <div className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">个人数据概览</h3>
@@ -201,7 +201,7 @@ export default function UserPage() {
 
 function InfoCard({ icon: Icon, label, value }: { icon: typeof User; label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-background/50 border border-border/60 px-4 py-4 hover:bg-muted/30 transition-colors duration-200">
+    <div className="rounded-2xl bg-white/50 border border-amber-950/10 px-4 py-4 hover:bg-muted/30 transition-colors duration-200">
       <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
         <Icon className="w-3.5 h-3.5" />
         <span className="font-medium">{label}</span>
