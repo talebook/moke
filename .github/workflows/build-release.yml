@@ -116,6 +116,7 @@ jobs:
         run: |
           cd readest
           pnpm install --no-frozen-lockfile
+          pnpm --filter @readest/readest-app setup-vendors
           pnpm --filter @readest/readest-app build
           cd apps/readest-app/src-tauri
           cargo build --release
