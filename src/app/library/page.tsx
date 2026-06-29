@@ -307,15 +307,6 @@ export default function LibraryPage() {
             <List className="w-4 h-4" />
           </button>
         </div>
-
-        {activeTab === 'local' && (
-          <div className="relative shrink-0">
-            <button className="flex items-center gap-1.5 h-9 px-3 text-sm rounded-xl border border-border bg-background text-foreground">
-              <span>最近添加</span>
-              <ChevronDown className="w-3 h-3 text-muted-foreground" />
-            </button>
-          </div>
-        )}
       </header>
 
       {/* ── Tabs ── */}
