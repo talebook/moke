@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { fetchCurrentUser, fetchServerInfo } from '@/lib/api';
+import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
@@ -22,22 +22,27 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hasHydrated) return;
-    if (!serverUrl) {
-      setServerTitle('');
-      setUser(null);
-      return;
-    }
+    if (publicPaths.includes(pathname)) return;
+    if (!serverUrl) return;
 
     let cancelled = false;
 
-    const syncUser = async () => {
+    const checkAccess = async () => {
       try {
+        const welcome = await checkWelcomeRequirement(serverUrl);
+        if (!cancelled && welcome.needsAccessCode) {
+          console.log('[ServerProvider] needs access code, redirecting to /access');
+          router.replace('/access');
+          return;
+        }
+
         const [userData, serverData] = await Promise.all([fetchCurrentUser(), fetchServerInfo()]);
         if (!cancelled) {
           setUser(userData.user);
           setServerTitle(serverData.title || '');
         }
-      } catch {
+      } catch (e) {
+        console.error('[ServerProvider] sync error:', e);
         if (!cancelled) {
           setUser(null);
           setServerTitle('');
@@ -45,12 +50,12 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    syncUser();
+    checkAccess();
 
     return () => {
       cancelled = true;
     };
-  }, [hasHydrated, serverUrl, setServerTitle, setUser]);
+  }, [hasHydrated, pathname, serverUrl, setServerTitle, setUser]);
 
   return <>{children}</>;
 }

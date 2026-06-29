@@ -37,6 +37,7 @@ export default function WelcomePage() {
       const result = await validateServerConnection(parsed.origin);
 
       if (result.err !== 'ok') {
+        console.error('[WelcomePage] validateServerConnection failed:', result);
         setError(result.msg || '服务器校验失败');
         return;
       }
@@ -44,13 +45,16 @@ export default function WelcomePage() {
       const welcome = await checkWelcomeRequirement(parsed.origin);
 
       if (welcome.err !== 'ok') {
+        console.error('[WelcomePage] checkWelcomeRequirement failed:', welcome);
         setError(welcome.msg || '访问码状态检查失败');
         return;
       }
 
+      console.log('[WelcomePage] connect OK, needsAccessCode:', welcome.needsAccessCode);
       setServer(parsed.protocol, parsed.host, parsed.port);
       router.push(welcome.needsAccessCode ? '/access' : '/shelf');
-    } catch {
+    } catch (e) {
+      console.error('[WelcomePage] connect exception:', e);
       setError('请输入正确的服务器地址');
     } finally {
       setLoading(false);
