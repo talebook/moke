@@ -115,7 +115,7 @@ jobs:
         if: matrix.platform != 'android'
         run: |
           cd readest
-          pnpm install
+          pnpm install --no-frozen-lockfile
           pnpm --filter @readest/readest-app build
           cd apps/readest-app/src-tauri
           cargo build --release
