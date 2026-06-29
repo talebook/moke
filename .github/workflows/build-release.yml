@@ -36,8 +36,8 @@ jobs:
             os: ubuntu-22.04
           - platform: windows
             os: windows-latest
-          - platform: android
-            os: ubuntu-22.04
+          # - platform: android
+          #   os: ubuntu-22.04
 
     permissions:
       contents: write
@@ -46,7 +46,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive 
+          submodules: recursive
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -61,8 +61,6 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'android' && 'aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android' || '' }}
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -72,7 +70,6 @@ jobs:
             ./readest -> target
 
       - name: Cache readest Next.js
-        if: matrix.platform != 'android'
         uses: actions/cache@v4
         with:
           path: readest/apps/readest-app/.next/cache
@@ -80,45 +77,39 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nextjs-readest-
 
+      - name: Cache readest node_modules
+        uses: actions/cache@v4
+        with:
+          path: readest/node_modules
+          key: ${{ runner.os }}-readest-modules-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-readest-modules-
+
+      - name: Cache readest vendor
+        id: cache-readest-vendor
+        uses: actions/cache@v4
+        with:
+          path: readest/apps/readest-app/public/vendor
+          key: ${{ runner.os }}-readest-vendor-${{ hashFiles('readest/pnpm-lock.yaml') }}
+
       - name: Install Linux Dependencies
         if: matrix.platform == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Setup Java (Android Only)
-        if: matrix.platform == 'android'
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Setup Android SDK (Android Only)
-        if: matrix.platform == 'android'
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK and CMake (Android Only)
-        if: matrix.platform == 'android'
-        run: |
-          yes | sdkmanager "ndk;25.2.9519653" "cmake;3.22.1"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-
       - name: Install Frontend Dependencies
         run: pnpm install
 
-      - name: Initialize Android project (Android Only)
-        if: matrix.platform == 'android'
-        run: pnpm tauri android init
-
       - name: Build readest sidecar
-        if: matrix.platform != 'android'
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
           cd readest
           pnpm install --no-frozen-lockfile
-          pnpm --filter @readest/readest-app setup-vendors
+          if [ "${{ steps.cache-readest-vendor.outputs.cache-hit }}" != "true" ]; then
+            pnpm --filter @readest/readest-app setup-vendors
+          fi
           pnpm --filter @readest/readest-app build
           cd apps/readest-app/src-tauri
           cargo build --release
@@ -135,25 +126,21 @@ jobs:
         shell: bash
 
       - name: Build Tauri app (Push / PR)
-        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Release Tauri app (Tags)
-        if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
 
-      - name: Build Android app
-        if: matrix.platform == 'android'
-        run: pnpm tauri android build
-
       - name: Upload Tauri artifact (Push / PR)
-        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-artifact
@@ -164,27 +151,27 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
 
-      - name: Upload APK artifact (Push / PR)
-        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Moke-Android-APK
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+      # - name: Upload APK artifact (Push / PR)
+      #   if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: Moke-Android-APK
+      #     path: |
+      #       src-tauri/gen/android/app/build/outputs/apk/**/*.apk
 
-      - name: Upload AAB artifact (Push / PR)
-        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: Moke-Android-AAB
-          path: |
-            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+      # - name: Upload AAB artifact (Push / PR)
+      #   if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: Moke-Android-AAB
+      #     path: |
+      #       src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
 
-      - name: Upload Android artifact to Release (Tags)
-        if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+      # - name: Upload Android artifact to Release (Tags)
+      #   if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
+      #   uses: softprops/action-gh-release@v2
+      #   with:
+      #     tag_name: ${{ github.ref_name }}
+      #     files: |
+      #       src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+      #       src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
