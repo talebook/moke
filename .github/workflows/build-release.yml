@@ -113,6 +113,8 @@ jobs:
 
       - name: Build readest sidecar
         if: matrix.platform != 'android'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           cd readest
           pnpm install --no-frozen-lockfile
