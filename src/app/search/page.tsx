@@ -51,7 +51,7 @@ function SearchContent() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8" style={{ maxWidth: '1400px' }}>
+      <div className="px-8 py-8 h-full overflow-y-auto" style={{ maxWidth: '1400px' }}>
         <div className="mb-6">
           <p className="text-xs font-medium text-primary/80">探索书库</p>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">搜索</h1>

@@ -340,7 +340,7 @@ export default function LibraryPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-auto px-8 py-8">
+          <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
             {localLoading ? (
               <div className="flex items-center justify-center h-64">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
@@ -438,7 +438,7 @@ export default function LibraryPage() {
         /* ══════════════════════════════════════════
             ONLINE TAB
         ══════════════════════════════════════════ */
-        <div className="flex-1 overflow-auto flex flex-col">
+        <div className="flex-1 min-h-0 overflow-auto flex flex-col">
 
           {/* ── Filter bar (书源 + 分类，与本地书库样式一致) ── */}
           {!networkSearchMode && (
@@ -505,7 +505,7 @@ export default function LibraryPage() {
 
           {/* ── Network search results ── */}
           {networkSearchMode ? (
-            <div className="flex-1 overflow-auto px-8 py-8">
+            <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
               <div className="flex items-center gap-3 mb-6">
                 <button
                   onClick={() => { setNetworkSearchMode(false); setNetworkSearchQ(''); setNetworkSearchResults([]); }}
@@ -534,8 +534,8 @@ export default function LibraryPage() {
             </div>
           ) : (
             /* ── Browse books / empty states ── */
-            <div className="flex-1 overflow-auto flex flex-col">
-              <div className="flex-1 overflow-auto px-8 py-8">
+            <div className="flex-1 min-h-0 overflow-auto flex flex-col">
+              <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
                 {/* 未选书源 */}
                 {selectedSourceId === null ? (
                   <div className="rounded-[32px] app-glass px-8 py-16 text-center">

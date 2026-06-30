@@ -190,7 +190,8 @@ function DetailContent() {
       });
 
       setDownloadProgress(100);
-      await updateReadingState({ read_state: 1 });
+      await updateReadingState({ download: 1 });
+      // 等待下一个版本更新后加入read_state: 1
       setDownloaded(true);
       setBook((current) => current ? {
         ...current,
