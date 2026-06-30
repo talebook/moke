@@ -20,6 +20,15 @@ function makeKey(serverUrl: string, bookId: string) {
   return `${serverUrl}::${bookId}`;
 }
 
+function sanitizeFileName(fileName: string) {
+  const sanitized = fileName
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+    .replace(/[. ]+$/g, '')
+    .trim();
+
+  return sanitized || 'book.epub';
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
@@ -83,6 +92,8 @@ export async function saveOfflineBook(input: {
   const db = await openDatabase();
   let filePath: string | undefined;
 
+  const fileName = sanitizeFileName(input.fileName);
+
   if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
     try {
       const { writeFile, BaseDirectory, mkdir } = await import('@tauri-apps/plugin-fs');
@@ -94,12 +105,12 @@ export async function saveOfflineBook(input: {
         // Ignore if directory already exists
       }
 
-      const relativePath = await join('books', input.fileName);
+      const relativePath = await join('books', fileName);
       const arrayBuffer = await input.blob.arrayBuffer();
       await writeFile(relativePath, new Uint8Array(arrayBuffer), { baseDir: BaseDirectory.AppData });
 
       const dir = await appDataDir();
-      filePath = await join(dir, 'books', input.fileName);
+      filePath = await join(dir, 'books', fileName);
     } catch (e) {
       console.error('Failed to save book to file system:', e);
       throw new Error('Failed to save book to file system');
@@ -111,7 +122,7 @@ export async function saveOfflineBook(input: {
     serverUrl: input.serverUrl,
     bookId: input.bookId,
     title: input.title,
-    fileName: input.fileName,
+    fileName,
     mimeType: input.mimeType,
     blob: input.blob,
     updatedAt: Date.now(),
