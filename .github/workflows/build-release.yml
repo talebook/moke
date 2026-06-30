@@ -36,8 +36,6 @@ jobs:
             os: ubuntu-22.04
           - platform: windows
             os: windows-latest
-          # - platform: android
-          #   os: ubuntu-22.04
 
     permissions:
       contents: write
@@ -45,8 +43,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -67,7 +63,6 @@ jobs:
         with:
           workspaces: |
             ./src-tauri -> target
-            ./readest -> target
 
       - name: Cache readest Next.js
         uses: actions/cache@v4
@@ -101,27 +96,12 @@ jobs:
       - name: Install Frontend Dependencies
         run: pnpm install
 
-      - name: Build readest sidecar
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Install Readest Dependencies
         run: |
           cd readest
           pnpm install --no-frozen-lockfile
           if [ "${{ steps.cache-readest-vendor.outputs.cache-hit }}" != "true" ]; then
             pnpm --filter @readest/readest-app setup-vendors
-          fi
-          pnpm --filter @readest/readest-app build
-          cd apps/readest-app/src-tauri
-          cargo build --release
-          cd ../../../../
-
-          TARGET=$(rustc -vV | grep host | awk '{print $2}')
-          mkdir -p src-tauri/bin
-
-          if [ "${{ matrix.platform }}" == "windows" ]; then
-            cp readest/target/release/[rR]eadest.exe src-tauri/bin/readest-$TARGET.exe
-          else
-            cp readest/target/release/[rR]eadest src-tauri/bin/readest-$TARGET
           fi
         shell: bash
 
@@ -130,12 +110,14 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Build and Release Tauri app (Tags)
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_OPTIONS: --max-old-space-size=4096
         with:
           tagName: ${{ github.ref_name }}
 
@@ -150,28 +132,3 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
-
-      # - name: Upload APK artifact (Push / PR)
-      #   if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: Moke-Android-APK
-      #     path: |
-      #       src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-
-      # - name: Upload AAB artifact (Push / PR)
-      #   if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: Moke-Android-AAB
-      #     path: |
-      #       src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
-
-      # - name: Upload Android artifact to Release (Tags)
-      #   if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
-      #   uses: softprops/action-gh-release@v2
-      #   with:
-      #     tag_name: ${{ github.ref_name }}
-      #     files: |
-      #       src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-      #       src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
