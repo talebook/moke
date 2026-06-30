@@ -1,62 +1,31 @@
-use tauri::Manager;
-
-/// 阅读器资源在打包后相对于 `resource_dir` 的相对路径。
+/// Moke 桌面客户端入口。
 ///
-/// readest 阅读器作为一份打包资源随 Moke 一起发布（见 tauri.conf.json
-/// 的 `bundle.resources`）。把路径集中在这里，后续想更换阅读器（例如换成
-/// 别的阅读器程序）只需替换 `resources/reader/` 下的可执行文件，并改这一处常量。
-#[cfg(target_os = "windows")]
-const READER_RELATIVE_PATH: &str = "reader/readest.exe";
-#[cfg(not(target_os = "windows"))]
-const READER_RELATIVE_PATH: &str = "reader/readest";
-
-/// 统一的“打开阅读器”入口。
+/// 阅读器（readest）的 Rust 后端通过 `readestlib` 以库形式编译进本应用：
+/// - 基础插件（fs/http/os/shell/opener）由 moke 自己注册，供两端复用；
+/// - 其余阅读器专用插件由 `readestlib::register_reader_plugins` 统一注册；
+/// - 阅读器前端以“裸命令名”调用的所有后端命令（含 `open_reader`）由
+///   `readestlib::reader_invoke_handler()` 一次性挂到应用级 handler。
 ///
-/// 前端只调用这一个命令；它负责定位随应用打包的阅读器程序，并以独立窗口
-/// （独立进程）方式打开指定的书籍文件。这样两个应用在编译/打包时合为一个
-/// 安装包，同时阅读器仍然在自己的窗口中呈现，且保留了清晰的调用关系，便于
-/// 后续整体替换阅读器。
-#[tauri::command]
-async fn open_reader(app: tauri::AppHandle, file_path: String) -> Result<(), String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("无法定位资源目录: {e}"))?;
-
-    let reader_path = resource_dir.join(READER_RELATIVE_PATH);
-
-    if !reader_path.exists() {
-        return Err(format!(
-            "未找到打包的阅读器程序: {}",
-            reader_path.display()
-        ));
-    }
-
-    // 以独立进程启动阅读器，把书籍文件路径作为参数传入。
-    // readest 本身是一个独立的 GUI 程序，会在自己的窗口中打开书籍。
-    std::process::Command::new(&reader_path)
-        .arg(&file_path)
-        .spawn()
-        .map_err(|e| format!("启动阅读器失败: {e}"))?;
-
-    Ok(())
-}
-
+/// `open_reader` 现在在进程内新开阅读器窗口（不再 spawn 外部 exe），因此整个
+/// 应用最终只产出一个二进制。前端调用方式 `invoke('open_reader', { filePath })`
+/// 保持不变。更换阅读器只需替换 `readestlib` 依赖与 `/readest` 前端产物。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![open_reader])
+        .plugin(tauri_plugin_opener::init());
+
+    // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
+    let builder = readestlib::register_reader_plugins(builder);
+
+    builder
+        .invoke_handler(readestlib::reader_invoke_handler())
         .setup(|app| {
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_shell::ShellExt;
-                let _ = app.shell();
-            }
+            // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
+            readestlib::manage_reader_state(app.handle());
             Ok(())
         })
         .run(tauri::generate_context!())

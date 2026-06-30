@@ -10,6 +10,20 @@ const nextConfig = {
   },
   devIndicators: false,
   reactStrictMode: true,
+  // In dev mode, proxy /readest/* to readest's dev server (port 3001) so the
+  // reader window loads through the same origin and avoids Tauri remote-URL
+  // permission issues.
+  async rewrites() {
+    if (isDev) {
+      return [
+        {
+          source: '/readest/:path*',
+          destination: 'http://localhost:3001/readest/:path*',
+        },
+      ];
+    }
+    return [];
+  },
 };
 
 export default nextConfig;

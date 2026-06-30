@@ -17,7 +17,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "2", features = [] }
+# protocol-asset: 让阅读器窗口可以通过 asset:// 读取本地书籍文件与封面
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-fs = "2"
 # 显式开启 cookies（跨请求持久化 session cookie，Talebook 登录/访问码依赖会话）
 # 以及 dangerous-settings（允许前端按需放行自签名证书 / 纯 HTTP 局域网服务器）
@@ -25,3 +26,29 @@ tauri-plugin-http = { version = "2", features = ["cookies", "dangerous-settings"
 tauri-plugin-os = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-opener = "2"
+
+# 阅读器（readest）作为库依赖在进程内嵌入：复用其 Rust 后端命令与插件，
+# 这样最终只产出一个二进制。default-features=false 关闭 readest 自带的
+# standalone `run()`（它会用 generate_context! 读取 readest 自己的
+# tauri.conf.json），改为通过 readestlib::register_reader_plugins /
+# open_reader_window 等接口集成。更换阅读器只需替换这一依赖与对应前端。
+readestlib = { package = "Readest", path = "../readest/apps/readest-app/src-tauri", default-features = false }
+
+# Tauri 的权限(ACL)体系要求：凡是 capabilities 里引用了某插件的权限
+# （如 dialog:default / turso:default），承载这些 capability 的“应用 crate”就
+# 必须【直接】依赖该插件——插件通过 cargo `links` 暴露的权限清单只会传给直接
+# 依赖方，不会穿透 readestlib 这一层传到 moke（否则 build.rs 报
+# “Permission dialog:default not found”）。因此把阅读器前端会用到、且已在
+# capabilities 中授权的插件都列为 moke 的直接依赖。实际的插件【注册】仍由
+# readestlib::register_reader_plugins 统一完成，这里仅为让 build.rs 找到权限定义；
+# 版本/路径与 readest 保持一致，cargo 会去重成同一份 crate。
+tauri-plugin-dialog = "2"
+tauri-plugin-websocket = "2"
+tauri-plugin-process = "2"
+tauri-plugin-oauth = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-device-info = "1.0.1"
+tauri-plugin-log = "2"
+tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
+tauri-plugin-native-bridge = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge" }
+tauri-plugin-native-tts = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts" }

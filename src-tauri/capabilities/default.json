@@ -4,22 +4,14 @@
   "windows": [
     "*"
   ],
+  "remote": {
+    "urls": ["http://localhost:3001"]
+  },
   "permissions": [
     "core:default",
     "fs:default",
     "os:default",
     "shell:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "reader",
-          "cmd": "",
-          "args": true,
-          "sidecar": false
-        }
-      ]
-    },
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
@@ -34,12 +26,48 @@
       "allow": [{ "path": "**" }]
     },
     {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$TEMP/**/*" }
+      ]
+    },
+    {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$APPDATA/**" }]
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$TEMP/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$TEMP/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:scope-appdata-recursive",
+      "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "fs:scope-appconfig-recursive",
+      "allow": [{ "path": "$APPCONFIG/**/*" }]
     },
     {
       "identifier": "fs:allow-mkdir",
-      "allow": [{ "path": "$APPDATA/**" }]
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$TEMP/**/*" }
+      ]
     },
     {
       "identifier": "http:default",
@@ -51,6 +79,47 @@
         { "url": "http://*:*/**" },
         { "url": "https://*:*/**" }
       ]
-    }
+    },
+
+    "fs:read-meta",
+    "fs:allow-open",
+    "fs:allow-rename",
+    "fs:allow-remove",
+    "fs:allow-stat",
+    "fs:allow-fstat",
+    "fs:allow-lstat",
+    "dialog:default",
+    "websocket:default",
+    "process:default",
+    "process:allow-exit",
+    "process:allow-restart",
+    "oauth:allow-start",
+    "oauth:allow-cancel",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text",
+    "device-info:default",
+    "turso:default",
+    "native-tts:default",
+    "native-bridge:default",
+    "log:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-center",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-minimize",
+    "core:window:allow-unminimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-destroy",
+    "core:webview:allow-create-webview-window",
+    "core:path:allow-resolve-directory"
   ]
 }

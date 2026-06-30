@@ -11,7 +11,10 @@
     "build-web": "dotenv -e .env.web -- next build",
     "tauri": "tauri",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:reader": "cd readest && pnpm --filter @readest/readest-app build",
+    "dev:reader": "cd readest && pnpm --filter @readest/readest-app dev",
+    "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
