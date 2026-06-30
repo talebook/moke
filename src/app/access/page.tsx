@@ -1,30 +1,106 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
 import { submitWelcomeCode } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { debugLog } from '@/lib/debug-log';
 
-export default function AccessPage() {
+function AccessPageInner() {
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const searchParams = useSearchParams();
+  const { serverUrl, hasHydrated } = useServerStore();
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
 
+  // 从 URL query 恢复 serverUrl（welcome 页跳转时带过来），
+  // 这是跨页传递最可靠的方式，不受 release WebView 下 persist 不稳定的影响
+  useEffect(() => {
+    let candidate = searchParams.get('server') || '';
+    let source = 'URL';
+
+    // URL 没有就尝试手动写入的 localStorage 键
+    if (!candidate) {
+      try {
+        candidate = localStorage.getItem('moke_server_url') || '';
+        source = 'localStorage';
+      } catch {
+        // ignore
+      }
+    }
+
+    debugLog('info', 'access', `恢复尝试: URL=${searchParams.get('server') || '(无)'}, localStorage=${(() => { try { return localStorage.getItem('moke_server_url') || '(无)'; } catch { return '(异常)'; } })()}`);
+
+    if (candidate) {
+      try {
+        const url = new URL(candidate);
+        const current = useServerStore.getState().serverUrl;
+        if (current !== url.origin) {
+          useServerStore.setState({
+            serverUrl: url.origin,
+            protocol: url.protocol.replace(':', '') as 'http' | 'https',
+            host: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+            isConnected: true,
+          });
+          debugLog('success', 'access', `已从 ${source} 恢复 serverUrl=${url.origin}`);
+        }
+      } catch (e) {
+        debugLog('error', 'access', `server 参数解析失败: ${String(e)}`);
+      }
+    }
+  }, [searchParams]);
+
   const handleVerify = async (captchaData?: any) => {
     if (!code.trim()) return;
+
+    // 守卫：确保有 serverUrl，否则请求会发往相对路径导致网络异常
+    let effectiveUrl = useServerStore.getState().serverUrl;
+
+    // 兜底：内存为空时从手动 localStorage 键直接恢复
+    if (!effectiveUrl) {
+      try {
+        const fromLs = localStorage.getItem('moke_server_url') || '';
+        if (fromLs) {
+          const url = new URL(fromLs);
+          useServerStore.setState({
+            serverUrl: url.origin,
+            protocol: url.protocol.replace(':', '') as 'http' | 'https',
+            host: url.hostname,
+            port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+            isConnected: true,
+          });
+          effectiveUrl = url.origin;
+          debugLog('warn', 'access守卫', `提交前从 localStorage 兜底恢复 serverUrl=${url.origin}`);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!effectiveUrl) {
+      if (!hasHydrated) {
+        setError('正在加载连接信息，请稍候再试…');
+      } else {
+        debugLog('error', 'access守卫', '内存、URL、localStorage 均无 serverUrl', { hasHydrated, serverUrl });
+        setError('未找到服务器地址，请返回欢迎页重新连接');
+      }
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
       const res = await submitWelcomeCode(code, captchaData);
       if (res.err === 'ok') {
         setShowCaptcha(false);
-        router.back();
+        // 验证成功后进入书架主页，而不是 router.back()（那会退回 welcome 连接页）
+        router.push('/shelf');
       } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
         setError(res.msg || '请输入人机验证码');
         setShowCaptcha(true);
@@ -77,5 +153,13 @@ export default function AccessPage() {
         onSuccess={(data: any) => handleVerify(data)}
       />
     </main>
+  );
+}
+
+export default function AccessPage() {
+  return (
+    <Suspense fallback={null}>
+      <AccessPageInner />
+    </Suspense>
   );
 }

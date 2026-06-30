@@ -2,6 +2,7 @@
 
 import '@/app/globals.css';
 import { ServerProvider } from '@/components/providers/ServerProvider';
+import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
 
 export default function RootLayout({
   children,
@@ -19,6 +20,7 @@ export default function RootLayout({
         <ServerProvider>
           {children}
         </ServerProvider>
+        <DebugLogPanel />
       </body>
     </html>
   );

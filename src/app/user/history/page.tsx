@@ -8,6 +8,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
+import { AuthImage } from '@/components/ui/AuthImage';
 
 type HistoryType = 'reading' | 'finished' | 'read_history' | 'download_history' | 'push_history' | 'upload_history';
 
@@ -208,7 +209,13 @@ export default function UserHistoryPage() {
                 >
                   <div className="w-12 h-[72px] rounded-lg overflow-hidden shadow-card shrink-0 flex items-center justify-center bg-muted">
                     {coverUrl ? (
-                      <img src={coverUrl} alt={item.title} className="w-full h-full object-cover" loading="lazy" />
+                      <AuthImage
+                        src={coverUrl}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                        fallback={<span className="text-foreground/30 text-sm font-bold font-serif">{item.title[0]}</span>}
+                      />
                     ) : (
                       <span className="text-foreground/30 text-sm font-bold font-serif">{item.title[0]}</span>
                     )}

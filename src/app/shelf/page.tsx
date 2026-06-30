@@ -8,6 +8,7 @@ import { BookOpen, History, Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
+import { AuthImage } from '@/components/ui/AuthImage';
 
 interface BookItem {
   id: string | number;
@@ -40,7 +41,19 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
         <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
           style={{ aspectRatio: '2/3' }}>
           {coverUrl ? (
-            <img src={coverUrl} alt={book.title} className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105" loading="lazy" />
+            <AuthImage
+              src={coverUrl}
+              alt={book.title}
+              className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              loading="lazy"
+              fallback={
+                <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
+                  <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
+                    {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
+                  </span>
+                </div>
+              }
+            />
           ) : (
             <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
               <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
@@ -65,7 +78,19 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
       className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group">
       <div className="w-10 h-[60px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
         {coverUrl ? (
-          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+          <AuthImage
+            src={coverUrl}
+            alt={book.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            fallback={
+              <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
+                <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
+                  {book.title.length > 2 ? book.title.slice(0, 2) : book.title}
+                </span>
+              </div>
+            }
+          />
         ) : (
           <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
             <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
@@ -101,7 +126,7 @@ export default function ShelfPage() {
     setLoading(true);
     setRequiresLogin(false);
     try {
-      const res = await request(`${serverUrl}/api/wants`, { credentials: 'include' });
+      const res = await request(`${serverUrl}/api/shelf`, { credentials: 'include' });
       const data = await res.json();
 
       if (data.err === 'user.need_login') {

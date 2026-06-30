@@ -8,6 +8,7 @@ import { Search, Grid3X3, List } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
+import { AuthImage } from '@/components/ui/AuthImage';
 
 interface BookItem {
   id: string | number;
@@ -113,7 +114,17 @@ function SearchContent() {
                       <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
                         style={{ aspectRatio: '2/3' }}>
                         {coverUrl ? (
-                          <img src={coverUrl} alt={book.title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+                          <AuthImage
+                            src={coverUrl}
+                            alt={book.title}
+                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                            loading="lazy"
+                            fallback={
+                              <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+                                <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
+                              </div>
+                            }
+                          />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
                             <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
@@ -135,7 +146,17 @@ function SearchContent() {
                     className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm">
                     <div className="w-10 h-[60px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
                       {coverUrl ? (
-                        <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" loading="lazy" />
+                        <AuthImage
+                          src={coverUrl}
+                          alt={book.title}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          fallback={
+                            <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+                              <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
+                            </div>
+                          }
+                        />
                       ) : (
                         <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
                           <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>

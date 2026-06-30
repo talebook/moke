@@ -10,7 +10,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { serverUrl, hasHydrated, setServerTitle, setUser } = useServerStore();
 
-  const publicPaths = ['/welcome', '/login', '/register', '/access'];
+  const publicPaths = ['/welcome', '/login', '/register', '/access', '/settings/developer'];
 
   useEffect(() => {
     if (!hasHydrated) return;

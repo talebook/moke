@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState, useRef } from 'react';
 import { ArrowLeft, BookOpen, ExternalLink, HeartHandshake, Info, Sparkles, X } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
+import { useDeveloperStore } from '@/lib/store/developer';
 
 interface Contributor {
   id: string;
@@ -35,6 +36,43 @@ export default function AboutPage() {
   const [activeEgg, setActiveEgg] = useState<{ image: string; caption: string } | null>(null);
   const clickCountMap = useRef<Record<string, number>>({});
   const clickTimerMap = useRef<Record<string, NodeJS.Timeout>>({});
+
+  const { unlocked, enabled, setEnabled, tapVersion } = useDeveloperStore();
+  const [devHint, setDevHint] = useState('');
+  const devHintTimer = useRef<NodeJS.Timeout | null>(null);
+  // 已解锁但被隐藏时，用一个独立计数器统计连点，达到 8 次后重新显示入口
+  const reshowTapsRef = useRef(0);
+
+  const handleVersionClick = () => {
+    if (unlocked) {
+      if (enabled) {
+        setDevHint('开发者选项已解锁');
+      } else {
+        // 开发者选项已解锁但被隐藏：连点 8 次重新显示入口
+        reshowTapsRef.current += 1;
+        const remaining = 8 - reshowTapsRef.current;
+        if (remaining <= 0) {
+          reshowTapsRef.current = 0;
+          setEnabled(true);
+          setDevHint('🎉 已重新显示开发者选项！请前往设置查看');
+        } else if (remaining <= 5) {
+          setDevHint(`再点击 ${remaining} 次即可重新显示开发者选项`);
+        }
+      }
+    } else {
+      const justUnlocked = tapVersion();
+      if (justUnlocked) {
+        setDevHint('🎉 已解锁开发者选项！请前往设置查看');
+      } else {
+        const remaining = 8 - (useDeveloperStore.getState().versionTapCount);
+        if (remaining <= 5) {
+          setDevHint(`再点击 ${remaining} 次即可解锁开发者选项`);
+        }
+      }
+    }
+    if (devHintTimer.current) clearTimeout(devHintTimer.current);
+    devHintTimer.current = setTimeout(() => setDevHint(''), 2000);
+  };
 
   const handleContributorClick = (c: Contributor) => {
     if (!c.easterEgg) return;
@@ -97,9 +135,12 @@ export default function AboutPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               <InfoRow label="应用名称" value="墨客" />
-              <InfoRow label="应用版本" value="v0.1.0" />
+              <InfoRow label="应用版本" value="v0.1.0" onClick={handleVersionClick} highlight={unlocked} />
               <InfoRow label="定位" value="Talebook 桌面客户端" />
             </div>
+            {devHint && (
+              <p className="mt-3 text-xs text-primary font-medium animate-in fade-in duration-200">{devHint}</p>
+            )}
           </section>
 
           <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
@@ -180,11 +221,16 @@ export default function AboutPage() {
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, onClick, highlight }: { label: string; value: string; onClick?: () => void; highlight?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-2xl bg-white/55 border border-amber-950/10 px-4 py-3">
+    <div
+      onClick={onClick}
+      className={`flex items-start justify-between gap-4 rounded-2xl border px-4 py-3 transition-colors ${
+        onClick ? 'cursor-pointer select-none hover:bg-white/80 active:scale-[0.99]' : ''
+      } ${highlight ? 'border-primary/40 bg-primary/5' : 'border-amber-950/10 bg-white/55'}`}
+    >
       <span className="text-muted-foreground shrink-0">{label}</span>
-      <span className="text-foreground text-right break-all">{value}</span>
+      <span className={`text-right break-all ${highlight ? 'text-primary font-medium' : 'text-foreground'}`}>{value}</span>
     </div>
   );
 }

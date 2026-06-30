@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
+import { useDeveloperStore } from '@/lib/store/developer';
+import { debugLog } from '@/lib/debug-log';
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -12,6 +14,23 @@ export default function WelcomePage() {
   const [serverUrl, setServerUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 主页版本号连点 8 次：解锁并直接进入开发者选项（无任何提示）
+  const versionClicksRef = useRef(0);
+  const versionClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleVersionClick = () => {
+    versionClicksRef.current += 1;
+    if (versionClickTimerRef.current) clearTimeout(versionClickTimerRef.current);
+    if (versionClicksRef.current >= 8) {
+      versionClicksRef.current = 0;
+      useDeveloperStore.getState().unlock();
+      router.push('/settings/developer');
+      return;
+    }
+    versionClickTimerRef.current = setTimeout(() => {
+      versionClicksRef.current = 0;
+    }, 2000);
+  };
 
   const normalizeServerUrl = (value: string) => {
     const input = value.trim();
@@ -52,7 +71,22 @@ export default function WelcomePage() {
 
       console.log('[WelcomePage] connect OK, needsAccessCode:', welcome.needsAccessCode);
       setServer(parsed.protocol, parsed.host, parsed.port);
-      router.push(welcome.needsAccessCode ? '/access' : '/shelf');
+
+      // release WebView 下 zustand persist 与 URL query 跨页都不可靠，
+      // 直接手动写一个独立的 localStorage 键，并立即回读校验
+      try {
+        localStorage.setItem('moke_server_url', parsed.origin);
+        const verify = localStorage.getItem('moke_server_url');
+        debugLog('info', 'welcome', `手动写入 localStorage moke_server_url=${parsed.origin}, 回读=${verify}`);
+      } catch (e) {
+        debugLog('error', 'welcome', `localStorage 写入失败: ${String(e)}`);
+      }
+
+      if (welcome.needsAccessCode) {
+        router.push(`/access?server=${encodeURIComponent(parsed.origin)}`);
+      } else {
+        router.push('/shelf');
+      }
     } catch (e) {
       console.error('[WelcomePage] connect exception:', e);
       setError('请输入正确的服务器地址');
@@ -132,7 +166,7 @@ export default function WelcomePage() {
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">
-            <span>v0.1.0</span>
+            <span onClick={handleVersionClick} className="cursor-default select-none">v0.1.0</span>
             <a href="https://github.com/talebook/moke" target="_blank" rel="noopener noreferrer" className="hover:underline">
               GitHub
             </a>

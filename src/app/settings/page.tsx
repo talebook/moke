@@ -3,18 +3,27 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, LogOut, PlugZap, Settings2, ShieldAlert, User } from 'lucide-react';
+import { ArrowRight, BookOpen, LogOut, PlugZap, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
+import { useDeveloperStore } from '@/lib/store/developer';
 
 export default function SettingsPage() {
   const router = useRouter();
   const { serverTitle, serverUrl, user, disconnect, logout } = useServerStore();
+  const unlocked = useDeveloperStore((s) => s.unlocked);
+  const developerEnabled = useDeveloperStore((s) => s.enabled);
   const [serverVersion, setServerVersion] = useState('获取中...');
 
   useEffect(() => {
     let cancelled = false;
+
+    // serverUrl 为空时（如已断开连接），不发起请求，避免无前缀 URL 报错
+    if (!serverUrl) {
+      setServerVersion('未连接');
+      return;
+    }
 
     const loadServerInfo = async () => {
       try {
@@ -43,11 +52,14 @@ export default function SettingsPage() {
   };
 
   const handleLogout = async () => {
-    try {
-      await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-    } catch {}
+    if (serverUrl) {
+      try {
+        await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
+      } catch {}
+    }
     logout();
     localStorage.removeItem('moke-auth-token');
+    router.push('/login');
   };
 
   return (
@@ -111,6 +123,17 @@ export default function SettingsPage() {
               description="后续可以继续拆分出界面、阅读、实验功能等独立设置块"
             />
           </SettingsSection>
+
+          {unlocked && developerEnabled && (
+            <SettingsSection title="开发者" description="调试与诊断相关功能，仅开发者可见">
+              <SettingsLinkRow
+                icon={Code2}
+                label="开发者选项"
+                description="崩溃测试、调试面板开关等诊断工具"
+                href="/settings/developer"
+              />
+            </SettingsSection>
+          )}
         </div>
       </div>
     </DesktopLayout>

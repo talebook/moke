@@ -8,6 +8,7 @@ import { downloadBookBlob, request } from '@/lib/api';
 import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
 import { useServerStore } from '@/lib/store/server';
 import { resolveServerAssetUrl } from '@/lib/utils';
+import { AuthImage } from '@/components/ui/AuthImage';
 
 interface BookDetail {
   id: string;
@@ -135,11 +136,11 @@ function DetailContent() {
     setMessage('');
 
     try {
-      const res = await request(`${serverUrl}/api/book/${book.id}/wants`, {
+      const res = await request(`${serverUrl}/api/book/${book.id}/shelf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ wants: nextInShelf }),
+        body: JSON.stringify({ shelf: nextInShelf }),
       });
       const data = await res.json();
 
@@ -219,9 +220,11 @@ function DetailContent() {
     try {
       const record = await getOfflineBook(serverUrl, id!);
       if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
-        const { Command } = await import('@tauri-apps/plugin-shell');
-        const command = Command.sidecar('bin/readest', [record.filePath]);
-        await command.execute();
+        // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
+        // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
+        // 只需替换打包资源，无需改动这里的调用方式。
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('open_reader', { filePath: record.filePath });
       } else {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
@@ -288,7 +291,12 @@ function DetailContent() {
             <div className="w-[220px] rounded-[24px] overflow-hidden book-cover-shadow border border-amber-950/10 bg-white transition-transform duration-300 hover:scale-[1.02]">
               <div className="aspect-[2/3] flex items-center justify-center bg-muted/60 relative group">
                 {coverUrl ? (
-                  <img src={coverUrl} alt={book.title} className="w-full h-full object-cover" />
+                  <AuthImage
+                    src={coverUrl}
+                    alt={book.title}
+                    className="w-full h-full object-cover"
+                    fallback={<BookOpen className="w-16 h-16 text-muted-foreground/40" />}
+                  />
                 ) : (
                   <BookOpen className="w-16 h-16 text-muted-foreground/40" />
                 )}
