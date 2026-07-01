@@ -138,6 +138,7 @@ export default function DeveloperSettingsPage() {
           </DevSection>
         </div>
         </div>
+      </div>
     </DesktopLayout>
   );
 }
