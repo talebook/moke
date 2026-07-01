@@ -277,7 +277,7 @@ function DetailContent() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8">
+      <div className="px-8 py-8 flex-1 overflow-y-auto">
         <div className="mb-8 rounded-[28px] app-card px-5 py-4">
           <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
