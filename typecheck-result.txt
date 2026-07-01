@@ -1,0 +1,9 @@
+﻿pnpm.exe : [WARN] The "pnpm" field in package.json is no longer read by pnpm. The following keys were ignored: "pnpm.on
+lyBuiltDependencies". See https://pnpm.io/settings for the new home of each setting.
+所在位置 C:\Users\Administrator\AppData\Local\pnpm\bin\pnpm.ps1:14 字符: 3
++   & "$basedir/../global/v11/5a88-19f0280fc93/node_modules/@pnpm/exe/p ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WARN] The "pnp...f each setting.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+$ tsc --noEmit

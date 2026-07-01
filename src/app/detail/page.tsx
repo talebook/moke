@@ -45,6 +45,7 @@ function DetailContent() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [metaExpanded, setMetaExpanded] = useState(false);
+  const [selectedFormat, setSelectedFormat] = useState('epub');
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloaded, setDownloaded] = useState(false);
@@ -98,6 +99,8 @@ function DetailContent() {
       if (data.err === 'ok') {
         setBook(nextBook);
         setInShelf(Boolean(nextBook?.state?.wants));
+        const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
+        setSelectedFormat(format);
         loadReadingState(nextBook?.id || id);
       }
     } catch {} finally { setLoading(false); }
@@ -175,7 +178,7 @@ function DetailContent() {
     setMessage('');
 
     try {
-      const blob = await downloadBookBlob(book.id, 'epub', {
+      const blob = await downloadBookBlob(book.id, selectedFormat, {
         onProgress: (progress) => {
           setDownloadProgress(progress);
         },
@@ -184,8 +187,8 @@ function DetailContent() {
         serverUrl,
         bookId: String(book.id),
         title: book.title,
-        fileName: `${book.title}.epub`,
-        mimeType: blob.type || 'application/epub+zip',
+        fileName: `${book.title}.${selectedFormat}`,
+        mimeType: blob.type || getDefaultMimeType(selectedFormat),
         blob,
       });
 
@@ -321,6 +324,29 @@ function DetailContent() {
                 {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
               </span>
             </button>
+            {book.files && book.files.length > 1 && !downloaded && (
+              <div className="mt-3 w-[220px]">
+                <div className="flex flex-wrap gap-1.5">
+                  {book.files.map((f) => {
+                    const fmt = f.format.toLowerCase();
+                    const isActive = selectedFormat === fmt;
+                    return (
+                      <button
+                        key={fmt}
+                        onClick={() => setSelectedFormat(fmt)}
+                        className={`h-7 px-2.5 rounded-lg text-xs font-medium transition-all border ${
+                          isActive
+                            ? 'bg-primary/10 border-primary/30 text-primary'
+                            : 'bg-muted/50 border-border/40 text-muted-foreground hover:border-border'
+                        }`}
+                      >
+                        {fmt.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <button
               onClick={toggleShelf}
               disabled={shelfUpdating}
@@ -508,6 +534,19 @@ function normalizeNames(items?: string[] | Array<{ name: string }>, fallback?: s
   }
 
   return [];
+}
+
+function getDefaultMimeType(format: string) {
+  const mimeMap: Record<string, string> = {
+    epub: 'application/epub+zip',
+    pdf: 'application/pdf',
+    mobi: 'application/x-mobipocket-ebook',
+    azw3: 'application/vnd.amazon.ebook',
+    txt: 'text/plain',
+    rtf: 'application/rtf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  return mimeMap[format.toLowerCase()] || 'application/octet-stream';
 }
 
 function formatFileSize(size: number) {
