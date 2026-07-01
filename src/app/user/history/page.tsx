@@ -233,7 +233,6 @@ export default function UserHistoryPage() {
           </div>
         )}
       </div>
-        </div>
       </div>
     </DesktopLayout>
   );
