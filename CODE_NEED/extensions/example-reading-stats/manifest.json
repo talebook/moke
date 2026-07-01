@@ -1,0 +1,32 @@
+{
+  "name": "reading-stats",
+  "version": "1.0.0",
+  "api_version": "1",
+  "display_name": "阅读统计",
+  "description": "示例拓展：展示阅读时长、进度和翻页统计",
+  "author": "Moke 开发团队",
+
+  "entry": {
+    "ui_port": 0,
+    "backend": {
+      "executable": "server.exe",
+      "args": ["--ext-port", "{EXT_PORT}"]
+    }
+  },
+
+  "sidebar": {
+    "label": "阅读统计",
+    "icon": "chart-line",
+    "order": 100
+  },
+
+  "permissions": [
+    "books.read",
+    "user.profile",
+    "reader.events.subscribe",
+    "reader.state.read",
+    "storage"
+  ],
+
+  "lucide_icons": ["chart-line", "bar-chart-3", "clock"]
+}

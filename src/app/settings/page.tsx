@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, LogOut, PlugZap, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, LogOut, Package, PlugZap, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -119,12 +119,19 @@ export default function SettingsPage() {
               href="/settings"
               disabled
             />
-            <StaticInfoRow
-              icon={ShieldAlert}
-              label="更多设置"
-              description="后续可以继续拆分出界面、阅读、实验功能等独立设置块"
-            />
           </SettingsSection>
+
+          {/* 只有桌面端才显示拓展管理入口 */}
+          {process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' && (
+            <SettingsSection title="拓展" description="管理已安装的拓展程序">
+              <SettingsLinkRow
+                icon={Package}
+                label="拓展管理"
+                description="查看、启用或卸载已安装的拓展"
+                href="/extensions"
+              />
+            </SettingsSection>
+          )}
 
           {unlocked && developerEnabled && (
             <SettingsSection title="开发者" description="调试与诊断相关功能，仅开发者可见">

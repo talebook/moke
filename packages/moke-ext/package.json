@@ -1,0 +1,14 @@
+{
+  "name": "moke-ext",
+  "version": "0.1.0",
+  "description": "Moke extension scaffolding CLI",
+  "type": "module",
+  "bin": {
+    "moke-ext": "./bin/moke-ext.js"
+  },
+  "scripts": {
+    "start": "node bin/moke-ext.js"
+  },
+  "keywords": ["moke", "extension", "cli"],
+  "license": "MIT"
+}

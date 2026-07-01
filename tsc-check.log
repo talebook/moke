@@ -1,0 +1,6 @@
+﻿src/lib/store/extensions.ts(114,22): error TS2352: Conversion of type 'Record<string, unknown>[]' to type 'ExtensionInfo[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'ExtensionInfo': name, version, displayName, description, and 6 more.
+src/lib/store/extensions.ts(114,60): error TS2345: Argument of type '(obj: Record<string, unknown>) => Record<string, unknown>' is not assignable to parameter of type '(value: ExtensionInfo, index: number, array: ExtensionInfo[]) => Record<string, unknown>'.
+  Types of parameters 'obj' and 'value' are incompatible.
+    Type 'ExtensionInfo' is not assignable to type 'Record<string, unknown>'.
+      Index signature for type 'string' is missing in type 'ExtensionInfo'.

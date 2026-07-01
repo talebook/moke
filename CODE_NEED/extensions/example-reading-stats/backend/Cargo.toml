@@ -1,0 +1,11 @@
+[package]
+name = "reading-stats-backend"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+tiny_http = "0.12"

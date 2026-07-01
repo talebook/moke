@@ -1,14 +1,26 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Bookmark, Library, LogIn, Settings } from 'lucide-react';
+import { BookOpen, Bookmark, Library, LogIn, Package, Puzzle, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useServerStore } from '@/lib/store/server';
+import { useExtensionStore } from '@/lib/store/extensions';
 
 export function Sidebar() {
   const pathname = usePathname();
   const { serverTitle, user } = useServerStore();
+  const { extensions, loaded, loadExtensions, getSidebarExtensions } = useExtensionStore();
+  const [sidebarExts, setSidebarExts] = useState<ReturnType<typeof getSidebarExtensions>>([]);
+
+  useEffect(() => {
+    if (!loaded) loadExtensions();
+  }, [loaded, loadExtensions]);
+
+  useEffect(() => {
+    setSidebarExts(getSidebarExtensions());
+  }, [extensions, getSidebarExtensions]);
 
   const navItems = [
     { href: '/shelf', icon: Bookmark, label: '书架' },
@@ -16,6 +28,13 @@ export function Sidebar() {
     { href: '/search', icon: null, label: null, hidden: true },
     { href: '/settings', icon: Settings, label: '设置' },
   ];
+
+  // 拓展侧边栏项
+  const extNavItems = sidebarExts.map((ext) => ({
+    href: `/extensions/view?name=${ext.name}`,
+    icon: Package,
+    label: ext.sidebar?.label ?? ext.displayName,
+  }));
 
   return (
     <aside className="fixed left-0 top-0 h-full w-[220px] flex flex-col z-10 bg-primary">
@@ -28,7 +47,7 @@ export function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex-1 flex flex-col gap-1 px-3 pt-4">
+      <nav className="flex-1 flex flex-col gap-1 px-3 pt-4 overflow-y-auto">
         {navItems.filter((i) => !i.hidden).map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -47,6 +66,36 @@ export function Sidebar() {
             </Link>
           );
         })}
+
+        {/* 拓展分隔 & 拓展导航项 */}
+        {extNavItems.length > 0 && (
+          <>
+            <div className="mx-3 my-1 h-px bg-white/10" />
+            <div className="px-3 py-1">
+              <span className="text-[10px] font-medium text-white/30 uppercase tracking-wider">
+                拓展
+              </span>
+            </div>
+            {extNavItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150',
+                    isActive
+                      ? 'bg-white/10 text-primary-foreground'
+                      : 'text-white/55 hover:text-white hover:bg-white/5'
+                  )}
+                >
+                  <item.icon className="w-5 h-5" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </>
+        )}
       </nav>
 
       <div className="px-4 py-4 border-t border-white/10">

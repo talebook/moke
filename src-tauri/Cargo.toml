@@ -52,3 +52,9 @@ tauri-plugin-log = "2"
 tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
 tauri-plugin-native-bridge = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge" }
 tauri-plugin-native-tts = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts" }
+
+# 拓展系统
+uuid = { version = "1", features = ["v4"] }
+log = "0.4"
+tiny_http = "0.12"
+tungstenite = "0.24"

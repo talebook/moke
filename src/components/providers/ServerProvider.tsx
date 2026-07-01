@@ -12,9 +12,12 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
   const publicPaths = ['/welcome', '/login', '/register', '/access', '/settings/developer'];
 
+  // 拓展管理页面是本地功能，不需要连接服务器
+  const isExtensionPath = pathname.startsWith('/extensions');
+
   useEffect(() => {
     if (!hasHydrated) return;
-    if (publicPaths.includes(pathname)) return;
+    if (publicPaths.includes(pathname) || isExtensionPath) return;
     if (!serverUrl) {
       router.replace('/welcome');
     }
@@ -22,7 +25,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hasHydrated) return;
-    if (publicPaths.includes(pathname)) return;
+    if (publicPaths.includes(pathname) || isExtensionPath) return;
     if (!serverUrl) return;
 
     let cancelled = false;

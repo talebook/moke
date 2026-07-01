@@ -1,0 +1,1 @@
+C:\Users\Administrator\Documents\GitHub\talebook_client\CODE_NEED\extensions\example-reading-stats\backend\target\release\server.exe: C:\Users\Administrator\Documents\GitHub\talebook_client\CODE_NEED\extensions\example-reading-stats\backend\src\main.rs

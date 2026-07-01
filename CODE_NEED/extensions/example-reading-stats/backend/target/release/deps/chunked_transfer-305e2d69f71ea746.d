@@ -1,0 +1,9 @@
+C:\Users\Administrator\Documents\GitHub\talebook_client\CODE_NEED\extensions\example-reading-stats\backend\target\release\deps\chunked_transfer-305e2d69f71ea746.d: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\decoder.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\encoder.rs
+
+C:\Users\Administrator\Documents\GitHub\talebook_client\CODE_NEED\extensions\example-reading-stats\backend\target\release\deps\libchunked_transfer-305e2d69f71ea746.rlib: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\decoder.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\encoder.rs
+
+C:\Users\Administrator\Documents\GitHub\talebook_client\CODE_NEED\extensions\example-reading-stats\backend\target\release\deps\libchunked_transfer-305e2d69f71ea746.rmeta: C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\lib.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\decoder.rs C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\encoder.rs
+
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\lib.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\decoder.rs:
+C:\Users\Administrator\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\chunked_transfer-1.5.0\src\encoder.rs:
