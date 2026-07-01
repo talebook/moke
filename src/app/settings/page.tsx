@@ -8,6 +8,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
+import { APP_VERSION } from '@/lib/app-version';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -104,7 +105,7 @@ export default function SettingsPage() {
           </SettingsSection>
 
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
-            <SettingsRow label="应用版本" value="v0.1.4" />
+            <SettingsRow label="应用版本" value={APP_VERSION} />
             <SettingsLinkRow
               icon={BookOpen}
               label="关于应用"

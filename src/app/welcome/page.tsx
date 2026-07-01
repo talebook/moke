@@ -7,6 +7,7 @@ import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { debugLog } from '@/lib/debug-log';
+import { APP_VERSION } from '@/lib/app-version';
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -166,7 +167,7 @@ export default function WelcomePage() {
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">
-            <span onClick={handleVersionClick} className="cursor-default select-none">v0.1.4</span>
+            <span onClick={handleVersionClick} className="cursor-default select-none">{APP_VERSION}</span>
             <a href="https://github.com/talebook/moke" target="_blank" rel="noopener noreferrer" className="hover:underline">
               GitHub
             </a>
