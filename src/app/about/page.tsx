@@ -136,7 +136,7 @@ export default function AboutPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               <InfoRow label="应用名称" value="墨客" />
-              <InfoRow label="应用版本" value="v0.1.3" onClick={handleVersionClick} highlight={unlocked} />
+              <InfoRow label="应用版本" value="v0.1.4" onClick={handleVersionClick} highlight={unlocked} />
               <InfoRow label="定位" value="Talebook 桌面客户端" />
             </div>
             {devHint && (
