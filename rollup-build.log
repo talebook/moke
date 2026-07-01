@@ -1,0 +1,30 @@
+﻿node.exe : [36m
+所在位置 行:1 字符: 1
++ & "D:\Program Files\nodejs/node.exe" "D:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([36m:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[1mrollup/fflate.js[22m 鈫?[1mvendor/[22m...[39m
+[1m[33m(!) [plugin node-resolve] Could not resolve import "rollup/fflate.js" in undefined using exports defined in C:
+\Users\Administrator\Documents\GitHub\talebook_client\readest\node_modules\.pnpm\rollup@4.60.3\node_modules\rollup\pack
+age.json.[39m[22m
+[32mcreated [1mvendor/[22m in [1m226ms[22m[39m
+[36m
+[1mrollup/zip.js[22m 鈫?[1mvendor/[22m...[39m
+[1m[33m(!) [plugin node-resolve] Could not resolve import "rollup/zip.js" in undefined using exports defined in C:\Us
+ers\Administrator\Documents\GitHub\talebook_client\readest\node_modules\.pnpm\rollup@4.60.3\node_modules\rollup\package
+.json.[39m[22m
+[1m[31m[!] [1mRollupError: Could not resolve "../node_modules/@zip.js/zip.js/lib/zip-no-worker-inflate.js" from "rol
+lup/zip.js"[22m[1m[39m[22m
+rollup/zip.js
+[2m    at getRollupError (C:\Users\Administrator\Documents\GitHub\talebook_client\readest\node_modules\.pnpm\rollup@4.
+60.3\node_modules\rollup\dist\shared\parseAst.js:289:41)
+    at Object.error (C:\Users\Administrator\Documents\GitHub\talebook_client\readest\node_modules\.pnpm\rollup@4.60.3\n
+ode_modules\rollup\dist\shared\parseAst.js:285:42)
+    at ModuleLoader.handleInvalidResolvedId (C:\Users\Administrator\Documents\GitHub\talebook_client\readest\node_modul
+es\.pnpm\rollup@4.60.3\node_modules\rollup\dist\shared\rollup.js:23355:36)
+    at C:\Users\Administrator\Documents\GitHub\talebook_client\readest\node_modules\.pnpm\rollup@4.60.3\node_modules\ro
+llup\dist\shared\rollup.js:23315:26[22m
+
+
