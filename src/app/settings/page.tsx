@@ -64,7 +64,8 @@ export default function SettingsPage() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 flex-1 overflow-y-auto" style={{ maxWidth: '860px' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="mx-auto" style={{ maxWidth: '860px' }}>
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-foreground">设置</h1>
           <p className="text-sm text-muted-foreground mt-1">管理账户、连接信息与应用相关内容</p>
@@ -134,6 +135,7 @@ export default function SettingsPage() {
               />
             </SettingsSection>
           )}
+        </div>
         </div>
       </div>
     </DesktopLayout>

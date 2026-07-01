@@ -137,7 +137,8 @@ export default function UserHistoryPage() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 flex-1 overflow-y-auto" style={{ maxWidth: '1200px' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="mx-auto" style={{ maxWidth: '1200px' }}>
         <div className="flex items-center gap-3 mb-8">
           <button
             onClick={() => router.back()}
@@ -232,6 +233,7 @@ export default function UserHistoryPage() {
           </div>
         )}
       </div>
+        </div>
     </DesktopLayout>
   );
 }

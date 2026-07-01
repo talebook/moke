@@ -105,7 +105,8 @@ export default function UserPage() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 flex-1 overflow-y-auto" style={{ maxWidth: '1200px' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="mx-auto" style={{ maxWidth: '1200px' }}>
         <div className="flex items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">个人面板</h1>
@@ -195,6 +196,7 @@ export default function UserPage() {
           </div>
         )}
       </div>
+        </div>
     </DesktopLayout>
   );
 }

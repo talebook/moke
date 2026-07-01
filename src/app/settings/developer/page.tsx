@@ -62,7 +62,8 @@ export default function DeveloperSettingsPage() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 flex-1 overflow-y-auto" style={{ maxWidth: '860px' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="mx-auto" style={{ maxWidth: '860px' }}>
         <button
           onClick={() => router.push('/settings')}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
@@ -136,7 +137,7 @@ export default function DeveloperSettingsPage() {
             />
           </DevSection>
         </div>
-      </div>
+        </div>
     </DesktopLayout>
   );
 }
