@@ -38,6 +38,19 @@
 - [报告 Bug](../../issues) — 发现 Bug？请告诉我们
 - [参与贡献](CONTRIBUTING.md) — 开发者贡献指南
 
+## 支持
+
+如果 Moke 对你有帮助，欢迎请维护者喝杯咖啡~
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center"><img src="public/contributors/houheya/weixin.jpg" width="200" alt="微信赞赏码" /><br/>微信</td>
+      <td align="center"><img src="public/contributors/houheya/alipay.jpg" width="200" alt="支付宝收款码" /><br/>支付宝</td>
+    </tr>
+  </table>
+</div>
+
 ## 许可证
 
 MIT
