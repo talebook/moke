@@ -104,7 +104,7 @@ export default function SettingsPage() {
           </SettingsSection>
 
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
-            <SettingsRow label="应用版本" value="v0.1.2" />
+            <SettingsRow label="应用版本" value="v0.1.3" />
             <SettingsLinkRow
               icon={BookOpen}
               label="关于应用"
