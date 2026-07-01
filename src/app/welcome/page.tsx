@@ -166,7 +166,7 @@ export default function WelcomePage() {
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">
-            <span onClick={handleVersionClick} className="cursor-default select-none">v0.1.1</span>
+            <span onClick={handleVersionClick} className="cursor-default select-none">v0.1.2</span>
             <a href="https://github.com/talebook/moke" target="_blank" rel="noopener noreferrer" className="hover:underline">
               GitHub
             </a>
