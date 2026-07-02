@@ -200,22 +200,11 @@ jobs:
       - name: Build unsigned iOS app
         if: matrix.platform == 'ios'
         run: |
-          pnpm build
-          pnpm build:reader
-          pnpm copy:reader
-          xcodebuild \
-            -workspace src-tauri/gen/apple/moke.xcodeproj/project.xcworkspace \
-            -scheme moke_iOS \
-            -sdk iphoneos \
-            -configuration release \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath src-tauri/gen/apple/build/DerivedData \
-            CONFIGURATION_BUILD_DIR="$PWD/src-tauri/gen/apple/build/arm64" \
+          pnpm tauri -v ios build --target aarch64 -- \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            build
+            DEVELOPMENT_TEAM=""
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
@@ -224,6 +213,9 @@ jobs:
         run: |
           mkdir -p ios-release-artifacts/Payload
           app_path="$(find src-tauri/gen/apple/build/arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          if [ -z "$app_path" ]; then
+            app_path="$(find src-tauri/gen/apple -name '*.app' -type d | head -n 1)"
+          fi
           if [ -z "$app_path" ]; then
             echo "No iOS .app found." >&2
             exit 1
