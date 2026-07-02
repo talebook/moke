@@ -58,3 +58,11 @@ uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 tiny_http = "0.12"
 tungstenite = "0.24"
+
+[profile.release]
+# Runtime-optimized: single codegen unit + fat LTO for maximum cross-crate optimization.
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true
+panic = "abort"

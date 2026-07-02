@@ -36,6 +36,7 @@ CODE_NEED/extensions/*/storage.json
 CODE_NEED/extensions/*/runtime.json
 CODE_NEED/extensions/*/*.tmp
 *.log
+*.exe
 
 # IDE
 .vscode/

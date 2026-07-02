@@ -10,6 +10,11 @@ const nextConfig = {
   },
   devIndicators: false,
   reactStrictMode: true,
+  experimental: {
+    turbopackFileSystemCacheForDev: true,
+    turbopackFileSystemCacheForBuild: true,
+    turbopackMemoryLimit: 8192, // MB — use more RAM for fewer GC pauses
+  },
   // In dev mode, proxy /readest/* to readest's dev server (port 3001) so the
   // reader window loads through the same origin and avoids Tauri remote-URL
   // permission issues.

@@ -455,10 +455,14 @@ fn ext_reader_event(
     // 通过 WS 广播给已连接的后端拓展（Tauri emit 和 WS broadcast 统一使用 reader: 前缀）
     let full_event = format!("reader:{}", event);
     let data_str = serde_json::to_string(&data).unwrap_or_default();
-    let _ = state.ws_broadcast.send(events::WsBroadcast {
+    if let Err(e) = state.ws_broadcast.send(events::WsBroadcast {
         event: full_event.clone(),
-        data: data_str,
-    });
+        data: data_str.clone(),
+    }) {
+        log::error!("[ext] WS 广播事件 {full_event} 失败: {e}");
+    } else {
+        log::debug!("[ext] 事件已发送: {full_event} data={data_str}");
+    }
 
     // 同时通过 Tauri event 发送给前端监听器
     app.emit(&full_event, &data)

@@ -27,6 +27,8 @@ struct Client {
     ws: tungstenite::WebSocket<std::net::TcpStream>,
     extension_name: String,
     subscriptions: Vec<String>,
+    /// 最后一次收到消息或 pong 的时间，用于心跳超时检测。
+    last_activity: std::time::Instant,
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +65,10 @@ pub fn start(
         let mut clients: Vec<Client> = Vec::new();
         // 事件重放缓存：event → 最近一次广播的 JSON payload
         let mut last_events: HashMap<String, String> = HashMap::new();
+        // 心跳 tick 计数器
+        let mut tick: u64 = 0;
+        const HEARTBEAT_INTERVAL: u64 = 20; // 每 20 tick (~1s) 发一次 ping
+        const STALE_TIMEOUT_SECS: u64 = 30;
 
         loop {
             // 1. 接受新连接
@@ -90,6 +96,7 @@ pub fn start(
                                 ws,
                                 extension_name: name,
                                 subscriptions: subs,
+                                last_activity: std::time::Instant::now(),
                             });
                         }
                         Err(e) => {
@@ -117,17 +124,25 @@ pub fn start(
             clients.retain_mut(|client| {
                 match client.ws.read() {
                     Ok(tungstenite::Message::Text(text)) => {
+                        client.last_activity = std::time::Instant::now();
                         if text == "ping" {
                             let _ = client.ws.send(tungstenite::Message::Text("pong".into()));
                         }
                         true
                     }
-                    Ok(tungstenite::Message::Binary(_)) => true,
+                    Ok(tungstenite::Message::Binary(_)) => {
+                        client.last_activity = std::time::Instant::now();
+                        true
+                    }
                     Ok(tungstenite::Message::Ping(data)) => {
+                        client.last_activity = std::time::Instant::now();
                         let _ = client.ws.send(tungstenite::Message::Pong(data));
                         true
                     }
-                    Ok(tungstenite::Message::Pong(_)) => true,
+                    Ok(tungstenite::Message::Pong(_)) => {
+                        client.last_activity = std::time::Instant::now();
+                        true
+                    }
                     Ok(tungstenite::Message::Close(_)) => {
                         log::info!("WS 客户端断开: {}", client.extension_name);
                         false
@@ -150,7 +165,34 @@ pub fn start(
                 }
             });
 
-            // 4. 短暂休眠避免忙等
+            // 4. 心跳：定期 ping 客户端 + 清理超时连接
+            tick = tick.wrapping_add(1);
+            if tick % HEARTBEAT_INTERVAL == 0 {
+                let now = std::time::Instant::now();
+                // 发送 ping 帧，并清理超时（STALE_TIMEOUT_SECS 无活动）的连接
+                clients.retain_mut(|client| {
+                    if now.duration_since(client.last_activity)
+                        > Duration::from_secs(STALE_TIMEOUT_SECS)
+                    {
+                        log::warn!(
+                            "[ext] WS 客户端 {} 心跳超时，断开连接",
+                            client.extension_name
+                        );
+                        return false;
+                    }
+                    // 发送 WebSocket Ping，接收方自动回复 Pong
+                    if let Err(e) = client.ws.send(tungstenite::Message::Ping(vec![])) {
+                        log::warn!(
+                            "[ext] WS ping 失败 ({}): {e}",
+                            client.extension_name
+                        );
+                        return false;
+                    }
+                    true
+                });
+            }
+
+            // 5. 短暂休眠避免忙等
             thread::sleep(Duration::from_millis(50));
         }
     });
