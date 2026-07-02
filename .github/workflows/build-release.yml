@@ -39,7 +39,7 @@ jobs:
           - platform: android
             os: ubuntu-22.04
           - platform: ios
-            os: macos-latest
+            os: macos-15
 
     permissions:
       contents: write
@@ -95,12 +95,9 @@ jobs:
           rustup target add i686-linux-android
           rustup target add x86_64-linux-android
 
-      - name: Install iOS Rust targets
+      - name: Install iOS Rust target
         if: matrix.platform == 'ios'
-        run: |
-          rustup target add aarch64-apple-ios
-          rustup target add aarch64-apple-ios-sim
-          rustup target add x86_64-apple-ios
+        run: rustup target add aarch64-apple-ios
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -162,7 +159,9 @@ jobs:
 
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
-        run: pnpm tauri android init
+        run: |
+          pnpm tauri android init
+          chmod +x src-tauri/gen/android/gradlew
 
       - name: Configure Android signing
         if: matrix.platform == 'android'
@@ -190,7 +189,7 @@ jobs:
 
       - name: Build Android APK
         if: matrix.platform == 'android'
-        run: pnpm tauri android build
+        run: pnpm tauri -v android build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
@@ -198,15 +197,9 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
-      - name: Build iOS simulator release arm64
+      - name: Build iOS release
         if: matrix.platform == 'ios'
-        run: pnpm tauri ios build --target aarch64-sim
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Build iOS simulator release x86_64
-        if: matrix.platform == 'ios'
-        run: pnpm tauri ios build --target x86_64
+        run: pnpm tauri -v ios build --target aarch64
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
