@@ -197,6 +197,18 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
+      - name: Configure unsigned iOS build
+        if: matrix.platform == 'ios'
+        run: |
+          cat > "$RUNNER_TEMP/ios-nosign.xcconfig" <<'EOF'
+          CODE_SIGNING_ALLOWED = NO
+          CODE_SIGNING_REQUIRED = NO
+          CODE_SIGN_IDENTITY =
+          DEVELOPMENT_TEAM =
+          PROVISIONING_PROFILE_SPECIFIER =
+          EOF
+          echo "XCODE_XCCONFIG_FILE=$RUNNER_TEMP/ios-nosign.xcconfig" >> "$GITHUB_ENV"
+
       - name: Build unsigned iOS app
         if: matrix.platform == 'ios'
         run: |
