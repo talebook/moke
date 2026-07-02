@@ -21,8 +21,6 @@
   },
 
   "permissions": [
-    "books.read",
-    "user.profile",
     "reader.events.subscribe",
     "reader.state.read",
     "storage"

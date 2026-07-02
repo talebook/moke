@@ -21,12 +21,42 @@ function DetailContent() {
   const { extensions, loaded, loadExtensions, enableExtension, disableExtension, uninstallExtension } =
     useExtensionStore();
   const [actionInProgress, setActionInProgress] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loaded) loadExtensions();
   }, [loaded, loadExtensions]);
 
   const ext = extensions.find((e) => e.name === name);
+
+  const handleToggle = async () => {
+    if (!ext) return;
+    setActionInProgress(true);
+    setErrorMsg(null);
+    try {
+      if (ext.enabled) await disableExtension(ext.name);
+      else await enableExtension(ext.name);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionInProgress(false);
+    }
+  };
+
+  const handleUninstall = async () => {
+    if (!ext) return;
+    if (!confirm(`确定要卸载 ${ext.displayName} 吗？`)) return;
+    setActionInProgress(true);
+    setErrorMsg(null);
+    try {
+      await uninstallExtension(ext.name);
+      router.push('/extensions');
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionInProgress(false);
+    }
+  };
 
   if (!loaded || !name) {
     return (
@@ -59,31 +89,16 @@ function DetailContent() {
     );
   }
 
-  const handleToggle = async () => {
-    setActionInProgress(true);
-    try {
-      if (ext.enabled) await disableExtension(ext.name);
-      else await enableExtension(ext.name);
-    } finally {
-      setActionInProgress(false);
-    }
-  };
-
-  const handleUninstall = async () => {
-    if (!confirm(`确定要卸载 ${ext.displayName} 吗？`)) return;
-    setActionInProgress(true);
-    try {
-      await uninstallExtension(ext.name);
-      router.push('/extensions');
-    } finally {
-      setActionInProgress(false);
-    }
-  };
-
   return (
     <DesktopLayout>
       <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
         <div className="mx-auto" style={{ maxWidth: '860px' }}>
+          {errorMsg && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive flex items-center justify-between">
+              <span>{errorMsg}</span>
+              <button onClick={() => setErrorMsg(null)} className="ml-2 shrink-0 hover:opacity-70">&times;</button>
+            </div>
+          )}
           <button
             onClick={() => router.push('/extensions')}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"

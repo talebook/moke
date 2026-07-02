@@ -12,7 +12,7 @@ mod storage;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU16;
-use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use tauri::AppHandle;
@@ -36,6 +36,10 @@ pub struct ExtensionRuntime {
     pub api_port: u16,
     /// WebSocket 端口（启动后设置）
     pub ws_port: u16,
+    /// WebSocket 广播发送端，供 ext_reader_event 等向外广播事件
+    pub ws_broadcast: Sender<events::WsBroadcast>,
+    /// 端口分配的起始值（wrap 时回到这里）
+    pub port_range_start: u16,
 }
 
 /// 单个已启用拓展的运行时信息。
@@ -138,24 +142,21 @@ fn start_extension_backend(
         return Ok((0, None));
     };
 
+    // 有 UI 入口但没有后端：分配一个端口供前端 iframe 使用
+    let port_needed = entry.ui_port > 0 || entry.backend.is_some();
+    if !port_needed {
+        return Ok((0, None));
+    }
+
     let Some(backend) = &entry.backend else {
-        return Ok((lifecycle::allocate_port(&state.next_port), None));
+        return Ok((lifecycle::allocate_port(&state.next_port, state.port_range_start), None));
     };
 
     let ext_dir = state.extensions_dir.join(name);
-    let mut last_error = None;
-    for _ in 0..10 {
-        let port = lifecycle::allocate_port(&state.next_port);
-        match lifecycle::start_backend(&ext_dir, backend, port, token) {
-            Ok(child) => return Ok((port, Some(child))),
-            Err(e) => last_error = Some(e),
-        }
-    }
-
-    Err(format!(
-        "无法启动拓展「{name}」后端: {}",
-        last_error.unwrap_or_else(|| "没有可用端口".into())
-    ))
+    let port = lifecycle::allocate_port(&state.next_port, state.port_range_start);
+    lifecycle::start_backend(&ext_dir, backend, port, token, state.api_port, state.ws_port)
+        .map(|child| (port, Some(child)))
+        .map_err(|e| format!("无法启动拓展「{name}」后端: {e}"))
 }
 
 fn stop_extension_backend(ext: EnabledExtension) {
@@ -212,7 +213,7 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
                     order: s.order,
                 }),
                 has_backend,
-                has_ui: has_ui && d.manifest.entry.is_some(),
+                has_ui,
             }
         })
         .collect()
@@ -294,6 +295,11 @@ fn ext_disable_extension(
 }
 
 /// 卸载一个拓展。
+///
+/// 流程：
+/// 1. 先禁用拓展（关闭后端进程、持久化状态）
+/// 2. 尝试运行拓展自带的 uninstall.exe（NSIS 卸载程序，清理注册表等）
+/// 3. uninstall.exe 不存在或失败时，回退到直接删除目录
 #[tauri::command]
 fn ext_uninstall_extension(
     state: tauri::State<'_, ExtensionRuntime>,
@@ -301,7 +307,7 @@ fn ext_uninstall_extension(
 ) -> Result<(), String> {
     lifecycle::validate_extension_name(&name)?;
 
-    // 先取出拓展信息，释放锁，再杀进程和持久化
+    // 1. 先禁用（杀进程 + 持久化）
     let ext = {
         let mut enabled = state.enabled.lock().unwrap();
         enabled.remove(&name)
@@ -312,15 +318,91 @@ fn ext_uninstall_extension(
     }
 
     lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
+    log::info!("拓展「{name}」已禁用，开始卸载...");
 
+    // 2. 尝试运行 uninstall.exe（NSIS 生成的规范卸载程序）
     let ext_dir = state.extensions_dir.join(&name);
+    if !ext_dir.exists() {
+        return Err(format!("拓展目录不存在: {}", ext_dir.display()));
+    }
+
+    let uninstaller = ext_dir.join("uninstall.exe");
+    if uninstaller.exists() {
+        match run_uninstaller(&uninstaller) {
+            Ok(true) => {
+                log::info!("拓展「{name}」已通过 uninstall.exe 卸载");
+                return Ok(());
+            }
+            Ok(false) => {
+                log::warn!("uninstall.exe 已执行但目录仍存在，回退到强制删除");
+            }
+            Err(e) => {
+                log::warn!("uninstall.exe 运行失败: {e}，回退到强制删除");
+            }
+        }
+    } else {
+        log::info!("拓展「{name}」未提供 uninstall.exe，使用强制删除");
+    }
+
+    // 3. 回退：强制删除
     if ext_dir.exists() {
         std::fs::remove_dir_all(&ext_dir)
             .map_err(|e| format!("无法删除拓展目录「{}」: {e}", ext_dir.display()))?;
     }
 
-    log::info!("拓展「{name}」已卸载");
+    log::info!("拓展「{name}」已卸载（强制删除）");
     Ok(())
+}
+
+/// 运行拓展自带的卸载程序。返回 Ok(true) 表示卸载后目录已消失，
+/// Ok(false) 表示程序执行了但目录仍在，Err 表示启动失败。
+fn run_uninstaller(uninstaller: &std::path::Path) -> Result<bool, String> {
+    let mut cmd = std::process::Command::new(uninstaller);
+    // 静默卸载参数（NSIS: /S = silent）
+    cmd.arg("/S").arg("_?=").arg(
+        uninstaller
+            .parent()
+            .unwrap_or(std::path::Path::new(".")),
+    );
+
+    // Windows: 隐藏窗口
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let start = std::time::Instant::now();
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("无法启动 uninstall.exe: {e}"))?;
+
+    // 等待最多 30 秒
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                log::info!(
+                    "uninstall.exe 退出, 状态: {status}, 耗时: {:?}",
+                    start.elapsed()
+                );
+                // 检查目录是否已删除
+                let parent = uninstaller.parent().unwrap_or(std::path::Path::new("."));
+                return Ok(!parent.exists());
+            }
+            Ok(None) => {
+                if start.elapsed() > std::time::Duration::from_secs(30) {
+                    let _ = child.kill();
+                    return Err("uninstall.exe 超时（30 秒）".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(format!("检查 uninstall.exe 状态失败: {e}"));
+            }
+        }
+    }
 }
 
 /// 返回 API Server 的 REST 端口。
@@ -362,7 +444,7 @@ fn ext_diagnostics(
 
 /// 阅读器前端调用：上报事件到拓展系统。
 ///
-/// 事件通过 WS broadcast 转发给已订阅的拓展。
+/// 事件同时通过 Tauri event 和 WS broadcast 发送给已订阅的拓展。
 #[tauri::command]
 fn ext_reader_event(
     state: tauri::State<'_, ExtensionRuntime>,
@@ -370,8 +452,16 @@ fn ext_reader_event(
     event: String,
     data: serde_json::Value,
 ) -> Result<(), String> {
-    // 通过 Tauri event 发送，WS 服务器再统一广播给已订阅拓展
-    app.emit(&format!("reader:{}", event), &data)
+    // 通过 WS 广播给已连接的后端拓展（Tauri emit 和 WS broadcast 统一使用 reader: 前缀）
+    let full_event = format!("reader:{}", event);
+    let data_str = serde_json::to_string(&data).unwrap_or_default();
+    let _ = state.ws_broadcast.send(events::WsBroadcast {
+        event: full_event.clone(),
+        data: data_str,
+    });
+
+    // 同时通过 Tauri event 发送给前端监听器
+    app.emit(&full_event, &data)
         .map_err(|e| format!("发送事件失败: {e}"))?;
 
     Ok(())
@@ -403,8 +493,8 @@ pub fn init(app: &AppHandle) {
 
     let enabled = Arc::new(Mutex::new(HashMap::new()));
 
-    // 1. 先启动 WebSocket 服务器（先占端口）
-    let (ws_port, _) = events::start(enabled.clone(), WS_SERVER_PORT);
+    // 1. 先启动 WebSocket 服务器（先占端口），保留 sender 用于事件广播
+    let (ws_port, ws_sender) = events::start(enabled.clone(), WS_SERVER_PORT);
 
     // 2. 再启动 REST API Server（如果 WS 回退了端口，REST 继续往后试）
     let api_ctx = Arc::new(api_server::ServerContext {
@@ -415,14 +505,14 @@ pub fn init(app: &AppHandle) {
     let api_port = api_server::start(api_ctx, API_SERVER_PORT);
 
     // 3. 拓展端口从 server 之后开始，避免冲突
-    let ext_port_start = u16::max(api_port, ws_port) + 1;
+    let port_range_start = u16::max(api_port, ws_port) + 1;
 
     // 4. 最后恢复上次的启用状态
-    let next_port = Arc::new(AtomicU16::new(ext_port_start));
+    let next_port = Arc::new(AtomicU16::new(port_range_start));
     {
         let runtime_state = extensions_dir.clone();
         let enabled_clone = enabled.clone();
-        let restored_ports = lifecycle::restore_runtime_state_inner(&runtime_state, &enabled_clone);
+        let restored_ports = lifecycle::restore_runtime_state_inner(&runtime_state, &enabled_clone, api_port, ws_port);
         if let Some(max_port) = restored_ports.into_iter().max() {
             lifecycle::reserve_after_port(&next_port, max_port);
         }
@@ -447,6 +537,8 @@ pub fn init(app: &AppHandle) {
         extensions_dir: extensions_dir.clone(),
         api_port,
         ws_port,
+        ws_broadcast: ws_sender,
+        port_range_start,
     };
 
     app.manage(runtime);

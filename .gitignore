@@ -27,6 +27,16 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/bin/readest-*
 
+# extensions
+CODE_NEED/extensions/*/backend/target/
+CODE_NEED/extensions/*/dist/
+CODE_NEED/extensions/*/*.exe
+CODE_NEED/extensions/*/stats.json
+CODE_NEED/extensions/*/storage.json
+CODE_NEED/extensions/*/runtime.json
+CODE_NEED/extensions/*/*.tmp
+*.log
+
 # IDE
 .vscode/
 .idea/

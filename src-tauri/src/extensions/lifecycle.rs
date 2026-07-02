@@ -34,11 +34,11 @@ pub fn generate_token() -> String {
     format!("moke_ext_{}", Uuid::new_v4().as_simple())
 }
 
-pub fn allocate_port(next_port: &Arc<AtomicU16>) -> u16 {
+pub fn allocate_port(next_port: &Arc<AtomicU16>, port_range_start: u16) -> u16 {
     let port = next_port.fetch_add(1, Ordering::SeqCst);
     if port > PORT_MAX {
-        next_port.store(PORT_MIN + 1, Ordering::SeqCst);
-        PORT_MIN
+        next_port.store(port_range_start + 1, Ordering::SeqCst);
+        port_range_start
     } else {
         port
     }
@@ -67,6 +67,8 @@ pub fn start_backend(
     backend: &BackendConfig,
     port: u16,
     token: &str,
+    api_port: u16,
+    ws_port: u16,
 ) -> Result<std::process::Child, String> {
     let exe_path = ext_dir.join(&backend.executable);
 
@@ -92,8 +94,10 @@ pub fn start_backend(
         // 最基本的 Windows 运行环境
         .env("SYSTEMROOT", std::env::var("SYSTEMROOT").unwrap_or_else(|_| "C:\\Windows".into()))
         .env("PATH", std::env::var("PATH").unwrap_or_default())
-        // 传递 token，拓展后端可通过 MOKE_EXT_TOKEN 环境变量获取
-        .env("MOKE_EXT_TOKEN", token);
+        // 传递 token 和宿主服务端口，拓展后端可通过环境变量获取
+        .env("MOKE_EXT_TOKEN", token)
+        .env("MOKE_API_PORT", api_port.to_string())
+        .env("MOKE_WS_PORT", ws_port.to_string());
 
     // Windows: 隐藏后端进程窗口
     #[cfg(target_os = "windows")]
@@ -186,6 +190,8 @@ pub fn save_runtime_state(
 pub fn restore_runtime_state_inner(
     extensions_dir: &Path,
     enabled_map: &Arc<Mutex<HashMap<String, EnabledExtension>>>,
+    api_port: u16,
+    ws_port: u16,
 ) -> Vec<u16> {
     let mut restored_ports = Vec::new();
     let path = extensions_dir.join(RUNTIME_STATE_FILE);
@@ -234,7 +240,7 @@ pub fn restore_runtime_state_inner(
         let backend_child = if let Some(entry) = &manifest.entry {
             if let Some(backend) = &entry.backend {
                 let ext_dir = extensions_dir.join(&name);
-                match start_backend(&ext_dir, backend, persisted.port, &persisted.token) {
+                match start_backend(&ext_dir, backend, persisted.port, &persisted.token, api_port, ws_port) {
                     Ok(child) => Some(child),
                     Err(e) => {
                         log::warn!("恢复拓展「{name}」后端失败: {e}");
@@ -248,7 +254,7 @@ pub fn restore_runtime_state_inner(
             None
         };
 
-        if backend_child.is_some() || manifest.entry.as_ref().is_some_and(|e| e.backend.is_none()) {
+        if persisted.port > 0 {
             restored_ports.push(persisted.port);
         }
 

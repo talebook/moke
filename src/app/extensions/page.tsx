@@ -20,6 +20,7 @@ export default function ExtensionsPage() {
   const { extensions, loaded, loadExtensions, enableExtension, disableExtension, uninstallExtension } =
     useExtensionStore();
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     loadExtensions();
@@ -27,6 +28,7 @@ export default function ExtensionsPage() {
 
   const handleToggle = async (ext: ExtensionInfo) => {
     setActionInProgress(ext.name);
+    setErrorMsg(null);
     try {
       if (ext.enabled) {
         await disableExtension(ext.name);
@@ -34,7 +36,8 @@ export default function ExtensionsPage() {
         await enableExtension(ext.name);
       }
     } catch (e) {
-      console.error('[extensions] 操作失败:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrorMsg(`${ext.displayName}: ${msg}`);
     } finally {
       setActionInProgress(null);
     }
@@ -43,10 +46,12 @@ export default function ExtensionsPage() {
   const handleUninstall = async (ext: ExtensionInfo) => {
     if (!confirm(`确定要卸载 ${ext.displayName} 吗？`)) return;
     setActionInProgress(ext.name);
+    setErrorMsg(null);
     try {
       await uninstallExtension(ext.name);
     } catch (e) {
-      console.error('[extensions] 卸载失败:', e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrorMsg(`卸载 ${ext.displayName}: ${msg}`);
     } finally {
       setActionInProgress(null);
     }
@@ -65,6 +70,13 @@ export default function ExtensionsPage() {
               管理已安装的拓展程序
             </p>
           </div>
+
+          {errorMsg && (
+            <div className="mb-4 px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive flex items-center justify-between">
+              <span>{errorMsg}</span>
+              <button onClick={() => setErrorMsg(null)} className="ml-2 shrink-0 hover:opacity-70">&times;</button>
+            </div>
+          )}
 
           {!loaded ? (
             <div className="flex items-center justify-center py-20">

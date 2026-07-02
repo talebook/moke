@@ -21,11 +21,11 @@
       padding: 4px 12px; border-radius: 20px;
       font-size: 0.75rem; font-weight: 500;
     }
-    .status.connected { background: #ecfdf5; color: #065f46; }
-    .status.disconnected { background: #fef2f2; color: #991b1b; }
+    .status.online { background: #ecfdf5; color: #065f46; }
+    .status.offline { background: #fef2f2; color: #991b1b; }
     .status-dot { width: 6px; height: 6px; border-radius: 50%; }
-    .status.connected .status-dot { background: #10b981; }
-    .status.disconnected .status-dot { background: #ef4444; }
+    .status.online .status-dot { background: #10b981; }
+    .status.offline .status-dot { background: #ef4444; }
 
     .stats-grid {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -38,6 +38,12 @@
     .stat-card .label { font-size: 0.7rem; color: #8b806e; margin-bottom: 4px; }
     .stat-card .value { font-size: 1.6rem; font-weight: 700; color: #3d3529; }
     .stat-card .unit { font-size: 0.75rem; font-weight: 400; color: #8b806e; }
+    .stat-card .live-dot {
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: #10b981; margin-left: 6px; vertical-align: middle;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
     .current-book {
       background: white; border-radius: 16px; padding: 16px;
@@ -52,32 +58,23 @@
       height: 100%; background: #ca8a04; border-radius: 3px; transition: width 0.3s;
     }
 
-    .event-log {
-      background: white; border-radius: 16px; padding: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    .error-banner {
+      background: #fef2f2; color: #991b1b; font-size: 0.8rem;
+      padding: 10px 16px; border-radius: 12px; margin-bottom: 12px; display: none;
     }
-    .event-log h3 { font-size: 0.85rem; margin-bottom: 8px; }
-    .event-item {
-      font-size: 0.72rem; padding: 4px 0; border-bottom: 1px solid #f5f0e8;
-      font-family: 'SF Mono', 'Menlo', monospace; color: #6b5e4e;
-    }
-    .event-item .time { color: #aaa; }
-
-    .empty {
-      text-align: center; padding: 40px 20px; color: #8b806e; font-size: 0.85rem;
-    }
+    .error-banner.show { display: block; }
   </style>
 </head>
 <body>
   <h1>阅读统计</h1>
   <p class="subtitle">
-    实时监控阅读活动
-    <span id="statusBadge" class="status disconnected">
-      <span class="status-dot"></span> 未连接
+    <span id="statusBadge" class="status offline">
+      <span class="status-dot"></span> 加载中...
     </span>
   </p>
 
-  <!-- 统计卡片 -->
+  <div class="error-banner" id="errorBanner"></div>
+
   <div class="stats-grid">
     <div class="stat-card">
       <div class="label">翻页次数</div>
@@ -88,12 +85,11 @@
       <div class="value" id="bookCount">0</div>
     </div>
     <div class="stat-card">
-      <div class="label">阅读时长</div>
+      <div class="label">
+        阅读时长
+        <span class="live-dot" id="liveDot" style="display:none"></span>
+      </div>
       <div class="value" id="readingTime">0<span class="unit"> 分钟</span></div>
-    </div>
-    <div class="stat-card">
-      <div class="label">今日标注</div>
-      <div class="value" id="highlightCount">0</div>
     </div>
   </div>
 
@@ -106,218 +102,64 @@
     </div>
   </div>
 
-  <!-- 事件日志 -->
-  <div class="event-log">
-    <h3>事件日志</h3>
-    <div id="eventList">
-      <div class="empty">等待事件...</div>
-    </div>
-  </div>
-
   <script>
-    // -----------------------------------------------------------------------
-    // 配置 —— 实际使用时从 API Server 获取端口
-    // -----------------------------------------------------------------------
-    const API_PORT = 19555;
-    const WS_PORT = 19556;
-    const EXT_NAME = 'reading-stats';
+    // 每 2 秒向自己的 backend 拉取统计
+    const POLL_MS = 2000;
 
-    // -----------------------------------------------------------------------
-    // 状态
-    // -----------------------------------------------------------------------
-    let ws = null;
-    let stats = {
-      pageTurns: 0,
-      booksOpened: 0,
-      highlights: 0,
-      sessionStart: null,
-    };
-    let currentBook = null;
-    let eventLog = [];
+    function showError(msg) {
+      const el = document.getElementById('errorBanner');
+      el.textContent = msg;
+      el.className = 'error-banner show';
+    }
 
-    // -----------------------------------------------------------------------
-    // UI 更新
-    // -----------------------------------------------------------------------
-    function updateStatus(connected) {
+    function clearError() {
+      document.getElementById('errorBanner').className = 'error-banner';
+    }
+
+    function updateStatus(ok) {
       const badge = document.getElementById('statusBadge');
-      badge.className = 'status ' + (connected ? 'connected' : 'disconnected');
-      badge.innerHTML = (connected
+      badge.className = 'status ' + (ok ? 'online' : 'offline');
+      badge.innerHTML = ok
         ? '<span class="status-dot"></span> 已连接'
-        : '<span class="status-dot"></span> 未连接');
+        : '<span class="status-dot"></span> 连接中断';
     }
 
-    function updateStats() {
-      document.getElementById('pageCount').textContent = stats.pageTurns;
-      document.getElementById('bookCount').textContent = stats.booksOpened;
-      document.getElementById('highlightCount').textContent = stats.highlights;
-
-      const minutes = stats.sessionStart
-        ? Math.round((Date.now() - stats.sessionStart) / 60000)
-        : 0;
-      document.getElementById('readingTime').innerHTML = minutes + '<span class="unit"> 分钟</span>';
-    }
-
-    function updateCurrentBook(book) {
-      if (book) {
-        document.getElementById('currentBookTitle').textContent = book.title || book.book_id || '未知';
-        document.getElementById('currentBookMeta').textContent =
-          [book.author, book.format].filter(Boolean).join(' · ');
-        document.getElementById('progressFill').style.width =
-          (book.progress || 0) + '%';
-      } else {
-        document.getElementById('currentBookTitle').textContent = '未在阅读';
-        document.getElementById('currentBookMeta').textContent = '';
-        document.getElementById('progressFill').style.width = '0%';
-      }
-    }
-
-    function addEventLog(type, detail) {
-      const now = new Date();
-      const time = now.toLocaleTimeString('zh-CN', { hour12: false });
-      eventLog.unshift({ time, type, detail });
-      if (eventLog.length > 50) eventLog.pop();
-
-      const list = document.getElementById('eventList');
-      const emptyEl = list.querySelector('.empty');
-      if (emptyEl) emptyEl.remove();
-
-      list.innerHTML = eventLog.map(e =>
-        `<div class="event-item"><span class="time">${e.time}</span> ${e.type}: ${e.detail}</div>`
-      ).join('');
-    }
-
-    // -----------------------------------------------------------------------
-    // 获取 token（从自己的后端 /api/token，由主程序通过环境变量注入）
-    // -----------------------------------------------------------------------
-    async function getToken() {
+    async function poll() {
       try {
-        const resp = await fetch('/api/token');
-        const data = await resp.json();
-        return data.token || '';
-      } catch {
-        return '';
-      }
-    }
+        const resp = await fetch('/api/stats');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const s = await resp.json();
 
-    // -----------------------------------------------------------------------
-    // WebSocket 连接
-    // -----------------------------------------------------------------------
-    async function connect() {
-      // 1. 获取 token（主程序通过 MOKE_EXT_TOKEN 环境变量注入后端）
-      const token = await getToken();
-      if (!token) {
-        addEventLog('error', '无法获取 token，拓展可能未正确启用');
-        setTimeout(connect, 5000);
-        return;
-      }
-      addEventLog('info', '已获取 token');
+        clearError();
+        updateStatus(true);
 
-      // 2. 验证 API Server 在线
-      try {
-        const resp = await fetch(`http://127.0.0.1:${API_PORT}/api/v1/info`);
-        const info = await resp.json();
-        addEventLog('info', 'API Server 在线，阅读器窗口: ' + (info.reader_windows?.length || 0) + ' 个');
+        document.getElementById('pageCount').textContent = s.page_turns;
+        document.getElementById('bookCount').textContent = s.books_opened;
+        document.getElementById('readingTime').innerHTML =
+          s.total_minutes + '<span class="unit"> 分钟</span>';
+
+        document.getElementById('liveDot').style.display = s.reading_active ? 'inline-block' : 'none';
+
+        if (s.current_book) {
+          const b = s.current_book;
+          document.getElementById('currentBookTitle').textContent = b.title || b.book_id || '未知';
+          document.getElementById('currentBookMeta').textContent =
+            [b.author, b.format].filter(Boolean).join(' · ') || '—';
+          document.getElementById('progressFill').style.width = (b.progress || 0) + '%';
+        } else {
+          document.getElementById('currentBookTitle').textContent = '未在阅读';
+          document.getElementById('currentBookMeta').textContent = '—';
+          document.getElementById('progressFill').style.width = '0%';
+        }
       } catch (e) {
-        addEventLog('error', '无法连接 API Server: ' + e.message);
-        setTimeout(connect, 5000);
-        return;
-      }
-
-      // 3. 连接 WebSocket
-      try {
-        ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
-
-        ws.onopen = () => {
-          updateStatus(true);
-          addEventLog('ws', '已连接，正在握手...');
-
-          // 发送认证消息
-          ws.send(JSON.stringify({
-            type: 'hello',
-            extension: EXT_NAME,
-            token: token,
-            events: [
-              'reader:book:opened',
-              'reader:book:closed',
-              'reader:page:changed',
-              'reader:highlight:created',
-              'reader:annotation:created',
-            ],
-          }));
-        };
-
-        ws.onmessage = (msg) => {
-          try {
-            const { event, data } = JSON.parse(msg.data);
-            handleEvent(event, data);
-          } catch (e) { /* ignore parse errors */ }
-        };
-
-        ws.onclose = () => {
-          updateStatus(false);
-          addEventLog('ws', '连接断开，5 秒后重连');
-          ws = null;
-          setTimeout(connect, 5000);
-        };
-
-        ws.onerror = () => {
-          // onclose will fire after this
-        };
-      } catch (e) {
-        addEventLog('error', 'WebSocket 连接失败: ' + e.message);
-        setTimeout(connect, 5000);
+        updateStatus(false);
+        showError('无法获取统计: ' + e.message);
       }
     }
 
-    // -----------------------------------------------------------------------
-    // 事件处理
-    // -----------------------------------------------------------------------
-    function handleEvent(event, data) {
-      switch (event) {
-        case 'reader:book:opened':
-          stats.booksOpened++;
-          stats.sessionStart = Date.now();
-          currentBook = data;
-          updateCurrentBook(currentBook);
-          addEventLog('book', `打开: ${data.title || data.book_id}`);
-          break;
-
-        case 'reader:book:closed':
-          currentBook = null;
-          updateCurrentBook(null);
-          addEventLog('book', '关闭书籍');
-          break;
-
-        case 'reader:page:changed':
-          stats.pageTurns++;
-          if (data.progress !== undefined) {
-            currentBook = { ...currentBook, progress: data.progress };
-            updateCurrentBook(currentBook);
-          }
-          addEventLog('page', `第 ${data.page}/${data.total_pages} 页 — ${data.chapter || ''}`);
-          break;
-
-        case 'reader:highlight:created':
-          stats.highlights++;
-          addEventLog('highlight', (data.text || '').substring(0, 40));
-          break;
-
-        default:
-          // ignore unknown events
-      }
-      updateStats();
-    }
-
-    // -----------------------------------------------------------------------
-    // 定时刷新
-    // -----------------------------------------------------------------------
-    setInterval(updateStats, 10000); // 每 10 秒刷新阅读时长
-
-    // -----------------------------------------------------------------------
-    // 启动
-    // -----------------------------------------------------------------------
-    addEventLog('init', '拓展已加载，正在连接...');
-    connect();
+    // 立即拉取一次，然后定时轮询
+    poll();
+    setInterval(poll, POLL_MS);
   </script>
 </body>
 </html>

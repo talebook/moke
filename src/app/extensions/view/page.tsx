@@ -56,7 +56,7 @@ function ViewContent() {
         ) : uiUrl ? (
           <iframe
             src={uiUrl}
-            sandbox="allow-scripts allow-forms"
+            sandbox="allow-scripts allow-forms allow-same-origin"
             className="flex-1 w-full border-0"
             title={`拓展: ${name}`}
           />

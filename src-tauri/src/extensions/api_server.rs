@@ -31,7 +31,7 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
     let server = loop {
         match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
             Ok(s) => break s,
-            Err(e) if port < start_port + 10 => {
+            Err(_e) if port < start_port + 10 => {
                 log::warn!("API Server 端口 {port} 被占用，尝试 {next}", next = port + 1);
                 port += 1;
             }
@@ -121,7 +121,12 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
 
         // ---- 阅读器 ----
         (_, u) if u.starts_with("/api/v1/reader/") => {
-            handle_reader(&ctx, &ext_name, &method, u)
+            handle_reader(&ctx, &ext_name, &method, u, &body)
+        }
+
+        // ---- 拓展存储（列出所有 key） ----
+        (tiny_http::Method::Get, "/api/v1/extension/storage") => {
+            handle_ext_storage_list(&ctx, &ext_name)
         }
 
         // ---- 拓展自管理 ----
@@ -132,7 +137,7 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
             handle_ext_page_register(&ctx, &ext_name, &body)
         }
         (_, u) if u.starts_with("/api/v1/extension/storage/") => {
-            handle_ext_storage(&ctx, &ext_name, &method, u)
+            handle_ext_storage(&ctx, &ext_name, &method, u, &body)
         }
 
         // ---- 404 ----
@@ -226,6 +231,7 @@ fn handle_reader(
     _ext_name: &str,
     method: &tiny_http::Method,
     url: &str,
+    body: &str,
 ) -> Result<String, String> {
     // GET /api/v1/reader/windows
     if url == "/api/v1/reader/windows" && method == &tiny_http::Method::Get {
@@ -266,7 +272,9 @@ fn handle_reader(
                 // 拓展发送: { "command": "jump_to_page", "page": 50 }
                 // 我们转发为: reader:command 事件
                 // 注：此处只是透传；阅读器前端需要监听此事件
-                if let Err(e) = window.emit("reader:command", ()) {
+                let payload: serde_json::Value = serde_json::from_str(body)
+                    .unwrap_or(serde_json::Value::Null);
+                if let Err(e) = window.emit("reader:command", &payload) {
                     return Err(format!("发送命令失败: {e}"));
                 }
                 return Ok(serde_json::json!({"sent": true}).to_string());
@@ -312,12 +320,24 @@ fn handle_ext_page_register(
     Ok(serde_json::json!({"registered": true}).to_string())
 }
 
+/// GET /api/v1/extension/storage — 列出所有 key
+fn handle_ext_storage_list(
+    ctx: &ServerContext,
+    ext_name: &str,
+) -> Result<String, String> {
+    super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
+    let ext_dir = ctx.extensions_dir.join(ext_name);
+    let keys = super::storage::list_keys(&ext_dir)?;
+    Ok(serde_json::json!({"keys": keys}).to_string())
+}
+
 /// /api/v1/extension/storage/{key}
 fn handle_ext_storage(
     ctx: &ServerContext,
     ext_name: &str,
     method: &tiny_http::Method,
     url: &str,
+    body: &str,
 ) -> Result<String, String> {
     // 安全：只有允许 storage 权限的拓展才能访问
     super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
@@ -337,9 +357,13 @@ fn handle_ext_storage(
             Ok(serde_json::json!({"key": key, "value": value}).to_string())
         }
         &tiny_http::Method::Put => {
-            // 需要读取请求体获取 value
-            // 简化：从 query string 读取
-            Err("PUT 需要请求体，请查看 API 文档".into())
+            let data: serde_json::Value = serde_json::from_str(body)
+                .map_err(|e| format!("JSON 解析失败: {e}"))?;
+            let value = data["value"]
+                .as_str()
+                .ok_or("缺少 value 字段")?;
+            super::storage::set(&ext_dir, key, value)?;
+            Ok(serde_json::json!({"key": key, "stored": true}).to_string())
         }
         &tiny_http::Method::Delete => {
             super::storage::delete(&ext_dir, key)?;

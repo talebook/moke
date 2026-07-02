@@ -1,6 +1,7 @@
 //! WebSocket 事件服务器 + Tauri event 桥接。
 //!
 //! 单线程事件循环：accept 新连接、接收认证/订阅、接收广播、发送消息。
+//! 支持事件重放：新客户端订阅时，立即回放最近一次该类型事件的缓存数据。
 
 use super::EnabledExtension;
 use std::collections::HashMap;
@@ -44,7 +45,7 @@ pub fn start(
     let listener = loop {
         match TcpListener::bind(format!("127.0.0.1:{port}")) {
             Ok(l) => break l,
-            Err(e) if port < start_port + 10 => {
+            Err(_e) if port < start_port + 10 => {
                 log::warn!("WS Server 端口 {port} 被占用，尝试 {next}", next = port + 1);
                 port += 1;
             }
@@ -60,6 +61,8 @@ pub fn start(
 
     thread::spawn(move || {
         let mut clients: Vec<Client> = Vec::new();
+        // 事件重放缓存：event → 最近一次广播的 JSON payload
+        let mut last_events: HashMap<String, String> = HashMap::new();
 
         loop {
             // 1. 接受新连接
@@ -79,6 +82,10 @@ pub fn start(
                     match authenticate_and_subscribe(&mut ws, &enabled) {
                         Ok((name, subs)) => {
                             log::info!("WS 认证成功: {name}, 订阅: {subs:?}");
+
+                            // 重放已缓存的事件
+                            replay_events(&mut ws, &subs, &last_events);
+
                             clients.push(Client {
                                 ws,
                                 extension_name: name,
@@ -99,9 +106,11 @@ pub fn start(
                 }
             }
 
-            // 2. 处理广播
+            // 2. 处理广播（同时更新缓存）
             while let Ok(msg) = rx.try_recv() {
-                broadcast(&mut clients, &msg);
+                let payload = build_payload(&msg);
+                last_events.insert(msg.event.clone(), payload.clone());
+                broadcast_to_clients(&mut clients, &msg.event, &payload);
             }
 
             // 3. 处理客户端消息（pong、unsubscribe 等）并清理断线
@@ -224,11 +233,12 @@ fn authenticate_and_subscribe(
 }
 
 // ---------------------------------------------------------------------------
-// 广播
+// 广播与重放
 // ---------------------------------------------------------------------------
 
-fn broadcast(clients: &mut Vec<Client>, msg: &WsBroadcast) {
-    let payload = serde_json::json!({
+/// 构建广播 JSON payload。
+fn build_payload(msg: &WsBroadcast) -> String {
+    serde_json::json!({
         "event": msg.event,
         "data": serde_json::from_str::<serde_json::Value>(&msg.data).unwrap_or_default(),
         "timestamp": std::time::SystemTime::now()
@@ -236,15 +246,35 @@ fn broadcast(clients: &mut Vec<Client>, msg: &WsBroadcast) {
             .unwrap()
             .as_millis(),
     })
-    .to_string();
+    .to_string()
+}
 
+/// 向已订阅客户端广播消息。
+fn broadcast_to_clients(clients: &mut Vec<Client>, event: &str, payload: &str) {
     for client in clients.iter_mut() {
-        if client.subscriptions.iter().any(|s| s == &msg.event) {
+        if client.subscriptions.iter().any(|s| s == event) {
             if let Err(e) = client
                 .ws
-                .send(tungstenite::Message::Text(payload.clone()))
+                .send(tungstenite::Message::Text(payload.to_string()))
             {
                 log::warn!("WS 发送失败 ({}): {e}", client.extension_name);
+            }
+        }
+    }
+}
+
+/// 向新连接客户端重放已缓存的事件（每个事件类型最近一条）。
+fn replay_events(
+    ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+    subscriptions: &[String],
+    last_events: &HashMap<String, String>,
+) {
+    for sub in subscriptions {
+        if let Some(payload) = last_events.get(sub) {
+            if let Err(e) = ws.send(tungstenite::Message::Text(payload.clone())) {
+                log::warn!("WS 事件重放失败 ({sub}): {e}");
+            } else {
+                log::info!("WS 事件重放: {sub}");
             }
         }
     }

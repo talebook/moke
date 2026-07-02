@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 /// 一次发现的结果：拓展目录路径 + 已解析的 manifest。
 pub struct Discovery {
+    #[allow(dead_code)]
     pub dir: PathBuf,
     pub manifest: Manifest,
 }
