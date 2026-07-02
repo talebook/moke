@@ -161,16 +161,6 @@ jobs:
         if: matrix.platform == 'android'
         run: |
           pnpm tauri android init
-          python3 - <<'PY'
-          from pathlib import Path
-
-          gradle_file = Path('src-tauri/gen/android/app/build.gradle.kts')
-          text = gradle_file.read_text()
-          needle = '            versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")\n'
-          replacement = needle + '            missingDimensionStrategy("store", "foss")\n'
-          if 'missingDimensionStrategy("store"' not in text:
-              gradle_file.write_text(text.replace(needle, replacement))
-          PY
           chmod +x src-tauri/gen/android/gradlew
 
       - name: Configure Android signing
