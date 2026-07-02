@@ -197,21 +197,39 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
-      - name: Build iOS release
+      - name: Build unsigned iOS app
         if: matrix.platform == 'ios'
-        run: pnpm tauri -v ios build --target aarch64
+        run: |
+          pnpm build
+          pnpm build:reader
+          pnpm copy:reader
+          xcodebuild \
+            -workspace src-tauri/gen/apple/moke.xcodeproj/project.xcworkspace \
+            -scheme moke_iOS \
+            -sdk iphoneos \
+            -configuration release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath src-tauri/gen/apple/build/DerivedData \
+            CONFIGURATION_BUILD_DIR="$PWD/src-tauri/gen/apple/build/arm64" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      - name: Package iOS artifacts
+      - name: Package unsigned iOS IPA
         if: matrix.platform == 'ios'
         run: |
-          mkdir -p ios-release-artifacts
-          for app in src-tauri/gen/apple/build/*/*.app; do
-            [ -e "$app" ] || continue
-            arch="$(basename "$(dirname "$app")")"
-            ditto -c -k --keepParent "$app" "ios-release-artifacts/moke-ios-${arch}.zip"
-          done
+          mkdir -p ios-release-artifacts/Payload
+          app_path="$(find src-tauri/gen/apple/build/arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
+          if [ -z "$app_path" ]; then
+            echo "No iOS .app found." >&2
+            exit 1
+          fi
+          cp -R "$app_path" ios-release-artifacts/Payload/
+          (cd ios-release-artifacts && ditto -c -k Payload Moke_0.1.4_arm64.ipa)
 
       - name: Create Release
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -224,7 +242,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.zip
+            ios-release-artifacts/*.ipa
 
       - name: Upload Tauri artifact (Push / PR)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -238,6 +256,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.zip
+            ios-release-artifacts/*.ipa
             src-tauri/gen/apple/build/**/*.app
           if-no-files-found: error
