@@ -1,7 +1,3 @@
-# Maximize parallel rustc processes. 0 = use all logical cores.
-[build]
-jobs = 0
-
 # Replace the slow MSVC link.exe with LLVM's lld-link (ships with Rust).
 # This is the single biggest win for Windows compile+link times.
 [target.x86_64-pc-windows-msvc]

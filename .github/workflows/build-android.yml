@@ -1,0 +1,155 @@
+name: Build Android
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.vscode/**'
+      - 'CODE_NEED/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.vscode/**'
+      - 'CODE_NEED/**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            'ndk;27.0.12077973'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust targets
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ./src-tauri -> target
+
+      - name: Cache readest Next.js
+        uses: actions/cache@v4
+        with:
+          path: readest/apps/readest-app/.next/cache
+          key: ${{ runner.os }}-nextjs-readest-android-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-readest-android-
+
+      - name: Cache readest node_modules
+        uses: actions/cache@v4
+        with:
+          path: readest/node_modules
+          key: ${{ runner.os }}-readest-modules-android-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-readest-modules-android-
+
+      - name: Cache readest vendor
+        id: cache-readest-vendor
+        uses: actions/cache@v4
+        with:
+          path: readest/apps/readest-app/public/vendor
+          key: ${{ runner.os }}-readest-vendor-android-${{ hashFiles('readest/pnpm-lock.yaml') }}
+
+      - name: Install Frontend Dependencies
+        run: pnpm install
+
+      - name: Install Readest Dependencies
+        run: |
+          cd readest
+          pnpm install --no-frozen-lockfile
+          if [ "${{ steps.cache-readest-vendor.outputs.cache-hit }}" != "true" ]; then
+            pnpm --filter @readest/readest-app setup-vendors
+          fi
+        shell: bash
+
+      - name: Initialize Tauri Android project
+        run: pnpm tauri android init
+
+      - name: Configure Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KEYSTORE_BASE64="${ANDROID_KEYSTORE_BASE64:-$ANDROID_KEY_BASE64}"
+          KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-$ANDROID_KEY_PASSWORD}"
+
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "Missing Android signing secrets." >&2
+            exit 1
+          fi
+
+          base64 -d <<< "$KEYSTORE_BASE64" > "$RUNNER_TEMP/android-release.jks"
+          pushd src-tauri/gen/android
+          echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
+          echo "password=$KEYSTORE_PASSWORD" >> keystore.properties
+          echo "storeFile=$RUNNER_TEMP/android-release.jks" >> keystore.properties
+          popd
+
+      - name: Build Android APK
+        run: pnpm tauri android build -- --release
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
