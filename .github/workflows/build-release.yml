@@ -161,6 +161,16 @@ jobs:
         if: matrix.platform == 'android'
         run: |
           pnpm tauri android init
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle_file = Path('src-tauri/gen/android/app/build.gradle.kts')
+          text = gradle_file.read_text()
+          needle = '            versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")\n'
+          replacement = needle + '            missingDimensionStrategy("store", "foss")\n'
+          if 'missingDimensionStrategy("store"' not in text:
+              gradle_file.write_text(text.replace(needle, replacement))
+          PY
           chmod +x src-tauri/gen/android/gradlew
 
       - name: Configure Android signing
@@ -197,43 +207,14 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
-      - name: Configure unsigned iOS build
+      - name: Build signed iOS IPA
         if: matrix.platform == 'ios'
-        run: |
-          cat > "$RUNNER_TEMP/ios-nosign.xcconfig" <<'EOF'
-          CODE_SIGNING_ALLOWED = NO
-          CODE_SIGNING_REQUIRED = NO
-          CODE_SIGN_IDENTITY =
-          DEVELOPMENT_TEAM =
-          PROVISIONING_PROFILE_SPECIFIER =
-          EOF
-          echo "XCODE_XCCONFIG_FILE=$RUNNER_TEMP/ios-nosign.xcconfig" >> "$GITHUB_ENV"
-
-      - name: Build unsigned iOS app
-        if: matrix.platform == 'ios'
-        run: |
-          pnpm tauri -v ios build --target aarch64 -- \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+        run: pnpm tauri -v ios build --target aarch64 --export-method debugging
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Package unsigned iOS IPA
-        if: matrix.platform == 'ios'
-        run: |
-          mkdir -p ios-release-artifacts/Payload
-          app_path="$(find src-tauri/gen/apple/build/arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
-          if [ -z "$app_path" ]; then
-            app_path="$(find src-tauri/gen/apple -name '*.app' -type d | head -n 1)"
-          fi
-          if [ -z "$app_path" ]; then
-            echo "No iOS .app found." >&2
-            exit 1
-          fi
-          cp -R "$app_path" ios-release-artifacts/Payload/
-          (cd ios-release-artifacts && ditto -c -k Payload Moke_0.1.4_arm64.ipa)
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
 
       - name: Create Release
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -246,7 +227,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.ipa
+            src-tauri/gen/apple/build/**/*.ipa
 
       - name: Upload Tauri artifact (Push / PR)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -260,6 +241,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.ipa
+            src-tauri/gen/apple/build/**/*.ipa
             src-tauri/gen/apple/build/**/*.app
           if-no-files-found: error
