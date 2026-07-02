@@ -36,6 +36,10 @@ jobs:
             os: ubuntu-22.04
           - platform: windows
             os: windows-latest
+          - platform: android
+            os: ubuntu-22.04
+          - platform: ios
+            os: macos-latest
 
     permissions:
       contents: write
@@ -57,8 +61,46 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
+      - name: Setup Java
+        if: matrix.platform == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Setup Android SDK
+        if: matrix.platform == 'android'
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        if: matrix.platform == 'android'
+        run: |
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            'ndk;27.0.12077973'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Android Rust targets
+        if: matrix.platform == 'android'
+        run: |
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add i686-linux-android
+          rustup target add x86_64-linux-android
+
+      - name: Install iOS Rust targets
+        if: matrix.platform == 'ios'
+        run: |
+          rustup target add aarch64-apple-ios
+          rustup target add aarch64-apple-ios-sim
+          rustup target add x86_64-apple-ios
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -70,16 +112,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: readest/apps/readest-app/.next/cache
-          key: ${{ runner.os }}-nextjs-readest-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-nextjs-readest-${{ matrix.platform }}-${{ hashFiles('readest/pnpm-lock.yaml') }}
           restore-keys: |
+            ${{ runner.os }}-nextjs-readest-${{ matrix.platform }}-
             ${{ runner.os }}-nextjs-readest-
 
       - name: Cache readest node_modules
         uses: actions/cache@v4
         with:
           path: readest/node_modules
-          key: ${{ runner.os }}-readest-modules-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-readest-modules-${{ matrix.platform }}-${{ hashFiles('readest/pnpm-lock.yaml') }}
           restore-keys: |
+            ${{ runner.os }}-readest-modules-${{ matrix.platform }}-
             ${{ runner.os }}-readest-modules-
 
       - name: Cache readest vendor
@@ -87,7 +131,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: readest/apps/readest-app/public/vendor
-          key: ${{ runner.os }}-readest-vendor-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-readest-vendor-${{ matrix.platform }}-${{ hashFiles('readest/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-readest-vendor-${{ matrix.platform }}-
+            ${{ runner.os }}-readest-vendor-
 
       - name: Install Linux Dependencies
         if: matrix.platform == 'ubuntu'
@@ -107,17 +154,71 @@ jobs:
           fi
         shell: bash
 
-      - name: Build Tauri app (Push / PR)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Build Tauri app
+        if: contains(fromJSON('["macos", "ubuntu", "windows"]'), matrix.platform)
         run: pnpm tauri build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      - name: Build Tauri app (Tags)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: pnpm tauri build
+      - name: Initialize Tauri Android project
+        if: matrix.platform == 'android'
+        run: pnpm tauri android init
+
+      - name: Configure Android signing
+        if: matrix.platform == 'android'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          KEYSTORE_BASE64="${ANDROID_KEYSTORE_BASE64:-$ANDROID_KEY_BASE64}"
+          KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-$ANDROID_KEY_PASSWORD}"
+
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ]; then
+            echo "Missing Android signing secrets." >&2
+            exit 1
+          fi
+
+          base64 -d <<< "$KEYSTORE_BASE64" > "$RUNNER_TEMP/android-release.jks"
+          pushd src-tauri/gen/android
+          echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
+          echo "password=$KEYSTORE_PASSWORD" >> keystore.properties
+          echo "storeFile=$RUNNER_TEMP/android-release.jks" >> keystore.properties
+          popd
+
+      - name: Build Android APK
+        if: matrix.platform == 'android'
+        run: pnpm tauri android build -- --release
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Initialize Tauri iOS project
+        if: matrix.platform == 'ios'
+        run: pnpm tauri ios init
+
+      - name: Build iOS simulator release arm64
+        if: matrix.platform == 'ios'
+        run: pnpm tauri ios build --target aarch64-sim
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Build iOS simulator release x86_64
+        if: matrix.platform == 'ios'
+        run: pnpm tauri ios build --target x86_64
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      - name: Package iOS artifacts
+        if: matrix.platform == 'ios'
+        run: |
+          mkdir -p ios-release-artifacts
+          for app in src-tauri/gen/apple/build/*/*.app; do
+            [ -e "$app" ] || continue
+            arch="$(basename "$(dirname "$app")")"
+            ditto -c -k --keepParent "$app" "ios-release-artifacts/moke-ios-${arch}.zip"
+          done
 
       - name: Create Release
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
@@ -129,6 +230,8 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+            ios-release-artifacts/*.zip
 
       - name: Upload Tauri artifact (Push / PR)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -141,3 +244,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+            ios-release-artifacts/*.zip
+            src-tauri/gen/apple/build/**/*.app
+          if-no-files-found: error
