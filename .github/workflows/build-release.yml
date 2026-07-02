@@ -190,7 +190,7 @@ jobs:
 
       - name: Build Android APK
         if: matrix.platform == 'android'
-        run: pnpm tauri android build -- --release
+        run: pnpm tauri android build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
