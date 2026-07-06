@@ -203,8 +203,11 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+      # ---------- iOS 相关步骤（修改部分） ----------
       - name: Initialize Tauri iOS project
         if: matrix.platform == 'ios'
+        env:
+          TAURI_APPLE_DEVELOPMENT_TEAM: ${{ secrets.IOS_TEAM_ID }}
         run: pnpm tauri ios init
 
       - name: Import iOS signing
@@ -231,14 +234,13 @@ jobs:
           echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > \
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
 
-      # ---------- 修改点：iOS 构建步骤 ----------
       - name: Build iOS device (signed)
         if: matrix.platform == 'ios'
         env:
-          TAURI_APPLE_DEVELOPMENT_TEAM: ${{ secrets.IOS_TEAM_ID }}
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           NODE_OPTIONS: --max-old-space-size=4096
-        run: pnpm tauri ios build
-      # -----------------------------------------
+        run: pnpm tauri ios build -- -- DEVELOPMENT_TEAM="$IOS_TEAM_ID"
+      # ----------------------------------------------
 
       - name: Package iOS IPA
         if: matrix.platform == 'ios'
@@ -270,27 +272,4 @@ jobs:
             src-tauri/target/release/bundle/**/*.dmg
             ios-release-artifacts/*.ipa
 
-      - name: Upload Android artifact (Push / PR)
-        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform }}-artifact
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-
-      - name: Upload Tauri artifact (Push / PR)
-        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.platform }}-artifact
-          path: |
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.dmg
-            ios-release-artifacts/*.ipa
-            src-tauri/gen/apple/build/**/*.app
-          if-no-files-found: error
+      - name: Upload Android artifact (Pu
