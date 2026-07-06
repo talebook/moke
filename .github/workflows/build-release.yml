@@ -272,4 +272,27 @@ jobs:
             src-tauri/target/release/bundle/**/*.dmg
             ios-release-artifacts/*.ipa
 
-      - name: Upload Android artifact (Pu
+      - name: Upload Android artifact (Push / PR)
+        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifact
+          path: |
+            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+      - name: Upload Tauri artifact (Push / PR)
+        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifact
+          path: |
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            ios-release-artifacts/*.ipa
+            src-tauri/gen/apple/build/**/*.app
+          if-no-files-found: error
