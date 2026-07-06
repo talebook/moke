@@ -179,7 +179,7 @@ jobs:
             const p = "src-tauri/gen/android/app/build.gradle.kts";
             const s = fs.readFileSync(p, "utf8");
             if (s.includes("missingDimensionStrategy")) process.exit(0);
-            fs.writeFileSync(p, s.replace(/(android\s*\{\n)/, "$1    missingDimensionStrategy(\"store\", \"foss\")\n"));
+            fs.writeFileSync(p, s.replace(/(defaultConfig\s*\{\n)/, "$1        missingDimensionStrategy(\"store\", \"foss\")\n"));
           '
 
       - name: Configure Android signing
