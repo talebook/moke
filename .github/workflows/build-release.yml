@@ -101,8 +101,6 @@ jobs:
         if: matrix.platform == 'ios'
         run: |
           rustup target add aarch64-apple-ios
-          rustup target add aarch64-apple-ios-sim
-          rustup target add x86_64-apple-ios
 
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
@@ -216,30 +214,57 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
-      - name: Build iOS simulator release arm64
+      - name: Import iOS signing
         if: matrix.platform == 'ios'
-        run: pnpm tauri ios build --target aarch64-sim
+        env:
+          IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -z "$IOS_CERTIFICATE_P12_BASE64" ] || [ -z "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "Missing iOS signing secrets." >&2
+            exit 1
+          fi
+          # ponytail: CI mac runner has no login keychain password; use a temp one.
+          KEYCHAIN="$RUNNER_TEMP/ios.keychain-db"
+          security create-keychain -p "$IOS_CERTIFICATE_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$IOS_CERTIFICATE_PASSWORD" "$KEYCHAIN"
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 -d > "$RUNNER_TEMP/ios.p12"
+          security import "$RUNNER_TEMP/ios.p12" -P "$IOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security find-identity -v -p codesigning "$KEYCHAIN"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
+
+      - name: Build iOS device (signed)
+        if: matrix.platform == 'ios'
+        run: pnpm tauri ios build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      - name: Build iOS simulator release x86_64
-        if: matrix.platform == 'ios'
-        run: pnpm tauri ios build --target x86_64
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
-      - name: Package iOS artifacts
+      - name: Package iOS IPA
         if: matrix.platform == 'ios'
         run: |
-          mkdir -p ios-release-artifacts
-          for app in src-tauri/gen/apple/build/*/*.app; do
-            [ -e "$app" ] || continue
-            arch="$(basename "$(dirname "$app")")"
-            ditto -c -k --keepParent "$app" "ios-release-artifacts/moke-ios-${arch}.zip"
-          done
+          mkdir -p ios-release-artifacts/Payload
+          app="$(find src-tauri/gen/apple/build -name '*.app' -maxdepth 2 | head -n1)"
+          [ -e "$app" ] || { echo "No .app built"; exit 1; }
+          cp -R "$app" ios-release-artifacts/Payload/
+          ditto -c -k --keepParent ios-release-artifacts/Payload \
+            "ios-release-artifacts/moke-ios.ipa"
+
+      - name: Create Android Release
+        if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/release/*.aab
 
       - name: Create Release
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -248,11 +273,20 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
+            ios-release-artifacts/*.ipa
+
+      - name: Upload Android artifact (Push / PR)
+        if: ${{ matrix.platform == 'android' && !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-artifact
+          path: |
             src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.zip
+            src-tauri/gen/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ matrix.platform != 'android' && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-artifact
@@ -262,7 +296,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/gen/android/app/build/outputs/apk/release/*.apk
-            ios-release-artifacts/*.zip
+            ios-release-artifacts/*.ipa
             src-tauri/gen/apple/build/**/*.app
           if-no-files-found: error
