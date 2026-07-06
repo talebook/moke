@@ -241,9 +241,10 @@ jobs:
 
       - name: Build iOS device (signed)
         if: matrix.platform == 'ios'
-        run: pnpm tauri ios build
         env:
+          IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
           NODE_OPTIONS: --max-old-space-size=4096
+        run: pnpm tauri ios build --team-id "$IOS_TEAM_ID"
 
       - name: Package iOS IPA
         if: matrix.platform == 'ios'
