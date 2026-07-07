@@ -207,7 +207,7 @@ jobs:
       - name: Override iOS bundle identifier
         if: matrix.platform == 'ios'
         run: |
-          sed -i '' 's/"identifier": "org.houheya.moke"/"identifier": "app.suyun3.test"/' tauri.conf.json
+          sed -i '' 's/"identifier": "org.houheya.moke"/"identifier": "app.suyun3.test"/' src-tauri/tauri.conf.json
 
       - name: Initialize Tauri iOS project
         if: matrix.platform == 'ios'
