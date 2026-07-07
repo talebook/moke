@@ -299,8 +299,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/release/*.aab
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
 
       - name: Create Release
         if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
@@ -320,8 +320,8 @@ jobs:
         with:
           name: ${{ matrix.platform }}-artifact
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/release/*.aab
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)
