@@ -203,7 +203,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      # ============ iOS 构建（含调试信息） ============
+      # ============ iOS 构建 ============
       - name: Override iOS bundle identifier
         if: matrix.platform == 'ios'
         run: |
@@ -238,14 +238,20 @@ jobs:
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
           
           # ===== 调试信息 =====
-          echo "=== 检查描述文件绑定的 Bundle ID ==="
-          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" | \
-            plutil -extract Entitlements.application-identifier xml -o - - | \
-            grep -A1 '<string>' | tail -1 | sed 's/.*<string>//;s/<\/string>.*//'
+          echo "=== 检查描述文件信息 ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" > /tmp/profile.plist
           
-          echo "=== 检查 Team ID ==="
-          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" | \
-            grep -A1 TeamIdentifier | tail -1 | sed 's/.*<string>//;s/<\/string>.*//'
+          echo "=== 绑定的 Bundle ID ==="
+          /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null | sed 's/^[^.]*\.//' || echo "未找到"
+          
+          echo "=== Team ID ==="
+          /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" /tmp/profile.plist 2>/dev/null || echo "未找到"
+          
+          echo "=== App ID Name ==="
+          /usr/libexec/PlistBuddy -c "Print :AppIDName" /tmp/profile.plist 2>/dev/null || echo "未找到"
+          
+          echo "=== 描述文件名称 ==="
+          /usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist 2>/dev/null || echo "未找到"
           
           echo "=== 列出所有可用的描述文件 ==="
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
@@ -265,7 +271,7 @@ jobs:
           cp -R "$app" ios-release-artifacts/Payload/
           ditto -c -k --keepParent ios-release-artifacts/Payload \
             "ios-release-artifacts/moke-ios.ipa"
-      # ==============================================
+      # ==================================
 
       - name: Create Android Release
         if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
