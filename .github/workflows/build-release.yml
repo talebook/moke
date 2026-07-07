@@ -230,7 +230,7 @@ jobs:
           # inject manual signing right after each DEVELOPMENT_TEAM assignment
           s = re.sub(
               r"(DEVELOPMENT_TEAM = [^;]+;)",
-              r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "app.suyun3.test";',
+              r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;',
               s,
           )
           # ponytail: native-bridge swift plugin uses Storefront (15+) and
@@ -265,11 +265,11 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > \
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
-          
+
           # ===== 调试信息 =====
           echo "=== 检查描述文件信息 ==="
           security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" > /tmp/profile.plist
-          
+
           echo "=== 绑定的 Bundle ID ==="
           /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null | sed 's/^[^.]*\.//' || echo "未找到"
           
@@ -284,6 +284,27 @@ jobs:
           
           echo "=== 列出所有可用的描述文件 ==="
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
+
+          # ponytail: PROVISIONING_PROFILE_SPECIFIER must match the profile's
+          # actual Name, not the bundle id. Read it from the installed profile
+          # (just parsed above) and inject it into the pbxproj so xcodebuild
+          # exportArchive can resolve the profile (otherwise: "requires a
+          # provisioning profile").
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist 2>/dev/null)
+          PBX="src-tauri/gen/apple/moke.xcodeproj/project.pbxproj"
+          python3 - "$PBX" "$PROFILE_NAME" <<'PY'
+          import sys, re
+          p, specifier = sys.argv[1], sys.argv[2]
+          if not specifier:
+              sys.exit("could not read provisioning profile Name")
+          s = open(p).read()
+          if 'PROVISIONING_PROFILE_SPECIFIER = "' + specifier + '"' in s:
+              sys.exit(0)
+          s = re.sub(r'PROVISIONING_PROFILE_SPECIFIER = "[^"]*";',
+                     f'PROVISIONING_PROFILE_SPECIFIER = "{specifier}";', s)
+          open(p, "w").write(s)
+          print(f"set PROVISIONING_PROFILE_SPECIFIER = '{specifier}'")
+          PY
 
       - name: Build iOS device (signed)
         if: matrix.platform == 'ios'
