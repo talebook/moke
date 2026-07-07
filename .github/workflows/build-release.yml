@@ -203,11 +203,11 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
-      # ============ iOS 构建 ============
+      # ============ iOS 构建（含调试信息） ============
       - name: Override iOS bundle identifier
         if: matrix.platform == 'ios'
         run: |
-          sed -i '' 's/"identifier": "org.houheya.moke"/"identifier": "app.suyun3.test"/' src-tauri/tauri.conf.json
+          sed -i '' 's/"identifier": "org.houheya.moke"/"identifier": "app.suyun3.test"/' tauri.conf.json
 
       - name: Initialize Tauri iOS project
         if: matrix.platform == 'ios'
@@ -236,6 +236,19 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > \
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
+          
+          # ===== 调试信息 =====
+          echo "=== 检查描述文件绑定的 Bundle ID ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" | \
+            plutil -extract Entitlements.application-identifier xml -o - - | \
+            grep -A1 '<string>' | tail -1 | sed 's/.*<string>//;s/<\/string>.*//'
+          
+          echo "=== 检查 Team ID ==="
+          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" | \
+            grep -A1 TeamIdentifier | tail -1 | sed 's/.*<string>//;s/<\/string>.*//'
+          
+          echo "=== 列出所有可用的描述文件 ==="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
 
       - name: Build iOS device (signed)
         if: matrix.platform == 'ios'
@@ -252,7 +265,7 @@ jobs:
           cp -R "$app" ios-release-artifacts/Payload/
           ditto -c -k --keepParent ios-release-artifacts/Payload \
             "ios-release-artifacts/moke-ios.ipa"
-      # ==================================
+      # ==============================================
 
       - name: Create Android Release
         if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
