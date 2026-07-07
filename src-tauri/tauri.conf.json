@@ -55,8 +55,7 @@
       }
     },
     "iOS": {
-      "developmentTeam": "6X9BLAS47C",
-      "identifier": "app.suyun3.test"
+      "developmentTeam": "6X9BLAS47C"
     }
   },
   "plugins": {
