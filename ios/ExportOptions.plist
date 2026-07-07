@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>debugging</string>
+	<key>teamID</key>
+	<string>6X9BLAS47C</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Development: jie ma (23WYGBKWTG)</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>app.suyun3.test</key>
+		<string>app.suyun3.test</string>
+	</dict>
+</dict>
+</plist>

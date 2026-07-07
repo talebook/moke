@@ -41,3 +41,5 @@ CODE_NEED/extensions/*/*.tmp
 # IDE
 .vscode/
 .idea/
+# reference checkout, not part of client build
+CODE_NEED/

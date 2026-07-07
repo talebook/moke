@@ -211,6 +211,8 @@ jobs:
 
       - name: Initialize Tauri iOS project
         if: matrix.platform == 'ios'
+        env:
+          APPLE_DEVELOPMENT_TEAM: "6X9BLAS47C"
         run: pnpm tauri ios init
 
       # Tauri forces Automatic signing + -allowProvisioningUpdates, which needs a
@@ -266,39 +268,30 @@ jobs:
           echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > \
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
 
-          # ===== 调试信息 =====
-          echo "=== 绑定的 Bundle ID ==="
-          /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null | sed 's/^[^.]*\.//' || echo "未找到"
-
-          echo "=== Team ID ==="
-          /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" /tmp/profile.plist 2>/dev/null || echo "未找到"
-
-          echo "=== 描述文件名称 ==="
-          /usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist 2>/dev/null || echo "未找到"
-
-          echo "=== 列出所有可用的描述文件 ==="
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
 
-      - name: Build iOS device (signed)
+      - name: Build iOS device (archive only)
         if: matrix.platform == 'ios'
-        run: pnpm tauri ios build
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
-          # ponytail: without APPLE_CODE_SIGN_IDENTITY Tauri treats signing as
-          # automatic and omits provisioningProfiles from the export plist, so
-          # exportArchive fails with "requires a provisioning profile".
-          APPLE_CODE_SIGN_IDENTITY: "Apple Development: jie ma (23WYGBKWTG)"
           APPLE_DEVELOPMENT_TEAM: "6X9BLAS47C"
+          APPLE_CODE_SIGN_IDENTITY: "Apple Development: jie ma (23WYGBKWTG)"
+        run: |
+          # ponytail: we only need the .xcarchive from tauri; the export step
+          # below uses our own ExportOptions.plist, so ignore tauri's own
+          # (broken) exportArchive. Fail only if the archive wasn't produced.
+          pnpm tauri ios build || true
+          ARCHIVE=$(find src-tauri/gen/apple/build -name '*.xcarchive' -maxdepth 3 | head -n1)
+          [ -n "$ARCHIVE" ] || { echo "No .xcarchive produced"; exit 1; }
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - name: Package iOS IPA
+      - name: Export iOS IPA
         if: matrix.platform == 'ios'
         run: |
-          mkdir -p ios-release-artifacts/Payload
-          app="$(find src-tauri/gen/apple/build -name '*.app' -maxdepth 2 | head -n1)"
-          [ -e "$app" ] || { echo "No .app built"; exit 1; }
-          cp -R "$app" ios-release-artifacts/Payload/
-          ditto -c -k --keepParent ios-release-artifacts/Payload \
-            "ios-release-artifacts/moke-ios.ipa"
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE" \
+            -exportPath ios-release-artifacts \
+            -exportOptionsPlist ios/ExportOptions.plist
+
       # ==================================
 
       - name: Create Android Release
