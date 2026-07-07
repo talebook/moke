@@ -213,6 +213,30 @@ jobs:
         if: matrix.platform == 'ios'
         run: pnpm tauri ios init
 
+      # Tauri forces Automatic signing + -allowProvisioningUpdates, which needs a
+      # logged-in Xcode Apple ID (unavailable on CI) -> "No Accounts". Switch the
+      # generated pbxproj to Manual signing so xcodebuild uses the profile we drop
+      # into ~/Library/MobileDevice/Provisioning Profiles instead.
+      - name: Force manual iOS signing
+        if: matrix.platform == 'ios'
+        run: |
+          PBX="src-tauri/gen/apple/moke.xcodeproj/project.pbxproj"
+          python3 - "$PBX" <<'PY'
+          import sys, re
+          p = sys.argv[1]
+          s = open(p).read()
+          if "CODE_SIGN_STYLE = manual" in s:
+              sys.exit(0)
+          # inject manual signing right after each DEVELOPMENT_TEAM assignment
+          s = re.sub(
+              r"(DEVELOPMENT_TEAM = [^;]+;)",
+              r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "app.suyun3.test";',
+              s,
+          )
+          open(p, "w").write(s)
+          print("patched pbxproj to manual signing")
+          PY
+
       - name: Import iOS signing
         if: matrix.platform == 'ios'
         env:
