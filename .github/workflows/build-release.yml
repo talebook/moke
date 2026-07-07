@@ -217,6 +217,7 @@ jobs:
       # logged-in Xcode Apple ID (unavailable on CI) -> "No Accounts". Switch the
       # generated pbxproj to Manual signing so xcodebuild uses the profile we drop
       # into ~/Library/MobileDevice/Provisioning Profiles instead.
+      # ponytail: profile Name == bundle id == app.suyun3.test, Team 6X9BLAS47C.
       - name: Force manual iOS signing
         if: matrix.platform == 'ios'
         run: |
@@ -227,10 +228,9 @@ jobs:
           s = open(p).read()
           if "CODE_SIGN_STYLE = manual" in s:
               sys.exit(0)
-          # inject manual signing right after each DEVELOPMENT_TEAM assignment
           s = re.sub(
               r"(DEVELOPMENT_TEAM = [^;]+;)",
-              r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;',
+              r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "app.suyun3.test";',
               s,
           )
           # ponytail: native-bridge swift plugin uses Storefront (15+) and
@@ -239,7 +239,7 @@ jobs:
           s = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = [^;]+;",
                      "IPHONEOS_DEPLOYMENT_TARGET = 17.0;", s)
           open(p, "w").write(s)
-          print("patched pbxproj to manual signing, deployment target 17.0")
+          print("patched pbxproj to manual signing, specifier app.suyun3.test, deployment target 17.0")
           PY
 
       - name: Import iOS signing
@@ -267,44 +267,17 @@ jobs:
             "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision"
 
           # ===== 调试信息 =====
-          echo "=== 检查描述文件信息 ==="
-          security cms -D -i "$HOME/Library/MobileDevice/Provisioning Profiles/moke.mobileprovision" > /tmp/profile.plist
-
           echo "=== 绑定的 Bundle ID ==="
           /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" /tmp/profile.plist 2>/dev/null | sed 's/^[^.]*\.//' || echo "未找到"
-          
+
           echo "=== Team ID ==="
           /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" /tmp/profile.plist 2>/dev/null || echo "未找到"
-          
-          echo "=== App ID Name ==="
-          /usr/libexec/PlistBuddy -c "Print :AppIDName" /tmp/profile.plist 2>/dev/null || echo "未找到"
-          
+
           echo "=== 描述文件名称 ==="
           /usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist 2>/dev/null || echo "未找到"
-          
+
           echo "=== 列出所有可用的描述文件 ==="
           ls -la "$HOME/Library/MobileDevice/Provisioning Profiles/"
-
-          # ponytail: PROVISIONING_PROFILE_SPECIFIER must match the profile's
-          # actual Name, not the bundle id. Read it from the installed profile
-          # (just parsed above) and inject it into the pbxproj so xcodebuild
-          # exportArchive can resolve the profile (otherwise: "requires a
-          # provisioning profile").
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" /tmp/profile.plist 2>/dev/null)
-          PBX="src-tauri/gen/apple/moke.xcodeproj/project.pbxproj"
-          python3 - "$PBX" "$PROFILE_NAME" <<'PY'
-          import sys, re
-          p, specifier = sys.argv[1], sys.argv[2]
-          if not specifier:
-              sys.exit("could not read provisioning profile Name")
-          s = open(p).read()
-          if 'PROVISIONING_PROFILE_SPECIFIER = "' + specifier + '"' in s:
-              sys.exit(0)
-          s = re.sub(r'PROVISIONING_PROFILE_SPECIFIER = "[^"]*";',
-                     f'PROVISIONING_PROFILE_SPECIFIER = "{specifier}";', s)
-          open(p, "w").write(s)
-          print(f"set PROVISIONING_PROFILE_SPECIFIER = '{specifier}'")
-          PY
 
       - name: Build iOS device (signed)
         if: matrix.platform == 'ios'
