@@ -284,6 +284,11 @@ jobs:
         run: pnpm tauri ios build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          # ponytail: without APPLE_CODE_SIGN_IDENTITY Tauri treats signing as
+          # automatic and omits provisioningProfiles from the export plist, so
+          # exportArchive fails with "requires a provisioning profile".
+          APPLE_CODE_SIGN_IDENTITY: "Apple Development: jie ma (23WYGBKWTG)"
+          APPLE_DEVELOPMENT_TEAM: "6X9BLAS47C"
 
       - name: Package iOS IPA
         if: matrix.platform == 'ios'
