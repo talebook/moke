@@ -233,8 +233,13 @@ jobs:
               r'\1\n\t\t\t\tCODE_SIGN_STYLE = manual;\n\t\t\t\tPROVISIONING_PROFILE_SPECIFIER = "app.suyun3.test";',
               s,
           )
+          # ponytail: native-bridge swift plugin uses Storefront (15+) and
+          # registerForTraitChanges/assumeIsolated (17+); Tauri defaults target
+          # to 13, which breaks the Swift availability check. Bump to 17.0.
+          s = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = [^;]+;",
+                     "IPHONEOS_DEPLOYMENT_TARGET = 17.0;", s)
           open(p, "w").write(s)
-          print("patched pbxproj to manual signing")
+          print("patched pbxproj to manual signing, deployment target 17.0")
           PY
 
       - name: Import iOS signing
