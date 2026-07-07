@@ -20,8 +20,10 @@
 | Windows | `.msi` / `.exe` |
 | macOS | `.dmg` |
 | Linux | `.AppImage` / `.deb` |
+| Android（平板） | `.apk` |
+| iPadOS | `.ipa`（自签名安装，需将设备 UDID 加入开发者描述文件） |
 
-> **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）
+> **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iPadOS 17+
 
 ## 使用
 

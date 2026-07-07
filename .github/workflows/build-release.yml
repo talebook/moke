@@ -300,7 +300,6 @@ jobs:
         with:
           files: |
             src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
 
       - name: Create Release
         if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
@@ -321,7 +320,6 @@ jobs:
           name: ${{ matrix.platform }}-artifact
           path: |
             src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-            src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)
