@@ -7,6 +7,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { downloadBookBlob, request } from '@/lib/api';
 import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
 import { useServerStore } from '@/lib/store/server';
+import { useSettingsStore } from '@/lib/store/settings';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 
@@ -228,7 +229,7 @@ function DetailContent() {
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('open_reader', { filePath: record.filePath });
+        await invoke('open_reader', { filePath: record.filePath, eink: useSettingsStore.getState().eink });
       } else {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }

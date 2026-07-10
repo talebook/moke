@@ -8,6 +8,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
+import { useSettingsStore } from '@/lib/store/settings';
 import { APP_VERSION } from '@/lib/app-version';
 
 export default function SettingsPage() {
@@ -15,6 +16,8 @@ export default function SettingsPage() {
   const { serverTitle, serverUrl, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
+  const eink = useSettingsStore((s) => s.eink);
+  const setEink = useSettingsStore((s) => s.setEink);
   const [serverVersion, setServerVersion] = useState('获取中...');
 
   useEffect(() => {
@@ -112,12 +115,12 @@ export default function SettingsPage() {
               description="查看应用介绍、版本说明与贡献者信息"
               href="/about"
             />
-            <SettingsLinkRow
+            <ToggleRow
               icon={Settings2}
-              label="界面与偏好"
-              description="预留给后续主题、布局与阅读偏好设置"
-              href="/settings"
-              disabled
+              label="墨水屏模式"
+              description="关闭模糊与渐变效果，提升电子墨水屏可读性"
+              checked={eink}
+              onChange={setEink}
             />
           </SettingsSection>
 
@@ -208,6 +211,31 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
       </div>
       <ArrowRight className={`w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-200 shrink-0 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
     </button>
+  );
+}
+
+function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon: typeof User; label: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
+      <div className="flex items-start gap-3.5 min-w-0">
+        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 text-muted-foreground shrink-0">
+          <Icon className="w-4 h-4" />
+        </div>
+        <div className="min-w-0 py-0.5">
+          <p className="text-sm font-medium text-foreground">{label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+      >
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+      </button>
+    </div>
   );
 }
 

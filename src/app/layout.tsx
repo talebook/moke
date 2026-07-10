@@ -1,14 +1,23 @@
 'use client';
 
 import '@/app/globals.css';
+import { useEffect } from 'react';
 import { ServerProvider } from '@/components/providers/ServerProvider';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const eink = useSettingsStore((s) => s.eink);
+
+  // Manual override class; auto e-ink styling is applied via CSS media queries.
+  useEffect(() => {
+    document.documentElement.classList.toggle('eink', eink);
+  }, [eink]);
+
   return (
     <html lang="zh-CN" className="light">
       <head>

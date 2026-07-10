@@ -16,6 +16,81 @@
   }
 }
 
+/* ===== E-ink rendering ===== */
+/* Auto path: native media features, no JS, no hydration flash.
+   (update: slow) = slow-refresh displays (most e-ink); (max-color: 1) = monochrome
+   (Kindle). (prefers-reduced-motion) is for motion-sensitive users on normal
+   screens, so it only kills motion — not color/radius. */
+@media (update: slow), (max-color: 1) {
+  html, body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    -webkit-font-smoothing: none !important;
+    -moz-osx-font-smoothing: unset !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    backdrop-filter: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  img {
+    filter: grayscale(100%) contrast(1.15) !important;
+  }
+  .app-warm-bg, .app-glass, .app-card {
+    background: #FFFFFF !important;
+    border: 1px solid #000000 !important;
+    box-shadow: none !important;
+  }
+  ::selection {
+    background: #000000 !important;
+    color: #FFFFFF !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Manual override: force ink mode on any device via the Settings toggle. */
+html.eink, html.eink body {
+  background: #FFFFFF !important;
+  color: #000000 !important;
+  -webkit-font-smoothing: none !important;
+  -moz-osx-font-smoothing: unset !important;
+}
+html.eink *, html.eink *::before, html.eink *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+  backdrop-filter: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+html.eink img {
+  filter: grayscale(100%) contrast(1.15) !important;
+}
+html.eink .app-warm-bg,
+html.eink .app-glass,
+html.eink .app-card {
+  background: #FFFFFF !important;
+  border: 1px solid #000000 !important;
+  box-shadow: none !important;
+}
+html.eink ::selection {
+  background: #000000 !important;
+  color: #FFFFFF !important;
+}
+
 @layer utilities {
   .no-scrollbar::-webkit-scrollbar {
     display: none;
