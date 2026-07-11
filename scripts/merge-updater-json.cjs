@@ -10,14 +10,15 @@ const path = require('path');
 
 const dir = process.argv[2];
 if (!dir) {
-  console.error('Usage: node scripts/merge-updater-json.js <manifest-dir>');
+  console.error('Usage: node scripts/merge-updater-json.cjs <manifest-dir>');
   process.exit(1);
 }
 
-const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+let files = [];
+try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { /* dir missing */ }
 if (files.length === 0) {
-  console.error('No JSON manifests found in', dir);
-  process.exit(1);
+  console.log('No updater manifests found — skipping latest.json generation');
+  process.exit(0);
 }
 
 const manifests = files.map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')));
