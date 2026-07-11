@@ -366,7 +366,7 @@ jobs:
           path: updater-manifests
 
       - name: Merge manifests into latest.json
-        run: node scripts/merge-updater-json.js updater-manifests
+        run: node scripts/merge-updater-json.cjs updater-manifests
 
       - name: Upload latest.json to release
         uses: softprops/action-gh-release@v2
