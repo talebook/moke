@@ -13,9 +13,11 @@ export default function RootLayout({
 }) {
   const eink = useSettingsStore((s) => s.eink);
 
-  // Manual override class; auto e-ink styling is applied via CSS media queries.
+  // Manual override: set the [data-eink='true'] attribute (same signal readest
+  // uses) so Moke + the embedded reader share one convention. Auto e-ink
+  // styling is applied via CSS media queries regardless.
   useEffect(() => {
-    document.documentElement.classList.toggle('eink', eink);
+    document.documentElement.setAttribute('data-eink', eink.toString());
   }, [eink]);
 
   return (

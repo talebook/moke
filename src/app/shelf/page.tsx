@@ -141,7 +141,7 @@ export default function ShelfPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
+      <div className="moke-shelf-bg flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
         <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-8 py-5 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-6">
             <div>
@@ -165,7 +165,7 @@ export default function ShelfPage() {
                 href="/user/history"
                 aria-label="查看历史记录"
                 title="查看历史记录"
-                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/70 text-muted-foreground shadow-sm transition hover:text-foreground hover:bg-white hover:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
+                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/70 eink-bordered text-muted-foreground eink:text-black shadow-sm transition hover:text-foreground hover:bg-white hover:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
               >
                 <History className="w-4 h-4" />
               </Link>
@@ -180,7 +180,7 @@ export default function ShelfPage() {
             </div>
           ) : books.length === 0 ? (
             <div className="flex min-h-[520px] items-center justify-center px-8 py-24 text-center">
-              <div className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-amber-950/10 bg-white/65 px-8 py-12 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur">
+              <div className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-amber-950/10 bg-white/65 eink-bordered px-8 py-12 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur">
                 <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
                 <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-amber-200/40 text-primary shadow-inner">
                   <Search className="w-10 h-10" />
@@ -193,7 +193,7 @@ export default function ShelfPage() {
             </div>
           ) : (
             <div className="px-8 py-8">
-              <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
+              <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 eink-bordered p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
                 {books.map((book) => (
                   <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
                 ))}

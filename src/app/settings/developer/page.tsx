@@ -150,7 +150,7 @@ function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
       <div className="flex items-start gap-3.5 min-w-0">
-        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 text-muted-foreground shrink-0">
+        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
           <Icon className="w-4 h-4" />
         </div>
         <div className="min-w-0 py-0.5">
@@ -162,9 +162,9 @@ function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon
         role="switch"
         aria-checked={checked}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent transition-colors duration-200 eink:!bg-white eink:border-black ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
       >
-        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 eink:!bg-black ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
       </button>
     </div>
   );

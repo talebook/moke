@@ -78,6 +78,16 @@ const config: Config = {
   },
   plugins: [
     require('@tailwindcss/typography'),
+    // ponytail: mirror readest's eink variants so Moke + reader share one
+    // convention (html[data-eink='true']).
+    require('tailwindcss/plugin')(({
+      addVariant,
+    }: {
+      addVariant: (name: string, selector: string) => void;
+    }) => {
+      addVariant('eink', 'html[data-eink="true"] &');
+      addVariant('not-eink', 'html:not([data-eink="true"]) &');
+    }),
   ],
 };
 

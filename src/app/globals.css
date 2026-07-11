@@ -34,7 +34,6 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
     backdrop-filter: none !important;
-    border-radius: 0 !important;
     box-shadow: none !important;
   }
   img {
@@ -60,35 +59,101 @@
   }
 }
 
-/* Manual override: force ink mode on any device via the Settings toggle. */
-html.eink, html.eink body {
+/* Manual override: force ink mode on any device via the Settings toggle.
+   Uses the same [data-eink='true'] signal as the readest reader so the Moke
+   bridge (window.__MOKE_EINK) and the reader share one convention. */
+[data-eink='true'], [data-eink='true'] body {
   background: #FFFFFF !important;
   color: #000000 !important;
   -webkit-font-smoothing: none !important;
   -moz-osx-font-smoothing: unset !important;
 }
-html.eink *, html.eink *::before, html.eink *::after {
+[data-eink='true'] *, [data-eink='true'] *::before, [data-eink='true'] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
   backdrop-filter: none !important;
-  border-radius: 0 !important;
   box-shadow: none !important;
 }
-html.eink img {
+[data-eink='true'] img {
   filter: grayscale(100%) contrast(1.15) !important;
 }
-html.eink .app-warm-bg,
-html.eink .app-glass,
-html.eink .app-card {
+[data-eink='true'] .app-warm-bg,
+[data-eink='true'] .app-glass,
+[data-eink='true'] .app-card {
   background: #FFFFFF !important;
   border: 1px solid #000000 !important;
   box-shadow: none !important;
 }
-html.eink ::selection {
+[data-eink='true'] ::selection {
   background: #000000 !important;
   color: #FFFFFF !important;
+}
+
+/* Sidebar is a full-height bg-primary bar; in e-ink the brown collapses to a
+   gray smear and the white text/active states lose all contrast. Invert to a
+   white column with a 1px right border, and flip the white text to black so
+   the active item (bg-white/10) still reads as a gray fill on white. */
+[data-eink='true'] .moke-sidebar {
+  background: #FFFFFF !important;
+  border-right: 1px solid #000000 !important;
+}
+[data-eink='true'] .moke-sidebar :where(.text-primary-foreground, .text-white) {
+  color: #000000 !important;
+}
+[data-eink='true'] .moke-sidebar :where(.text-white\/55, .text-white\/30, .text-white\/45) {
+  color: #555555 !important;
+}
+[data-eink='true'] .moke-sidebar :where(.border-white\/10) {
+  border-color: #000000 !important;
+}
+
+/* eink-bordered: the readest convention for visible boundaries on e-ink, where
+   shadows don't render. Swaps to solid 1px border + flat surface in e-ink. */
+.eink-bordered {
+  border-width: 1px;
+  border-color: rgba(74, 57, 35, 0.1);
+}
+[data-eink='true'] .eink-bordered {
+  border-color: #000000;
+  background: #FFFFFF;
+}
+
+/* System-wide flatten of the warm translucent "glass" recipe used by every
+   page (shelf/library/history headers, cards, empty-state blobs). These use
+   inline bg-white/N + backdrop-blur rather than the .app-glass class, so they
+   aren't caught above. On e-ink the translucency shows content behind and the
+   blur smears; force solid white + a 1px border for delineation. Substring
+   matchers mirror readest's [class*='...'] e-ink rules. */
+[data-eink='true'] [class*='bg-white/'],
+[data-eink='true'] [class*='bg-[#fffdf8]/'] {
+  background-color: #FFFFFF !important;
+}
+[data-eink='true'] header {
+  background: #FFFFFF !important;
+  border-bottom: 1px solid #000000 !important;
+  backdrop-filter: none !important;
+}
+/* Decorative gradient overlays / blur blobs: invisible value on e-ink, just smear. */
+[data-eink='true'] [class*='blur-2xl'],
+[data-eink='true'] [class*='from-white/'],
+[data-eink='true'] [class*='from-black/'] {
+  display: none !important;
+}
+/* Primary CTA (bg-primary): brown collapses to gray with white text. Invert to
+   white + 1px border + black label so the action stays distinct (readest's
+   [data-eink] .bg-primary rule). */
+[data-eink='true'] .bg-primary {
+  background-color: #FFFFFF !important;
+  border: 1px solid #000000 !important;
+  color: #000000 !important;
+}
+
+/* Shelf page background is a warm radial+linear gradient (background-image),
+   not caught by the shadow/blur rules. Flatten to solid white on e-ink. */
+[data-eink='true'] .moke-shelf-bg {
+  background: #FFFFFF !important;
 }
 
 @layer utilities {
