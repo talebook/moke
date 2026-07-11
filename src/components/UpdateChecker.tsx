@@ -9,7 +9,6 @@ export function UpdateChecker() {
   const availableVersion = useUpdateStore((s) => s.availableVersion);
   const releaseNotes = useUpdateStore((s) => s.releaseNotes);
   const error = useUpdateStore((s) => s.error);
-  const progressPercent = useUpdateStore((s) => s.progressPercent);
   const shouldPrompt = useUpdateStore((s) => s.shouldPrompt);
   const initialize = useUpdateStore((s) => s.initialize);
   const installUpdate = useUpdateStore((s) => s.installUpdate);
@@ -59,14 +58,9 @@ export function UpdateChecker() {
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => void installUpdate()}
-            disabled={status === 'downloading' || status === 'installing'}
-            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            {status === 'downloading'
-              ? `下载中 ${progressPercent}%`
-              : status === 'installing'
-                ? '安装中...'
-                : '安装并重启'}
+            安装并重启
           </button>
           <button
             onClick={dismissPrompt}
