@@ -84,6 +84,8 @@ export async function request(url: string | URL, options?: RequestInit): Promise
   } catch (e) {
     const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     debugLog('error', 'request', `✗ ${method} ${urlStr} 网络异常 (${Date.now() - startedAt}ms)`, errMsg);
+    // 延迟导入避免在 RSC/SSR 中加载 zustand store
+    import('@/lib/toast').then(m => m.useToast.getState().show(`网络连接失败：${errMsg}`)).catch(() => {});
     throw e;
   }
 

@@ -54,7 +54,11 @@ interface UpdateStore {
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
   dismissPrompt: () => void;
+  simulateUpdate: () => Promise<void>;
 }
+
+// ponytail: flag to skip real Tauri APIs when simulating
+let fake = false;
 
 type UpdaterMod = typeof import('@tauri-apps/plugin-updater');
 type ProcessMod = typeof import('@tauri-apps/plugin-process');
@@ -217,6 +221,27 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   installUpdate: async () => {
+    // ponytail: fake update skips real Tauri calls, just simulates restart
+    if (fake) {
+      writeDismissed(null);
+      set({ status: 'installing', shouldPrompt: false });
+      await new Promise((r) => setTimeout(r, 1000));
+      set({ status: 'restarting' });
+
+      if (watchdog) clearTimeout(watchdog);
+      watchdog = setTimeout(() => {
+        set({ status: 'downloaded', error: '重启未能自动启动（模拟），请手动重启应用以完成更新。', shouldPrompt: true });
+      }, 15_000);
+
+      // Don't actually relaunch — restore after 3s for re-testing
+      await new Promise((r) => setTimeout(r, 3000));
+      if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+      fake = false;
+      set({ status: 'idle', availableVersion: null, releaseNotes: null, shouldPrompt: false, error: null, progressPercent: 0, checkedAt: null });
+      (await import('@/lib/toast')).useToast.getState().show('虚假更新流程已走完，状态已重置。', 'info');
+      return;
+    }
+
     const updater = await importUpdater();
     const process = await importProcess();
     if (!updater || !process) return;
@@ -293,5 +318,24 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   dismissPrompt: () => {
     writeDismissed(get().availableVersion);
     set({ shouldPrompt: false });
+  },
+
+  simulateUpdate: async () => {
+    fake = true;
+    writeDismissed(null);
+
+    set({ status: 'checking', error: null });
+    await new Promise((r) => setTimeout(r, 800));
+
+    set({ status: 'available', availableVersion: 'v9.9.9-test', releaseNotes: '🧪 虚假更新测试\n\n这个更新是假的，用于验证更新流程的 UI 交互是否正常。', checkedAt: Date.now(), error: null });
+    await new Promise((r) => setTimeout(r, 600));
+
+    set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: 1024 * 1024 * 50 });
+    for (let p = 0; p <= 100; p += 10) {
+      await new Promise((r) => setTimeout(r, 250));
+      set({ progressPercent: p, downloadedBytes: (1024 * 1024 * 50) * p / 100 });
+    }
+
+    set({ status: 'downloaded', progressPercent: 100, shouldPrompt: true });
   },
 }));

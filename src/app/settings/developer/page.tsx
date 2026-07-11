@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Bug, FlaskConical, Lock, Trash2, AlertTriangle, Eye } from 'lucide-react';
+import { ArrowLeft, Bug, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
+import { useUpdateStore } from '@/lib/store/update';
 import { useDebugLogStore, debugLog } from '@/lib/debug-log';
+import { APP_VERSION } from '@/lib/app-version';
 
 export default function DeveloperSettingsPage() {
   const router = useRouter();
@@ -14,7 +16,6 @@ export default function DeveloperSettingsPage() {
   const setEnabled = useDeveloperStore((s) => s.setEnabled);
   const showDebugPanel = useDeveloperStore((s) => s.showDebugPanel);
   const setShowDebugPanel = useDeveloperStore((s) => s.setShowDebugPanel);
-  const lock = useDeveloperStore((s) => s.lock);
   const clearLogs = useDebugLogStore((s) => s.clear);
   const logCount = useDebugLogStore((s) => s.logs.length);
   const [crashArmed, setCrashArmed] = useState(false);
@@ -48,11 +49,6 @@ export default function DeveloperSettingsPage() {
   const triggerRenderCrash = () => {
     debugLog('error', 'devtools', '手动触发渲染崩溃测试');
     setCrashArmed(true);
-  };
-
-  const handleLock = () => {
-    lock();
-    router.push('/settings');
   };
 
   if (crashArmed) {
@@ -127,15 +123,10 @@ export default function DeveloperSettingsPage() {
             />
           </DevSection>
 
-          <DevSection title="开发者模式" description="关闭后需重新在「关于」页连点版本号解锁">
-            <ActionRow
-              icon={Lock}
-              label="退出开发者模式"
-              description="锁定开发者选项并隐藏调试面板"
-              tone="danger"
-              onClick={handleLock}
-            />
+          <DevSection title="更新测试" description="测试自动更新功能的各项状态与交互">
+            <UpdateTestPanel />
           </DevSection>
+
         </div>
         </div>
       </div>
@@ -175,6 +166,100 @@ function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon
       >
         <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
       </button>
+    </div>
+  );
+}
+
+function UpdateTestPanel() {
+  const status = useUpdateStore((s) => s.status);
+  const availableVersion = useUpdateStore((s) => s.availableVersion);
+  const releaseNotes = useUpdateStore((s) => s.releaseNotes);
+  const progressPercent = useUpdateStore((s) => s.progressPercent);
+  const error = useUpdateStore((s) => s.error);
+  const shouldPrompt = useUpdateStore((s) => s.shouldPrompt);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
+  const simulateUpdate = useUpdateStore((s) => s.simulateUpdate);
+
+  const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+
+  const clearDismissed = () => {
+    try { localStorage.removeItem('moke-dismissed-update-version'); } catch {}
+    debugLog('info', 'devtools', '已清除更新忽略版本记录');
+  };
+
+  const statusLabel: Record<string, string> = {
+    idle: '空闲',
+    checking: '检查中...',
+    available: '有可用更新',
+    'up-to-date': '已是最新',
+    downloading: '下载中',
+    downloaded: '已下载',
+    installing: '安装中',
+    restarting: '重启中',
+    error: '出错',
+  };
+
+  return (
+    <div className="px-4 py-3 rounded-xl space-y-3">
+      {/* Status */}
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-sm font-medium text-foreground">当前状态</span>
+        <span className={`text-sm ${status === 'error' ? 'text-destructive' : status === 'downloaded' ? 'text-green-600' : 'text-muted-foreground'}`}>
+          {statusLabel[status]}
+        </span>
+      </div>
+
+      <DevRow label="应用版本" value={APP_VERSION} />
+      {availableVersion && <DevRow label="可用版本" value={availableVersion} />}
+      {(status === 'downloading' || status === 'downloaded') && (
+        <DevRow label="下载进度" value={`${progressPercent}%`} />
+      )}
+      {error && <DevRow label="错误信息" value={error} />}
+      {releaseNotes && (
+        <div>
+          <span className="text-xs text-muted-foreground">更新说明</span>
+          <pre className="mt-1 text-xs text-muted-foreground bg-muted/50 rounded-lg p-2 max-h-24 overflow-y-auto whitespace-pre-wrap">{releaseNotes}</pre>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {isTauri ? (
+          <button
+            onClick={() => { checkForUpdates(); debugLog('info', 'devtools', '手动触发更新检查'); }}
+            disabled={status === 'checking' || status === 'downloading'}
+            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${status === 'checking' ? 'animate-spin' : ''}`} />
+            检查更新
+          </button>
+        ) : (
+          <span className="text-xs text-muted-foreground">非 Tauri 环境，更新功能不可用</span>
+        )}
+        <button
+          onClick={clearDismissed}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"
+        >
+          <Trash2 className="w-3 h-3" />
+          清除忽略版本
+        </button>
+        <button
+          onClick={() => { void simulateUpdate(); debugLog('info', 'devtools', '触发虚假更新测试'); }}
+          disabled={status === 'checking' || status === 'downloading' || status === 'installing' || status === 'restarting'}
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-50 transition-colors"
+        >
+          <Download className="w-3 h-3" />
+          模拟更新
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DevRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-xs text-foreground font-mono truncate max-w-[180px]">{value}</span>
     </div>
   );
 }
