@@ -165,7 +165,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: updater-manifest-${{ matrix.platform }}
-          path: src-tauri/target/release/bundle/**/latest*.json
+          path: src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: ignore
 
       - name: Initialize Tauri Android project
