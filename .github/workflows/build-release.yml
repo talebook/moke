@@ -157,6 +157,16 @@ jobs:
         run: pnpm tauri build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload updater manifest
+        if: contains(fromJSON('["macos", "ubuntu", "windows"]'), matrix.platform)
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-manifest-${{ matrix.platform }}
+          path: src-tauri/target/release/bundle/**/latest*.json
+          if-no-files-found: ignore
 
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
@@ -336,3 +346,29 @@ jobs:
             ios-release-artifacts/*.ipa
             src-tauri/gen/apple/build/**/*.app
           if-no-files-found: error
+
+  merge-updater-manifest:
+    name: Merge updater manifests
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download updater manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: updater-manifest-*
+          merge-multiple: true
+          path: updater-manifests
+
+      - name: Merge manifests into latest.json
+        run: node scripts/merge-updater-json.js updater-manifests
+
+      - name: Upload latest.json to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: latest.json

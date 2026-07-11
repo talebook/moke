@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, LogOut, Package, PlugZap, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Download, LogOut, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
+import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
 
 export default function SettingsPage() {
@@ -109,6 +110,7 @@ export default function SettingsPage() {
 
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
             <SettingsRow label="应用版本" value={APP_VERSION} />
+            <UpdateSection />
             <SettingsLinkRow
               icon={BookOpen}
               label="关于应用"
@@ -235,6 +237,83 @@ function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon
       >
         <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-200 ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
       </button>
+    </div>
+  );
+}
+
+function UpdateSection() {
+  const status = useUpdateStore((s) => s.status);
+  const availableVersion = useUpdateStore((s) => s.availableVersion);
+  const error = useUpdateStore((s) => s.error);
+  const progressPercent = useUpdateStore((s) => s.progressPercent);
+  const checkedAt = useUpdateStore((s) => s.checkedAt);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
+  const installUpdate = useUpdateStore((s) => s.installUpdate);
+
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return null;
+
+  const statusText = (() => {
+    if (status === 'checking') return '正在检查更新...';
+    if (error) return `检查失败: ${error}`;
+    if (status === 'downloading') return `下载中 ${progressPercent}%`;
+    if (status === 'downloaded') return `新版本已下载，重启后生效`;
+    if (status === 'installing') return '正在安装...';
+    if (status === 'restarting') return '正在重启...';
+    if (status === 'available' && availableVersion) return `发现新版本 ${availableVersion}`;
+    if (status === 'up-to-date') return `已是最新版本 ${APP_VERSION}`;
+    return '点击检查更新';
+  })();
+
+  const checkedAtText = checkedAt
+    ? new Date(checkedAt).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })
+    : null;
+
+  const isBusy = status === 'checking' || status === 'downloading' || status === 'installing' || status === 'restarting';
+
+  return (
+    <div className="px-4 py-3.5 rounded-xl">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-start gap-3.5 min-w-0">
+          <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 text-muted-foreground shrink-0">
+            <Download className="w-4 h-4" />
+          </div>
+          <div className="min-w-0 py-0.5">
+            <p className="text-sm font-medium text-foreground">检查更新</p>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{statusText}</p>
+            {checkedAtText && (
+              <p className="text-[11px] text-muted-foreground/70 mt-0.5">上次检查: {checkedAtText}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {availableVersion && (status === 'available' || status === 'downloaded' || status === 'error') && (
+            <button
+              onClick={() => void installUpdate()}
+              disabled={isBusy}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {status === 'downloaded' ? '安装并重启' : '立即更新'}
+            </button>
+          )}
+          <button
+            onClick={() => void checkForUpdates()}
+            disabled={isBusy}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-50 transition-colors flex items-center gap-1"
+          >
+            <RefreshCw className={`w-3 h-3 ${status === 'checking' ? 'animate-spin' : ''}`} />
+            检查
+          </button>
+        </div>
+      </div>
+
+      {(status === 'downloading' || status === 'restarting') && (
+        <div className="mt-2 h-1 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary transition-all duration-300"
+            style={{ width: `${Math.min(progressPercent, 100)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

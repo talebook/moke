@@ -120,6 +120,7 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
-    "core:path:allow-resolve-directory"
+    "core:path:allow-resolve-directory",
+    "updater:default"
   ]
 }

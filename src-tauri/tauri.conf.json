@@ -41,6 +41,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -61,6 +62,15 @@
   "plugins": {
     "fs": {
       "requireLiteralLeadingDot": false
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEwQkJFQTlFQzIyQzQ5OEMKUldTTVNTekNudXE3RU1MVERSWHNFZ3U2Q2RWa2psN1hIbTF2Z0Q0aWRWNmFhSVM5b01oNkg4dGIK",
+      "endpoints": [
+        "https://github.com/talebook/moke/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

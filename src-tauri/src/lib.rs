@@ -22,7 +22,8 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
     let builder = readestlib::register_reader_plugins(builder);
