@@ -1,6 +1,11 @@
 // Reads .sig files produced by Tauri's createUpdaterArtifacts and builds latest.json.
 // Usage: node scripts/merge-updater-json.cjs <sig-dir>
 // Output: latest.json in the current directory.
+//
+// The .sig files are uploaded via actions/upload-artifact@v4 with a workspace-relative
+// glob (e.g. src-tauri/target/release/bundle/**/*.sig), and the download-artifact step
+// with merge-multiple preserves that directory structure inside <sig-dir>. So we have
+// to search recursively and use the basename as the asset name.
 
 const fs = require('fs');
 const path = require('path');
@@ -11,9 +16,23 @@ if (!dir) {
   process.exit(1);
 }
 
-let files = [];
-try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.sig')); } catch { /* dir missing */ }
-if (files.length === 0) {
+function findSigFiles(root) {
+  const out = [];
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return out; }
+  for (const entry of entries) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...findSigFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith('.sig')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+const sigFiles = findSigFiles(dir);
+if (sigFiles.length === 0) {
   console.log('No .sig files found — skipping latest.json generation');
   process.exit(0);
 }
@@ -38,7 +57,8 @@ function platformFromName(name) {
 }
 
 const platforms = {};
-for (const f of files) {
+for (const fullPath of sigFiles) {
+  const f = path.basename(fullPath);
   let plat = platformFromName(f);
   if (!plat) { console.log('  skip unknown: %s', f); continue; }
 
@@ -48,7 +68,7 @@ for (const f of files) {
   if (plat.endsWith('-deb') && platforms['linux-aarch64']) continue;
 
   const basePlat = plat.replace(/-msi|-deb/, '');
-  const sig = fs.readFileSync(path.join(dir, f), 'utf-8').trim();
+  const sig = fs.readFileSync(fullPath, 'utf-8').trim();
   const assetName = f.replace(/\.sig$/, '');
   platforms[basePlat] = { signature: sig, url: `${base}/${assetName}` };
   console.log('  %s ← %s', basePlat, f);
