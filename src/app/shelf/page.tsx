@@ -9,6 +9,9 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
+import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { ViewModeToggle } from '@/components/book/ViewModeToggle';
+import { useViewPrefsStore } from '@/lib/store/view-prefs';
 
 interface BookItem {
   id: string | number;
@@ -17,6 +20,14 @@ interface BookItem {
   author?: string;
   img?: string;
   thumb?: string;
+  publisher?: string;
+  pubdate?: string;
+  files?: Array<{ format: string; size?: number }>;
+  timestamp?: number;
+  state?: {
+    wants?: boolean;
+    download?: number;
+  };
 }
 
 function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolean }) {
@@ -116,7 +127,8 @@ export default function ShelfPage() {
   const [books, setBooks] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requiresLogin, setRequiresLogin] = useState(false);
-  const viewMode = 'grid';
+  const viewMode = useViewPrefsStore((s) => s.shelfViewMode);
+  const setViewMode = useViewPrefsStore((s) => s.setShelfViewMode);
 
   useEffect(() => {
     loadBooks();
@@ -169,6 +181,7 @@ export default function ShelfPage() {
               >
                 <History className="w-4 h-4" />
               </Link>
+              <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1" />
             </div>
           </div>
         </header>
@@ -193,11 +206,15 @@ export default function ShelfPage() {
             </div>
           ) : (
             <div className="px-8 py-8">
-              <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 eink-bordered p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
-                {books.map((book) => (
-                  <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
-                ))}
-              </div>
+              {viewMode === 'rows' ? (
+                <BookTable books={books as BookRow[]} showStatus />
+              ) : (
+                <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 eink-bordered p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
+                  {books.map((book) => (
+                    <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

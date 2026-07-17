@@ -4,11 +4,14 @@ import { Suspense, useState, useEffect } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Search, Grid3X3, List } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
+import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
+import { useViewPrefsStore } from '@/lib/store/view-prefs';
 
 interface BookItem {
   id: string | number;
@@ -17,6 +20,10 @@ interface BookItem {
   author?: string;
   img?: string;
   thumb?: string;
+  publisher?: string;
+  pubdate?: string;
+  files?: Array<{ format: string; size?: number }>;
+  timestamp?: number;
 }
 
 function SearchContent() {
@@ -27,7 +34,8 @@ function SearchContent() {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [activeFilter, setActiveFilter] = useState('全部');
-  const [viewGrid, setViewGrid] = useState(true);
+  const viewMode = useViewPrefsStore((s) => s.searchViewMode);
+  const setViewMode = useViewPrefsStore((s) => s.setSearchViewMode);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -80,14 +88,7 @@ function SearchContent() {
             ))}
           </div>
           
-          <div className="flex items-center rounded-lg p-1 shrink-0 bg-muted border border-border">
-            <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-              <Grid3X3 className="w-4 h-4" />
-            </button>
-            <button onClick={() => setViewGrid(false)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all', !viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-              <List className="w-4 h-4" />
-            </button>
-          </div>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
         </div>
 
         {loading ? (
@@ -102,13 +103,16 @@ function SearchContent() {
         ) : results.length > 0 ? (
           <div>
             <p className="text-sm text-muted-foreground mb-5">找到 {results.length} 本书</p>
-            <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
-              {results.map((book) => {
-                const bookId = String(book.id);
-                const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
-                const authorName = book.author || book.authors?.[0]?.name || '';
+            {viewMode === 'rows' ? (
+              <BookTable books={results as BookRow[]} />
+            ) : (
+              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+                {results.map((book) => {
+                  const bookId = String(book.id);
+                  const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
+                  const authorName = book.author || book.authors?.[0]?.name || '';
 
-                if (viewGrid) {
+                  if (viewMode === 'grid') {
                   return (
                     <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
                       <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
@@ -170,7 +174,8 @@ function SearchContent() {
                   </Link>
                 );
               })}
-            </div>
+              </div>
+            )}
           </div>
         ) : null}
       </div>

@@ -3,12 +3,15 @@
 import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Grid3X3, List, ChevronDown, ArrowLeft, Loader2 } from 'lucide-react';
+import { Search, ChevronDown, ArrowLeft, Loader2 } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
+import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
+import { useViewPrefsStore } from '@/lib/store/view-prefs';
 
 interface BookItem {
   id: string | number;
@@ -17,7 +20,9 @@ interface BookItem {
   author?: string;
   img?: string;
   thumb?: string;
-  files?: Array<{ format: string }>;
+  publisher?: string;
+  pubdate?: string;
+  files?: Array<{ format: string; size?: number }>;
   timestamp?: number;
 }
 
@@ -72,7 +77,8 @@ export default function LibraryPage() {
 
   // Shared
   const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
-  const [viewGrid, setViewGrid] = useState(true);
+  const viewMode = useViewPrefsStore((s) => s.libraryViewMode);
+  const setViewMode = useViewPrefsStore((s) => s.setLibraryViewMode);
   const [searchQ, setSearchQ] = useState('');
 
   // Local tab state
@@ -300,14 +306,7 @@ export default function LibraryPage() {
           />
         </div>
 
-        <div className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm">
-          <button onClick={() => setViewGrid(true)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all eink:!bg-black eink:!text-white', viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-            <Grid3X3 className="w-4 h-4" />
-          </button>
-          <button onClick={() => setViewGrid(false)} className={cn('flex items-center justify-center w-7 h-7 rounded-md transition-all eink:!bg-black eink:!text-white', !viewGrid ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-            <List className="w-4 h-4" />
-          </button>
-        </div>
+        <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1" />
       </header>
 
       {/* ── Tabs ── */}
@@ -350,14 +349,16 @@ export default function LibraryPage() {
                 <p className="text-lg font-semibold text-foreground">没有找到匹配的书籍</p>
                 <p className="mt-2 text-sm text-muted-foreground">可以调整格式或分类筛选条件后再试。</p>
               </div>
+            ) : viewMode === 'rows' ? (
+              <BookTable books={books as BookRow[]} />
             ) : (
-              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
                 {books.map((book) => {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
                   const ci = getColorIndex(bookId);
-                  return viewGrid ? (
+                  return viewMode === 'grid' ? (
                     <Link key={bookId} href={`/detail?id=${bookId}`} className="group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
                       <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
                         {coverUrl ? (
@@ -528,8 +529,10 @@ export default function LibraryPage() {
                   <p className="text-lg font-semibold text-foreground">没有找到相关书籍</p>
                   <p className="mt-2 text-sm text-muted-foreground">换个关键词试试。</p>
                 </div>
+              ) : viewMode === 'rows' ? (
+                <NetworkBookTable books={networkSearchResults} />
               ) : (
-                <NetworkBookGrid books={networkSearchResults} viewGrid={viewGrid} />
+                <NetworkBookGrid books={networkSearchResults} viewMode={viewMode} />
               )}
             </div>
           ) : (
@@ -561,8 +564,10 @@ export default function LibraryPage() {
                     <p className="text-lg font-semibold text-foreground">该分类暂无书籍</p>
                     <p className="mt-2 text-sm text-muted-foreground">换个分类试试，或稍后再来看看。</p>
                   </div>
+                ) : viewMode === 'rows' ? (
+                  <NetworkBookTable books={networkBooks} />
                 ) : (
-                  <NetworkBookGrid books={networkBooks} viewGrid={viewGrid} />
+                  <NetworkBookGrid books={networkBooks} viewMode={viewMode} />
                 )}
               </div>
 
@@ -592,9 +597,32 @@ export default function LibraryPage() {
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
-function NetworkBookGrid({ books, viewGrid }: { books: NetworkBook[]; viewGrid: boolean }) {
+function networkBookToRow(book: NetworkBook, idx: number): BookRow {
+  const title = book.title || book.name || `未命名-${idx}`;
+  const authorRaw = book.author || book.authors;
+  const author = typeof authorRaw === 'string'
+    ? authorRaw
+    : Array.isArray(authorRaw)
+      ? authorRaw.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
+      : '';
+  // Network books don't carry a stable id; synthesize one from the index so the table
+  // can key rows. The detail link is intentionally not wired for these — they're
+  // search/explore results and we'd need the originating server to resolve a real id.
+  return {
+    id: `network-${idx}`,
+    title,
+    author,
+    img: book.cover_url || book.img || book.thumb,
+  };
+}
+
+function NetworkBookTable({ books }: { books: NetworkBook[] }) {
+  return <BookTable books={books.map((b, i) => networkBookToRow(b, i))} linkable={false} />;
+}
+
+function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: ViewMode }) {
   return (
-    <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewGrid ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+    <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
       {books.map((book, idx) => {
         const title = book.title || book.name || '';
         const authorRaw = book.author || book.authors;
@@ -605,7 +633,7 @@ function NetworkBookGrid({ books, viewGrid }: { books: NetworkBook[]; viewGrid: 
             : '';
         const coverUrl = book.cover_url || book.img || book.thumb;
         const ci = getColorIndex(title + idx);
-        return viewGrid ? (
+        return viewMode === 'grid' ? (
           <div key={idx} className="group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
             <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
               {coverUrl ? (
