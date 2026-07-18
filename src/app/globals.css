@@ -150,6 +150,212 @@
   color: #000000 !important;
 }
 
+/* text-primary / text-primary/N: warm brown accent text (used for captions
+   like "共 13 本藏书", "探索书库", the small label above the page title).
+   The 80/60 opacity variants are too low-contrast on white-on-white. Force
+   solid black so the caption stays readable. */
+[data-eink='true'] .text-primary,
+[data-eink='true'] [class*='text-primary/'] {
+  color: #000000 !important;
+}
+
+/* border-amber-950/N: the standard warm 1px border used on cards, headers,
+   the ViewModeToggle container, and — critically — the Select dropdown
+   panel and the right-click BookContextMenu (both use `border-amber-950/10`
+   for a hairline frame). On e-ink the faint warm tint disappears, leaving
+   the panels borderless against the white background. Force solid black
+   for crisp 1px outlines. */
+[data-eink='true'] [class*='border-amber-950/'] {
+  border-color: #000000 !important;
+}
+
+/* Warm amber hover backgrounds (used in Select options, BookContextMenu
+   items, etc.) translate to a near-invisible tint on e-ink. Keep the hover
+   affordance visible by swapping to a clear gray. */
+[data-eink='true'] [class*='hover:bg-amber-']:hover,
+[data-eink='true'] [class*='hover:bg-amber-']:focus-visible {
+  background-color: #E5E5E5 !important;
+}
+/* Same treatment for hover:bg-muted*: the warm light-gray hover tint
+   (`bg-muted` = #EDE9DF at various opacities) is barely visible on
+   white in e-ink. The :hover pseudo-class keeps it scoped to the
+   interactive moment (the persistent bg-muted rule above already
+   handles the non-hover case). Used by settings rows, history page
+   links, about/contributors cards, library pagination, etc. */
+[data-eink='true'] [class*='hover:bg-muted']:hover,
+[data-eink='true'] [class*='hover:bg-muted']:focus-visible {
+  background-color: #E5E5E5 !important;
+}
+/* The currently-selected option in the Select uses `bg-amber-50/40` (a
+   persistent, not hover, fill). The faint tint is invisible on e-ink —
+   invert to a solid gray so the selected row still stands out.
+   Excludes `hover:bg-amber-50/40` (BookTable rows would otherwise show
+   persistent gray because the substring `bg-amber-50/40` matches the
+   hover variant too). */
+[data-eink='true'] [class*='bg-amber-50/40']:not([class*='hover:bg-amber-50/40']) {
+  background-color: #E5E5E5 !important;
+}
+
+/* text-foreground / text-foreground/N: the primary text color (#2C2C2E).
+   The body color override doesn't reach it because the class sets an
+   explicit color, so leave an explicit rule. */
+[data-eink='true'] .text-foreground,
+[data-eink='true'] [class*='text-foreground/'] {
+  color: #000000 !important;
+}
+/* text-muted-foreground / text-muted-foreground/N: the secondary text color
+   (#8B8682, a warm gray). On e-ink the warm tint washes out and the
+   50%-gray value is too low contrast — bump to #555555 (matches the
+   .moke-sidebar convention for muted white-on-dark text). */
+[data-eink='true'] .text-muted-foreground,
+[data-eink='true'] [class*='text-muted-foreground/'] {
+  color: #555555 !important;
+}
+/* border-foreground / border-foreground/N: the dark gray used as a border
+   for selected/active elements (e.g. the active tab in the history page,
+   which uses `border-foreground bg-muted text-foreground` to signal
+   selection). On e-ink the dark gray border is still visible against
+   white, but matching it to the text-foreground (black) gives a stronger,
+   more consistent outline. */
+[data-eink='true'] .border-foreground,
+[data-eink='true'] [class*='border-foreground/'] {
+  border-color: #000000 !important;
+}
+/* bg-muted / bg-muted/N: the warm light-gray surface used for icon
+   containers, active-tab fills, list-item backgrounds, and various
+   "muted" grouping surfaces (#EDE9DF, near-invisible on white in e-ink).
+   Force a visible neutral gray so the surfaces still read as
+   "non-white".
+   Excludes:
+   - `hover:bg-muted*` (settings rows etc. would otherwise show persistent
+     gray because the substring `bg-muted` matches the hover variant too)
+   - `bg-muted-foreground*` (the toggle's unchecked state uses
+     `bg-muted-foreground/30`; that should stay as its own state color,
+     not get repainted as a "muted surface") */
+[data-eink='true'] [class*='bg-muted']:not([class*='hover:bg-muted']):not([class*='bg-muted-foreground']) {
+  background-color: #E5E5E5 !important;
+}
+
+/* bg-background/N: the page-background color (#FBF9F2, the warm cream).
+   The cream tint collapses to near-white on e-ink but the undertones
+   make it dirty-looking. Force solid white so cards / chips on the
+   cream page read as the same surface as the page. Used in the user
+   page history cards, QuickLink cards, etc. */
+[data-eink='true'] [class*='bg-background/'] {
+  background-color: #FFFFFF !important;
+}
+
+/* border-border/N: the standard light-gray border (#E8E3DC, very subtle
+   in normal mode). Near-invisible on white in e-ink — force solid black
+   for crisp 1px outlines. Used by the user page history cards, QuickLink
+   cards, InfoCard icons, settings section dividers, etc. */
+[data-eink='true'] [class*='border-border/'],
+[data-eink='true'] .border-border {
+  border-color: #000000 !important;
+}
+
+/* border-primary/N: brown accent border (used on hover for "查看全部"
+   link, history card icon containers, etc.). The brown collapses to a
+   muddy gray on e-ink; force black for the same contrast story as
+   border-foreground. */
+[data-eink='true'] [class*='border-primary/'] {
+  border-color: #000000 !important;
+}
+
+/* from-primary / via-primary / to-primary: brown-gradient avatar /
+   icon containers (e.g. the user page profile avatar). The brown
+   gradient collapses to a muddy gray on e-ink; invert to solid black
+   so the avatar still reads as a distinct "primary" surface (matches
+   the inverted .bg-primary e-ink convention). text-primary-foreground
+   (white) on the inverted black background stays readable. */
+[data-eink='true'] [class*='from-primary'],
+[data-eink='true'] [class*='via-primary'],
+[data-eink='true'] [class*='to-primary'] {
+  background: #000000 !important;
+}
+
+/* All other colored book-cover placeholder gradients (the fallback
+   div shown when a cover image fails to load). The shelf page uses
+   heavy hues (emerald-800, amber-700, rose-700, indigo-700 at /20
+   opacity) and the library/search/BookTable use light grays
+   (slate-200, stone-200, zinc-200, etc.). On e-ink the colored
+   variants collapse to arbitrary gray smears and the gray variants
+   are so light they're invisible. Force a solid neutral gray
+   background so every placeholder reads as the same "no-cover"
+   surface, and the white initial/title text on top stays visible. */
+[data-eink='true'] [class*='from-emerald-'],
+[data-eink='true'] [class*='from-teal-'],
+[data-eink='true'] [class*='from-cyan-'],
+[data-eink='true'] [class*='from-amber-'],
+[data-eink='true'] [class*='from-yellow-'],
+[data-eink='true'] [class*='from-orange-'],
+[data-eink='true'] [class*='from-slate-'],
+[data-eink='true'] [class*='from-gray-'],
+[data-eink='true'] [class*='from-zinc-'],
+[data-eink='true'] [class*='from-stone-'],
+[data-eink='true'] [class*='from-neutral-'],
+[data-eink='true'] [class*='from-rose-'],
+[data-eink='true'] [class*='from-red-'],
+[data-eink='true'] [class*='from-pink-'],
+[data-eink='true'] [class*='from-indigo-'],
+[data-eink='true'] [class*='from-blue-'],
+[data-eink='true'] [class*='from-purple-'],
+[data-eink='true'] [class*='from-violet-'],
+[data-eink='true'] [class*='from-fuchsia-'],
+[data-eink='true'] [class*='from-sky-'],
+[data-eink='true'] [class*='from-lime-'],
+[data-eink='true'] [class*='from-green-'] {
+  background: #E5E5E5 !important;
+}
+
+/* Book-cover placeholder text: the inner span uses `text-white/75`
+   (or /70) in normal mode for contrast against the dark colored
+   gradient. After the rule above the parent is solid #E5E5E5, so
+   white-on-gray is ~1.2:1 — unreadable. Force the inner white text
+   to black. Scoped via descendant selector so this only fires for
+   text-white inside a colored-gradient cover placeholder (not for
+   the .moke-sidebar text-white/N, which has its own rule that
+   targets #555555, and not for the from-primary avatar text, which
+   is white-on-black after the from-primary rule). */
+[data-eink='true'] [class*='from-emerald-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-amber-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-rose-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-indigo-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-slate-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-stone-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-zinc-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-gray-'] [class*='text-white/'],
+[data-eink='true'] [class*='from-neutral-'] [class*='text-white/'] {
+  color: #000000 !important;
+}
+
+/* All other colored text (text-{color}-{shade} where color is a
+   Tailwind hue like amber/rose/red/green/...) collapses to arbitrary
+   gray smears in e-ink and conveys no information. Used for decorative
+   section icons (e.g. about page "后续规划" Sparkles text-amber-500,
+   "贡献者" HeartHandshake text-rose-500), destructive (text-red-600),
+   success (text-emerald-600, text-green-600), info (text-blue-700), etc.
+   Force solid black in e-ink. */
+[data-eink='true'] [class*='text-amber-'],
+[data-eink='true'] [class*='text-rose-'],
+[data-eink='true'] [class*='text-red-'],
+[data-eink='true'] [class*='text-orange-'],
+[data-eink='true'] [class*='text-yellow-'],
+[data-eink='true'] [class*='text-lime-'],
+[data-eink='true'] [class*='text-green-'],
+[data-eink='true'] [class*='text-emerald-'],
+[data-eink='true'] [class*='text-teal-'],
+[data-eink='true'] [class*='text-cyan-'],
+[data-eink='true'] [class*='text-sky-'],
+[data-eink='true'] [class*='text-blue-'],
+[data-eink='true'] [class*='text-indigo-'],
+[data-eink='true'] [class*='text-violet-'],
+[data-eink='true'] [class*='text-purple-'],
+[data-eink='true'] [class*='text-fuchsia-'],
+[data-eink='true'] [class*='text-pink-'] {
+  color: #000000 !important;
+}
+
 /* Shelf page background is a warm radial+linear gradient (background-image),
    not caught by the shadow/blur rules. Flatten to solid white on e-ink. */
 [data-eink='true'] .moke-shelf-bg {

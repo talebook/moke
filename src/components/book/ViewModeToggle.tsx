@@ -13,9 +13,11 @@ interface ViewModeToggleProps {
   showRows?: boolean;
 }
 
-const BASE = 'flex items-center justify-center w-7 h-7 rounded-md transition-all eink:!bg-black eink:!text-white';
-const ACTIVE = 'bg-background text-foreground shadow-sm';
-const INACTIVE = 'text-muted-foreground hover:text-foreground';
+// Active: normal mode = white card with subtle shadow; e-ink mode = filled black (the "pressed in" state, contrasts against the white outlined inactive buttons). Matches the inverted-button e-ink convention used by .bg-primary elsewhere in the app.
+const BASE = 'flex items-center justify-center w-7 h-7 rounded-md transition-all';
+const ACTIVE = 'bg-background text-foreground shadow-sm eink:!bg-black eink:!text-white';
+// Inactive: normal mode = muted text; e-ink mode = white bg + black icon + 1px black border (outlined) so it stays visible against the white container in e-ink mode (the container's bg-white/65 is forced solid white there by the global rule, so a flat inactive button would disappear without the border outline).
+const INACTIVE = 'text-muted-foreground hover:text-foreground eink:!bg-white eink:!text-black eink:!shadow-[inset_0_0_0_1px_#000]';
 
 export function ViewModeToggle({ value, onChange, className, showRows = true }: ViewModeToggleProps) {
   return (

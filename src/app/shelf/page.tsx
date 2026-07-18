@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
 import { BookOpen, History, Search } from 'lucide-react';
@@ -11,7 +11,13 @@ import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
 import { ViewModeToggle } from '@/components/book/ViewModeToggle';
+import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionBar';
+import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookContextMenu';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
+import { downloadBookBlob } from '@/lib/api';
+import { saveOfflineBook } from '@/lib/offline-books';
+import { useToast } from '@/lib/toast';
+import { Check, Download, ListChecks } from 'lucide-react';
 
 interface BookItem {
   id: string | number;
@@ -30,7 +36,22 @@ interface BookItem {
   };
 }
 
-function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolean }) {
+function BookCard({
+  book,
+  viewGrid = true,
+  batchMode = false,
+  selected = false,
+  onToggleSelect,
+  onContextAction,
+}: {
+  book: BookItem;
+  viewGrid?: boolean;
+  batchMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
+  /** Right-click / long-press: open the context menu at (x, y) for this book. */
+  onContextAction?: (id: string, x: number, y: number) => void;
+}) {
   const { serverUrl } = useServerStore();
   const authorName = book.author || book.authors?.[0]?.name || '';
   const bookId = String(book.id);
@@ -44,10 +65,67 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
   ];
   const ci = Math.abs(bookId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % colors.length;
 
+  // Build the interaction props based on mode.
+  // - batchMode=true: any click (incl. right-click / long-press) toggles selection.
+  // - batchMode=false & onContextAction: right-click + long-press open a context menu;
+  //   left-click is left to the Link (navigation).
+  function makeHandlers() {
+    if (batchMode) {
+      const toggle = (mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) =>
+        onToggleSelect?.(bookId, mods);
+      return {
+        onClick: (e: React.MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggle({ shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+        },
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          toggle({ shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+        },
+      };
+    }
+    if (onContextAction) {
+      let pressTimer: number | null = null;
+      let didLongPress = false;
+      let touchX = 0;
+      let touchY = 0;
+      return {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          onContextAction(bookId, e.clientX, e.clientY);
+        },
+        onTouchStart: (e: React.TouchEvent) => {
+          didLongPress = false;
+          const t = e.touches[0];
+          touchX = t?.clientX ?? 0;
+          touchY = t?.clientY ?? 0;
+          pressTimer = window.setTimeout(() => {
+            didLongPress = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+            onContextAction(bookId, touchX, touchY);
+          }, 500);
+        },
+        onTouchEnd: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onTouchMove: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onClick: (e: React.MouseEvent) => {
+          if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+        },
+      };
+    }
+    return {};
+  }
+  const handlers = makeHandlers();
+
   if (viewGrid) {
     return (
       <Link href={`/detail?id=${bookId}`}
-        className="group flex flex-col gap-3 cursor-pointer rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]"
+        {...handlers}
+        className={`group relative flex flex-col gap-3 cursor-pointer rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)] ${selected ? 'ring-2 ring-primary/60 bg-white/70' : batchMode ? 'cursor-pointer' : ''}`}
       >
         <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
           style={{ aspectRatio: '2/3' }}>
@@ -75,6 +153,14 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
           <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
           <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
           <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          {/* Selection badge: always rendered, fades in/out + scales so the badge itself
+              animates smoothly when batch mode toggles. It's absolute-positioned, so it
+              doesn't push the title/author — the grid view layout is unaffected. */}
+          <div className={`absolute top-2 right-2 z-10 w-5 h-5 rounded-full flex items-center justify-center shadow-sm transition-all duration-200 ease-out ${batchMode ? 'opacity-100' : 'opacity-0 scale-50 pointer-events-none'}`}>
+            <span className={`flex items-center justify-center w-5 h-5 rounded-full transition-all duration-150 ${selected ? 'bg-primary text-primary-foreground scale-100' : 'bg-white/70 border-2 border-muted-foreground/30 scale-90'}`}>
+              {selected && <span className="text-[10px] font-bold">✓</span>}
+            </span>
+          </div>
         </div>
         <div className="flex flex-col gap-1 px-1">
           <span className="text-[13px] font-semibold leading-snug truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</span>
@@ -86,8 +172,16 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
 
   return (
       <Link href={`/detail?id=${bookId}`}
-      className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group">
-      <div className="w-10 h-[60px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
+      {...handlers}
+      className={`flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
+      {/* Selection indicator wrapper: width animates 0 → 20px so the cover/title
+          smoothly slides right when entering batch mode, instead of jumping. */}
+      <div className={`overflow-hidden shrink-0 transition-[width,opacity] duration-200 ease-out ${batchMode ? 'w-5 opacity-100' : 'w-0 opacity-0'}`}>
+        <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150 ${selected ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
+          {selected && <span className="text-[10px] font-bold">✓</span>}
+        </div>
+      </div>
+      <div className="w-14 h-[84px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
         {coverUrl ? (
           <AuthImage
             src={coverUrl}
@@ -124,11 +218,22 @@ function BookCard({ book, viewGrid = true }: { book: BookItem; viewGrid?: boolea
 export default function ShelfPage() {
   const { serverUrl } = useServerStore();
   const router = useRouter();
+  const toast = useToast((s) => s.show);
   const [books, setBooks] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requiresLogin, setRequiresLogin] = useState(false);
   const viewMode = useViewPrefsStore((s) => s.shelfViewMode);
   const setViewMode = useViewPrefsStore((s) => s.setShelfViewMode);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const lastSelectedIdRef = useRef<string | null>(null);
+  const [batchMode, setBatchMode] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
+
+  // Clear selection whenever the underlying book list changes (server change, reload, etc.)
+  useEffect(() => {
+    setSelectedIds(new Set());
+    lastSelectedIdRef.current = null;
+  }, [books.length, serverUrl]);
 
   useEffect(() => {
     loadBooks();
@@ -149,6 +254,180 @@ export default function ShelfPage() {
 
       setBooks(data.books || []);
     } catch {} finally { setLoading(false); }
+  };
+
+  // ── Selection ────────────────────────────────────────────────────────────
+  const enterBatchMode = (firstId?: string) => {
+    setBatchMode(true);
+    if (firstId) {
+      setSelectedIds(new Set([firstId]));
+      lastSelectedIdRef.current = firstId;
+    }
+  };
+
+  const exitBatchMode = () => {
+    setBatchMode(false);
+    setSelectedIds(new Set());
+    lastSelectedIdRef.current = null;
+  };
+
+  const toggleSelect = (id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+    if (!batchMode) return;
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const orderedIds = books.map((b) => String(b.id));
+      const anchor = lastSelectedIdRef.current;
+      if (mods.shiftKey && anchor && orderedIds.includes(anchor)) {
+        const a = orderedIds.indexOf(anchor);
+        const b = orderedIds.indexOf(id);
+        if (a !== -1 && b !== -1) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          const shouldSelect = !prev.has(id);
+          for (let i = lo; i <= hi; i++) next.add(orderedIds[i]);
+          if (!shouldSelect) for (let i = lo; i <= hi; i++) next.delete(orderedIds[i]);
+        }
+      } else {
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        lastSelectedIdRef.current = id;
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(books.map((b) => String(b.id))));
+  };
+
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+    lastSelectedIdRef.current = null;
+  };
+
+  // Deselecting everything should also exit batch mode (nothing to act on).
+  useEffect(() => {
+    if (!batchMode) return;
+    if (selectedIds.size === 0) setBatchMode(false);
+  }, [selectedIds, batchMode]);
+
+  // ── Single-item actions (from right-click / long-press menu) ────────────
+  const removeFromShelf = async (id: string) => {
+    const book = books.find((b) => String(b.id) === id);
+    if (!book) return;
+    try {
+      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ shelf: false }),
+      });
+      const data = await res.json();
+      if (data.err === 'ok') {
+        toast(`已移出《${book.title}》`);
+        await loadBooks();
+      } else {
+        toast(data.msg || '移出失败');
+      }
+    } catch {
+      toast('移出失败，请检查网络');
+    }
+  };
+
+  const downloadOne = async (id: string) => {
+    const book = books.find((b) => String(b.id) === id);
+    if (!book) return;
+    const format = (book.files?.[0]?.format || 'epub').toLowerCase();
+    try {
+      const blob = await downloadBookBlob(id, format);
+      await saveOfflineBook({
+        serverUrl,
+        bookId: id,
+        title: book.title,
+        fileName: `${book.title}.${format}`,
+        mimeType: blob.type || 'application/octet-stream',
+        blob,
+      });
+      toast(`《${book.title}》已下载`);
+    } catch {
+      toast('下载失败');
+    }
+  };
+
+  // ── Context menu items for a given book ─────────────────────────────────
+  const buildMenuItems = (book: BookItem): ContextMenuItem[] => [
+    {
+      key: 'remove',
+      label: '移出书架',
+      icon: <Check className="w-3.5 h-3.5" />,
+      onClick: () => removeFromShelf(String(book.id)),
+    },
+    {
+      key: 'download',
+      label: '下载',
+      icon: <Download className="w-3.5 h-3.5" />,
+      onClick: () => downloadOne(String(book.id)),
+    },
+    { key: 'sep-1', label: '', separator: true },
+    {
+      key: 'select-many',
+      label: '选择多本',
+      icon: <ListChecks className="w-3.5 h-3.5" />,
+      onClick: () => enterBatchMode(String(book.id)),
+    },
+  ];
+
+  const openContextMenu = (bookId: string, clientX: number, clientY: number) => {
+    setContextMenu({ x: clientX, y: clientY, bookId });
+  };
+
+  // ── Batch actions ────────────────────────────────────────────────────────
+  const runBatch = async (action: BatchAction): Promise<{ ok: number; fail: number }> => {
+    if (selectedIds.size === 0) return { ok: 0, fail: 0 };
+    const ids = Array.from(selectedIds);
+    let ok = 0;
+    let fail = 0;
+
+    if (action === 'remove-shelf') {
+      const results = await Promise.allSettled(
+        ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ shelf: false }),
+        }).then((r) => r.json())),
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value?.err === 'ok') ok++;
+        else fail++;
+      }
+      // Refresh shelf list to reflect the removals
+      await loadBooks();
+      exitBatchMode();
+      if (ok > 0) toast(`已移出 ${ok} 本`);
+      if (fail > 0) toast(`${fail} 本移出失败`);
+    } else if (action === 'download') {
+      for (const id of ids) {
+        const book = books.find((b) => String(b.id) === id);
+        if (!book) { fail++; continue; }
+        const format = (book.files?.[0]?.format || 'epub').toLowerCase();
+        try {
+          const blob = await downloadBookBlob(id, format);
+          await saveOfflineBook({
+            serverUrl,
+            bookId: id,
+            title: book.title,
+            fileName: `${book.title}.${format}`,
+            mimeType: blob.type || 'application/octet-stream',
+            blob,
+          });
+          ok++;
+        } catch { fail++; }
+      }
+      exitBatchMode();
+      if (ok > 0) toast(`已下载 ${ok} 本`);
+      if (fail > 0) toast(`${fail} 本下载失败`);
+    }
+    return { ok, fail };
   };
 
   return (
@@ -207,11 +486,26 @@ export default function ShelfPage() {
           ) : (
             <div className="px-8 py-8">
               {viewMode === 'rows' ? (
-                <BookTable books={books as BookRow[]} showStatus />
+                <BookTable
+                  books={books as BookRow[]}
+                  showStatus
+                  batchMode={batchMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onContextAction={openContextMenu}
+                />
               ) : (
                 <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 eink-bordered p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
                   {books.map((book) => (
-                    <BookCard key={String(book.id)} book={book} viewGrid={viewMode === 'grid'} />
+                    <BookCard
+                      key={String(book.id)}
+                      book={book}
+                      viewGrid={viewMode === 'grid'}
+                      batchMode={batchMode}
+                      selected={selectedIds.has(String(book.id))}
+                      onToggleSelect={batchMode ? toggleSelect : undefined}
+                      onContextAction={batchMode ? undefined : openContextMenu}
+                    />
                   ))}
                 </div>
               )}
@@ -219,6 +513,29 @@ export default function ShelfPage() {
           )}
         </div>
       </div>
+      <BatchActionBar
+        batchMode={batchMode}
+        selectedCount={selectedIds.size}
+        totalCount={books.length}
+        canAddShelf={false}
+        canRemoveShelf
+        canDownload
+        onAction={runBatch}
+        onClear={deselectAll}
+        onSelectAll={selectAll}
+        onExitBatchMode={exitBatchMode}
+      />
+      {contextMenu && (() => {
+        const book = books.find((b) => String(b.id) === contextMenu.bookId);
+        if (!book) return null;
+        return (
+          <BookContextMenu
+            position={{ x: contextMenu.x, y: contextMenu.y }}
+            items={buildMenuItems(book)}
+            onClose={() => setContextMenu(null)}
+          />
+        );
+      })()}
     </DesktopLayout>
   );
 }

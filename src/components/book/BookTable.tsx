@@ -28,6 +28,11 @@ interface BookTableProps {
   books: BookRow[];
   showStatus?: boolean;
   linkable?: boolean;
+  batchMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
+  /** Right-click / long-press: open the context menu at (x, y) for this book. */
+  onContextAction?: (id: string, x: number, y: number) => void;
 }
 
 type SortKey = 'title' | 'author' | 'publisher' | 'format' | 'size' | 'added' | 'wants' | 'download';
@@ -155,9 +160,19 @@ function SortHeader({ label, sortKey, sort, onChange, className, align = 'left',
   );
 }
 
-export function BookTable({ books, showStatus = false, linkable = true }: BookTableProps) {
+export function BookTable({
+  books,
+  showStatus = false,
+  linkable = true,
+  batchMode = false,
+  selectedIds,
+  onToggleSelect,
+  onContextAction,
+}: BookTableProps) {
   const { serverUrl } = useServerStore();
   const [sort, setSort] = useState<SortState | null>(null);
+  const selectable = Boolean(batchMode && selectedIds && onToggleSelect);
+  const contextual = Boolean(!batchMode && onContextAction);
 
   const sorted = useMemo(() => {
     if (!sort) return books;
@@ -168,14 +183,67 @@ export function BookTable({ books, showStatus = false, linkable = true }: BookTa
 
   if (books.length === 0) return null;
 
+  // Long-press / right-click handler factory
+  function makeRowHandlers(id: string) {
+    if (batchMode) {
+      const toggle = (mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) =>
+        onToggleSelect!(id, mods);
+      return {
+        onClick: (e: React.MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggle({ shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+        },
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          toggle({ shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+        },
+      };
+    }
+    if (contextual) {
+      let pressTimer: number | null = null;
+      let didLongPress = false;
+      let touchX = 0;
+      let touchY = 0;
+      return {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          onContextAction!(id, e.clientX, e.clientY);
+        },
+        onTouchStart: (e: React.TouchEvent) => {
+          didLongPress = false;
+          const t = e.touches[0];
+          touchX = t?.clientX ?? 0;
+          touchY = t?.clientY ?? 0;
+          pressTimer = window.setTimeout(() => {
+            didLongPress = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+            onContextAction!(id, touchX, touchY);
+          }, 500);
+        },
+        onTouchEnd: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onTouchMove: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onClick: (e: React.MouseEvent) => {
+          if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+        },
+      };
+    }
+    return {};
+  }
+
   return (
     <div className="rounded-[24px] app-card overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse table-fixed min-w-[640px]">
           {/* colgroup must contain only <col> children — no whitespace or comments between, or HTML hydration errors. */}
-          <colgroup><col /><col className="w-[180px]" /><col className="w-[160px]" /><col className="w-[72px]" /><col className="w-[84px]" /><col className="w-[108px]" />{showStatus && <col className="w-[64px]" />}{showStatus && <col className="w-[72px]" />}</colgroup>
+          <colgroup><col className={`overflow-hidden transition-[width] duration-200 ease-out ${selectable ? 'w-[40px]' : 'w-0'}`} /><col /><col className="w-[180px]" /><col className="w-[160px]" /><col className="w-[72px]" /><col className="w-[84px]" /><col className="w-[108px]" />{showStatus && <col className="w-[64px]" />}{showStatus && <col className="w-[72px]" />}</colgroup>
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide border-b border-amber-950/10 bg-white/40">
+              <th className={`overflow-hidden text-center text-primary transition-all duration-200 ease-out ${selectable ? 'w-[40px] px-3 py-2.5 opacity-100' : 'w-0 p-0 opacity-0'}`}>已选</th>
               <SortHeader label="标题" sortKey="title" sort={sort} onChange={setSort} />
               <SortHeader label="作者" sortKey="author" sort={sort} onChange={setSort} />
               <SortHeader label="出版商" sortKey="publisher" sort={sort} onChange={setSort} className="hidden md:table-cell" />
@@ -203,10 +271,16 @@ export function BookTable({ books, showStatus = false, linkable = true }: BookTa
               return (
                 <tr
                   key={id}
-                  className="border-b border-amber-950/5 last:border-b-0 hover:bg-amber-50/40 transition-colors"
+                  {...makeRowHandlers(id)}
+                  className={`border-b border-amber-950/5 last:border-b-0 transition-colors cursor-${batchMode || contextual ? 'pointer' : 'default'} ${selectable && selectedIds!.has(id) ? 'bg-amber-100/70 ring-1 ring-inset ring-primary/40' : batchMode ? 'hover:bg-amber-50/60' : 'hover:bg-amber-50/40'}`}
                 >
+                  <td className={`overflow-hidden align-middle text-center transition-all duration-200 ease-out ${selectable ? 'w-[40px] px-3 py-2 opacity-100' : 'w-0 p-0 opacity-0'}`}>
+                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full transition-all duration-150 ${selectedIds!.has(id) ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
+                      {selectedIds!.has(id) && <span className="text-[10px] font-bold">✓</span>}
+                    </span>
+                  </td>
                   <td className="px-4 py-2 align-middle">
-                    {linkable ? (
+                    {linkable && !batchMode ? (
                       <Link
                         href={`/detail?id=${id}`}
                         className="flex items-center gap-3 min-w-0 group"
