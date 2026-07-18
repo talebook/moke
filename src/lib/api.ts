@@ -1,4 +1,4 @@
-import type { ReaderInfo } from '@/lib/store/server';
+import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
 
 interface UserInfoResponse {
@@ -20,6 +20,61 @@ interface UserInfoResponse {
     admin?: boolean;
     permission?: string;
   };
+}
+
+type ApiEnvelope = {
+  err?: string;
+  msg?: string;
+};
+
+export class MokeApiError extends Error {
+  code: string;
+  status?: number;
+
+  constructor(message: string, code: string, status?: number) {
+    super(message);
+    this.name = 'MokeApiError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {
+  if (error instanceof MokeApiError) return error.message || fallback;
+  if (error instanceof Error) {
+    if (error.message === 'server.url.missing') return '服务器地址丢失，请重新连接书库。';
+    if (error.message.startsWith('http.')) return `服务器返回 ${error.message.replace('http.', '')}。`;
+    return error.message || fallback;
+  }
+  return fallback;
+}
+
+export async function readApiJson<T extends ApiEnvelope>(
+  response: Response,
+  fallbackMessage = '服务器返回内容无效。',
+  okErrs: string[] = ['ok'],
+): Promise<T> {
+  let data: T;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new MokeApiError(fallbackMessage, 'server.invalid_response', response.status);
+  }
+
+  if (!response.ok) {
+    throw new MokeApiError(
+      String(data.msg || `服务器返回 ${response.status}。`),
+      String(data.err || `http.${response.status}`),
+      response.status,
+    );
+  }
+
+  if (data.err && !okErrs.includes(data.err)) {
+    throw new MokeApiError(String(data.msg || '接口请求失败。'), String(data.err), response.status);
+  }
+
+  return data;
 }
 
 const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -209,6 +264,76 @@ export async function fetchServerInfo(): Promise<{ err: string; msg?: string; ti
     msg: data.msg,
     title: data.sys?.title || '',
     version: data.sys?.version || '',
+  };
+}
+
+async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boolean> {
+  try {
+    const response = await request(`${serverUrl}${path}`, {
+      credentials: 'include',
+    });
+
+    if (response.status === 404 || response.status === 405) return false;
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return response.ok;
+
+    const data = await response.json().catch(() => null);
+    const err = typeof data?.err === 'string' ? data.err : '';
+
+    if (!err) return response.ok;
+    if (err === 'page.not_found' || err === 'handler.not_found' || err === 'api.not_found') return false;
+    return true;
+  } catch (error) {
+    debugLog('warn', 'capabilities', `能力探测失败: ${path}`, getErrorMessage(error));
+    return false;
+  }
+}
+
+async function findSampleBookId(serverUrl: string): Promise<string | null> {
+  const candidates = ['/api/shelf', '/api/library?num=1', '/api/library?page=1&num=1'];
+
+  for (const path of candidates) {
+    try {
+      const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
+      if (!response.ok) continue;
+
+      const data = await response.json().catch(() => null);
+      const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
+      if (Array.isArray(books) && books.length > 0 && books[0]?.id != null) {
+        return String(books[0].id);
+      }
+    } catch (error) {
+      debugLog('warn', 'capabilities', `样本书籍探测失败: ${path}`, getErrorMessage(error));
+    }
+  }
+
+  return null;
+}
+
+export async function discoverServerCapabilities(serverUrl: string): Promise<ServerCapabilities> {
+  const infoResponse = await request(`${serverUrl}/api/user/info`, {
+    credentials: 'include',
+  });
+  const info = await infoResponse.json().catch(() => ({} as UserInfoResponse)) as UserInfoResponse;
+  const sampleBookId = await findSampleBookId(serverUrl);
+
+  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi] = await Promise.all([
+    probeJsonEndpoint(serverUrl, '/api/shelf'),
+    probeJsonEndpoint(serverUrl, '/api/reading/stats'),
+    probeJsonEndpoint(serverUrl, '/api/network/sources'),
+    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
+    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
+  ]);
+
+  return {
+    shelfApi,
+    readingStateApi,
+    readingProgressApi,
+    readingStatsApi,
+    networkSourcesApi,
+    checkedAt: Date.now(),
+    version: info.sys?.version || '',
   };
 }
 

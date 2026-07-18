@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Search, ArrowLeft, Loader2 } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { request } from '@/lib/api';
+import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
@@ -146,11 +146,15 @@ export default function LibraryPage() {
       if (selectedTag !== '全部') params.set('tag', selectedTag);
       if (selectedFormat !== '全部') params.set('format', selectedFormat.toLowerCase());
       const res = await request(`${serverUrl}/api/library?${params.toString()}`, { credentials: 'include' });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[]; total?: number }>(res, '书库列表解析失败。', ['ok', 'user.need_login']);
       if (data.err === 'user.need_login') { router.push('/login'); return; }
       setBooks(data.books || data.items || []);
       setTotal(data.total || 0);
-    } catch {} finally { setLocalLoading(false); }
+    } catch (error) {
+      setBooks([]);
+      setTotal(0);
+      toast(getErrorMessage(error, '书库加载失败，请检查服务器连接。'));
+    } finally { setLocalLoading(false); }
   };
 
   const loadTags = async () => {
@@ -191,20 +195,24 @@ export default function LibraryPage() {
     setNetworkSourcesLoading(true);
     try {
       const res = await request(`${serverUrl}/api/network/sources`, { credentials: 'include' });
-      const data = await res.json();
-      if (data.err !== 'ok') return;
+      const data = await readApiJson<{ err?: string; msg?: string; items?: NetworkSource[] }>(res, '网络书源解析失败。');
       setNetworkSources(data.items || []);
-    } catch {} finally { setNetworkSourcesLoading(false); }
+    } catch (error) {
+      setNetworkSources([]);
+      toast(getErrorMessage(error, '网络书源加载失败。'));
+    } finally { setNetworkSourcesLoading(false); }
   };
 
   const loadCategories = async (sourceId: number) => {
     setCategoriesLoading(true);
     try {
       const res = await request(`${serverUrl}/api/network/categories?source_id=${sourceId}`, { credentials: 'include' });
-      const data = await res.json();
-      if (data.err !== 'ok') return;
+      const data = await readApiJson<{ err?: string; msg?: string; items?: NetworkCategory[] }>(res, '分类解析失败。');
       setCategories(data.items || []);
-    } catch {} finally { setCategoriesLoading(false); }
+    } catch (error) {
+      setCategories([]);
+      toast(getErrorMessage(error, '分类加载失败。'));
+    } finally { setCategoriesLoading(false); }
   };
 
   const loadNetworkBooks = async (categoryUrl: string, page: number) => {
@@ -213,10 +221,12 @@ export default function LibraryPage() {
     try {
       const params = new URLSearchParams({ source_id: String(selectedSourceId), url: categoryUrl, page: String(page) });
       const res = await request(`${serverUrl}/api/network/explore?${params.toString()}`, { credentials: 'include' });
-      const data = await res.json();
-      if (data.err !== 'ok') return;
+      const data = await readApiJson<{ err?: string; msg?: string; books?: NetworkBook[] }>(res, '网络书籍解析失败。');
       setNetworkBooks(data.books || []);
-    } catch {} finally { setNetworkBooksLoading(false); }
+    } catch (error) {
+      setNetworkBooks([]);
+      toast(getErrorMessage(error, '网络书籍加载失败。'));
+    } finally { setNetworkBooksLoading(false); }
   };
 
   // ── Network search ───────────────────────────────────────────────────────────
@@ -228,9 +238,9 @@ export default function LibraryPage() {
     try {
       const params = new URLSearchParams({ key: q.trim() });
       const initRes = await request(`${serverUrl}/api/network/search?${params.toString()}`, { credentials: 'include' });
-      const initData = await initRes.json();
-      if (initData.err !== 'ok') return;
+      const initData = await readApiJson<{ err?: string; msg?: string; task_id?: string | number }>(initRes, '网络搜索任务解析失败。');
       const taskId = initData.task_id;
+      if (taskId == null) throw new Error('网络搜索任务创建失败。');
       // Poll until finished
       let done = false;
       let attempts = 0;
@@ -238,8 +248,7 @@ export default function LibraryPage() {
         await new Promise((r) => setTimeout(r, 1000));
         attempts++;
         const pollRes = await request(`${serverUrl}/api/network/search/status?task_id=${taskId}`, { credentials: 'include' });
-        const pollData = await pollRes.json();
-        if (pollData.err !== 'ok') break;
+        const pollData = await readApiJson<{ err?: string; msg?: string; results?: Array<{ books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook>; finished?: boolean }>(pollRes, '网络搜索结果解析失败。');
         const partial: NetworkBook[] = (pollData.results || []).flatMap((r: { books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
           if (Array.isArray(r)) return r;
           if (typeof r === 'object' && r !== null) {
@@ -251,7 +260,9 @@ export default function LibraryPage() {
         setNetworkSearchResults(partial);
         if (pollData.finished) done = true;
       }
-    } catch {} finally { setNetworkSearchLoading(false); }
+    } catch (error) {
+      toast(getErrorMessage(error, '网络搜索失败。'));
+    } finally { setNetworkSearchLoading(false); }
   }, [serverUrl]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {

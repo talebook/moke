@@ -4,10 +4,11 @@ import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { downloadBookBlob, request } from '@/lib/api';
+import { downloadBookBlob, getErrorMessage, readApiJson, request } from '@/lib/api';
 import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
+import { fetchReadingProgress } from '@/lib/reading-progress';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 
@@ -95,16 +96,21 @@ function DetailContent() {
     setLoading(true);
     try {
       const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include' });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。');
       const nextBook = data.book || data.data;
-      if (data.err === 'ok') {
+      if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
         setInShelf(Boolean(nextBook?.state?.wants));
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        loadReadingState(nextBook?.id || id);
+        loadReadingState(nextBook?.id || String(id));
+      } else {
+        throw new Error(data.msg || '书籍详情加载失败。');
       }
-    } catch {} finally { setLoading(false); }
+    } catch (error) {
+      setBook(null);
+      setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
+    } finally { setLoading(false); }
   };
 
   const loadReadingState = async (bookId: string | number) => {
@@ -116,7 +122,9 @@ function DetailContent() {
       if (data.err === 'ok') {
         setInShelf(Boolean(data.wants));
       }
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to load reading state:', error);
+    }
   };
 
   const updateReadingState = async (payload: { read_state?: number; online_read?: number; download?: number }) => {
@@ -129,7 +137,9 @@ function DetailContent() {
         credentials: 'include',
         body: JSON.stringify(payload),
       });
-    } catch {}
+    } catch (error) {
+      console.warn('Failed to update reading state:', error);
+    }
   };
 
   const toggleShelf = async () => {
@@ -229,7 +239,13 @@ function DetailContent() {
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('open_reader', { filePath: record.filePath, eink: useSettingsStore.getState().eink });
+        const restoreProgress = await fetchReadingProgress(book.id);
+        await invoke('open_reader', {
+          filePath: record.filePath,
+          eink: useSettingsStore.getState().eink,
+          mokeBookId: String(book.id),
+          restoreProgress,
+        });
       } else {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
@@ -271,7 +287,7 @@ function DetailContent() {
   if (!book) {
     return (
       <DesktopLayout>
-        <div className="px-8 py-16 text-center text-muted-foreground">书籍未找到</div>
+        <div className="px-8 py-16 text-center text-muted-foreground">{message || '书籍未找到'}</div>
       </DesktopLayout>
     );
   }

@@ -6,7 +6,7 @@ import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
 import { BookOpen, History, Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { request } from '@/lib/api';
+import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
@@ -244,7 +244,7 @@ export default function ShelfPage() {
     setRequiresLogin(false);
     try {
       const res = await request(`${serverUrl}/api/shelf`, { credentials: 'include' });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[] }>(res, '书架列表解析失败。', ['ok', 'user.need_login']);
 
       if (data.err === 'user.need_login') {
         setBooks([]);
@@ -253,7 +253,10 @@ export default function ShelfPage() {
       }
 
       setBooks(data.books || []);
-    } catch {} finally { setLoading(false); }
+    } catch (error) {
+      setBooks([]);
+      toast(getErrorMessage(error, '书架加载失败，请检查服务器连接。'));
+    } finally { setLoading(false); }
   };
 
   // ── Selection ────────────────────────────────────────────────────────────

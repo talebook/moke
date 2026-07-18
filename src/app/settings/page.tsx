@@ -60,7 +60,9 @@ export default function SettingsPage() {
     if (serverUrl) {
       try {
         await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-      } catch {}
+      } catch (error) {
+        console.warn('Failed to sign out on server:', error);
+      }
     }
     logout();
     localStorage.removeItem('moke-auth-token');

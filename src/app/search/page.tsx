@@ -1,12 +1,12 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { request } from '@/lib/api';
+import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
@@ -32,6 +32,13 @@ interface BookItem {
   timestamp?: number;
 }
 
+const FORMAT_FILTERS = ['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'] as const;
+
+function hasFormat(book: BookItem, filter: string) {
+  if (filter === FORMAT_FILTERS[0]) return true;
+  return book.files?.some((file) => file.format?.toUpperCase() === filter) ?? false;
+}
+
 function SearchContent() {
   const searchParams = useSearchParams();
   const { serverUrl } = useServerStore();
@@ -39,7 +46,7 @@ function SearchContent() {
   const [results, setResults] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('全部');
+  const [activeFilter, setActiveFilter] = useState<string>(FORMAT_FILTERS[0]);
   const viewMode = useViewPrefsStore((s) => s.searchViewMode);
   const setViewMode = useViewPrefsStore((s) => s.setSearchViewMode);
   const toast = useToast((s) => s.show);
@@ -47,6 +54,10 @@ function SearchContent() {
   const [batchMode, setBatchMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
+  const filteredResults = useMemo(
+    () => results.filter((book) => hasFormat(book, activeFilter)),
+    [activeFilter, results],
+  );
 
   // Clear selection when results change
   useEffect(() => {
@@ -54,7 +65,7 @@ function SearchContent() {
     setBatchMode(false);
     setContextMenu(null);
     lastSelectedIdRef.current = null;
-  }, [results, query]);
+  }, [activeFilter, results, query]);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -71,8 +82,11 @@ function SearchContent() {
     setSearched(true);
     try {
       const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。');
       if (data.err === 'ok') setResults(data.books || data.items || []);
+    } catch (error) {
+      setResults([]);
+      toast(getErrorMessage(error, '搜索失败，请检查服务器连接。'));
     } finally { setLoading(false); }
   };
 
@@ -95,7 +109,7 @@ function SearchContent() {
     if (!batchMode) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      const orderedIds = results.map((b) => String(b.id));
+      const orderedIds = filteredResults.map((b) => String(b.id));
       const anchor = lastSelectedIdRef.current;
       if (mods.shiftKey && anchor && orderedIds.includes(anchor)) {
         const a = orderedIds.indexOf(anchor);
@@ -116,7 +130,7 @@ function SearchContent() {
   };
 
   const selectAll = () => {
-    setSelectedIds(new Set(results.map((b) => String(b.id))));
+    setSelectedIds(new Set(filteredResults.map((b) => String(b.id))));
   };
 
   const deselectAll = () => {
@@ -268,7 +282,7 @@ function SearchContent() {
 
         <div className="flex items-center gap-3 mb-6 justify-between rounded-3xl app-card px-4 py-3">
           <div className="flex gap-3">
-            {['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'].map((f) => (
+            {FORMAT_FILTERS.map((f) => (
               <button key={f} onClick={() => setActiveFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-2xl border transition-colors ${activeFilter === f ? 'border-foreground text-foreground bg-muted' : 'border-border text-muted-foreground hover:text-foreground'}`}>
                 {f}
@@ -288,12 +302,19 @@ function SearchContent() {
             <p className="text-lg font-semibold text-foreground">未找到相关书籍</p>
             <p className="text-sm mt-2">尝试使用不同的关键词搜索</p>
           </div>
-        ) : results.length > 0 ? (
+        ) : results.length > 0 && filteredResults.length === 0 ? (
+          <div className="rounded-[32px] app-glass px-8 py-16 text-center text-muted-foreground">
+            <p className="text-lg font-semibold text-foreground">当前格式下没有结果</p>
+            <p className="text-sm mt-2">切换为“全部”或其他格式试试</p>
+          </div>
+        ) : filteredResults.length > 0 ? (
           <div>
-            <p className="text-sm text-muted-foreground mb-5">找到 {results.length} 本书</p>
+            <p className="text-sm text-muted-foreground mb-5">
+              找到 {filteredResults.length} 本书{filteredResults.length !== results.length ? `，共 ${results.length} 本` : ''}
+            </p>
             {viewMode === 'rows' ? (
               <BookTable
-                books={results as BookRow[]}
+                books={filteredResults as BookRow[]}
                 batchMode={batchMode}
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
@@ -301,7 +322,7 @@ function SearchContent() {
               />
             ) : (
               <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
-                {results.map((book) => {
+                {filteredResults.map((book) => {
                   const bookId = String(book.id);
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
                   const authorName = book.author || book.authors?.[0]?.name || '';
@@ -429,7 +450,7 @@ function SearchContent() {
       <BatchActionBar
         batchMode={batchMode}
         selectedCount={selectedIds.size}
-        totalCount={results.length}
+        totalCount={filteredResults.length}
         canAddShelf
         canRemoveShelf={false}
         canDownload

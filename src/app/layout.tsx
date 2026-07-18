@@ -3,6 +3,7 @@
 import '@/app/globals.css';
 import { useEffect } from 'react';
 import { ServerProvider } from '@/components/providers/ServerProvider';
+import { ReaderProgressProvider } from '@/components/providers/ReaderProgressProvider';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
 import { useSettingsStore } from '@/lib/store/settings';
 
@@ -29,7 +30,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <ServerProvider>
-          {children}
+          <ReaderProgressProvider>
+            {children}
+          </ReaderProgressProvider>
         </ServerProvider>
         <DebugLogPanel />
       </body>
