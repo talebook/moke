@@ -118,6 +118,24 @@ function TinyCover({ title, src }: { title: string; src: string }) {
   );
 }
 
+function MobileCover({ title, src }: { title: string; src: string }) {
+  const fallback = (
+    <div className="flex h-[72px] w-12 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-slate-200 to-slate-300 text-sm font-bold text-foreground/30">
+      {(title || '?').charAt(0)}
+    </div>
+  );
+  if (!src) return fallback;
+  return (
+    <AuthImage
+      src={src}
+      alt={title}
+      className="h-[72px] w-12 shrink-0 rounded-md object-cover shadow-sm"
+      loading="lazy"
+      fallback={fallback}
+    />
+  );
+}
+
 interface SortHeaderProps {
   label: string;
   sortKey: SortKey;
@@ -236,8 +254,56 @@ export function BookTable({
   }
 
   return (
-    <div className="rounded-[24px] app-card overflow-hidden">
-      <div className="overflow-x-auto">
+    <>
+      <div className="overflow-hidden rounded-[22px] app-card md:hidden">
+        {sorted.map((row) => {
+          const id = String(row.id);
+          const coverUrl = resolveServerAssetUrl(serverUrl, row.img || row.thumb);
+          const author = authorOf(row);
+          const fmt = row.files?.[0]?.format?.toUpperCase();
+          const size = formatSize(row.files?.[0]?.size);
+          const isSelected = selectedIds?.has(id) ?? false;
+          const content = (
+            <>
+              {selectable && (
+                <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-all ${isSelected ? 'bg-primary text-primary-foreground' : 'border-2 border-muted-foreground/30'}`}>
+                  {isSelected && <Check className="h-3 w-3" />}
+                </span>
+              )}
+              <MobileCover title={row.title} src={coverUrl} />
+              <span className="min-w-0 flex-1">
+                <span className="line-clamp-2 text-sm font-semibold leading-5 text-foreground">{row.title || '—'}</span>
+                {author && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{author}</span>}
+                <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {fmt && <span className="rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{fmt}</span>}
+                  {size !== '—' && <span className="text-[10px] text-muted-foreground/80">{size}</span>}
+                  {showStatus && row.state?.wants && <span className="text-[10px] font-medium text-primary">在书架</span>}
+                  {showStatus && row.state?.download ? <span className="text-[10px] text-emerald-600">已下载</span> : null}
+                </span>
+              </span>
+            </>
+          );
+
+          return (
+            <div
+              key={id}
+              {...makeRowHandlers(id)}
+              className={`border-b border-amber-950/5 last:border-b-0 ${isSelected ? 'bg-amber-100/70 ring-1 ring-inset ring-primary/40' : 'active:bg-amber-50/60'}`}
+            >
+              {linkable && !batchMode ? (
+                <Link href={`/detail?id=${id}`} className="flex min-w-0 items-center gap-3 px-3 py-3.5">
+                  {content}
+                </Link>
+              ) : (
+                <div className="flex min-w-0 items-center gap-3 px-3 py-3.5">{content}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="hidden overflow-hidden rounded-[24px] app-card md:block">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse table-fixed min-w-[640px]">
           {/* colgroup must contain only <col> children — no whitespace or comments between, or HTML hydration errors. */}
           <colgroup><col className={`overflow-hidden transition-[width] duration-200 ease-out ${selectable ? 'w-[40px]' : 'w-0'}`} /><col /><col className="w-[180px]" /><col className="w-[160px]" /><col className="w-[72px]" /><col className="w-[84px]" /><col className="w-[108px]" />{showStatus && <col className="w-[64px]" />}{showStatus && <col className="w-[72px]" />}</colgroup>
@@ -268,15 +334,16 @@ export function BookTable({
               const added = formatDate(row.timestamp);
               const inShelf = Boolean(row.state?.wants);
               const downloaded = Boolean(row.state?.download);
+              const isSelected = selectedIds?.has(id) ?? false;
               return (
                 <tr
                   key={id}
                   {...makeRowHandlers(id)}
-                  className={`border-b border-amber-950/5 last:border-b-0 transition-colors cursor-${batchMode || contextual ? 'pointer' : 'default'} ${selectable && selectedIds!.has(id) ? 'bg-amber-100/70 ring-1 ring-inset ring-primary/40' : batchMode ? 'hover:bg-amber-50/60' : 'hover:bg-amber-50/40'}`}
+                  className={`border-b border-amber-950/5 last:border-b-0 transition-colors cursor-${batchMode || contextual ? 'pointer' : 'default'} ${selectable && isSelected ? 'bg-amber-100/70 ring-1 ring-inset ring-primary/40' : batchMode ? 'hover:bg-amber-50/60' : 'hover:bg-amber-50/40'}`}
                 >
                   <td className={`overflow-hidden align-middle text-center transition-all duration-200 ease-out ${selectable ? 'w-[40px] px-3 py-2 opacity-100' : 'w-0 p-0 opacity-0'}`}>
-                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full transition-all duration-150 ${selectedIds!.has(id) ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
-                      {selectedIds!.has(id) && <span className="text-[10px] font-bold">✓</span>}
+                    <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full transition-all duration-150 ${isSelected ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
+                      {isSelected && <span className="text-[10px] font-bold">✓</span>}
                     </span>
                   </td>
                   <td className="px-4 py-2 align-middle">
@@ -343,7 +410,8 @@ export function BookTable({
             })}
           </tbody>
         </table>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

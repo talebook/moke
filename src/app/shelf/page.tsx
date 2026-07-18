@@ -173,7 +173,7 @@ function BookCard({
   return (
       <Link href={`/detail?id=${bookId}`}
       {...handlers}
-      className={`book-list-motion flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
+      className={`book-list-motion flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all duration-200 hover:bg-muted/70 hover:border-border/60 hover:shadow-xs group sm:gap-4 sm:px-3 sm:py-4 ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
       {/* Selection indicator wrapper: width animates 0 → 20px so the cover/title
           smoothly slides right when entering batch mode, instead of jumping. */}
       <div className={`overflow-hidden shrink-0 transition-[width,opacity] duration-200 ease-out ${batchMode ? 'w-5 opacity-100' : 'w-0 opacity-0'}`}>
@@ -181,7 +181,7 @@ function BookCard({
           {selected && <span className="text-[10px] font-bold">✓</span>}
         </div>
       </div>
-      <div className="book-list-cover-motion w-14 h-[84px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
+      <div className="book-list-cover-motion h-[72px] w-12 rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03] sm:h-[84px] sm:w-14">
         {coverUrl ? (
           <AuthImage
             src={coverUrl}
@@ -205,7 +205,7 @@ function BookCard({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="book-title-motion text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</p>
+        <p className="book-title-motion line-clamp-2 text-sm font-semibold leading-5 text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</p>
         {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
       </div>
       <span className="text-[11px] font-semibold text-muted-foreground shrink-0 px-2 py-0.5 bg-muted rounded-md border border-border/30">
@@ -222,6 +222,7 @@ export default function ShelfPage() {
   const [books, setBooks] = useState<BookItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [requiresLogin, setRequiresLogin] = useState(false);
+  const [shelfSearchQ, setShelfSearchQ] = useState('');
   const viewMode = useViewPrefsStore((s) => s.shelfViewMode);
   const setViewMode = useViewPrefsStore((s) => s.setShelfViewMode);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -433,11 +434,17 @@ export default function ShelfPage() {
     return { ok, fail };
   };
 
+  const submitShelfSearch = () => {
+    const query = shelfSearchQ.trim();
+    if (!query) return;
+    router.push(`/search?q=${encodeURIComponent(query)}`);
+  };
+
   return (
     <DesktopLayout>
       <div className="moke-shelf-bg flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
-        <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-8 py-5 backdrop-blur-xl">
-          <div className="flex items-center justify-between gap-6">
+        <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:gap-6">
             <div>
               <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
                 <BookOpen className="h-3.5 w-3.5" />
@@ -445,25 +452,39 @@ export default function ShelfPage() {
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="relative shrink-0 w-[320px]">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="搜索我的书..."
-                  onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/search?q=${encodeURIComponent((e.target as HTMLInputElement).value)}`); }}
-                  className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
-                />
+            <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center">
+              <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="search"
+                    placeholder="搜索书籍"
+                    value={shelfSearchQ}
+                    onChange={(e) => setShelfSearchQ(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitShelfSearch(); }}
+                    className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={submitShelfSearch}
+                  disabled={!shelfSearchQ.trim()}
+                  className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                    搜索
+                </button>
               </div>
-              <Link
-                href="/user/history"
-                aria-label="查看历史记录"
-                title="查看历史记录"
-                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/70 eink-bordered text-muted-foreground eink:text-black shadow-sm transition hover:text-foreground hover:bg-white hover:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
-              >
-                <History className="w-4 h-4" />
-              </Link>
-              <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1" />
+              <div className="flex items-center justify-end gap-2">
+                <Link
+                  href="/user/history"
+                  aria-label="查看历史记录"
+                  title="查看历史记录"
+                  className="shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/70 eink-bordered text-muted-foreground eink:text-black shadow-sm transition hover:text-foreground hover:bg-white hover:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
+                >
+                  <History className="w-4 h-4" />
+                </Link>
+                <ViewModeToggle value={viewMode} onChange={setViewMode} />
+              </div>
             </div>
           </div>
         </header>
@@ -474,8 +495,8 @@ export default function ShelfPage() {
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
             </div>
           ) : books.length === 0 ? (
-            <div className="flex min-h-[520px] items-center justify-center px-8 py-24 text-center">
-              <div className="relative w-full max-w-md overflow-hidden rounded-[32px] border border-amber-950/10 bg-white/65 eink-bordered px-8 py-12 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur">
+            <div className="flex min-h-[420px] items-center justify-center px-4 py-16 text-center sm:px-8 md:min-h-[520px] md:py-24">
+              <div className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-amber-950/10 bg-white/65 eink-bordered px-5 py-10 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur sm:rounded-[32px] sm:px-8 sm:py-12">
                 <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
                 <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-amber-200/40 text-primary shadow-inner">
                   <Search className="w-10 h-10" />
@@ -487,7 +508,7 @@ export default function ShelfPage() {
               </div>
             </div>
           ) : (
-            <div className="px-8 py-8">
+            <div className="px-4 py-5 sm:px-6 md:px-8 md:py-8">
               {viewMode === 'rows' ? (
                 <BookTable
                   books={books as BookRow[]}
@@ -498,7 +519,7 @@ export default function ShelfPage() {
                   onContextAction={openContextMenu}
                 />
               ) : (
-                <div className={cn('gap-x-4 gap-y-7 rounded-[30px] border border-amber-950/10 bg-white/35 eink-bordered p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2')}>
+                <div className={cn('rounded-[24px] border border-amber-950/10 bg-white/35 eink-bordered p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
                   {books.map((book) => (
                     <BookCard
                       key={String(book.id)}

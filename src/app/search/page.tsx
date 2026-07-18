@@ -261,27 +261,42 @@ function SearchContent() {
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 h-full overflow-y-auto" style={{ maxWidth: '1400px' }}>
-        <div className="mb-6">
-          <p className="text-xs font-medium text-primary/80">探索书库</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">搜索</h1>
-        </div>
-        <div className="flex items-center gap-3 mb-8 rounded-[28px] app-card p-3">
-          <div className="relative flex-1 max-w-xl">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input type="text" placeholder="搜索书名、作者、标签..."
-              value={query} onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
-              className="w-full h-12 pl-11 pr-4 rounded-2xl bg-white/70 border border-amber-950/10 shadow-sm text-foreground text-base outline-none transition-colors focus:border-primary focus:bg-background" />
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:flex-row md:items-center md:px-8 md:py-5">
+          <div className="shrink-0">
+            <p className="text-xs font-medium text-primary/80">探索书库</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">搜索</h1>
           </div>
-          <button onClick={() => handleSearch()} disabled={loading || !query.trim()}
-            className="h-11 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-sm font-semibold transition hover:opacity-90 disabled:opacity-50">
-            {loading ? '搜索中...' : '搜索'}
-          </button>
-        </div>
+          <div className="hidden flex-1 md:block" />
 
-        <div className="flex items-center gap-3 mb-6 justify-between rounded-3xl app-card px-4 py-3">
-          <div className="flex gap-3">
+          <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+            <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="search"
+                  placeholder="搜索书籍"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+                  className="h-10 w-full rounded-2xl border border-amber-950/10 bg-white/70 pl-10 pr-3 text-sm text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSearch()}
+                disabled={loading || !query.trim()}
+                className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {loading ? '搜索中' : '搜索'}
+              </button>
+            </div>
+            <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1 shrink-0" />
+          </div>
+        </header>
+
+        <div className="shrink-0 border-b border-amber-950/10 bg-white/35 px-4 py-3 backdrop-blur-sm sm:px-6 md:px-8">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
             {FORMAT_FILTERS.map((f) => (
               <button key={f} onClick={() => setActiveFilter(f)}
                 className={`text-xs px-3 py-1.5 rounded-2xl border transition-colors ${activeFilter === f ? 'border-foreground text-foreground bg-muted' : 'border-border text-muted-foreground hover:text-foreground'}`}>
@@ -289,39 +304,38 @@ function SearchContent() {
               </button>
             ))}
           </div>
-          
-          <ViewModeToggle value={viewMode} onChange={setViewMode} />
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center h-32">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-          </div>
-        ) : searched && results.length === 0 ? (
-          <div className="rounded-[32px] app-glass px-8 py-16 text-center text-muted-foreground">
-            <p className="text-lg font-semibold text-foreground">未找到相关书籍</p>
-            <p className="text-sm mt-2">尝试使用不同的关键词搜索</p>
-          </div>
-        ) : results.length > 0 && filteredResults.length === 0 ? (
-          <div className="rounded-[32px] app-glass px-8 py-16 text-center text-muted-foreground">
-            <p className="text-lg font-semibold text-foreground">当前格式下没有结果</p>
-            <p className="text-sm mt-2">切换为“全部”或其他格式试试</p>
-          </div>
-        ) : filteredResults.length > 0 ? (
-          <div>
-            <p className="text-sm text-muted-foreground mb-5">
-              找到 {filteredResults.length} 本书{filteredResults.length !== results.length ? `，共 ${results.length} 本` : ''}
-            </p>
-            {viewMode === 'rows' ? (
-              <BookTable
-                books={filteredResults as BookRow[]}
-                batchMode={batchMode}
-                selectedIds={selectedIds}
-                onToggleSelect={toggleSelect}
-                onContextAction={openContextMenu}
-              />
-            ) : (
-              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8" style={{ maxWidth: '1400px' }}>
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
+            </div>
+          ) : searched && results.length === 0 ? (
+            <div className="rounded-[28px] app-glass px-5 py-12 text-center text-muted-foreground sm:rounded-[32px] sm:px-8 sm:py-16">
+              <p className="text-lg font-semibold text-foreground">未找到相关书籍</p>
+              <p className="text-sm mt-2">尝试使用不同的关键词搜索</p>
+            </div>
+          ) : results.length > 0 && filteredResults.length === 0 ? (
+            <div className="rounded-[28px] app-glass px-5 py-12 text-center text-muted-foreground sm:rounded-[32px] sm:px-8 sm:py-16">
+              <p className="text-lg font-semibold text-foreground">当前格式下没有结果</p>
+              <p className="text-sm mt-2">切换为“全部”或其他格式试试</p>
+            </div>
+          ) : filteredResults.length > 0 ? (
+            <div>
+              <p className="text-sm text-muted-foreground mb-5">
+                找到 {filteredResults.length} 本书{filteredResults.length !== results.length ? `，共 ${results.length} 本` : ''}
+              </p>
+              {viewMode === 'rows' ? (
+                <BookTable
+                  books={filteredResults as BookRow[]}
+                  batchMode={batchMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={toggleSelect}
+                  onContextAction={openContextMenu}
+                />
+              ) : (
+                <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
                 {filteredResults.map((book) => {
                   const bookId = String(book.id);
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
@@ -410,13 +424,13 @@ function SearchContent() {
 
                 return (
                   <Link key={bookId} href={`/detail?id=${bookId}`} {...cardHandlers}
-                    className={`book-list-motion group flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
+                    className={`book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4 ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
                     <div className={`overflow-hidden shrink-0 transition-[width,opacity] duration-200 ease-out ${batchMode ? 'w-5 opacity-100' : 'w-0 opacity-0'}`}>
                       <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150 ${selected ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
                         {selected && <span className="text-[10px] font-bold">✓</span>}
                       </div>
                     </div>
-                    <div className="book-list-cover-motion w-14 h-[84px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
+                    <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
                       {coverUrl ? (
                         <AuthImage
                           src={coverUrl}
@@ -436,7 +450,7 @@ function SearchContent() {
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="book-title-motion text-sm font-medium truncate text-foreground">{book.title}</p>
+                      <p className="book-title-motion line-clamp-2 text-sm font-medium leading-5 text-foreground">{book.title}</p>
                       {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
                     </div>
                   </Link>
@@ -446,6 +460,7 @@ function SearchContent() {
             )}
           </div>
         ) : null}
+      </div>
       </div>
       <BatchActionBar
         batchMode={batchMode}
@@ -478,7 +493,7 @@ export default function SearchPage() {
   return (
     <Suspense fallback={
       <DesktopLayout>
-        <div className="px-8 py-16 flex items-center justify-center">
+        <div className="px-4 py-16 flex items-center justify-center sm:px-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
         </div>
       </DesktopLayout>

@@ -277,7 +277,7 @@ function DetailContent() {
   if (loading) {
     return (
       <DesktopLayout>
-        <div className="px-8 py-16 flex items-center justify-center">
+        <div className="flex items-center justify-center px-4 py-16 sm:px-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
         </div>
       </DesktopLayout>
@@ -287,15 +287,15 @@ function DetailContent() {
   if (!book) {
     return (
       <DesktopLayout>
-        <div className="px-8 py-16 text-center text-muted-foreground">{message || '书籍未找到'}</div>
+        <div className="px-4 py-16 text-center text-muted-foreground sm:px-8">{message || '书籍未找到'}</div>
       </DesktopLayout>
     );
   }
 
   return (
     <DesktopLayout>
-      <div className="px-8 py-8 flex-1 overflow-y-auto">
-        <div className="mb-8 rounded-[28px] app-card px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
+        <div className="mb-6 rounded-[24px] app-card px-4 py-4 sm:mb-8 sm:rounded-[28px] sm:px-5">
           <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             <span>返回</span>
@@ -307,9 +307,9 @@ function DetailContent() {
           </div>
         </div>
 
-        <div className="flex gap-10">
-          <div className="shrink-0 w-[240px] flex flex-col items-start">
-            <div className="w-[220px] rounded-[24px] overflow-hidden book-cover-shadow border border-amber-950/10 bg-white transition-transform duration-300 hover:scale-[1.02]">
+        <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
+          <div className="mx-auto flex w-full max-w-[260px] shrink-0 flex-col items-stretch lg:mx-0 lg:w-[240px] lg:items-start">
+            <div className="w-full overflow-hidden rounded-[24px] border border-amber-950/10 bg-white book-cover-shadow transition-transform duration-300 hover:scale-[1.02] lg:w-[220px]">
               <div className="aspect-[2/3] flex items-center justify-center bg-muted/60 relative group">
                 {coverUrl ? (
                   <AuthImage
@@ -327,7 +327,7 @@ function DetailContent() {
             <button
               onClick={downloaded ? handleOfflineRead : handleDownload}
               disabled={downloading}
-              className={`relative overflow-hidden w-[220px] h-11 rounded-xl font-semibold text-sm mt-6 inline-flex items-center justify-center shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
+              className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 lg:mt-6 lg:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
             >
               {downloading && <span className="absolute inset-0 bg-primary/15" />}
               {downloading && (
@@ -342,7 +342,7 @@ function DetailContent() {
               </span>
             </button>
             {book.files && book.files.length > 1 && !downloaded && (
-              <div className="mt-3 w-[220px]">
+              <div className="mt-3 w-full lg:w-[220px]">
                 <div className="flex flex-wrap gap-1.5">
                   {book.files.map((f) => {
                     const fmt = f.format.toLowerCase();
@@ -367,7 +367,7 @@ function DetailContent() {
             <button
               onClick={toggleShelf}
               disabled={shelfUpdating}
-              className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-amber-950/10 bg-white/60 text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60"
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-semibold text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60 lg:w-[220px]"
             >
               <Bookmark className="w-4 h-4" fill={inShelf ? 'currentColor' : 'none'} />
               {shelfUpdating ? '更新中' : inShelf ? '移出书架' : '加入书架'}
@@ -376,17 +376,17 @@ function DetailContent() {
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 disabled={deletingDownload}
-                className="w-[220px] h-10 rounded-xl font-semibold text-sm mt-3 inline-flex items-center justify-center gap-2 border border-destructive/30 bg-destructive/10 text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60"
+                className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 text-sm font-semibold text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60 lg:w-[220px]"
               >
                 <Trash2 className="w-4 h-4" />
                 {deletingDownload ? '删除中' : '删除下载书籍'}
               </button>
             )}
-            {message && <p className="mt-3 w-[220px] text-xs text-muted-foreground leading-relaxed px-1">{message}</p>}
+            {message && <p className="mt-3 w-full px-1 text-xs leading-relaxed text-muted-foreground lg:w-[220px]">{message}</p>}
           </div>
 
-          <div className="flex-1 min-w-0 app-glass rounded-[32px] px-7 pt-6 pb-7">
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">{book.title}</h1>
+          <div className="min-w-0 flex-1 rounded-[28px] app-glass px-5 pb-6 pt-5 sm:rounded-[32px] sm:px-7 sm:pb-7 sm:pt-6">
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">{book.title}</h1>
 
             <p className="text-base mt-1 text-muted-foreground font-medium">
               {authorNames.join(' · ') || '未知作者'}
@@ -582,7 +582,7 @@ export default function DetailPage() {
   return (
     <Suspense fallback={
       <DesktopLayout>
-        <div className="px-8 py-16 flex items-center justify-center">
+        <div className="flex items-center justify-center px-4 py-16 sm:px-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
         </div>
       </DesktopLayout>

@@ -24,7 +24,7 @@ export default function DeveloperSettingsPage() {
   if (!unlocked) {
     return (
       <DesktopLayout>
-        <div className="px-8 py-8 flex flex-col items-center justify-center text-center" style={{ minHeight: '60vh' }}>
+        <div className="flex flex-col items-center justify-center px-4 py-5 text-center sm:px-6 md:px-8 md:py-8" style={{ minHeight: '60vh' }}>
           <Lock className="w-10 h-10 text-muted-foreground mb-4" />
           <p className="text-sm text-muted-foreground">开发者选项尚未解锁。</p>
           <button
@@ -58,7 +58,7 @@ export default function DeveloperSettingsPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '860px' }}>
         <button
           onClick={() => router.push('/settings')}

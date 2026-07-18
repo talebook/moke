@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Moke - Tablet Preview",
+        "width": 768,
+        "height": 1024,
+        "minWidth": 360,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}

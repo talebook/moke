@@ -137,7 +137,7 @@ export default function UserHistoryPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '1200px' }}>
         <div className="flex items-center gap-3 mb-8">
           <button
@@ -187,7 +187,7 @@ export default function UserHistoryPage() {
             {message}
           </div>
         ) : currentItems.length === 0 ? (
-          <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+          <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
             <p className="text-lg font-medium text-foreground">暂无记录</p>
             <p className="mt-2 text-sm text-muted-foreground">{emptyState.description}</p>
             <Link

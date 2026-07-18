@@ -265,13 +265,16 @@ export default function LibraryPage() {
     } finally { setNetworkSearchLoading(false); }
   }, [serverUrl]);
 
-  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter') return;
+  const submitActiveSearch = () => {
     if (activeTab === 'local') {
       if (searchQ.trim()) router.push(`/search?q=${encodeURIComponent(searchQ.trim())}`);
     } else {
       doNetworkSearch(networkSearchQ);
     }
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') submitActiveSearch();
   };
 
   // ── Selection (local tab only — online books have no stable ids) ───────────
@@ -491,12 +494,12 @@ export default function LibraryPage() {
     ? setSearchQ
     : (v: string) => { setNetworkSearchQ(v); if (!v.trim()) setNetworkSearchMode(false); };
 
-  const searchPlaceholder = activeTab === 'local' ? '搜索书名、作者或标签...' : '搜索在线书籍...';
+  const searchPlaceholder = '搜索书籍';
 
   return (
     <DesktopLayout>
       {/* ── Header ── */}
-      <header className="sticky top-0 z-10 flex items-center gap-4 px-8 py-5 border-b border-amber-950/10 bg-[#fffdf8]/80 backdrop-blur-xl shrink-0">
+      <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:flex-row md:items-center md:px-8 md:py-5">
         <div className="shrink-0">
           {activeTab === 'local' ? (
             <>
@@ -510,26 +513,37 @@ export default function LibraryPage() {
             </>
           )}
         </div>
-        <div className="flex-1" />
+        <div className="hidden flex-1 md:block" />
 
-        {/* Search — switches mode per tab */}
-        <div className="relative shrink-0 w-[320px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            placeholder={searchPlaceholder}
-            value={activeSearchQ}
-            onChange={(e) => setActiveSearchQ(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white"
-          />
+        <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+          {/* Search — switches mode per tab */}
+          <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <input
+                type="search"
+                placeholder={searchPlaceholder}
+                value={activeSearchQ}
+                onChange={(e) => setActiveSearchQ(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={submitActiveSearch}
+              disabled={!activeSearchQ.trim() || (activeTab === 'online' && networkSearchLoading)}
+              className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {activeTab === 'online' && networkSearchLoading ? '搜索中' : '搜索'}
+            </button>
+          </div>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1 shrink-0" />
         </div>
-
-        <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1" />
       </header>
 
       {/* ── Tabs ── */}
-      <div className="px-8 border-b border-amber-950/10 bg-white/35 shrink-0 relative backdrop-blur-sm">
+      <div className="relative shrink-0 border-b border-amber-950/10 bg-white/35 px-4 backdrop-blur-sm sm:px-6 md:px-8">
         <div className="flex items-center gap-8 relative">
           <button
             onClick={() => setActiveTab('local')}
@@ -551,20 +565,20 @@ export default function LibraryPage() {
       ══════════════════════════════════════════ */}
       {activeTab === 'local' ? (
         <>
-          <div className="px-8 py-4 border-b border-amber-950/10 bg-white/25 shrink-0">
-            <div className="flex items-center gap-6 rounded-3xl app-card px-4 py-3">
+          <div className="shrink-0 border-b border-amber-950/10 bg-white/25 px-4 py-3 sm:px-6 md:px-8 md:py-4">
+            <div className="flex items-center gap-4 overflow-x-auto rounded-3xl app-card px-4 py-3 md:gap-6">
               <FilterSelect label="格式" value={selectedFormat} options={['全部', 'EPUB', 'PDF', 'MOBI', 'TXT', 'AZW3']} onChange={(v) => updateFilter('format', v)} />
               <FilterSelect label="标签" value={selectedTag} options={tagOptions} onChange={(v) => updateFilter('tag', v)} />
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
+          <div className="flex-1 min-h-0 overflow-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
             {localLoading ? (
               <div className="flex items-center justify-center h-64">
                 <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
               </div>
             ) : books.length === 0 ? (
-              <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+              <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
                 <p className="text-lg font-semibold text-foreground">没有找到匹配的书籍</p>
                 <p className="mt-2 text-sm text-muted-foreground">可以调整格式或分类筛选条件后再试。</p>
               </div>
@@ -577,7 +591,7 @@ export default function LibraryPage() {
                 onContextAction={openContextMenu}
               />
             ) : (
-              <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+              <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
                 {books.map((book) => {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
@@ -662,13 +676,13 @@ export default function LibraryPage() {
                       </div>
                     </Link>
                   ) : (
-                    <Link key={bookId} href={`/detail?id=${bookId}`} {...cardHandlers} className={`book-list-motion group flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
+                    <Link key={bookId} href={`/detail?id=${bookId}`} {...cardHandlers} className={`book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4 ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
                       <div className={`overflow-hidden shrink-0 transition-[width,opacity] duration-200 ease-out ${batchMode ? 'w-5 opacity-100' : 'w-0 opacity-0'}`}>
                         <div className={`w-5 h-5 rounded-full flex items-center justify-center transition-all duration-150 ${selected ? 'bg-primary text-primary-foreground scale-100' : 'border-2 border-muted-foreground/30 scale-90'}`}>
                           {selected && <span className="text-[10px] font-bold">✓</span>}
                         </div>
                       </div>
-                      <div className="book-list-cover-motion w-14 h-[84px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
+                      <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
                         {coverUrl ? (
                           <AuthImage
                             src={coverUrl}
@@ -688,10 +702,10 @@ export default function LibraryPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="book-title-motion text-sm font-medium truncate text-foreground">{book.title}</p>
+                        <p className="book-title-motion line-clamp-2 text-sm font-medium leading-5 text-foreground">{book.title}</p>
                         {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
                       </div>
-                      <span className="text-[11px] text-muted-foreground shrink-0">{book.files?.[0]?.format?.toUpperCase() || 'EPUB'}</span>
+                      <span className="shrink-0 rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{book.files?.[0]?.format?.toUpperCase() || 'EPUB'}</span>
                     </Link>
                   );
                 })}
@@ -700,7 +714,7 @@ export default function LibraryPage() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-1.5 py-5 border-t border-amber-950/10 bg-white/35 shrink-0 px-8 backdrop-blur-sm">
+            <div className="flex shrink-0 items-center justify-center gap-1.5 overflow-x-auto border-t border-amber-950/10 bg-white/35 px-4 py-4 backdrop-blur-sm sm:px-8 md:py-5">
               <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
                 className="flex items-center justify-center h-8 px-3 text-sm rounded-sm transition-colors text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent">上一页</button>
               {getPageNumbers().map((label, i) => (
@@ -723,8 +737,8 @@ export default function LibraryPage() {
 
           {/* ── Filter bar (书源 + 分类，与本地书库样式一致) ── */}
           {!networkSearchMode && (
-            <div className="px-8 py-4 border-b border-amber-950/10 bg-white/25 shrink-0">
-              <div className="flex items-center gap-6 rounded-3xl app-card px-4 py-3">
+            <div className="shrink-0 border-b border-amber-950/10 bg-white/25 px-4 py-3 sm:px-6 md:px-8 md:py-4">
+              <div className="flex items-center gap-4 overflow-x-auto rounded-3xl app-card px-4 py-3 md:gap-6">
                 {/* 书源选择 */}
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs shrink-0 text-muted-foreground">书源</span>
@@ -766,7 +780,7 @@ export default function LibraryPage() {
 
           {/* ── Network search results ── */}
           {networkSearchMode ? (
-            <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
+            <div className="flex-1 min-h-0 overflow-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
               <div className="flex items-center gap-3 mb-6">
                 <button
                   onClick={() => { setNetworkSearchMode(false); setNetworkSearchQ(''); setNetworkSearchResults([]); }}
@@ -785,7 +799,7 @@ export default function LibraryPage() {
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
                 </div>
               ) : networkSearchResults.length === 0 ? (
-                <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+                <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
                   <p className="text-lg font-semibold text-foreground">没有找到相关书籍</p>
                   <p className="mt-2 text-sm text-muted-foreground">换个关键词试试。</p>
                 </div>
@@ -798,16 +812,16 @@ export default function LibraryPage() {
           ) : (
             /* ── Browse books / empty states ── */
             <div className="flex-1 min-h-0 overflow-auto flex flex-col">
-              <div className="flex-1 min-h-0 overflow-auto px-8 py-8">
+              <div className="flex-1 min-h-0 overflow-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
                 {/* 未选书源 */}
                 {selectedSourceId === null ? (
-                  <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+                  <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
                     <p className="text-lg font-semibold text-foreground">请先选择一个书源</p>
                     <p className="mt-2 text-sm text-muted-foreground">在上方筛选栏选择书源，即可浏览该书源的书籍分类。</p>
                   </div>
                 ) : /* 已选书源但未选分类 */
                 selectedCategoryUrl === null ? (
-                  <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+                  <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
                     <p className="text-lg font-semibold text-foreground">请选择一个分类</p>
                     <p className="mt-2 text-sm text-muted-foreground">
                       已选择书源「{networkSources.find(s => s.id === selectedSourceId)?.name}」，请在上方继续选择分类。
@@ -820,7 +834,7 @@ export default function LibraryPage() {
                   </div>
                 ) : /* 该分类下无书籍 */
                 networkBooks.length === 0 ? (
-                  <div className="rounded-[32px] app-glass px-8 py-16 text-center">
+                  <div className="rounded-[28px] app-glass px-5 py-12 text-center sm:rounded-[32px] sm:px-8 sm:py-16">
                     <p className="text-lg font-semibold text-foreground">该分类暂无书籍</p>
                     <p className="mt-2 text-sm text-muted-foreground">换个分类试试，或稍后再来看看。</p>
                   </div>
@@ -833,7 +847,7 @@ export default function LibraryPage() {
 
               {/* 分页，仅在有书籍时显示 */}
               {selectedCategoryUrl !== null && !networkBooksLoading && networkBooks.length > 0 && (
-                <div className="flex items-center justify-center gap-3 py-5 border-t border-amber-950/10 bg-white/35 shrink-0 px-8 backdrop-blur-sm">
+                <div className="flex shrink-0 items-center justify-center gap-3 border-t border-amber-950/10 bg-white/35 px-4 py-4 backdrop-blur-sm sm:px-8 md:py-5">
                   <button
                     onClick={() => setNetworkPage(p => Math.max(1, p - 1))}
                     disabled={networkPage === 1}
@@ -905,7 +919,7 @@ function NetworkBookTable({ books }: { books: NetworkBook[] }) {
 
 function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: ViewMode }) {
   return (
-    <div className={cn('rounded-[30px] app-card p-4 gap-x-4 gap-y-7', viewMode === 'grid' ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 lg:grid-cols-2 gap-4')}>
+    <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
       {books.map((book, idx) => {
         const title = book.title || book.name || '';
         const authorRaw = book.author || book.authors;
@@ -935,8 +949,8 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
             </div>
           </div>
         ) : (
-          <div key={idx} className="book-list-motion group flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all hover:bg-white/70 border border-transparent hover:border-amber-950/10 hover:shadow-sm">
-            <div className="book-list-cover-motion w-14 h-[84px] rounded overflow-hidden shadow-card shrink-0 flex items-center justify-center relative">
+          <div key={idx} className="book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4">
+            <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
               {coverUrl ? (
                 <img src={coverUrl} alt={title} className="w-full h-full object-cover" loading="lazy" />
               ) : (
@@ -946,10 +960,10 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="book-title-motion text-sm font-medium truncate text-foreground">{title}</p>
+              <p className="book-title-motion line-clamp-2 text-sm font-medium leading-5 text-foreground">{title}</p>
               {author && <p className="text-xs text-muted-foreground truncate">{author}</p>}
             </div>
-            <span className="text-[11px] text-muted-foreground shrink-0">在线</span>
+            <span className="shrink-0 rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">在线</span>
           </div>
         );
       })}
@@ -959,7 +973,7 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
 
 function FilterSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex shrink-0 items-center gap-1.5">
       <span className="text-xs shrink-0 text-muted-foreground">{label}</span>
       <Select
         value={value}

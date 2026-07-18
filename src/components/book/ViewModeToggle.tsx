@@ -36,7 +36,16 @@ export function ViewModeToggle({ value, onChange, className, showRows = true }: 
         onClick={() => onChange('list')}
         aria-label="列表视图"
         title="列表视图"
-        className={cn(BASE, value === 'list' ? ACTIVE : INACTIVE)}
+        className={cn(BASE, 'md:hidden', value !== 'grid' ? ACTIVE : INACTIVE)}
+      >
+        <List className="w-4 h-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('list')}
+        aria-label="列表视图"
+        title="列表视图"
+        className={cn(BASE, 'hidden md:flex', value === 'list' ? ACTIVE : INACTIVE)}
       >
         <List className="w-4 h-4" />
       </button>
@@ -46,7 +55,7 @@ export function ViewModeToggle({ value, onChange, className, showRows = true }: 
           onClick={() => onChange('rows')}
           aria-label="纯列表（表格）视图"
           title="纯列表（表格）视图"
-          className={cn(BASE, value === 'rows' ? ACTIVE : INACTIVE)}
+          className={cn(BASE, 'hidden md:flex', value === 'rows' ? ACTIVE : INACTIVE)}
         >
           <Rows3 className="w-4 h-4" />
         </button>
