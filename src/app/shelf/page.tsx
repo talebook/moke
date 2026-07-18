@@ -125,18 +125,18 @@ function BookCard({
     return (
       <Link href={`/detail?id=${bookId}`}
         {...handlers}
-        className={`group relative flex flex-col gap-3 cursor-pointer rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)] ${selected ? 'ring-2 ring-primary/60 bg-white/70' : batchMode ? 'cursor-pointer' : ''}`}
+        className={`book-card-motion group relative flex flex-col gap-3 cursor-pointer rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)] ${selected ? 'ring-2 ring-primary/60 bg-white/70' : batchMode ? 'cursor-pointer' : ''}`}
       >
-        <div className="relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
+        <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5"
           style={{ aspectRatio: '2/3' }}>
           {coverUrl ? (
             <AuthImage
               src={coverUrl}
               alt={book.title}
-              className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              className="book-cover-media w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
               loading="lazy"
               fallback={
-                <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
+                <div className={cn('book-cover-media w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
                   <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
                     {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
                   </span>
@@ -144,7 +144,7 @@ function BookCard({
               }
             />
           ) : (
-            <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
+            <div className={cn('book-cover-media w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
               <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
                 {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
               </span>
@@ -163,7 +163,7 @@ function BookCard({
           </div>
         </div>
         <div className="flex flex-col gap-1 px-1">
-          <span className="text-[13px] font-semibold leading-snug truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</span>
+          <span className="book-title-motion text-[13px] font-semibold leading-snug truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</span>
           {authorName && <span className="text-[11px] truncate text-muted-foreground/85">{authorName}</span>}
         </div>
       </Link>
@@ -173,7 +173,7 @@ function BookCard({
   return (
       <Link href={`/detail?id=${bookId}`}
       {...handlers}
-      className={`flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
+      className={`book-list-motion flex items-center gap-4 pl-1 pr-4 py-4 rounded-2xl transition-all duration-200 hover:bg-muted/70 border border-transparent hover:border-border/60 hover:shadow-xs group ${selected ? 'bg-white/70 ring-1 ring-primary/40' : batchMode ? 'cursor-pointer' : ''}`}>
       {/* Selection indicator wrapper: width animates 0 → 20px so the cover/title
           smoothly slides right when entering batch mode, instead of jumping. */}
       <div className={`overflow-hidden shrink-0 transition-[width,opacity] duration-200 ease-out ${batchMode ? 'w-5 opacity-100' : 'w-0 opacity-0'}`}>
@@ -181,7 +181,7 @@ function BookCard({
           {selected && <span className="text-[10px] font-bold">✓</span>}
         </div>
       </div>
-      <div className="w-14 h-[84px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
+      <div className="book-list-cover-motion w-14 h-[84px] rounded-lg overflow-hidden shadow-sm shrink-0 flex items-center justify-center relative transition-transform duration-300 group-hover:scale-[1.03]">
         {coverUrl ? (
           <AuthImage
             src={coverUrl}
@@ -205,7 +205,7 @@ function BookCard({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</p>
+        <p className="book-title-motion text-sm font-semibold truncate text-foreground group-hover:text-primary transition-colors duration-200">{book.title}</p>
         {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
       </div>
       <span className="text-[11px] font-semibold text-muted-foreground shrink-0 px-2 py-0.5 bg-muted rounded-md border border-border/30">
