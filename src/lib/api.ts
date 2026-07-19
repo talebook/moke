@@ -1,5 +1,13 @@
 import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
+import {
+  buildTauriRequestInit,
+  getErrorMessage,
+  isAbsoluteHttpUrl,
+  readApiJson,
+  resolveAppPlatform,
+} from '@/lib/api-core';
+export { getErrorMessage, MokeApiError, readApiJson } from '@/lib/api-core';
 
 interface UserInfoResponse {
   err: string;
@@ -22,62 +30,8 @@ interface UserInfoResponse {
   };
 }
 
-type ApiEnvelope = {
-  err?: string;
-  msg?: string;
-};
-
-export class MokeApiError extends Error {
-  code: string;
-  status?: number;
-
-  constructor(message: string, code: string, status?: number) {
-    super(message);
-    this.name = 'MokeApiError';
-    this.code = code;
-    this.status = status;
-  }
-}
-
-export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {
-  if (error instanceof MokeApiError) return error.message || fallback;
-  if (error instanceof Error) {
-    if (error.message === 'server.url.missing') return '服务器地址丢失，请重新连接书库。';
-    if (error.message.startsWith('http.')) return `服务器返回 ${error.message.replace('http.', '')}。`;
-    return error.message || fallback;
-  }
-  return fallback;
-}
-
-export async function readApiJson<T extends ApiEnvelope>(
-  response: Response,
-  fallbackMessage = '服务器返回内容无效。',
-  okErrs: string[] = ['ok'],
-): Promise<T> {
-  let data: T;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new MokeApiError(fallbackMessage, 'server.invalid_response', response.status);
-  }
-
-  if (!response.ok) {
-    throw new MokeApiError(
-      String(data.msg || `服务器返回 ${response.status}。`),
-      String(data.err || `http.${response.status}`),
-      response.status,
-    );
-  }
-
-  if (data.err && !okErrs.includes(data.err)) {
-    throw new MokeApiError(String(data.msg || '接口请求失败。'), String(data.err), response.status);
-  }
-
-  return data;
-}
-
-const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
+const isTauriApp = appPlatform === 'tauri';
 
 async function interceptNotInvited(response: Response): Promise<void> {
   const contentType = response.headers.get('content-type') || '';
@@ -102,7 +56,7 @@ export async function request(url: string | URL, options?: RequestInit): Promise
 
   // 关键检测：Tauri 桌面端必须使用绝对 URL（http(s)://...），
   // 否则没有"当前域名"可拼接，会直接网络异常。
-  if (!/^https?:\/\//i.test(urlStr)) {
+  if (!isAbsoluteHttpUrl(urlStr)) {
     debugLog(
       'error',
       'request',
@@ -125,14 +79,7 @@ export async function request(url: string | URL, options?: RequestInit): Promise
       // Tauri 桌面端：使用插件 fetch。需要显式放宽以兼容自建 Talebook 服务器：
       // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
       // - maxRedirections: 跟随登录后的重定向（与浏览器行为一致）
-      response = await tauriFetch(urlStr, {
-        ...(options as any),
-        maxRedirections: 5,
-        danger: {
-          acceptInvalidCerts: true,
-          acceptInvalidHostnames: true,
-        },
-      } as any);
+      response = await tauriFetch(urlStr, buildTauriRequestInit(options) as any);
     } else {
       response = await fetch(url, options);
     }

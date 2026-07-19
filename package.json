@@ -14,6 +14,7 @@
     "tauri:dev:mobile": "tauri dev --config src-tauri/tauri.mobile.conf.json",
     "tauri:dev:tablet": "tauri dev --config src-tauri/tauri.tablet.conf.json",
     "lint": "next lint",
+    "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "build:reader": "cd readest && pnpm --filter @readest/readest-app build",
     "dev:reader": "cd readest && pnpm --filter @readest/readest-app dev",

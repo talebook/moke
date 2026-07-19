@@ -24,6 +24,7 @@ pnpm dev-web        # Next.js dev server, web env (.env.web)
 pnpm build          # next build for tauri (static export → out/)
 pnpm build-web      # next build for web deployment (server output)
 pnpm lint           # next lint
+pnpm test           # Node built-in tests for API, offline storage, and platform branches
 pnpm typecheck      # tsc --noEmit
 pnpm tauri dev      # full desktop app: compiles Rust + runs Next dev (slow, compiles readest's Rust)
 pnpm tauri build    # production desktop bundle (runs build + build:reader + copy:reader first)
@@ -33,8 +34,8 @@ pnpm build:reader   # builds readest-app frontend → out/readest (via readest's
 pnpm copy:reader    # fallback copy of readest/out/readest → out/readest
 ```
 
-There is no test suite in this repo. (The embedded `readest/apps/readest-app` has its own tests and
-its own `CLAUDE.md` — consult that file before touching reader code.)
+The root test suite uses Node's built-in test runner. The embedded `readest/apps/readest-app` has its
+own larger test suite and its own `CLAUDE.md` — consult that file before touching reader code.
 
 ### Build-environment gotcha (Windows + WSL)
 
