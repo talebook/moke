@@ -592,7 +592,7 @@ export default function LibraryPage() {
               />
             ) : (
               <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
-                {books.map((book) => {
+                {books.map((book, index) => {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
@@ -650,7 +650,8 @@ export default function LibraryPage() {
                             src={coverUrl}
                             alt={book.title}
                             className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                            loading="lazy"
+                            loading={index === 0 ? 'eager' : 'lazy'}
+                            fetchPriority={index === 0 ? 'high' : 'auto'}
                             fallback={
                               <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
                                 <span className="text-foreground/20 text-2xl font-bold font-serif">{book.title[0]}</span>
@@ -671,7 +672,7 @@ export default function LibraryPage() {
                         </div>
                       </div>
                       <div className="flex flex-col gap-0.5 px-0.5">
-                        <span className="book-title-motion text-sm font-medium truncate text-foreground">{book.title}</span>
+                        <span className="book-title-motion text-sm font-semibold truncate text-foreground">{book.title}</span>
                         {authorName && <span className="text-xs truncate text-muted-foreground">{authorName}</span>}
                       </div>
                     </Link>
@@ -688,7 +689,8 @@ export default function LibraryPage() {
                             src={coverUrl}
                             alt={book.title}
                             className="w-full h-full object-cover"
-                            loading="lazy"
+                            loading={index === 0 ? 'eager' : 'lazy'}
+                            fetchPriority={index === 0 ? 'high' : 'auto'}
                             fallback={
                               <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
                                 <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
@@ -702,7 +704,7 @@ export default function LibraryPage() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="book-title-motion line-clamp-2 text-sm font-medium leading-5 text-foreground">{book.title}</p>
+                        <p className="book-title-motion line-clamp-2 text-sm font-semibold leading-5 text-foreground">{book.title}</p>
                         {authorName && <p className="text-xs text-muted-foreground truncate">{authorName}</p>}
                       </div>
                       <span className="shrink-0 rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{book.files?.[0]?.format?.toUpperCase() || 'EPUB'}</span>
@@ -934,7 +936,13 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
           <div key={idx} className="book-card-motion group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
             <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
               {coverUrl ? (
-                <img src={coverUrl} alt={title} className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+                <img
+                  src={coverUrl}
+                  alt={title}
+                  className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  loading={idx === 0 ? 'eager' : 'lazy'}
+                  fetchPriority={idx === 0 ? 'high' : 'auto'}
+                />
               ) : (
                 <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
                   <span className="text-foreground/20 text-2xl font-bold font-serif">{title[0]}</span>
@@ -944,7 +952,7 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
               <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
             </div>
             <div className="flex flex-col gap-0.5 px-0.5">
-              <span className="book-title-motion text-sm font-medium truncate text-foreground">{title}</span>
+              <span className="book-title-motion text-sm font-semibold truncate text-foreground">{title}</span>
               {author && <span className="text-xs truncate text-muted-foreground">{author}</span>}
             </div>
           </div>
@@ -952,7 +960,13 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
           <div key={idx} className="book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4">
             <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
               {coverUrl ? (
-                <img src={coverUrl} alt={title} className="w-full h-full object-cover" loading="lazy" />
+                <img
+                  src={coverUrl}
+                  alt={title}
+                  className="w-full h-full object-cover"
+                  loading={idx === 0 ? 'eager' : 'lazy'}
+                  fetchPriority={idx === 0 ? 'high' : 'auto'}
+                />
               ) : (
                 <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
                   <span className="text-foreground/30 text-xs font-bold font-serif">{title[0]}</span>
@@ -960,7 +974,7 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="book-title-motion line-clamp-2 text-sm font-medium leading-5 text-foreground">{title}</p>
+              <p className="book-title-motion line-clamp-2 text-sm font-semibold leading-5 text-foreground">{title}</p>
               {author && <p className="text-xs text-muted-foreground truncate">{author}</p>}
             </div>
             <span className="shrink-0 rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">在线</span>

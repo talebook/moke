@@ -2,9 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* These files are bundled with the app so the interface keeps its intended
+   typography without a runtime dependency on Google Fonts. See
+   public/fonts/LICENSES.md for the font licenses. */
+@font-face {
+  font-family: 'Moke Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter-latin-variable.woff2') format('woff2');
+}
+
+/* The bundled subset covers the app's Chinese copy plus common GB2312
+   characters, keeping the font compact. Other characters gracefully fall
+   back to the operating system font. Browsers synthesize intermediate weights
+   from the bundled regular face. */
+@font-face {
+  font-family: 'Moke Noto Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-sans-sc-regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Moke Noto Serif SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-serif-sc-regular.woff2') format('woff2');
+}
+
 @layer base {
   html, body {
-    font-family: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+    font-family: 'Moke Inter', 'Moke Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
     background: #FBF9F2;
     color: #2C2C2E;
     -webkit-font-smoothing: antialiased;
@@ -13,6 +44,12 @@
 
   ::selection {
     background: rgba(184, 149, 106, 0.25);
+  }
+}
+
+@layer utilities {
+  .font-serif {
+    font-family: 'Moke Noto Serif SC', 'Songti SC', 'STSong', serif;
   }
 }
 

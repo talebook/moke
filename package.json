@@ -3,6 +3,7 @@
   "version": "0.1.6",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "dev": "dotenv -e .env.tauri -- next dev --turbo",
     "build": "dotenv -e .env.tauri -- next build --turbo",
@@ -13,7 +14,7 @@
     "tauri:dev": "tauri dev",
     "tauri:dev:mobile": "tauri dev --config src-tauri/tauri.mobile.conf.json",
     "tauri:dev:tablet": "tauri dev --config src-tauri/tauri.tablet.conf.json",
-    "lint": "next lint",
+    "lint": "eslint src tests",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "build:reader": "cd readest && pnpm --filter @readest/readest-app build",
@@ -25,10 +26,10 @@
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-http": "^2.5.7",
     "@tauri-apps/plugin-opener": "^2.5.3",
-    "@tauri-apps/plugin-process": "^2.2.4",
-    "@tauri-apps/plugin-updater": "^2.4.3",
     "@tauri-apps/plugin-os": "^2.3.2",
+    "@tauri-apps/plugin-process": "^2.2.4",
     "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-updater": "^2.4.3",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
     "next": "^16.2.6",
@@ -38,6 +39,7 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@tailwindcss/typography": "^0.5.16",
     "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^22.15.0",
@@ -45,6 +47,8 @@
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "dotenv-cli": "^7.4.4",
+    "eslint": "9.0.0",
+    "eslint-config-next": "16.2.6",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.18",
     "typescript": "^5.7.2"

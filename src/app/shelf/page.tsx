@@ -39,6 +39,7 @@ interface BookItem {
 function BookCard({
   book,
   viewGrid = true,
+  priority = false,
   batchMode = false,
   selected = false,
   onToggleSelect,
@@ -46,6 +47,7 @@ function BookCard({
 }: {
   book: BookItem;
   viewGrid?: boolean;
+  priority?: boolean;
   batchMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
@@ -134,7 +136,8 @@ function BookCard({
               src={coverUrl}
               alt={book.title}
               className="book-cover-media w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
-              loading="lazy"
+              loading={priority ? 'eager' : 'lazy'}
+              fetchPriority={priority ? 'high' : 'auto'}
               fallback={
                 <div className={cn('book-cover-media w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
                   <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
@@ -187,7 +190,8 @@ function BookCard({
             src={coverUrl}
             alt={book.title}
             className="w-full h-full object-cover"
-            loading="lazy"
+            loading={priority ? 'eager' : 'lazy'}
+            fetchPriority={priority ? 'high' : 'auto'}
             fallback={
               <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
                 <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
@@ -520,10 +524,11 @@ export default function ShelfPage() {
                 />
               ) : (
                 <div className={cn('rounded-[24px] border border-amber-950/10 bg-white/35 eink-bordered p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-sm sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
-                  {books.map((book) => (
+                  {books.map((book, index) => (
                     <BookCard
                       key={String(book.id)}
                       book={book}
+                      priority={index === 0}
                       viewGrid={viewMode === 'grid'}
                       batchMode={batchMode}
                       selected={selectedIds.has(String(book.id))}

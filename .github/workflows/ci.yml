@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Run ESLint
+        run: pnpm lint
+
+      - name: Run TypeScript typecheck
+        run: pnpm typecheck
+
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust library tests
+        working-directory: src-tauri
+        run: cargo test --lib --locked
+
+  desktop-build:
+    name: Desktop build smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Readest dependencies and vendors
+        working-directory: readest
+        shell: bash
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @readest/readest-app setup-vendors
+
+      - name: Build desktop app without installer bundling
+        run: pnpm tauri build --no-bundle
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+  mobile-smoke:
+    name: Mobile, tablet and desktop page smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start web preview server
+        run: |
+          NEXT_PUBLIC_APP_PLATFORM=web pnpm dev-web > "$RUNNER_TEMP/moke-web.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/moke-web.pid"
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:3000/settings/developer > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/moke-web.log"
+          exit 1
+
+      - name: Run responsive smoke test
+        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs --workers=1
+
+      - name: Upload responsive screenshots and server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: responsive-smoke-artifacts
+          path: |
+            test-results/**/*.png
+            ${{ runner.temp }}/moke-web.log
+          if-no-files-found: warn
+
+      - name: Stop web preview server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/moke-web.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/moke-web.pid")" || true
+          fi
+
+      - name: Verify web build configuration
+        run: pnpm build-web

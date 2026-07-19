@@ -15,7 +15,7 @@ export function TabBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-12px_36px_-28px_rgba(74,57,35,0.65)] backdrop-blur lg:hidden">
+    <nav className="moke-tab-bar fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-12px_36px_-28px_rgba(74,57,35,0.65)] backdrop-blur lg:hidden">
       <div className="grid h-14 grid-cols-3">
         {tabs.map((tab) => {
           const Icon = tab.icon;
