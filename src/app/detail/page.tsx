@@ -9,6 +9,7 @@ import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offlin
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
+import { buildEmbeddedReaderUrl } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 
@@ -240,6 +241,21 @@ function DetailContent() {
         // 只需替换打包资源，无需改动这里的调用方式。
         const { invoke } = await import('@tauri-apps/api/core');
         const restoreProgress = await fetchReadingProgress(book.id);
+        const { platform } = await import('@tauri-apps/plugin-os');
+        const currentPlatform = await platform();
+
+        // Mobile Tauri has one WebView, so desktop's reader-window command is
+        // unavailable. Navigate that WebView to the bundled reader instead.
+        if (currentPlatform === 'android' || currentPlatform === 'ios') {
+          router.push(buildEmbeddedReaderUrl({
+            filePath: record.filePath,
+            eink: useSettingsStore.getState().eink,
+            mokeBookId: String(book.id),
+            restoreProgress,
+          }));
+          return;
+        }
+
         await invoke('open_reader', {
           filePath: record.filePath,
           eink: useSettingsStore.getState().eink,

@@ -181,7 +181,7 @@ jobs:
             fs.writeFileSync(p, s.replace(/(defaultConfig\s*\{\n)/, "$1        missingDimensionStrategy(\"store\", \"foss\")\n"));
           '
 
-      - name: Configure Android signing
+      - name: Prepare Android signing key
         if: matrix.platform == 'android'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -199,17 +199,52 @@ jobs:
           fi
 
           base64 -d <<< "$KEYSTORE_BASE64" > "$RUNNER_TEMP/android-release.jks"
-          pushd src-tauri/gen/android
-          echo "keyAlias=$ANDROID_KEY_ALIAS" > keystore.properties
-          echo "password=$KEYSTORE_PASSWORD" >> keystore.properties
-          echo "storeFile=$RUNNER_TEMP/android-release.jks" >> keystore.properties
-          popd
 
       - name: Build Android APK
         if: matrix.platform == 'android'
         run: pnpm tauri android build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+      # Tauri's Android build produces an unsigned universal APK.  Signing it is
+      # deliberately a separate, explicit release step so the file uploaded below
+      # cannot be mistaken for a release-ready APK.
+      - name: Align, sign, and verify Android release APK
+        if: matrix.platform == 'android'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD:-$ANDROID_KEY_PASSWORD}"
+          KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          export KEYSTORE_PASSWORD
+          export ANDROID_SIGNING_KEY_PASSWORD="$KEY_PASSWORD"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED_APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
+          ALIGNED_APK="$RUNNER_TEMP/moke-release-aligned.apk"
+          RELEASE_APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/moke-android-release.apk"
+
+          [ -f "$UNSIGNED_APK" ] || { echo "Expected unsigned APK not found: $UNSIGNED_APK" >&2; exit 1; }
+          [ -x "$BUILD_TOOLS/zipalign" ] || { echo "zipalign not found in $BUILD_TOOLS" >&2; exit 1; }
+          [ -x "$BUILD_TOOLS/apksigner" ] || { echo "apksigner not found in $BUILD_TOOLS" >&2; exit 1; }
+
+          # Android requires 16 KiB alignment before APK Signature Scheme signing.
+          "$BUILD_TOOLS/zipalign" -P 16 -f -v 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/android-release.jks" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_SIGNING_KEY_PASSWORD \
+            --out "$RELEASE_APK" \
+            "$ALIGNED_APK"
+
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$RELEASE_APK"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$RELEASE_APK"
+          echo "ANDROID_RELEASE_APK=$RELEASE_APK" >> "$GITHUB_ENV"
 
       # ============ iOS 构建 ============
       - name: Override iOS bundle identifier
@@ -306,8 +341,7 @@ jobs:
         if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          files: ${{ env.ANDROID_RELEASE_APK }}
 
       - name: Create Release
         if: ${{ matrix.platform != 'android' && startsWith(github.ref, 'refs/tags/') }}
@@ -326,8 +360,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-artifact
-          path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: ${{ env.ANDROID_RELEASE_APK }}
           if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)
