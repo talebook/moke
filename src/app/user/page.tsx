@@ -2,8 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Download, Mail, Send, Settings, Shield, Upload, User } from 'lucide-react';
+import { ArrowRight, BookOpen, Download, LogIn, Mail, Send, Settings, Shield, Upload, User } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -29,6 +28,7 @@ interface UserDetailResponse {
     permission?: string;
     is_admin?: boolean;
     admin?: boolean;
+    is_login?: boolean;
     extra?: Partial<Record<HistoryType, HistoryItem[]>>;
   };
 }
@@ -41,7 +41,6 @@ const historyCards: Array<{ key: HistoryType; label: string; icon: typeof BookOp
 ];
 
 export default function UserPage() {
-  const router = useRouter();
   const { user, serverUrl } = useServerStore();
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -63,8 +62,14 @@ export default function UserPage() {
         });
         const data: UserDetailResponse = await res.json();
 
-        if (data.err === 'user.need_login') {
-          router.push('/login');
+        if (data.err === 'user.need_login' || !data.user?.is_login) {
+          setProfile(null);
+          setHistoryMap({
+            read_history: [],
+            download_history: [],
+            push_history: [],
+            upload_history: [],
+          });
           return;
         }
 
@@ -91,8 +96,9 @@ export default function UserPage() {
     if (serverUrl) {
       loadProfile();
     }
-  }, [router, serverUrl]);
+  }, [serverUrl]);
 
+  const isLoggedIn = Boolean(profile?.is_login ?? user);
   const displayName = profile?.nickname || profile?.name || user?.name || '未命名用户';
   const username = profile?.username || user?.username || '-';
   const email = profile?.email || user?.email || '未绑定邮箱';
@@ -129,6 +135,21 @@ export default function UserPage() {
         ) : message ? (
           <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-5 py-4 text-sm text-destructive">
             {message}
+          </div>
+        ) : !isLoggedIn ? (
+          <div className="rounded-[32px] app-glass px-6 py-12 text-center sm:px-10">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <User className="h-8 w-8" />
+            </div>
+            <h2 className="mt-5 text-xl font-semibold text-foreground">登录以查看个人面板</h2>
+            <p className="mt-2 text-sm text-muted-foreground">登录后可查看账户信息、阅读历史和个人使用数据。</p>
+            <Link
+              href="/login"
+              className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-primary px-6 text-base font-semibold text-primary-foreground shadow-lg shadow-primary/15 transition hover:opacity-90 active:opacity-80"
+            >
+              <LogIn className="h-4 w-4" />
+              登录
+            </Link>
           </div>
         ) : (
           <div className="space-y-6">
