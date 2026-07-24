@@ -60,7 +60,9 @@ export default function SettingsPage() {
     if (serverUrl) {
       try {
         await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-      } catch {}
+      } catch (error) {
+        console.warn('Failed to sign out on server:', error);
+      }
     }
     logout();
     localStorage.removeItem('moke-auth-token');
@@ -69,7 +71,7 @@ export default function SettingsPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '860px' }}>
         <div className="mb-8">
           <h1 className="text-2xl font-semibold text-foreground">设置</h1>

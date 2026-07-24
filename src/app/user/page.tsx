@@ -105,7 +105,7 @@ export default function UserPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '1200px' }}>
         <div className="flex items-center justify-between mb-8 gap-4">
           <div>
@@ -114,10 +114,11 @@ export default function UserPage() {
           </div>
           <Link
             href="/settings"
-            className="inline-flex items-center gap-2 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm px-4 text-sm text-foreground transition hover:bg-muted"
+            aria-label="前往设置"
+            title="前往设置"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm text-sm text-foreground transition hover:bg-muted"
           >
             <Settings className="w-4 h-4" />
-            <span>前往设置</span>
           </Link>
         </div>
 

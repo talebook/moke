@@ -26,7 +26,7 @@ export function UpdateChecker() {
   if (!show) return null;
 
   return (
-    <div className="fixed bottom-4 left-1/2 z-[120] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2">
+    <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[120] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 md:bottom-4">
       <div className="bg-card border border-border rounded-2xl shadow-lg p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">

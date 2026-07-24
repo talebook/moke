@@ -106,7 +106,7 @@ export default function AboutPage() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '960px' }}>
         <div className="mb-8 flex items-center justify-between gap-4">
           <div>

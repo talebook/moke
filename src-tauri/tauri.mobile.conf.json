@@ -1,0 +1,15 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Moke - Mobile Preview",
+        "width": 390,
+        "height": 844,
+        "minWidth": 320,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  }
+}

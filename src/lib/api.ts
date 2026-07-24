@@ -1,5 +1,13 @@
-import type { ReaderInfo } from '@/lib/store/server';
+import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
+import {
+  buildTauriRequestInit,
+  getErrorMessage,
+  isAbsoluteHttpUrl,
+  readApiJson,
+  resolveAppPlatform,
+} from '@/lib/api-core';
+export { getErrorMessage, MokeApiError, readApiJson } from '@/lib/api-core';
 
 interface UserInfoResponse {
   err: string;
@@ -22,7 +30,8 @@ interface UserInfoResponse {
   };
 }
 
-const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
+const isTauriApp = appPlatform === 'tauri';
 
 async function interceptNotInvited(response: Response): Promise<void> {
   const contentType = response.headers.get('content-type') || '';
@@ -47,7 +56,7 @@ export async function request(url: string | URL, options?: RequestInit): Promise
 
   // 关键检测：Tauri 桌面端必须使用绝对 URL（http(s)://...），
   // 否则没有"当前域名"可拼接，会直接网络异常。
-  if (!/^https?:\/\//i.test(urlStr)) {
+  if (!isAbsoluteHttpUrl(urlStr)) {
     debugLog(
       'error',
       'request',
@@ -70,14 +79,7 @@ export async function request(url: string | URL, options?: RequestInit): Promise
       // Tauri 桌面端：使用插件 fetch。需要显式放宽以兼容自建 Talebook 服务器：
       // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
       // - maxRedirections: 跟随登录后的重定向（与浏览器行为一致）
-      response = await tauriFetch(urlStr, {
-        ...(options as any),
-        maxRedirections: 5,
-        danger: {
-          acceptInvalidCerts: true,
-          acceptInvalidHostnames: true,
-        },
-      } as any);
+      response = await tauriFetch(urlStr, buildTauriRequestInit(options) as any);
     } else {
       response = await fetch(url, options);
     }
@@ -209,6 +211,76 @@ export async function fetchServerInfo(): Promise<{ err: string; msg?: string; ti
     msg: data.msg,
     title: data.sys?.title || '',
     version: data.sys?.version || '',
+  };
+}
+
+async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boolean> {
+  try {
+    const response = await request(`${serverUrl}${path}`, {
+      credentials: 'include',
+    });
+
+    if (response.status === 404 || response.status === 405) return false;
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) return response.ok;
+
+    const data = await response.json().catch(() => null);
+    const err = typeof data?.err === 'string' ? data.err : '';
+
+    if (!err) return response.ok;
+    if (err === 'page.not_found' || err === 'handler.not_found' || err === 'api.not_found') return false;
+    return true;
+  } catch (error) {
+    debugLog('warn', 'capabilities', `能力探测失败: ${path}`, getErrorMessage(error));
+    return false;
+  }
+}
+
+async function findSampleBookId(serverUrl: string): Promise<string | null> {
+  const candidates = ['/api/shelf', '/api/library?num=1', '/api/library?page=1&num=1'];
+
+  for (const path of candidates) {
+    try {
+      const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
+      if (!response.ok) continue;
+
+      const data = await response.json().catch(() => null);
+      const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
+      if (Array.isArray(books) && books.length > 0 && books[0]?.id != null) {
+        return String(books[0].id);
+      }
+    } catch (error) {
+      debugLog('warn', 'capabilities', `样本书籍探测失败: ${path}`, getErrorMessage(error));
+    }
+  }
+
+  return null;
+}
+
+export async function discoverServerCapabilities(serverUrl: string): Promise<ServerCapabilities> {
+  const infoResponse = await request(`${serverUrl}/api/user/info`, {
+    credentials: 'include',
+  });
+  const info = await infoResponse.json().catch(() => ({} as UserInfoResponse)) as UserInfoResponse;
+  const sampleBookId = await findSampleBookId(serverUrl);
+
+  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi] = await Promise.all([
+    probeJsonEndpoint(serverUrl, '/api/shelf'),
+    probeJsonEndpoint(serverUrl, '/api/reading/stats'),
+    probeJsonEndpoint(serverUrl, '/api/network/sources'),
+    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
+    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
+  ]);
+
+  return {
+    shelfApi,
+    readingStateApi,
+    readingProgressApi,
+    readingStatsApi,
+    networkSourcesApi,
+    checkedAt: Date.now(),
+    version: info.sys?.version || '',
   };
 }
 

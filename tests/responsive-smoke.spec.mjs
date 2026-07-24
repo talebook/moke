@@ -1,0 +1,33 @@
+import { test, expect } from '@playwright/test';
+
+const states = [
+  { name: 'mobile', width: 390, height: 844, tabBarVisible: true, sidebarVisible: false },
+  { name: 'tablet', width: 768, height: 1024, tabBarVisible: true, sidebarVisible: false },
+  { name: 'desktop', width: 1280, height: 900, tabBarVisible: false, sidebarVisible: true },
+];
+
+test('responsive navigation remains usable across device sizes', async ({ page }, testInfo) => {
+  await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+
+  for (const state of states) {
+    await page.setViewportSize({ width: state.width, height: state.height });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await expect(page.locator('.app-warm-bg')).toBeVisible();
+    if (state.tabBarVisible) {
+      await expect(page.locator('.moke-tab-bar')).toBeVisible();
+    } else {
+      await expect(page.locator('.moke-tab-bar')).toBeHidden();
+    }
+    if (state.sidebarVisible) {
+      await expect(page.locator('.moke-sidebar')).toBeVisible();
+    } else {
+      await expect(page.locator('.moke-sidebar')).toBeHidden();
+    }
+
+    await page.screenshot({
+      path: testInfo.outputPath(`responsive-${state.name}.png`),
+      fullPage: true,
+    });
+  }
+});

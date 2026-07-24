@@ -37,7 +37,7 @@ export function Sidebar() {
   }));
 
   return (
-    <aside className="moke-sidebar fixed left-0 top-0 h-full w-[220px] flex flex-col z-10 bg-primary">
+    <aside className="moke-sidebar fixed left-0 top-0 hidden h-full w-[220px] flex-col z-10 bg-primary lg:flex">
       <div className="flex items-center gap-3 px-6 h-16 border-b border-white/10">
         <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/10">
           <BookOpen className="w-5 h-5 text-primary-foreground" />
