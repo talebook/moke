@@ -61,7 +61,7 @@ function DetailContent() {
   if (!loaded || !name) {
     return (
       <DesktopLayout>
-        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
           <div className="mx-auto flex items-center justify-center py-20" style={{ maxWidth: '860px' }}>
             <p className="text-sm text-muted-foreground">{!name ? '未指定拓展名称' : '加载中...'}</p>
           </div>
@@ -73,7 +73,7 @@ function DetailContent() {
   if (!ext) {
     return (
       <DesktopLayout>
-        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
           <div className="mx-auto flex flex-col items-center justify-center py-20 text-center" style={{ maxWidth: '860px' }}>
             <Puzzle className="w-10 h-10 text-muted-foreground/40 mb-4" />
             <p className="text-sm text-muted-foreground">未找到拓展「{name}」</p>
@@ -91,7 +91,7 @@ function DetailContent() {
 
   return (
     <DesktopLayout>
-      <div className="flex-1 min-h-0 overflow-y-auto px-8 py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '860px' }}>
           {errorMsg && (
             <div className="mb-4 px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive flex items-center justify-between">
@@ -183,7 +183,7 @@ function DetailContent() {
 
 export default function DetailPage() {
   return (
-    <Suspense fallback={<DesktopLayout><div className="flex-1 min-h-0 overflow-y-auto px-8 py-8"><div className="mx-auto flex items-center justify-center py-20" style={{ maxWidth: '860px' }}><p className="text-sm text-muted-foreground">加载中...</p></div></div></DesktopLayout>}>
+    <Suspense fallback={<DesktopLayout><div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8"><div className="mx-auto flex items-center justify-center py-20" style={{ maxWidth: '860px' }}><p className="text-sm text-muted-foreground">加载中...</p></div></div></DesktopLayout>}>
       <DetailContent />
     </Suspense>
   );

@@ -1,6 +1,7 @@
 'use client';
 
 import { Sidebar } from '@/components/layout/Sidebar';
+import { TabBar } from '@/components/layout/TabBar';
 import { UpdateChecker } from '@/components/UpdateChecker';
 import { useToast } from '@/lib/toast';
 import { X, AlertTriangle, Info } from 'lucide-react';
@@ -11,11 +12,12 @@ export function DesktopLayout({ children }: { children: React.ReactNode }) {
   const dismiss = useToast((s) => s.dismiss);
 
   return (
-    <div className="flex h-screen overflow-hidden app-warm-bg">
+    <div className="flex h-dvh overflow-hidden app-warm-bg">
       <Sidebar />
-      <div className="ml-[220px] flex-1 min-w-0 h-screen flex flex-col overflow-hidden">
+      <div className="flex-1 min-w-0 h-dvh flex flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:ml-[220px] lg:pb-0">
         {children}
       </div>
+      <TabBar />
       <UpdateChecker />
       {toast && (
         <div className="fixed top-4 left-1/2 z-[130] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2">

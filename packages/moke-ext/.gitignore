@@ -1,0 +1,11 @@
+# moke-ext package — local ignores
+
+# Node CLI bits (in case this package ever gains a build step)
+node_modules/
+
+# Example extension build artifacts
+# Pattern covers any future example under examples/<name>/...
+examples/*/backend/target/
+examples/*/dist/
+examples/*/*.exe
+examples/*/installer.nsi.bak

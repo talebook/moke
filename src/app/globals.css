@@ -2,9 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* These files are bundled with the app so the interface keeps its intended
+   typography without a runtime dependency on Google Fonts. See
+   public/fonts/LICENSES.md for the font licenses. */
+@font-face {
+  font-family: 'Moke Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter-latin-variable.woff2') format('woff2');
+}
+
+/* The bundled subset covers the app's Chinese copy plus common GB2312
+   characters, keeping the font compact. Other characters gracefully fall
+   back to the operating system font. Browsers synthesize intermediate weights
+   from the bundled regular face. */
+@font-face {
+  font-family: 'Moke Noto Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-sans-sc-regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Moke Noto Serif SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/noto-serif-sc-regular.woff2') format('woff2');
+}
+
 @layer base {
   html, body {
-    font-family: 'Inter', 'PingFang SC', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+    font-family: 'Moke Inter', 'Moke Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
     background: #FBF9F2;
     color: #2C2C2E;
     -webkit-font-smoothing: antialiased;
@@ -13,6 +44,12 @@
 
   ::selection {
     background: rgba(184, 149, 106, 0.25);
+  }
+}
+
+@layer utilities {
+  .font-serif {
+    font-family: 'Moke Noto Serif SC', 'Songti SC', 'STSong', serif;
   }
 }
 
@@ -389,5 +426,104 @@
   }
   .book-cover-shadow {
     box-shadow: 0 14px 28px -18px rgba(37, 30, 20, 0.9), 0 2px 8px rgba(37, 30, 20, 0.08);
+  }
+
+  /* Keep the transition selectors free of input-device media queries: Tauri's
+     Windows WebView can report hover/pointer capabilities inconsistently in
+     development. Manual e-ink mode is excluded at the selector level, while
+     auto-detected e-ink keeps its existing global 0.01ms override. */
+    html:not([data-eink='true']) .book-card-motion {
+      isolation: isolate;
+      transform: translate3d(0, 0, 0);
+      transition-property: transform, box-shadow, background-color, border-color !important;
+      transition-duration: 280ms, 280ms, 200ms, 200ms !important;
+      transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1), cubic-bezier(0.16, 1, 0.3, 1), ease, ease !important;
+    }
+
+    html:not([data-eink='true']) .book-card-motion:hover,
+    html:not([data-eink='true']) .book-card-motion:focus-visible {
+      transform: translate3d(0, -2px, 0);
+      box-shadow: 0 20px 42px -32px rgba(74, 57, 35, 0.62);
+    }
+
+    html:not([data-eink='true']) .book-card-motion:active {
+      transform: translate3d(0, -1px, 0) scale(0.995);
+      transition-duration: 100ms, 100ms, 100ms, 100ms !important;
+    }
+
+    html:not([data-eink='true']) .book-cover-motion {
+      transform-origin: 50% 100%;
+      will-change: transform;
+      transition-property: transform, box-shadow, filter !important;
+      transition-duration: 420ms, 420ms, 280ms !important;
+      transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1), cubic-bezier(0.16, 1, 0.3, 1), ease !important;
+    }
+
+    html:not([data-eink='true']) .book-card-motion:hover .book-cover-motion,
+    html:not([data-eink='true']) .book-card-motion:focus-visible .book-cover-motion {
+      transform: translate3d(0, -5px, 0) rotateX(1deg) rotateY(-0.6deg) scale(1.01);
+      box-shadow: 0 18px 32px -19px rgba(37, 30, 20, 0.62), 0 6px 14px -10px rgba(37, 30, 20, 0.2);
+      filter: saturate(1.04) contrast(1.015);
+    }
+
+    html:not([data-eink='true']) .book-cover-media {
+      transform: scale(1.001);
+      transition: transform 560ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    html:not([data-eink='true']) .book-card-motion:hover .book-cover-media,
+    html:not([data-eink='true']) .book-card-motion:focus-visible .book-cover-media {
+      transform: scale(1.04);
+    }
+
+    html:not([data-eink='true']) .book-title-motion {
+      transition: color 180ms ease, transform 280ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    html:not([data-eink='true']) .book-card-motion:hover .book-title-motion,
+    html:not([data-eink='true']) .book-card-motion:focus-visible .book-title-motion {
+      transform: translateX(1px);
+    }
+
+    html:not([data-eink='true']) .book-list-motion {
+      transition:
+        transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 180ms ease,
+        border-color 180ms ease,
+        box-shadow 240ms ease !important;
+    }
+
+    html:not([data-eink='true']) .book-list-motion:hover,
+    html:not([data-eink='true']) .book-list-motion:focus-visible {
+      transform: translateX(4px);
+    }
+
+    html:not([data-eink='true']) .book-list-motion:active {
+      transform: translateX(2px) scale(0.995);
+      transition-duration: 100ms !important;
+    }
+
+    html:not([data-eink='true']) .book-list-cover-motion {
+      transform-origin: 50% 100%;
+      transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 300ms ease !important;
+    }
+
+    html:not([data-eink='true']) .book-list-motion:hover .book-list-cover-motion,
+    html:not([data-eink='true']) .book-list-motion:focus-visible .book-list-cover-motion {
+      transform: translateY(-2px) rotate(-1deg) scale(1.035);
+      box-shadow: 0 12px 20px -12px rgba(37, 30, 20, 0.62);
+    }
+
+  /* The normal-mode overrides above intentionally beat the global
+     reduced-motion reset. Reapply that reset for both e-ink entry paths so
+     their motion stays exactly as before. */
+  html[data-eink='true'] :is(.book-card-motion, .book-cover-motion, .book-cover-media, .book-title-motion, .book-list-motion, .book-list-cover-motion) {
+    transition-duration: 0.01ms !important;
+  }
+
+  @media (update: slow), (max-color: 1) {
+    html:not([data-eink='true']) :is(.book-card-motion, .book-cover-motion, .book-cover-media, .book-title-motion, .book-list-motion, .book-list-cover-motion) {
+      transition-duration: 0.01ms !important;
+    }
   }
 }

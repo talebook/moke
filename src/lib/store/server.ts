@@ -11,9 +11,30 @@ export interface ReaderInfo {
   permission: string;
 }
 
+export interface ServerCapabilities {
+  shelfApi: boolean;
+  readingStateApi: boolean;
+  readingProgressApi: boolean;
+  readingStatsApi: boolean;
+  networkSourcesApi: boolean;
+  checkedAt: number | null;
+  version: string;
+}
+
+export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
+  shelfApi: false,
+  readingStateApi: false,
+  readingProgressApi: false,
+  readingStatsApi: false,
+  networkSourcesApi: false,
+  checkedAt: null,
+  version: '',
+};
+
 interface ServerState {
   serverUrl: string;
   serverTitle: string;
+  capabilities: ServerCapabilities;
   protocol: 'http' | 'https';
   host: string;
   port: string;
@@ -25,6 +46,7 @@ interface ServerState {
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string) => void;
+  setServerCapabilities: (capabilities: ServerCapabilities) => void;
   setHasHydrated: (hydrated: boolean) => void;
   logout: () => void;
   disconnect: () => void;
@@ -35,6 +57,7 @@ export const useServerStore = create<ServerState>()(
     (set) => ({
       serverUrl: '',
       serverTitle: '',
+      capabilities: DEFAULT_SERVER_CAPABILITIES,
       protocol: 'http',
       host: '',
       port: '8080',
@@ -44,7 +67,7 @@ export const useServerStore = create<ServerState>()(
       user: null,
       setServer: (protocol, host, port) => {
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
-        set({ serverUrl: url, protocol, host, port, isConnected: true, token: '', user: null });
+        set({ serverUrl: url, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
       },
       setConnected: (token, user) => {
         set({ isConnected: true, token, user });
@@ -55,6 +78,9 @@ export const useServerStore = create<ServerState>()(
       setServerTitle: (serverTitle) => {
         set({ serverTitle });
       },
+      setServerCapabilities: (capabilities) => {
+        set({ capabilities });
+      },
       setHasHydrated: (hasHydrated) => {
         set({ hasHydrated });
       },
@@ -62,7 +88,7 @@ export const useServerStore = create<ServerState>()(
         set((state) => ({ isConnected: Boolean(state.serverUrl), token: '', user: null }));
       },
       disconnect: () => {
-        set({ serverUrl: '', serverTitle: '', protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
+        set({ serverUrl: '', serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
       },
     }),
     {

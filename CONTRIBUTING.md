@@ -65,6 +65,7 @@ pnpm dev-web        # 前端开发服务器（纯 Web 环境，端口 3000）
 pnpm tauri dev      # 完整桌面应用开发（Rust 后端 + Next.js 前端）
 pnpm lint           # ESLint 检查
 pnpm typecheck      # TypeScript 类型检查
+pnpm test           # API、离线存储和平台分支基础测试
 ```
 
 ### 构建
@@ -116,7 +117,7 @@ feat: 书架支持拖拽排序
 - **API 请求** — 所有服务器通信统一通过 `src/lib/api.ts` 的 `request()` 函数
 - **平台差异** — 通过 `process.env.NEXT_PUBLIC_APP_PLATFORM` 区分 Tauri 和 Web 行为，不要在 Web 代码中直接引入 `@tauri-apps/*`
 - **导航** — Tauri 环境下禁止使用 `window.location.href`，必须使用 `router.push` / `router.replace`（否则会重载 WebView 丢失所有内存状态）
-- **提交前检查** — 确保 `pnpm lint` 和 `pnpm typecheck` 通过
+- **提交前检查** — 确保 `pnpm lint`、`pnpm test` 和 `pnpm typecheck` 通过
 
 ### 提交 PR
 

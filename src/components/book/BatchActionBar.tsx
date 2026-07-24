@@ -63,8 +63,8 @@ export function BatchActionBar({
   const allSelected = totalCount > 0 && selectedCount === totalCount;
 
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)]">
-      <div className="flex items-center gap-2 rounded-2xl border border-amber-950/10 bg-white/95 backdrop-blur px-3 py-2 shadow-[0_18px_45px_-20px_rgba(74,57,35,0.5)]">
+    <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-40 max-w-[calc(100vw-1rem)] -translate-x-1/2 overflow-x-auto md:bottom-4 md:max-w-[calc(100vw-2rem)]">
+      <div className="flex w-max items-center gap-2 rounded-2xl border border-amber-950/10 bg-white/95 backdrop-blur px-3 py-2 shadow-[0_18px_45px_-20px_rgba(74,57,35,0.5)]">
         <button
           type="button"
           onClick={onExitBatchMode}
