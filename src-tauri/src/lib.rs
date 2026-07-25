@@ -27,6 +27,10 @@ pub fn run() {
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
     let builder = readestlib::register_reader_plugins(builder);
+    // Android reader files are served via Readest's `rangefile` URI scheme.
+    // The embedded host must register it too; otherwise mobile WebViews cannot
+    // read EPUB/PDF byte ranges and the reader remains blank.
+    let builder = readestlib::register_reader_protocols(builder);
 
     // 合并拓展系统的 Tauri commands 与 readest 的命令 handler。
     // 拓展命令以 "ext_" 为前缀，readest 命令不包含此前缀，
