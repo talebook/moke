@@ -21,6 +21,12 @@ const nextConfig = {
   async rewrites() {
     if (isDev) {
       return [
+        // The packaged frontend uses `reader.html`; Next's dev server exposes
+        // the equivalent App Router page as `/reader`.
+        {
+          source: '/readest/reader.html',
+          destination: 'http://localhost:3001/readest/reader',
+        },
         {
           source: '/readest/:path*',
           destination: 'http://localhost:3001/readest/:path*',
