@@ -62,6 +62,9 @@ function DetailContent() {
   const tagNames = normalizeNames(book?.tags);
   const summary = (book?.comments || book?.description || '').trim();
   const primaryFile = book?.files?.[0];
+  const fileFormats = Array.from(new Set(
+    book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
+  ));
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
 
   useEffect(() => {
@@ -323,9 +326,9 @@ function DetailContent() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:gap-10">
-          <div className="mx-auto flex w-full max-w-[260px] shrink-0 flex-col items-stretch lg:mx-0 lg:w-[240px] lg:items-start">
-            <div className="w-full overflow-hidden rounded-[24px] border border-amber-950/10 bg-white book-cover-shadow transition-transform duration-300 hover:scale-[1.02] lg:w-[220px]">
+        <div className="flex flex-col gap-6 md:flex-row md:gap-10">
+          <div className="mx-auto flex w-full max-w-[260px] shrink-0 flex-col items-stretch md:mx-0 md:w-[240px] md:items-start">
+            <div className="w-full overflow-hidden rounded-[24px] border border-amber-950/10 bg-white book-cover-shadow transition-transform duration-300 hover:scale-[1.02] md:w-[220px]">
               <div className="aspect-[2/3] flex items-center justify-center bg-muted/60 relative group">
                 {coverUrl ? (
                   <AuthImage
@@ -343,7 +346,7 @@ function DetailContent() {
             <button
               onClick={downloaded ? handleOfflineRead : handleDownload}
               disabled={downloading}
-              className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 lg:mt-6 lg:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
+              className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
             >
               {downloading && <span className="absolute inset-0 bg-primary/15" />}
               {downloading && (
@@ -358,7 +361,7 @@ function DetailContent() {
               </span>
             </button>
             {book.files && book.files.length > 1 && !downloaded && (
-              <div className="mt-3 w-full lg:w-[220px]">
+              <div className="mt-3 w-full md:w-[220px]">
                 <div className="flex flex-wrap gap-1.5">
                   {book.files.map((f) => {
                     const fmt = f.format.toLowerCase();
@@ -383,7 +386,7 @@ function DetailContent() {
             <button
               onClick={toggleShelf}
               disabled={shelfUpdating}
-              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-semibold text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60 lg:w-[220px]"
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-semibold text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60 md:w-[220px]"
             >
               <Bookmark className="w-4 h-4" fill={inShelf ? 'currentColor' : 'none'} />
               {shelfUpdating ? '更新中' : inShelf ? '移出书架' : '加入书架'}
@@ -392,13 +395,13 @@ function DetailContent() {
               <button
                 onClick={() => setShowDeleteConfirm(true)}
                 disabled={deletingDownload}
-                className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 text-sm font-semibold text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60 lg:w-[220px]"
+                className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 text-sm font-semibold text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60 md:w-[220px]"
               >
                 <Trash2 className="w-4 h-4" />
                 {deletingDownload ? '删除中' : '删除下载书籍'}
               </button>
             )}
-            {message && <p className="mt-3 w-full px-1 text-xs leading-relaxed text-muted-foreground lg:w-[220px]">{message}</p>}
+            {message && <p className="mt-3 w-full px-1 text-xs leading-relaxed text-muted-foreground md:w-[220px]">{message}</p>}
           </div>
 
           <div className="min-w-0 flex-1 rounded-[28px] app-glass px-5 pb-6 pt-5 sm:rounded-[32px] sm:px-7 sm:pb-7 sm:pt-6">
@@ -426,7 +429,7 @@ function DetailContent() {
               <MetaRow icon={Building2} label="出版社" text={book.publisher} />
             </div>
 
-            {(book.isbn || book.series || book.language || primaryFile?.format || primaryFile?.size || book.pubdate) && (
+            {(book.isbn || book.series || book.language || fileFormats.length > 0 || primaryFile?.size || book.pubdate) && (
               <>
                 {!metaExpanded && (
                   <button
@@ -445,7 +448,7 @@ function DetailContent() {
                       <MetaRow icon={LibraryBig} label="丛书" text={book.series} />
                       <MetaRow icon={Calendar} label="出版时间" text={book.pubdate} />
                       <MetaRow icon={FileBadge2} label="语言" text={book.language} />
-                      {primaryFile?.format && <MetaRow icon={FileText} label="格式" text={primaryFile.format.toUpperCase()} />}
+                      {fileFormats.length > 0 && <MetaRow icon={FileText} label="格式" text={fileFormats.join(' / ')} />}
                       {primaryFile?.size ? <MetaRow icon={HardDrive} label="大小" text={formatFileSize(primaryFile.size)} /> : null}
                     </div>
                     <button
