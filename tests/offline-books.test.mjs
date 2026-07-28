@@ -7,9 +7,21 @@ import {
   saveOfflineBook,
 } from '../src/lib/offline-books.ts';
 import {
+  hasEpubCentralDirectory,
   makeOfflineBookKey,
   sanitizeOfflineFileName,
 } from '../src/lib/offline-book-core.ts';
+
+test('EPUB requires a ZIP central directory at the end of the file', async () => {
+  const validEpub = new Blob([
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  ]);
+  const truncatedEpub = new Blob([new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4])]);
+
+  assert.equal(await hasEpubCentralDirectory(validEpub), true);
+  assert.equal(await hasEpubCentralDirectory(truncatedEpub), false);
+});
 
 function makeAsyncRequest(operation) {
   const request = {

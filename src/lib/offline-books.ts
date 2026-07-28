@@ -13,7 +13,7 @@ export interface OfflineBookRecord {
   title: string;
   fileName: string;
   mimeType: string;
-  blob: Blob;
+  blob?: Blob;
   updatedAt: number;
   filePath?: string;
 }
@@ -80,10 +80,11 @@ export async function saveOfflineBook(input: {
 }): Promise<void> {
   const db = await openDatabase();
   let filePath: string | undefined;
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   const fileName = sanitizeOfflineFileName(input.fileName);
 
-  if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+  if (isTauriApp) {
     try {
       const { writeFile, BaseDirectory, mkdir } = await import('@tauri-apps/plugin-fs');
       const { appDataDir, join } = await import('@tauri-apps/api/path');
@@ -113,7 +114,7 @@ export async function saveOfflineBook(input: {
     title: input.title,
     fileName,
     mimeType: input.mimeType,
-    blob: input.blob,
+    blob: isTauriApp ? undefined : input.blob,
     updatedAt: Date.now(),
     filePath,
   };

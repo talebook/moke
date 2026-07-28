@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
@@ -57,6 +57,7 @@ function DetailContent() {
   const [inShelf, setInShelf] = useState(false);
   const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
+  const downloadControllerRef = useRef<AbortController | null>(null);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -95,6 +96,10 @@ function DetailContent() {
       cancelled = true;
     };
   }, [id, serverUrl]);
+
+  useEffect(() => {
+    return () => downloadControllerRef.current?.abort();
+  }, []);
 
   const loadBook = async () => {
     setLoading(true);
@@ -188,6 +193,8 @@ function DetailContent() {
   const handleDownload = async () => {
     if (!book || downloading) return;
 
+    const controller = new AbortController();
+    downloadControllerRef.current = controller;
     setDownloading(true);
     setDownloadProgress(0);
     setMessage('');
@@ -197,6 +204,7 @@ function DetailContent() {
         onProgress: (progress) => {
           setDownloadProgress(progress);
         },
+        signal: controller.signal,
       });
       await saveOfflineBook({
         serverUrl,
@@ -208,7 +216,7 @@ function DetailContent() {
       });
 
       setDownloadProgress(100);
-      await updateReadingState({ download: 1 });
+      void updateReadingState({ download: 1 });
       // 等待下一个版本更新后加入read_state: 1
       setDownloaded(true);
       setBook((current) => current ? {
@@ -217,9 +225,12 @@ function DetailContent() {
       } : current);
       setMessage('已下载到本地，现在可以阅读。');
     } catch (error) {
+      if (controller.signal.aborted) return;
       const reason = error instanceof Error ? error.message : '';
       if (reason.startsWith('http.')) {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
+      } else if (reason === 'book.epub.invalid') {
+        setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
       } else if (reason === 'Failed to save book to file system') {
         setMessage('下载失败：保存文件到本地时出错。');
       } else if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
@@ -229,7 +240,10 @@ function DetailContent() {
       }
       setDownloadProgress(0);
     } finally {
-      setDownloading(false);
+      if (downloadControllerRef.current === controller) {
+        downloadControllerRef.current = null;
+        setDownloading(false);
+      }
     }
   };
 

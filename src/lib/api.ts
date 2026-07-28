@@ -7,6 +7,7 @@ import {
   readApiJson,
   resolveAppPlatform,
 } from '@/lib/api-core';
+import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
 export { getErrorMessage, MokeApiError, readApiJson } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -32,6 +33,19 @@ interface UserInfoResponse {
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
+
+function isRequestCancelled(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /request cancell?ed|aborted?/i.test(message);
+}
+
+async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob> {
+  if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
+    throw new Error('book.epub.invalid');
+  }
+  return blob;
+}
 
 async function interceptNotInvited(response: Response): Promise<void> {
   const contentType = response.headers.get('content-type') || '';
@@ -85,6 +99,10 @@ export async function request(url: string | URL, options?: RequestInit): Promise
     }
   } catch (e) {
     const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+    if (isRequestCancelled(e)) {
+      debugLog('info', 'request', `⊘ ${method} ${urlStr} 已取消 (${Date.now() - startedAt}ms)`);
+      throw e;
+    }
     debugLog('error', 'request', `✗ ${method} ${urlStr} 网络异常 (${Date.now() - startedAt}ms)`, errMsg);
     // 延迟导入避免在 RSC/SSR 中加载 zustand store
     import('@/lib/toast').then(m => m.useToast.getState().show(`网络连接失败：${errMsg}`)).catch(() => {});
@@ -438,28 +456,16 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
 export async function downloadBookBlob(
   bookId: string | number,
   format = 'epub',
-  options?: { onProgress?: (progress: number) => void },
+  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal },
 ): Promise<Blob> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
-  if (isTauriApp) {
-    const response = await request(url, {
-      method: 'GET',
-      connectTimeout: 30_000,
-    } as any);
-
-    if (!response.ok) {
-      throw new Error(`http.${response.status}`);
-    }
-
-    options?.onProgress?.(100);
-    return response.blob();
-  }
-
   try {
     const response = await request(url, {
-      credentials: 'include',
+      ...(isTauriApp
+        ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+        : { credentials: 'include', signal: options?.signal }),
     });
 
     if (!response.ok) {
@@ -470,8 +476,9 @@ export async function downloadBookBlob(
     const reader = response.body?.getReader();
 
     if (!reader) {
-      options?.onProgress?.(100);
-      return response.blob();
+      const blob = await response.blob();
+      options?.onProgress?.(99);
+      return validateDownloadedBook(blob, format);
     }
 
     const chunks: Uint8Array[] = [];
@@ -487,17 +494,15 @@ export async function downloadBookBlob(
       received += value.length;
 
       if (total > 0) {
-        options?.onProgress?.(Math.min(100, Math.round((received / total) * 100)));
+        options?.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
       }
     }
 
-    if (total === 0) {
-      options?.onProgress?.(100);
-    }
+    options?.onProgress?.(99);
 
-    return new Blob(chunks as BlobPart[], {
+    return validateDownloadedBook(new Blob(chunks as BlobPart[], {
       type: response.headers.get('content-type') || 'application/octet-stream',
-    });
+    }), format);
   } catch (error) {
     const reason = error instanceof Error ? error.message : '';
     throw new Error(reason || 'network.error');
