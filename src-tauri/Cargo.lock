@@ -3789,6 +3789,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
+ "tauri-plugin-deep-link",
  "tauri-plugin-device-info",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",

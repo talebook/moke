@@ -68,6 +68,15 @@ export async function deleteOfflineBook(serverUrl: string, bookId: string): Prom
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' && record) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('moke_remove_downloaded_book', { id: record.id });
+    } catch (error) {
+      console.warn('Failed to update Moke downloaded-books index:', error);
+    }
+  }
 }
 
 export async function saveOfflineBook(input: {
@@ -127,4 +136,23 @@ export async function saveOfflineBook(input: {
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
+
+  if (isTauriApp) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('moke_record_downloaded_book', {
+        book: {
+          id: record.id,
+          serverUrl: record.serverUrl,
+          bookId: record.bookId,
+          title: record.title,
+          fileName: record.fileName,
+          mimeType: record.mimeType,
+          updatedAt: record.updatedAt,
+        },
+      });
+    } catch (error) {
+      console.warn('Failed to update Moke downloaded-books index:', error);
+    }
+  }
 }

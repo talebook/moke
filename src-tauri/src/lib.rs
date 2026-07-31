@@ -15,6 +15,135 @@
 
 mod extensions;
 
+use serde::{Deserialize, Serialize};
+use std::fs;
+use tauri::{AppHandle, Manager};
+
+/// Metadata for a book downloaded by Moke.  The reader uses this small host
+/// API instead of reaching into Moke's IndexedDB, which is private to the
+/// main WebView.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MokeDownloadedBook {
+    id: String,
+    server_url: String,
+    book_id: String,
+    title: String,
+    file_name: String,
+    mime_type: String,
+    updated_at: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MokeDownloadedBookResponse {
+    #[serde(flatten)]
+    book: MokeDownloadedBook,
+    file_path: String,
+}
+
+fn moke_downloads_index_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(|error| error.to_string())?.join("moke-downloads.json"))
+}
+
+fn read_moke_downloads(app: &AppHandle) -> Result<Vec<MokeDownloadedBook>, String> {
+    let path = moke_downloads_index_path(app)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+fn write_moke_downloads(app: &AppHandle, books: &[MokeDownloadedBook]) -> Result<(), String> {
+    let path = moke_downloads_index_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(path, serde_json::to_vec(books).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Result<(), String> {
+    let mut books = read_moke_downloads(&app)?;
+    books.retain(|existing| existing.id != book.id);
+    books.push(book);
+    write_moke_downloads(&app, &books)
+}
+
+#[tauri::command]
+fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+    let mut books = read_moke_downloads(&app)?;
+    books.retain(|book| book.id != id);
+    write_moke_downloads(&app, &books)
+}
+
+/// Lists local Moke downloads for the embedded Readest home page. Files that
+/// predate the metadata index are still exposed with a filename-derived title.
+#[tauri::command]
+fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookResponse>, String> {
+    let books_dir = app.path().app_data_dir().map_err(|error| error.to_string())?.join("books");
+    let mut indexed = read_moke_downloads(&app)?;
+    indexed.retain(|book| books_dir.join(&book.file_name).is_file());
+    write_moke_downloads(&app, &indexed)?;
+
+    let mut result: Vec<_> = indexed
+        .into_iter()
+        .map(|book| MokeDownloadedBookResponse {
+            file_path: books_dir.join(&book.file_name).to_string_lossy().into_owned(),
+            book,
+        })
+        .collect();
+
+    if books_dir.is_dir() {
+        for entry in fs::read_dir(&books_dir).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if !path.is_file() || result.iter().any(|book| book.book.file_name == file_name) {
+                continue;
+            }
+            let title = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&file_name)
+                .to_string();
+            let updated_at = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or_default();
+            result.push(MokeDownloadedBookResponse {
+                book: MokeDownloadedBook {
+                    id: format!("legacy:{file_name}"),
+                    server_url: String::new(),
+                    book_id: String::new(),
+                    title,
+                    file_name,
+                    mime_type: String::new(),
+                    updated_at,
+                },
+                file_path: path.to_string_lossy().into_owned(),
+            });
+        }
+    }
+
+    result.sort_by(|left, right| right.book.updated_at.cmp(&left.book.updated_at));
+    Ok(result)
+}
+
+fn moke_invoke_handler(
+) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        moke_record_downloaded_book,
+        moke_remove_downloaded_book,
+        moke_list_downloaded_books,
+    ]
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -23,6 +152,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
@@ -39,10 +169,13 @@ pub fn run() {
         .invoke_handler({
             let reader_handler = readestlib::reader_invoke_handler();
             let ext_handler = extensions::invoke_handler();
+            let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
+                } else if cmd.starts_with("moke_") {
+                    moke_handler(invoke)
                 } else {
                     reader_handler(invoke)
                 }

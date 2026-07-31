@@ -14,18 +14,19 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
   // 拓展管理页面是本地功能，不需要连接服务器
   const isExtensionPath = pathname.startsWith('/extensions');
+  const isEmbeddedReaderPath = pathname.startsWith('/readest');
 
   useEffect(() => {
     if (!hasHydrated) return;
-    if (publicPaths.includes(pathname) || isExtensionPath) return;
+    if (publicPaths.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!serverUrl) {
       router.replace('/welcome');
     }
-  }, [hasHydrated, pathname, serverUrl, router]);
+  }, [hasHydrated, isEmbeddedReaderPath, pathname, serverUrl, router]);
 
   useEffect(() => {
     if (!hasHydrated) return;
-    if (publicPaths.includes(pathname) || isExtensionPath) return;
+    if (publicPaths.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!serverUrl) return;
 
     let cancelled = false;
@@ -63,7 +64,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [hasHydrated, pathname, serverUrl, setServerCapabilities, setServerTitle, setUser]);
+  }, [hasHydrated, isEmbeddedReaderPath, pathname, serverUrl, setServerCapabilities, setServerTitle, setUser]);
 
   return <>{children}</>;
 }

@@ -11,6 +11,8 @@ import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
+import { openEmbeddedReaderHome } from '@/lib/moke-reader';
+import { useToast } from '@/lib/toast';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function SettingsPage() {
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const eink = useSettingsStore((s) => s.eink);
   const setEink = useSettingsStore((s) => s.setEink);
+  const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
 
   useEffect(() => {
@@ -69,6 +72,18 @@ export default function SettingsPage() {
     router.push('/login');
   };
 
+  const handleOpenReaderHome = async () => {
+    try {
+      await openEmbeddedReaderHome({
+        eink: useSettingsStore.getState().eink,
+        navigate: (href) => router.push(href),
+      });
+    } catch (error) {
+      console.error('Failed to open embedded reader:', error);
+      showToast('打开阅读器失败', 'error');
+    }
+  };
+
   return (
     <DesktopLayout>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
@@ -113,6 +128,11 @@ export default function SettingsPage() {
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
             <SettingsRow label="应用版本" value={APP_VERSION} />
             <UpdateSection />
+            <ActionRow
+              icon={BookOpen}
+              label="打开内嵌阅读器"
+              onClick={handleOpenReaderHome}
+            />
             <SettingsLinkRow
               icon={BookOpen}
               label="关于应用"

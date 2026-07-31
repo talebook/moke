@@ -80,6 +80,16 @@ pub struct SidebarInfo {
     pub order: i32,
 }
 
+/// Host-side Moke downloaded book entry exposed to the embedded reader.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MokeOfflineBookInfo {
+    pub path: String,
+    pub file_name: String,
+    pub title: String,
+    pub updated_at: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Manifest 内部表示（反序列化用）
 // ---------------------------------------------------------------------------
@@ -471,6 +481,76 @@ fn ext_reader_event(
     Ok(())
 }
 
+/// Return books downloaded by Moke into AppData/books.
+///
+/// Moke stores offline downloads under AppData/books, while the embedded
+/// reader cannot read the host window IndexedDB directly. The host scans
+/// that directory and returns path/file metadata for the reader list.
+#[tauri::command]
+fn ext_moke_list_offline_books(app: AppHandle) -> Result<Vec<MokeOfflineBookInfo>, String> {
+    const BOOK_EXTENSIONS: [&str; 9] = [
+        "epub", "mobi", "azw", "azw3", "fb2", "zip", "cbz", "pdf", "txt",
+    ];
+
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+    let books_dir = app_data_dir.join("books");
+    if !books_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries = std::fs::read_dir(&books_dir)
+        .map_err(|e| format!("failed to read Moke books dir: {e}"))?;
+    let mut books = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let file_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        let extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        if !BOOK_EXTENSIONS.contains(&extension.as_str()) {
+            continue;
+        }
+
+        let title = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| file_name.clone());
+        let updated_at = std::fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+
+        books.push(MokeOfflineBookInfo {
+            path: path.to_string_lossy().into_owned(),
+            file_name,
+            title,
+            updated_at,
+        });
+    }
+
+    books.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    Ok(books)
+}
+
 // ---------------------------------------------------------------------------
 // 公开入口：初始化拓展系统
 // ---------------------------------------------------------------------------
@@ -565,6 +645,7 @@ pub fn invoke_handler(
         ext_get_api_port,
         ext_get_extensions_dir,
         ext_reader_event,
+        ext_moke_list_offline_books,
         ext_diagnostics,
     ]
 }

@@ -6,8 +6,10 @@ import { BookOpen } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
+import { useSettingsStore } from '@/lib/store/settings';
 import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
+import { openEmbeddedReaderHome } from '@/lib/moke-reader';
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -96,6 +98,19 @@ export default function WelcomePage() {
     }
   };
 
+  const handleOpenReaderHome = async () => {
+    setError('');
+    try {
+      await openEmbeddedReaderHome({
+        eink: useSettingsStore.getState().eink,
+        navigate: (href) => router.push(href),
+      });
+    } catch (e) {
+      console.error('[WelcomePage] open embedded reader failed:', e);
+      setError('打开阅读器失败');
+    }
+  };
+
   return (
     <main className="min-h-screen flex flex-col md:flex-row app-warm-bg">
         <div className="flex-1 flex items-center justify-center px-8 py-12 md:p-16 bg-primary">
@@ -159,6 +174,16 @@ export default function WelcomePage() {
               className="inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/50 text-foreground cursor-pointer transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               浏览演示书库
+            </button>
+
+            <button
+              data-dom-id="btn-open-reader"
+              onClick={handleOpenReaderHome}
+              disabled={loading}
+              className="mt-3 inline-flex items-center justify-center gap-2 w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/35 text-foreground cursor-pointer transition hover:bg-white/55 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <BookOpen className="h-4 w-4" />
+              打开内嵌阅读器
             </button>
 
             <p className="mt-5 text-xs text-center text-muted-foreground leading-relaxed">

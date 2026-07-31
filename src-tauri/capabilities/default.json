@@ -93,6 +93,7 @@
     "process:default",
     "process:allow-exit",
     "process:allow-restart",
+    "deep-link:default",
     "oauth:allow-start",
     "oauth:allow-cancel",
     "clipboard-manager:allow-write-text",
