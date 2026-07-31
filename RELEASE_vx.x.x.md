@@ -14,7 +14,7 @@
 | Android | `Moke_0.x.x.apk` |
 | iOS/iPadOS | `Moke_0.x.x.ipa`（自签名安装） |
 
-> 系统要求：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iPadOS 17+
+> 系统要求：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+
 
 ## 反馈
 
