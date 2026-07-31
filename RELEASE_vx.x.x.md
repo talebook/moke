@@ -11,8 +11,8 @@
 | Windows | `Moke_0.x.x_x64_en-US.msi` / `.exe` |
 | macOS | `Moke_0.x.x_x64.dmg` |
 | Linux | `Moke_0.x.x_amd64.AppImage` / `.deb` |
-| Android（平板） | `Moke_0.x.x.apk` |
-| iPadOS | `Moke_0.x.x.ipa`（自签名安装） |
+| Android | `Moke_0.x.x.apk` |
+| iOS/iPadOS | `Moke_0.x.x.ipa`（自签名安装） |
 
 > 系统要求：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iPadOS 17+
 
