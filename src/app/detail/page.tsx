@@ -9,7 +9,7 @@ import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offlin
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
-import { buildEmbeddedReaderUrl } from '@/lib/moke-reader';
+import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 
@@ -256,23 +256,23 @@ function DetailContent() {
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
-        const { invoke } = await import('@tauri-apps/api/core');
         const restoreProgress = await fetchReadingProgress(book.id);
-        const { platform } = await import('@tauri-apps/plugin-os');
-        const currentPlatform = await platform();
+        const currentPlatform = await getMokeRuntimePlatform();
 
-        // Mobile Tauri has one WebView, so desktop's reader-window command is
-        // unavailable. Navigate that WebView to the bundled reader instead.
-        if (currentPlatform === 'android' || currentPlatform === 'ios') {
-          router.push(buildEmbeddedReaderUrl({
+        // Mobile Tauri and OHOS have one WebView, so desktop's reader-window
+        // command is unavailable. Navigate that WebView to the bundled reader.
+        if (isSingleWebviewRuntime(currentPlatform)) {
+          const href = buildEmbeddedReaderUrl({
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
             mokeBookId: String(book.id),
             restoreProgress,
-          }));
+          });
+          await openEmbeddedReaderBook(href, router.push);
           return;
         }
 
+        const { invoke } = await import('@tauri-apps/api/core');
         await invoke('open_reader', {
           filePath: record.filePath,
           eink: useSettingsStore.getState().eink,

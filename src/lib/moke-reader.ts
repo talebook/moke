@@ -1,5 +1,31 @@
 import type { ReadingProgressPayload } from './reading-progress';
 
+export const isSingleWebviewRuntime = (platform: string): boolean =>
+  platform === 'ohos' || platform === 'android' || platform === 'ios';
+
+export async function getMokeRuntimePlatform(): Promise<string> {
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return 'web';
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<string>('moke_runtime_platform');
+  } catch {
+    // Compatibility fallback for an older desktop backend.
+    const { platform } = await import('@tauri-apps/plugin-os');
+    return await platform();
+  }
+}
+
+async function navigateSingleWebview(href: string, fallback: (href: string) => void): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('moke_navigate', { path: href });
+  } catch (error) {
+    console.warn('Falling back to client-side reader navigation:', error);
+    fallback(href);
+  }
+}
+
 export async function openEmbeddedReaderHome({
   eink,
   navigate,
@@ -14,11 +40,10 @@ export async function openEmbeddedReaderHome({
     return;
   }
 
-  const { platform } = await import('@tauri-apps/plugin-os');
-  const currentPlatform = await platform();
+  const currentPlatform = await getMokeRuntimePlatform();
 
-  if (currentPlatform === 'android' || currentPlatform === 'ios') {
-    navigate(href);
+  if (isSingleWebviewRuntime(currentPlatform)) {
+    await navigateSingleWebview(href, navigate);
     return;
   }
 
@@ -71,4 +96,11 @@ export function buildEmbeddedReaderUrl({
   }
 
   return `/readest/reader?${params.toString()}`;
+}
+
+export async function openEmbeddedReaderBook(
+  href: string,
+  navigate: (href: string) => void,
+): Promise<void> {
+  await navigateSingleWebview(href, navigate);
 }

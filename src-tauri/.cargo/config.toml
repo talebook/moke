@@ -12,3 +12,16 @@ codegen-units = 256
 incremental = true
 opt-level = 0
 debug = 1
+
+# DevEco/OpenHarmony SDK 23 NDK linker used by the local Windows build host.
+# Update this path only when the SDK is installed somewhere else.
+[env]
+OHOS_NDK_HOME = "C:/Users/Administrator/AppData/Local/OpenHarmony/Sdk/23/native"
+CC_aarch64_unknown_linux_ohos = "C:/Users/Administrator/AppData/Local/OpenHarmony/Sdk/23/native/llvm/bin/clang.exe"
+CC_x86_64_unknown_linux_ohos = "C:/Users/Administrator/AppData/Local/OpenHarmony/Sdk/23/native/llvm/bin/clang.exe"
+
+[target.aarch64-unknown-linux-ohos]
+linker = "C:/Users/Administrator/AppData/Local/OpenHarmony/Sdk/23/native/llvm/bin/clang.exe"
+
+[target.x86_64-unknown-linux-ohos]
+linker = "C:/Users/Administrator/AppData/Local/OpenHarmony/Sdk/23/native/llvm/bin/clang.exe"

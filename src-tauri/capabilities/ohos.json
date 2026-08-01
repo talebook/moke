@@ -1,0 +1,40 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ohos",
+  "description": "OpenHarmony first-stage capabilities: network, sandboxed downloads and host IPC.",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "fs:default",
+    "os:default",
+    "shell:default",
+    "opener:default",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "fs:allow-write",
+      "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://*" },
+        { "url": "https://*" },
+        { "url": "http://*/**" },
+        { "url": "https://*/**" },
+        { "url": "http://*:*/**" },
+        { "url": "https://*:*/**" }
+      ]
+    }
+  ]
+}

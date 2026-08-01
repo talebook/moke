@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildEmbeddedReaderUrl } from '../src/lib/moke-reader.ts';
+import { buildEmbeddedReaderUrl, isSingleWebviewRuntime } from '../src/lib/moke-reader.ts';
+
+test('OHOS uses the single-WebView reader flow', () => {
+  assert.equal(isSingleWebviewRuntime('ohos'), true);
+  assert.equal(isSingleWebviewRuntime('android'), true);
+  assert.equal(isSingleWebviewRuntime('ios'), true);
+  assert.equal(isSingleWebviewRuntime('linux'), false);
+  assert.equal(isSingleWebviewRuntime('windows'), false);
+});
 
 test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => {
   const url = new URL(

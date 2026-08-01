@@ -1,5 +1,37 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+
+// ArkWeb may expose localStorage but reject access for the tauri:// custom
+// scheme. Zustand otherwise treats storage as unavailable and skips hydration
+// entirely, leaving the app on its initial loading screen forever. Keep the
+// store usable in that case; persistence resumes automatically on platforms
+// where localStorage is available.
+const safeLocalStorage: StateStorage = {
+  getItem: (name) => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name, value) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(name, value);
+    } catch {
+      // Keep the in-memory Zustand state working when storage is unavailable.
+    }
+  },
+  removeItem: (name) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(name);
+    } catch {
+      // Nothing to remove when storage is unavailable.
+    }
+  },
+};
 
 export interface ReaderInfo {
   id: string | number;
@@ -93,6 +125,7 @@ export const useServerStore = create<ServerState>()(
     }),
     {
       name: 'moke-server-storage',
+      storage: createJSONStorage(() => safeLocalStorage),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },

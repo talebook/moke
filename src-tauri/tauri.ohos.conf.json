@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "org.houheya.moke",
+  "build": {
+    "frontendDist": "../out",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "security": {
+      "capabilities": ["ohos"]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": [],
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": null
+  }
+}

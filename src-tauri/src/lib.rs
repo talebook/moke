@@ -13,6 +13,7 @@
 /// 拓展系统：通过 `extensions` 模块管理拓展的发现、生命周期、存储。
 /// 拓展以独立进程方式运行，通过本地 HTTP + WebSocket 与主程序通信。
 
+#[cfg(not(target_env = "ohos"))]
 mod extensions;
 
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,35 @@ struct MokeDownloadedBookResponse {
     #[serde(flatten)]
     book: MokeDownloadedBook,
     file_path: String,
+}
+
+/// `tauri-plugin-os` reports OpenHarmony as Linux because the Rust target uses
+/// `target_os = "linux"`. Expose the target environment explicitly so the
+/// frontend can select the single-WebView reader flow on OHOS.
+#[tauri::command]
+fn moke_runtime_platform() -> &'static str {
+    #[cfg(target_env = "ohos")]
+    return "ohos";
+
+    #[cfg(not(target_env = "ohos"))]
+    std::env::consts::OS
+}
+
+/// Performs a full-document navigation inside the current Tauri WebView.
+/// ArkWeb cannot reliably execute Next.js App Router's RSC navigation over
+/// the custom `tauri://` scheme, and Moke/Readest are separate Next apps.
+#[tauri::command]
+fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
+    if !path.starts_with('/') || path.starts_with("//") {
+        return Err("navigation path must stay inside the application".into());
+    }
+
+    let target = webview
+        .url()
+        .map_err(|error| error.to_string())?
+        .join(&path)
+        .map_err(|error| error.to_string())?;
+    webview.navigate(target).map_err(|error| error.to_string())
 }
 
 fn moke_downloads_index_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -138,6 +168,8 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
 fn moke_invoke_handler(
 ) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        moke_runtime_platform,
+        moke_navigate,
         moke_record_downloaded_book,
         moke_remove_downloaded_book,
         moke_list_downloaded_books,
@@ -151,15 +183,20 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(not(target_env = "ohos"))]
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
+    #[cfg(not(target_env = "ohos"))]
     let builder = readestlib::register_reader_plugins(builder);
     // Android reader files are served via Readest's `rangefile` URI scheme.
     // The embedded host must register it too; otherwise mobile WebViews cannot
     // read EPUB/PDF byte ranges and the reader remains blank.
+    #[cfg(not(target_env = "ohos"))]
     let builder = readestlib::register_reader_protocols(builder);
 
     // 合并拓展系统的 Tauri commands 与 readest 的命令 handler。
@@ -167,11 +204,14 @@ pub fn run() {
     // 通过命令名分派到对应的 handler，避免 Invoke 被移动两次。
     builder
         .invoke_handler({
+            #[cfg(not(target_env = "ohos"))]
             let reader_handler = readestlib::reader_invoke_handler();
+            #[cfg(not(target_env = "ohos"))]
             let ext_handler = extensions::invoke_handler();
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
+                #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
                 } else if cmd.starts_with("moke_") {
@@ -179,14 +219,22 @@ pub fn run() {
                 } else {
                     reader_handler(invoke)
                 }
+                #[cfg(target_env = "ohos")]
+                if cmd.starts_with("moke_") {
+                    moke_handler(invoke)
+                } else {
+                    false
+                }
             }
         })
-        .setup(|app| {
+        .setup(|_app| {
             // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
-            readestlib::manage_reader_state(app.handle());
+            #[cfg(not(target_env = "ohos"))]
+            readestlib::manage_reader_state(_app.handle());
 
             // 初始化拓展系统
-            extensions::init(app.handle());
+            #[cfg(not(target_env = "ohos"))]
+            extensions::init(_app.handle());
 
             Ok(())
         })
