@@ -113,7 +113,7 @@ export default function WelcomePage() {
 
   return (
     <main className="min-h-screen flex flex-col md:flex-row app-warm-bg">
-        <div className="flex-1 flex items-center justify-center px-8 py-12 md:p-16 bg-primary">
+        <div className="hidden flex-1 items-center justify-center bg-primary px-8 py-12 md:flex md:p-16">
           <div className="max-w-md">
             <BookOpen className="w-16 h-16 text-primary-foreground" />
             <h1 className="mt-6 text-[36px] font-bold text-primary-foreground">墨客</h1>

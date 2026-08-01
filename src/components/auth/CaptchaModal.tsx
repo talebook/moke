@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
+import { buildGeetestOptions } from '@/lib/captcha-core';
+import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 
 interface CaptchaModalProps {
   isOpen: boolean;
@@ -99,11 +101,13 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     }
   };
 
-  const initGeetest = (captchaConfig: any) => {
+  const initGeetest = async (captchaConfig: any) => {
     if (!captchaConfig) return;
+
+    const isOhos = (await getMokeRuntimePlatform()) === 'ohos';
     
     if ((window as any).initGeetest4) {
-      renderGeetest(captchaConfig);
+      renderGeetest(captchaConfig, isOhos);
       return;
     }
 
@@ -119,7 +123,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     }
 
     const handleLoad = () => {
-      renderGeetest(captchaConfig);
+      renderGeetest(captchaConfig, isOhos);
     };
 
     const handleError = () => {
@@ -132,7 +136,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
     // If script is already loaded but event listeners were attached too late
     if ((window as any).initGeetest4) {
-      renderGeetest(captchaConfig);
+      renderGeetest(captchaConfig, isOhos);
     }
 
     return () => {
@@ -141,16 +145,12 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     };
   };
 
-  const renderGeetest = (captchaConfig: any) => {
+  const renderGeetest = (captchaConfig: any, isOhos: boolean) => {
     const container = document.getElementById('geetest-container');
     if (!container) return; // Might not be mounted yet
     container.innerHTML = ''; // Clear previous
 
-    (window as any).initGeetest4({
-      captchaId: captchaConfig.captchaId,
-      product: 'popup',
-      language: 'zho'
-    }, (gt: any) => {
+    (window as any).initGeetest4(buildGeetestOptions(captchaConfig, isOhos), (gt: any) => {
       gt.appendTo('#geetest-container')
         .onSuccess(() => {
           const result = gt.getValidate();
