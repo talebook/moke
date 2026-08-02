@@ -1,5 +1,10 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import {
+  safeGetLocalStorageItem,
+  safeRemoveLocalStorageItem,
+  safeSetLocalStorageItem,
+} from '@/lib/browser-storage';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -7,30 +12,9 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 // store usable in that case; persistence resumes automatically on platforms
 // where localStorage is available.
 const safeLocalStorage: StateStorage = {
-  getItem: (name) => {
-    if (typeof window === 'undefined') return null;
-    try {
-      return window.localStorage.getItem(name);
-    } catch {
-      return null;
-    }
-  },
-  setItem: (name, value) => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(name, value);
-    } catch {
-      // Keep the in-memory Zustand state working when storage is unavailable.
-    }
-  },
-  removeItem: (name) => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.removeItem(name);
-    } catch {
-      // Nothing to remove when storage is unavailable.
-    }
-  },
+  getItem: safeGetLocalStorageItem,
+  setItem: safeSetLocalStorageItem,
+  removeItem: safeRemoveLocalStorageItem,
 };
 
 export interface ReaderInfo {

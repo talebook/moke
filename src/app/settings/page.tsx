@@ -12,6 +12,7 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
+import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 
 export default function SettingsPage() {
@@ -55,7 +56,7 @@ export default function SettingsPage() {
 
   const handleDisconnect = () => {
     disconnect();
-    localStorage.removeItem('moke-auth-token');
+    safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/welcome');
   };
 
@@ -68,7 +69,7 @@ export default function SettingsPage() {
       }
     }
     logout();
-    localStorage.removeItem('moke-auth-token');
+    safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/login');
   };
 

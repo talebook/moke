@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
 import { buildGeetestOptions } from '@/lib/captcha-core';
@@ -25,18 +25,25 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
   // Web Code container
   const webCodeContainerRef = useRef<HTMLDivElement>(null);
+  const successHandledRef = useRef(false);
+
+  const completeCaptcha = useCallback((data: any) => {
+    if (successHandledRef.current) return;
+    successHandledRef.current = true;
+    onSuccess(data);
+  }, [onSuccess]);
   
   // Global callback setup for injected web code
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).__moke_captcha_success = (data: any) => {
-        onSuccess(data);
+        completeCaptcha(data);
       };
       (window as any).__moke_captcha_error = (err: string) => {
         setError(err);
       };
     }
-  }, [onSuccess]);
+  }, [completeCaptcha]);
 
   const loadCaptcha = async () => {
     setLoading(true);
@@ -154,7 +161,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       gt.appendTo('#geetest-container')
         .onSuccess(() => {
           const result = gt.getValidate();
-          onSuccess({
+          completeCaptcha({
             provider: 'geetest',
             lot_number: result.lot_number,
             captcha_output: result.captcha_output,
@@ -210,6 +217,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   useEffect(() => {
     if (isOpen) {
       setCode('');
+      successHandledRef.current = false;
       setMode('loading'); // 重置模式状态
       setConfig(null); // 清除旧的配置
       if (webCodeContainerRef.current) {
@@ -227,7 +235,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       setError('请输入验证码');
       return;
     }
-    onSuccess(code.trim());
+    completeCaptcha(code.trim());
   };
 
   return (
@@ -317,7 +325,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
               onClick={() => {
                 // 这个按钮仅作为降级/测试使用，实际应该由注入的JS自动调用回调
                 // 这里我们调用一个模拟的成功回调，主要为了防止页面卡死
-                onSuccess({ provider: config?.provider || 'webcode', fallback: true });
+                completeCaptcha({ provider: config?.provider || 'webcode', fallback: true });
               }}
               className="w-full h-11 rounded-lg border border-primary text-primary font-medium transition hover:bg-primary/5 active:bg-primary/10"
             >

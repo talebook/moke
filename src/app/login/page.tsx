@@ -7,6 +7,7 @@ import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
 interface TalebookLoginResponse {
   err: string;
@@ -67,7 +68,7 @@ export default function LoginPage() {
           return;
         }
 
-        localStorage.removeItem('moke-auth-token');
+        safeRemoveLocalStorageItem('moke-auth-token');
         setConnected('', info.user);
         router.push('/shelf');
       } else if (res.err === 'user.private.not_valid') {
@@ -78,7 +79,8 @@ export default function LoginPage() {
       } else {
         setError(res.msg || '登录失败，请检查用户名和密码');
       }
-    } catch {
+    } catch (loginError) {
+      console.error('[LoginPage] login flow failed:', loginError);
       setError('无法连接服务器');
     } finally {
       setLoading(false);

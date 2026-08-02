@@ -3,7 +3,7 @@
   "identifier": "org.houheya.moke",
   "build": {
     "frontendDist": "../out",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "pnpm build && pnpm build:reader && pnpm copy:reader && node scripts/prepare-ohos.mjs"
   },
   "app": {
     "security": {
