@@ -80,6 +80,13 @@
         { "url": "https://*:*/**" }
       ]
     },
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "http://**" },
+        { "url": "https://**" }
+      ]
+    },
 
     "fs:read-meta",
     "fs:allow-open",

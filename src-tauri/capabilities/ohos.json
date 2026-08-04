@@ -2,7 +2,17 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "ohos",
   "description": "OpenHarmony first-stage capabilities: network, sandboxed downloads and host IPC.",
-  "windows": ["*"],
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://*:3000/**",
+      "https://*:3000/**",
+      "http://*:3001/**",
+      "https://*:3001/**"
+    ]
+  },
   "permissions": [
     "core:default",
     "fs:default",
@@ -11,19 +21,95 @@
     "opener:default",
     {
       "identifier": "fs:allow-read",
-      "allow": [{ "path": "$APPDATA/**/*" }]
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write",
-      "allow": [{ "path": "$APPDATA/**/*" }]
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write-file",
-      "allow": [{ "path": "$APPDATA/**/*" }]
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
+    },
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/**/*" },
+        { "path": "$APPCONFIG/**/*" },
+        { "path": "$APPCACHE/**/*" },
+        { "path": "$TEMP/**/*" }
+      ]
+    },
+    {
+      "identifier": "fs:scope-appdata-recursive",
       "allow": [{ "path": "$APPDATA/**/*" }]
+    },
+    {
+      "identifier": "fs:scope-appconfig-recursive",
+      "allow": [{ "path": "$APPCONFIG/**/*" }]
     },
     {
       "identifier": "http:default",
@@ -34,6 +120,13 @@
         { "url": "https://*/**" },
         { "url": "http://*:*/**" },
         { "url": "https://*:*/**" }
+      ]
+    },
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "http://**" },
+        { "url": "https://**" }
       ]
     }
   ]
