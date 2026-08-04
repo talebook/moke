@@ -56,8 +56,31 @@ interface ExtensionState {
 
 const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
+// 拓展系统只在桌面 Tauri 存在：OHOS/移动端单 WebView 构建里 `ext_*`
+// 命令没有注册（lib.rs 用 `#[cfg(not(target_env = "ohos"))]` 排除）。
+// NEXT_PUBLIC_APP_PLATFORM 无法区分桌面与 OHOS（都是 'tauri'），
+// 因此需要运行时平台检测，避免在 OHOS 上调用未注册的命令。
+let extensionsRuntimeChecked = false;
+let extensionsRuntimeAvailable = false;
+
+async function canUseExtensions(): Promise<boolean> {
+  if (!isTauri) return false;
+  if (!extensionsRuntimeChecked) {
+    extensionsRuntimeChecked = true;
+    try {
+      const { getMokeRuntimePlatform, isSingleWebviewRuntime } = await import('@/lib/moke-reader');
+      const platform = await getMokeRuntimePlatform();
+      extensionsRuntimeAvailable = !isSingleWebviewRuntime(platform);
+    } catch {
+      // 兼容旧桌面后端：运行时检测失败时按桌面处理
+      extensionsRuntimeAvailable = true;
+    }
+  }
+  return extensionsRuntimeAvailable;
+}
+
 async function invokeExt<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauri) return [] as unknown as T;
+  if (!(await canUseExtensions())) return [] as unknown as T;
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<T>(cmd, args);
 }

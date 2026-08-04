@@ -91,6 +91,15 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
 
   initialize: async () => {
     if (startupDone || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
+    // OHOS/移动端单 WebView 构建里没有注册 updater 插件，跳过更新检查。
+    // NEXT_PUBLIC_APP_PLATFORM 无法区分桌面与 OHOS（都是 'tauri'），
+    // 需要运行时平台检测。
+    try {
+      const { getMokeRuntimePlatform, isSingleWebviewRuntime } = await import('@/lib/moke-reader');
+      if (isSingleWebviewRuntime(await getMokeRuntimePlatform())) return;
+    } catch {
+      // 运行时检测失败时按桌面处理（兼容旧后端）
+    }
     startupDone = true;
 
     await new Promise((r) => setTimeout(r, 5000));

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverServerCapabilities } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
+import { navigateFullDocument } from '@/lib/moke-reader';
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -20,7 +21,9 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     if (!hasHydrated) return;
     if (publicPaths.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!serverUrl) {
-      router.replace('/welcome');
+      // Use full-document navigation on single-WebView runtimes (OHOS) to avoid
+      // getting stuck on the blank loading screen when RSC navigation fails.
+      navigateFullDocument('/welcome', router.replace);
     }
   }, [hasHydrated, isEmbeddedReaderPath, pathname, serverUrl, router]);
 

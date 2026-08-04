@@ -1,3 +1,7 @@
 [submodule "readest"]
 	path = readest
 	url = https://github.com/hehetoshang/readest.git
+[submodule "tauri"]
+	path = tauri
+	url = https://github.com/hehetoshang/tauri.git
+	branch = dev

@@ -7,6 +7,7 @@ type ApiEnvelope = {
 
 export type TauriRequestInit = RequestInit & {
   maxRedirections: number;
+  connectTimeout?: number;
   danger: {
     acceptInvalidCerts: boolean;
     acceptInvalidHostnames: boolean;
@@ -34,14 +35,17 @@ export function isAbsoluteHttpUrl(url: string): boolean {
 }
 
 export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
-  return {
-    ...(options ?? {}),
-    maxRedirections: 5,
-    danger: {
-      acceptInvalidCerts: true,
-      acceptInvalidHostnames: true,
-    },
+  const init = { ...(options ?? {}) } as TauriRequestInit;
+  init.maxRedirections = 5;
+  init.danger = {
+    acceptInvalidCerts: true,
+    acceptInvalidHostnames: true,
   };
+  // 默认 8 秒连接超时：服务器不可达时 reqwest 默认 TCP 超时长达 30 秒+，
+  // 会让"连接书库"等操作长时间卡在等待。显式传入的 connectTimeout
+  // （如下载）不会被覆盖。
+  if (!init.connectTimeout) init.connectTimeout = 8_000;
+  return init;
 }
 
 export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {

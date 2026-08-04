@@ -12,20 +12,25 @@ name = "moke_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [build-dependencies]
-tauri-build = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-build", features = [] }
+tauri-build = { path = "../tauri/crates/tauri-build", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 # protocol-asset: 让阅读器窗口可以通过 asset:// 读取本地书籍文件与封面
-tauri = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri", features = ["protocol-asset"] }
+tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
+  "wry",
+  "protocol-asset",
+  "compression",
+  "dynamic-acl",
+] }
 tauri-plugin-fs = "=2.5.1"
 # 显式开启 cookies（跨请求持久化 session cookie，Talebook 登录/访问码依赖会话）
 # 以及 dangerous-settings（允许前端按需放行自签名证书 / 纯 HTTP 局域网服务器）
 tauri-plugin-http = { version = "=2.5.9", features = ["cookies", "dangerous-settings"] }
 tauri-plugin-os = "=2.3.2"
-tauri-plugin-shell = "=2.2.1"
-tauri-plugin-opener = "=2.4.0"
+tauri-plugin-shell = "=2.3.5"
+tauri-plugin-opener = "=2.5.4"
 
 # 阅读器（readest）作为库依赖在进程内嵌入：复用其 Rust 后端命令与插件，
 # 这样最终只产出一个二进制。default-features=false 关闭 readest 自带的
@@ -44,6 +49,11 @@ tauri-plugin-opener = "=2.4.0"
 # readestlib::register_reader_plugins 统一完成，这里仅为让 build.rs 找到权限定义；
 # 版本/路径与 readest 保持一致，cargo 会去重成同一份 crate。
 [target.'cfg(not(target_env = "ohos"))'.dependencies]
+tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
+  "common-controls-v6",
+  "x11",
+  "dbus",
+] }
 readestlib = { package = "Readest", path = "../readest/apps/readest-app/src-tauri", default-features = false }
 tauri-plugin-dialog = "2"
 tauri-plugin-websocket = "2"
@@ -63,7 +73,7 @@ tiny_http = "0.12"
 tungstenite = "0.24"
 
 [target.'cfg(target_env = "ohos")'.dependencies]
-# Required directly by richerfu/tauri's OpenHarmony entry-point macro, as in
+# Required directly by the OpenHarmony entry-point macro, as in
 # the upstream OHOS demo. The macro expands against these crate names.
 napi-ohos = "1.1"
 napi-derive-ohos = "1.1"
@@ -71,12 +81,19 @@ napi-derive-ohos = "1.1"
 # All Tauri core crates must resolve to the same OpenHarmony fork. Plugins
 # depend on these crates transitively, so patching only `tauri` is not enough.
 [patch.crates-io]
-tauri = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri" }
-tauri-build = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-build" }
-tauri-runtime = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-runtime" }
-tauri-runtime-wry = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-runtime-wry" }
-tauri-utils = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-utils" }
-tauri-macros = { path = "C:/Users/Administrator/Documents/tauri-ohos/crates/tauri-macros" }
+tauri = { path = "../tauri/crates/tauri" }
+tauri-build = { path = "../tauri/crates/tauri-build" }
+tauri-codegen = { path = "../tauri/crates/tauri-codegen" }
+tauri-macros = { path = "../tauri/crates/tauri-macros" }
+tauri-plugin = { path = "../tauri/crates/tauri-plugin" }
+tauri-runtime = { path = "../tauri/crates/tauri-runtime" }
+tauri-runtime-wry = { path = "../tauri/crates/tauri-runtime-wry" }
+tauri-utils = { path = "../tauri/crates/tauri-utils" }
+
+# Cargo only honors patches declared by the application's workspace root.
+# The same entries in the Tauri submodule's workspace do not apply here.
+wry = { git = "https://github.com/tauri-apps/wry", branch = "feat/open-harmony" }
+tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }
 
 # Required by the OHOS runtime pulled in by the Tauri fork.
 openharmony-ability = { git = "https://github.com/harmony-contrib/openharmony-ability.git" }

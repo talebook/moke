@@ -7,6 +7,7 @@ import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
+import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
 import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
@@ -76,13 +77,16 @@ export default function WelcomePage() {
       setServer(parsed.protocol, parsed.host, parsed.port);
 
       // release WebView 下 zustand persist 与 URL query 跨页都不可靠，
-      // 直接手动写一个独立的 localStorage 键，并立即回读校验
+      // 直接手动写一个独立的 localStorage 键，并立即回读校验。
+      // 用安全包装：ArkWeb 的 domStorageAccess 可能未开启（localStorage 为
+      // null），此时静默跳过持久化，不要 console.error 以免触发
+      // Next dev overlay 显示误导性的错误。
       try {
-        localStorage.setItem('moke_server_url', parsed.origin);
-        const verify = localStorage.getItem('moke_server_url');
+        safeSetLocalStorageItem('moke_server_url', parsed.origin);
+        const verify = safeGetLocalStorageItem('moke_server_url');
         debugLog('info', 'welcome', `手动写入 localStorage moke_server_url=${parsed.origin}, 回读=${verify}`);
       } catch (e) {
-        debugLog('error', 'welcome', `localStorage 写入失败: ${String(e)}`);
+        debugLog('info', 'welcome', `localStorage 不可用，跳过持久化: ${String(e)}`);
       }
 
       if (welcome.needsAccessCode) {
