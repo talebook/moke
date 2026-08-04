@@ -30,7 +30,7 @@ tauri-plugin-fs = "=2.5.1"
 tauri-plugin-http = { version = "=2.5.9", features = ["cookies", "dangerous-settings"] }
 tauri-plugin-os = "=2.3.2"
 tauri-plugin-shell = "=2.3.5"
-tauri-plugin-opener = "=2.5.4"
+tauri-plugin-opener = “=2.5.4”
 
 # 阅读器（readest）作为库依赖在进程内嵌入：复用其 Rust 后端命令与插件，
 # 这样最终只产出一个二进制。default-features=false 关闭 readest 自带的
@@ -41,36 +41,38 @@ tauri-plugin-opener = "=2.5.4"
 # Keep it out of the first OHOS HAP so the host UI, IPC and supported plugins
 # can be validated independently. It remains enabled for every desktop build.
 # Tauri 的权限(ACL)体系要求：凡是 capabilities 里引用了某插件的权限
-# （如 dialog:default / turso:default），承载这些 capability 的“应用 crate”就
+# （如 dialog:default / turso:default），承载这些 capability 的”应用 crate”就
 # 必须【直接】依赖该插件——插件通过 cargo `links` 暴露的权限清单只会传给直接
 # 依赖方，不会穿透 readestlib 这一层传到 moke（否则 build.rs 报
 # “Permission dialog:default not found”）。因此把阅读器前端会用到、且已在
 # capabilities 中授权的插件都列为 moke 的直接依赖。实际的插件【注册】仍由
 # readestlib::register_reader_plugins 统一完成，这里仅为让 build.rs 找到权限定义；
 # 版本/路径与 readest 保持一致，cargo 会去重成同一份 crate。
-[target.'cfg(not(target_env = "ohos"))'.dependencies]
-tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
-  "common-controls-v6",
-  "x11",
-  "dbus",
+readestlib = { package = “Readest”, path = “../readest/apps/readest-app/src-tauri”, default-features = false }
+tauri-plugin-dialog = “2”
+tauri-plugin-websocket = “2”
+tauri-plugin-process = “2”
+tauri-plugin-updater = “2”
+tauri-plugin-oauth = “2”
+tauri-plugin-deep-link = “2”
+tauri-plugin-clipboard-manager = “2”
+tauri-plugin-device-info = “1.0.1”
+tauri-plugin-log = “2”
+tauri-plugin-turso = { path = “../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso” }
+tauri-plugin-native-bridge = { path = “../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge” }
+tauri-plugin-native-tts = { path = “../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts” }
+uuid = { version = “1”, features = [“v4”] }
+log = “0.4”
+tiny_http = “0.12”
+tungstenite = “0.24”
+
+# 桌面端专属：x11/dbus/common-controls-v6 不适用于 OHOS
+[target.'cfg(not(target_env = “ohos”))'.dependencies]
+tauri = { path = “../tauri/crates/tauri”, default-features = false, features = [
+  “common-controls-v6”,
+  “x11”,
+  “dbus”,
 ] }
-readestlib = { package = "Readest", path = "../readest/apps/readest-app/src-tauri", default-features = false }
-tauri-plugin-dialog = "2"
-tauri-plugin-websocket = "2"
-tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-oauth = "2"
-tauri-plugin-deep-link = "2"
-tauri-plugin-clipboard-manager = "2"
-tauri-plugin-device-info = "1.0.1"
-tauri-plugin-log = "2"
-tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
-tauri-plugin-native-bridge = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge" }
-tauri-plugin-native-tts = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts" }
-uuid = { version = "1", features = ["v4"] }
-log = "0.4"
-tiny_http = "0.12"
-tungstenite = "0.24"
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 # Required directly by the OpenHarmony entry-point macro, as in

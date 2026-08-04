@@ -13,7 +13,6 @@
 /// 拓展系统：通过 `extensions` 模块管理拓展的发现、生命周期、存储。
 /// 拓展以独立进程方式运行，通过本地 HTTP + WebSocket 与主程序通信。
 
-#[cfg(not(target_env = "ohos"))]
 mod extensions;
 
 use serde::{Deserialize, Serialize};
@@ -185,18 +184,22 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init());
 
-    #[cfg(not(target_env = "ohos"))]
     let builder = builder
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_websocket::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_oauth::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_device_info::init())
+        .plugin(tauri_plugin_log::init());
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
-    #[cfg(not(target_env = "ohos"))]
     let builder = readestlib::register_reader_plugins(builder);
     // Android reader files are served via Readest's `rangefile` URI scheme.
     // The embedded host must register it too; otherwise mobile WebViews cannot
     // read EPUB/PDF byte ranges and the reader remains blank.
-    #[cfg(not(target_env = "ohos"))]
     let builder = readestlib::register_reader_protocols(builder);
 
     // 合并拓展系统的 Tauri commands 与 readest 的命令 handler。
@@ -204,14 +207,11 @@ pub fn run() {
     // 通过命令名分派到对应的 handler，避免 Invoke 被移动两次。
     builder
         .invoke_handler({
-            #[cfg(not(target_env = "ohos"))]
             let reader_handler = readestlib::reader_invoke_handler();
-            #[cfg(not(target_env = "ohos"))]
             let ext_handler = extensions::invoke_handler();
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
-                #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
                 } else if cmd.starts_with("moke_") {
@@ -219,21 +219,13 @@ pub fn run() {
                 } else {
                     reader_handler(invoke)
                 }
-                #[cfg(target_env = "ohos")]
-                if cmd.starts_with("moke_") {
-                    moke_handler(invoke)
-                } else {
-                    false
-                }
             }
         })
         .setup(|_app| {
             // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
-            #[cfg(not(target_env = "ohos"))]
             readestlib::manage_reader_state(_app.handle());
 
             // 初始化拓展系统
-            #[cfg(not(target_env = "ohos"))]
             extensions::init(_app.handle());
 
             Ok(())
