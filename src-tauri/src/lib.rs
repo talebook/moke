@@ -187,13 +187,16 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_websocket::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_oauth::init())
-        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_device_info::init())
         .plugin(tauri_plugin_log::init());
+
+    #[cfg(not(target_env = "ohos"))]
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
 
     // 注册阅读器（readest）后端额外依赖的插件（dialog / turso / native-tts 等）。
     let builder = readestlib::register_reader_plugins(builder);
