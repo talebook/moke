@@ -189,11 +189,15 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_oauth::init())
         .plugin(tauri_plugin_device_info::init())
-        .plugin(tauri_plugin_log::init());
+        .plugin(tauri_plugin_log::init())
+        // Patched copy (readest's patches/tauri-plugin-deep-link) compiles on
+        // OpenHarmony too; with no OS deep-link integration there,
+        // `get_current` answers null and the frontend's cold-start deep-link
+        // read doesn't reject IPC.
+        .plugin(tauri_plugin_deep_link::init());
 
     #[cfg(not(target_env = "ohos"))]
     let builder = builder
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init());

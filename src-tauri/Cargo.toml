@@ -39,6 +39,8 @@ tauri-plugin-device-info = "1.0.1"
 tauri-plugin-log = "2"
 tauri-plugin-native-bridge = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge" }
 tauri-plugin-native-tts = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts" }
+tauri-plugin-deep-link = "2"
+tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 tiny_http = "0.12"
@@ -54,15 +56,22 @@ tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
 ] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
-tauri-plugin-deep-link = "2"
 tauri-plugin-updater = "2"
-tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 napi-ohos = "1.1"
 napi-derive-ohos = "1.1"
 
 [patch.crates-io]
+# turso_ext's build.rs checks `cfg!(target_os = "windows")` which evaluates
+# on the build *host*: cross-compiling from Windows for OpenHarmony
+# (target_os = "linux") wrongly links advapi32 (a Windows-only lib). Vendored
+# at readest's patches/turso_ext with the target read via CARGO_CFG_TARGET_OS.
+turso_ext = { path = "../readest/patches/turso_ext" }
+# tauri-plugin-deep-link reads `Env::appimage` on Linux, a field the Moke
+# Tauri fork only exposes off-OpenHarmony. Vendored at readest's
+# patches/tauri-plugin-deep-link with that read cfg-gated for OHOS.
+tauri-plugin-deep-link = { path = "../readest/patches/tauri-plugin-deep-link" }
 tauri = { path = "../tauri/crates/tauri" }
 tauri-build = { path = "../tauri/crates/tauri-build" }
 tauri-codegen = { path = "../tauri/crates/tauri-codegen" }
