@@ -175,8 +175,23 @@ fn moke_invoke_handler(
     ]
 }
 
+/// KDE Plasma Wayland: WebKitGTK's DMA-BUF renderer fails to repaint the
+/// window until it is resized (see talebook/moke#7). Fall back to the
+/// shared-memory renderer, which repaints correctly; harmless on X11
+/// sessions and non-KDE Wayland compositors. Must run before GTK/WebKit
+/// initialization, so it lives at the very top of `run()`.
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+fn apply_linux_wayland_workarounds() {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+    apply_linux_wayland_workarounds();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
