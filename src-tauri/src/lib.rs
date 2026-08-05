@@ -189,7 +189,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_oauth::init())
         .plugin(tauri_plugin_device_info::init())
-        .plugin(tauri_plugin_log::init())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .level_for("tracing", log::LevelFilter::Warn)
+                .build(),
+        )
         // Patched copy (readest's patches/tauri-plugin-deep-link) compiles on
         // OpenHarmony too; with no OS deep-link integration there,
         // `get_current` answers null and the frontend's cold-start deep-link
@@ -230,6 +235,8 @@ pub fn run() {
         })
         .setup(|_app| {
             // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
+            // readestlib 只在桌面目标暴露 manage_reader_state（OHOS 上被 cfg 排除）。
+            #[cfg(not(target_env = "ohos"))]
             readestlib::manage_reader_state(_app.handle());
 
             // 初始化拓展系统
