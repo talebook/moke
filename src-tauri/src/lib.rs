@@ -235,13 +235,21 @@ pub fn run() {
     builder
         .invoke_handler({
             let reader_handler = readestlib::reader_invoke_handler();
+            #[cfg(not(target_env = "ohos"))]
             let ext_handler = extensions::invoke_handler();
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
+                #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
                 } else if cmd.starts_with("moke_") {
+                    moke_handler(invoke)
+                } else {
+                    reader_handler(invoke)
+                }
+                #[cfg(target_env = "ohos")]
+                if cmd.starts_with("moke_") {
                     moke_handler(invoke)
                 } else {
                     reader_handler(invoke)
@@ -254,7 +262,8 @@ pub fn run() {
             #[cfg(not(target_env = "ohos"))]
             readestlib::manage_reader_state(_app.handle());
 
-            // 初始化拓展系统
+            // 初始化拓展系统（REST+WS 服务器，仅桌面端；OHOS 上曾导致主线程阻塞）。
+            #[cfg(not(target_env = "ohos"))]
             extensions::init(_app.handle());
 
             Ok(())
