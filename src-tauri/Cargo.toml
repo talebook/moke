@@ -34,12 +34,9 @@ tauri-plugin-opener = "=2.5.4"
 readestlib = { package = "Readest", path = "../readest/apps/readest-app/src-tauri", default-features = false }
 tauri-plugin-websocket = "2"
 tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
 tauri-plugin-oauth = "2"
-tauri-plugin-deep-link = "2"
 tauri-plugin-device-info = "1.0.1"
 tauri-plugin-log = "2"
-tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
 tauri-plugin-native-bridge = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-bridge" }
 tauri-plugin-native-tts = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-native-tts" }
 uuid = { version = "1", features = ["v4"] }
@@ -57,6 +54,9 @@ tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
 ] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tauri-plugin-turso" }
 
 [target.'cfg(target_env = "ohos")'.dependencies]
 napi-ohos = "1.1"
