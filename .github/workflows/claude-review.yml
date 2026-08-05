@@ -1,55 +1,70 @@
 name: Claude Review
- 
+
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
+    # 可选：限制仅在特定文件变更时触发
     # paths:
     #   - "src/**/*.ts"
     #   - "src/**/*.tsx"
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
- 
+
 jobs:
   claude-review:
-    # Optional: Filter by PR author
+    # 可选：按 PR 作者过滤
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
     #   github.event.pull_request.user.login == 'new-developer' ||
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
- 
+
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
- 
+      contents: read           # 允许读取代码
+      pull-requests: write     # 允许发表评论和添加标签
+      id-token: write          # OIDC 认证（如果需要）
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
- 
-      - name: Run Claude Review
+          fetch-depth: 0        # 获取完整历史，便于审查
+
+      - name: Run Claude Review via DeepSeek
         id: claude-review
         uses: anthropics/claude-code-action@v1
         env:
+          # ---- DeepSeek 接入配置 ----
           ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}   # 你的 DeepSeek API Key
+          # ---- 模型指定 ----
+          ANTHROPIC_MODEL: "deepseek-v4-flash"                     # 主模型用 Flash
+          ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash"        # 映射 Opus → Flash
+          ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash"      # 映射 Sonnet → Flash
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"       # 映射 Haiku → Flash
+          CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"          # 子代理也用 Flash
+          # ---- 可选：限制对话轮数和超时 ----
+          # CLAUDE_CODE_MAX_TURNS: "10"
+          # CLAUDE_CODE_TIMEOUT_MINUTES: "5"
         with:
+          # 认证密钥（与 env 中 ANTHROPIC_AUTH_TOKEN 保持一致，但这里也需要显式传递）
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: true
+          track_progress: true   # 在 PR 中显示实时进度
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
- 
+
             Please review this pull request with a focus on:
             - Code quality and best practices
             - Potential bugs or issues
             - Security implications
             - Performance considerations
- 
+
             Provide detailed feedback using inline comments for specific issues.
             Please respond in Simplified Chinese.
- 
+
+          # ---- claude_args 传递额外参数 ----
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+            # --max-turns 10           # 如需限制，取消注释
+            # --timeout-minutes 5      # 如需超时，取消注释
