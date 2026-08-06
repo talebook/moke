@@ -97,7 +97,7 @@ jobs:
       # ohrs 是 OpenHarmony Rust 构建工具，cargo-mobile2 编译 OHOS target 时会调用 `ohrs build`。
       # 它读取 OHOS_NDK_HOME（setup-ohos 已设置）。
       - name: Install ohrs (OpenHarmony Rust tool)
-        run: cargo install ohrs --locked --git https://github.com/ohos-rs/ohos-rs --branch ohos
+        run: cargo install ohrs --git https://github.com/ohos-rs/ohos-rs --branch ohos
 
       # 官方 tauri-cli 没有 `ohos` 子命令；本仓库 vendor/ 下的 `tauri` 子模块
       # （hehetoshang/tauri @ dev 分支 d82140fd6）已包含该子命令与
