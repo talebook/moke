@@ -22,6 +22,7 @@ jobs:
     permissions:
       contents: read           # 允许读取代码
       pull-requests: write     # 允许发表评论和添加标签
+      actions: read
       id-token: write          # OIDC 认证（如果需要）
 
     steps:
@@ -43,13 +44,9 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash"      # 映射 Sonnet → Flash
           ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"       # 映射 Haiku → Flash
           CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"          # 子代理也用 Flash
-          # ---- 可选：限制对话轮数和超时 ----
-          # CLAUDE_CODE_MAX_TURNS: "10"
-          # CLAUDE_CODE_TIMEOUT_MINUTES: "5"
         with:
           # 认证密钥（与 env 中 ANTHROPIC_AUTH_TOKEN 保持一致，但这里也需要显式传递）
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          track_progress: true   # 在 PR 中显示实时进度
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
