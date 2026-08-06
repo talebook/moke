@@ -2,21 +2,18 @@
 	path = readest
 	url = https://github.com/hehetoshang/readest.git
 [submodule "tauri"]
-	path = tauri
+	path = vendor/tauri
 	url = https://github.com/hehetoshang/tauri.git
 	branch = dev
-[submodule "packages/foliate-js"]
-	path = packages/foliate-js
+[submodule "vendor/foliate-js"]
+	path = vendor/foliate-js
 	url = https://github.com/hehetoshang/foliate-js
-[submodule "packages/simplecc-wasm"]
-	path = packages/simplecc-wasm
+[submodule "vendor/simplecc-wasm"]
+	path = vendor/simplecc-wasm
 	url = https://github.com/readest/simplecc-wasm.git
-[submodule "packages/tauri"]
-	path = packages/tauri
-	url = https://github.com/readest/tauri.git
-[submodule "packages/tauri-plugins"]
-	path = packages/tauri-plugins
+[submodule "vendor/tauri-plugins"]
+	path = vendor/tauri-plugins
 	url = https://github.com/readest/tauri-plugins-workspace.git
-[submodule "packages/js-mdict"]
-	path = packages/js-mdict
+[submodule "vendor/js-mdict"]
+	path = vendor/js-mdict
 	url = https://github.com/readest/js-mdict.git
