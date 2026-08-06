@@ -65,29 +65,28 @@ jobs:
         with:
           targets: aarch64-unknown-linux-ohos,x86_64-unknown-linux-ohos
 
-      # 官方 tauri-cli 没有 `ohos` 子命令，必须从 fork 构建。
-      # 在 fork 工作区里 cargo build（而非 cargo install）保证 [patch.crates-io]
-      # 里的 cargo-mobile2(feat/ohos) 被应用。
-      - name: Clone Tauri CLI fork (with `ohos` subcommand)
-        run: git clone --depth 1 --branch dev https://github.com/hehetoshang/tauri.git "$GITHUB_WORKSPACE/.tauri-fork"
-
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             ./src-tauri -> target
-            ./.tauri-fork -> target
-          key: ${{ runner.os }}-ohos-cargo-${{ hashFiles('src-tauri/Cargo.lock', '.tauri-fork/Cargo.lock') }}
+            ./tauri -> target
+          key: ${{ runner.os }}-ohos-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'tauri/Cargo.lock') }}
 
       # ohrs 是 OpenHarmony Rust 构建工具，cargo-mobile2 编译 OHOS target 时会调用 `ohrs build`。
       # 它读取 OHOS_NDK_HOME（setup-ohos 已设置）。
       - name: Install ohrs (OpenHarmony Rust tool)
         run: cargo install ohrs --locked --git https://github.com/ohos-rs/ohos-rs --branch ohos
 
-      - name: Build Tauri CLI from fork
+      # 官方 tauri-cli 没有 `ohos` 子命令；本仓库根目录的 `tauri` 子模块
+      # （hehetoshang/tauri @ dev 分支固定提交 d6467c9b）已包含该子命令与
+      # [patch.crates-io]（cargo-mobile2 feat/ohos、wry/tao feat/open-harmony）。
+      # src-tauri 的 path 依赖也指向 ../tauri/crates/tauri，所以直接用子模块
+      # 编译 CLI 能保证 CLI 与库版本一致。不再额外 clone fork。
+      - name: Build Tauri CLI (from tauri submodule)
         run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/.tauri-fork/Cargo.toml" -p tauri-cli
-          echo "$GITHUB_WORKSPACE/.tauri-fork/target/release" >> "$GITHUB_PATH"
+          cargo build --release --manifest-path "$GITHUB_WORKSPACE/tauri/Cargo.toml" -p tauri-cli
+          echo "$GITHUB_WORKSPACE/tauri/target/release" >> "$GITHUB_PATH"
 
       - name: Cache readest Next.js
         uses: actions/cache@v4
