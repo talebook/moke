@@ -39,6 +39,7 @@
     "zustand": "^5.0.10"
   },
   "devDependencies": {
+    "@csstools/postcss-cascade-layers": "^6.0.0",
     "@playwright/test": "1.58.2",
     "@tailwindcss/typography": "^0.5.16",
     "@tauri-apps/cli": "^2.10.1",
