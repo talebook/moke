@@ -64,22 +64,19 @@ jobs:
           version: 6.1.1.280
           cache: true
 
-      # 镜像自带 node 18.20.1 会抢在 setup-node 装的 node 前面（toolcache 目录被
-      # runner 追加到 PATH 末尾），pnpm 的 #!/usr/bin/env node 因此命中 18，
-      # Next.js 报 “>=20.9.0 is required”。用 nvm 装 node 24 并前置到 PATH。
-      # 必须放在 setup-ohos 之后：setup-ohos 也会带入 Node.js 18 覆盖 PATH。
-      - name: Use Node 24 via nvm
+      # setup-ohos 会在 PATH 中带入 Node.js 18，覆盖 setup-node 装的 Node 24。
+      # 重新把 toolcache 中的 Node 24 前置到 PATH，确保后续 pnpm/Next.js 使用正确版本。
+      - name: Re-assert Node 24 after OHOS setup
         shell: bash
         run: |
           set -euo pipefail
-          export NVM_DIR=”${NVM_DIR:-$HOME/.nvm}”
-          [ -s “$NVM_DIR/nvm.sh” ] || export NVM_DIR=/usr/local/nvm
-          . “$NVM_DIR/nvm.sh”
-          nvm install 24 >/dev/null
-          nvm use 24 >/dev/null
-          NODE_BIN=”$(dirname “$(command -v node)”)”
-          echo “$NODE_BIN” >> “$GITHUB_PATH”
-          echo “node: $(“$NODE_BIN/node” -v) -> $NODE_BIN/node”
+          NODE24_BIN=$(ls -d “$RUNNER_TOOL_CACHE/node/24.”*”/x64/bin” 2>/dev/null | sort -V | tail -1)
+          if [ -z “$NODE24_BIN” ]; then
+            echo “ERROR: Node 24 not found in toolcache” >&2
+            exit 1
+          fi
+          echo “$NODE24_BIN” >> “$GITHUB_PATH”
+          echo “node: $(“$NODE24_BIN/node” -v) -> $NODE24_BIN/node”
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
