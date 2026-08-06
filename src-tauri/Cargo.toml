@@ -12,12 +12,12 @@ name = "moke_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [build-dependencies]
-tauri-build = { path = "../tauri/crates/tauri-build", features = [] }
+tauri-build = { path = "../vendor/tauri/crates/tauri-build", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
+tauri = { path = "../vendor/tauri/crates/tauri", default-features = false, features = [
   "wry",
   "protocol-asset",
   "compression",
@@ -49,7 +49,7 @@ tungstenite = "0.24"
 # Plugins that depend on native Linux libraries (gtk/x11)
 # and cannot cross-compile to OHOS.
 [target.'cfg(not(target_env = "ohos"))'.dependencies]
-tauri = { path = "../tauri/crates/tauri", default-features = false, features = [
+tauri = { path = "../vendor/tauri/crates/tauri", default-features = false, features = [
   "common-controls-v6",
   "x11",
   "dbus",
@@ -72,14 +72,14 @@ turso_ext = { path = "../readest/patches/turso_ext" }
 # Tauri fork only exposes off-OpenHarmony. Vendored at readest's
 # patches/tauri-plugin-deep-link with that read cfg-gated for OHOS.
 tauri-plugin-deep-link = { path = "../readest/patches/tauri-plugin-deep-link" }
-tauri = { path = "../tauri/crates/tauri" }
-tauri-build = { path = "../tauri/crates/tauri-build" }
-tauri-codegen = { path = "../tauri/crates/tauri-codegen" }
-tauri-macros = { path = "../tauri/crates/tauri-macros" }
-tauri-plugin = { path = "../tauri/crates/tauri-plugin" }
-tauri-runtime = { path = "../tauri/crates/tauri-runtime" }
-tauri-runtime-wry = { path = "../tauri/crates/tauri-runtime-wry" }
-tauri-utils = { path = "../tauri/crates/tauri-utils" }
+tauri = { path = "../vendor/tauri/crates/tauri" }
+tauri-build = { path = "../vendor/tauri/crates/tauri-build" }
+tauri-codegen = { path = "../vendor/tauri/crates/tauri-codegen" }
+tauri-macros = { path = "../vendor/tauri/crates/tauri-macros" }
+tauri-plugin = { path = "../vendor/tauri/crates/tauri-plugin" }
+tauri-runtime = { path = "../vendor/tauri/crates/tauri-runtime" }
+tauri-runtime-wry = { path = "../vendor/tauri/crates/tauri-runtime-wry" }
+tauri-utils = { path = "../vendor/tauri/crates/tauri-utils" }
 
 wry = { git = "https://github.com/tauri-apps/wry", branch = "feat/open-harmony" }
 tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }

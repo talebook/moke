@@ -111,7 +111,7 @@ along with its nested submodules; readest git history discarded). Edit reader co
 `readest/apps/readest-app/` — it's normal committable source. Do **not** propose merging the two apps
 into one package.json/single build: that was evaluated and rejected (113+57 deps, `@/*` alias clash,
 `app/{library,opds,user}` route-segment collisions). The reader depends on the workspace package
-`packages/foliate-js` and cannot be lifted out on its own.
+`vendor/foliate-js` and cannot be lifted out on its own.
 
 ### `CODE_NEED/talebook/`
 
@@ -124,7 +124,7 @@ the client build.
 
 `readest/apps/readest-app/tsconfig.json` aliases `@pdfjs/*` and `@simplecc/*` to paths under the
 **reader app's own** `public/vendor/` (not the moke root's `public/vendor/`). Those vendor files
-live in the submodules `packages/foliate-js` and `packages/simplecc-wasm` and are not committed.
+live in the submodules `vendor/foliate-js` and `vendor/simplecc-wasm` and are not committed.
 After pulling submodules (`git submodule update --init --recursive`), run:
 
 ```bash
