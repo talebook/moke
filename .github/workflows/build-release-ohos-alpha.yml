@@ -45,7 +45,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
 
       # libGL1 是 DevEco 纹理压缩（Linux）所需；jq 是 setup-ohos 读取 sdk-pkg.json 所用（GH runner 已预装）。
@@ -56,11 +56,30 @@ jobs:
 
       # 安装 HarmonyOS 命令行工具 + SDK + NDK。
       # 设置 HOS_SDK_HOME 与 OHOS_NDK_HOME（=$HOS_SDK_HOME/default/openharmony）。
+      # 注意：setup-ohos 会在 PATH 中带入 Node.js 18，因此 nvm 步骤必须在此之后执行，
+      # 以确保 Node 24 始终位于 PATH 最前面。
       - name: Setup HarmonyOS SDK and command-line tools
         uses: ErBWs/setup-ohos@v2
         with:
           version: 6.1.1.280
           cache: true
+
+      # 镜像自带 node 18.20.1 会抢在 setup-node 装的 node 前面（toolcache 目录被
+      # runner 追加到 PATH 末尾），pnpm 的 #!/usr/bin/env node 因此命中 18，
+      # Next.js 报 “>=20.9.0 is required”。用 nvm 装 node 24 并前置到 PATH。
+      # 必须放在 setup-ohos 之后：setup-ohos 也会带入 Node.js 18 覆盖 PATH。
+      - name: Use Node 24 via nvm
+        shell: bash
+        run: |
+          set -euo pipefail
+          export NVM_DIR=”${NVM_DIR:-$HOME/.nvm}”
+          [ -s “$NVM_DIR/nvm.sh” ] || export NVM_DIR=/usr/local/nvm
+          . “$NVM_DIR/nvm.sh”
+          nvm install 24 >/dev/null
+          nvm use 24 >/dev/null
+          NODE_BIN=”$(dirname “$(command -v node)”)”
+          echo “$NODE_BIN” >> “$GITHUB_PATH”
+          echo “node: $(“$NODE_BIN/node” -v) -> $NODE_BIN/node”
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
