@@ -82,7 +82,7 @@ jobs:
           workspaces: |
             ./src-tauri -> target
             ./vendor/tauri -> target
-          key: ${{ runner.os }}-ohos-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'vendor/tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-ohos-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'vendor/tauri/Cargo.lock', 'readest/apps/readest-app/src-tauri/Cargo.toml') }}
 
       # ohrs 是 OpenHarmony Rust 构建工具，cargo-mobile2 编译 OHOS target 时会调用 `ohrs build`。
       # 它读取 OHOS_NDK_HOME（setup-ohos 已设置）。
