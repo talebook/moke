@@ -172,6 +172,15 @@ jobs:
         if: matrix.platform == 'android'
         run: pnpm tauri android init
 
+      # tauri android init scaffolds gen/android with Tauri's DEFAULT launcher icons.
+      # Regenerate them from src-tauri/icons/icon.png: since gen/android already
+      # exists, `tauri icon` writes straight into gen/android/app/src/main/res/
+      # (mipmaps + adaptive-icon xml), so the APK ships with Moke's icon instead of
+      # the default Tauri logo.
+      - name: Generate Android launcher icons
+        if: matrix.platform == 'android'
+        run: pnpm tauri icon src-tauri/icons/icon.png
+
       - name: Patch Android flavor dimensions
         if: matrix.platform == 'android'
         run: |
