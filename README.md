@@ -40,6 +40,15 @@
 - [报告 Bug](../../issues) — 发现 Bug？请告诉我们
 - [参与贡献](CONTRIBUTING.md) — 开发者贡献指南
 
+## 开发者
+
+- **Rex**（[@talebook](https://github.com/talebook)）— Talebook 服务器作者，Moke 项目指导者
+- **houheya**（[@hehetoshang](https://github.com/hehetoshang)）— Moke 客户端开发
+
+## 致谢
+
+开发过程中使用了 AI 编程工具（Codex、cc-haha、multica-agent）辅助代码生成与调试，所有代码均经过人工审查。
+
 ## 支持
 
 如果 Moke 对你有帮助，欢迎请维护者喝杯咖啡~

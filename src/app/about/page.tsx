@@ -39,6 +39,13 @@ const contributors: Contributor[] = [
       alipay: '/contributors/houheya/alipay.jpg',
     },
   },
+  {
+    id: 'talebook',
+    name: 'Rex',
+    github: 'https://github.com/talebook',
+    avatarUrl: '/contributors/talebook/avatar.png',
+    role: 'Talebook 作者',
+  },
 ];
 
 export default function AboutPage() {
