@@ -42,12 +42,11 @@
 
 ## 开发者
 
-- **Rex**（[@talebook](https://github.com/talebook)）— Talebook 服务器作者，Moke 项目指导者
 - **houheya**（[@hehetoshang](https://github.com/hehetoshang)）— Moke 客户端开发
 
 ## 致谢
 
-开发过程中使用了 AI 编程工具（Codex、cc-haha、multica-agent）辅助代码生成与调试，所有代码均经过人工审查。
+- **Rex**（[@talebook](https://github.com/talebook)）— Talebook 服务器作者，Moke 项目指导者
 
 ## 支持
 
@@ -62,7 +61,13 @@
   </table>
 </div>
 
-感谢微信用户金海先生的打赏支持
+### 感谢以下用户的打赏支持
+
+- 微信用户金海先生
+
+## 说明
+
+本项目部分代码由 AI 编程工具（Codex、cc-haha、multica-agent）辅助生成，所有代码均经过人工审查。
 
 ## 许可证
 
