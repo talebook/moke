@@ -36,3 +36,4 @@ src-tauri/bin/readest-*
 .idea/
 # reference checkout, not part of client build
 CODE_NEED/
+tsconfig.tsbuildinfo
