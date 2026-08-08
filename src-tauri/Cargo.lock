@@ -18,8 +18,6 @@ dependencies = [
  "md-5",
  "minisign-verify",
  "mobi",
- "napi-derive-ohos",
- "napi-ohos",
  "objc",
  "objc-foundation",
  "objc2",
