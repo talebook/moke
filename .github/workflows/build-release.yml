@@ -169,6 +169,15 @@ jobs:
           path: src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: ignore
 
+      # The stock tauri-cli renders the adaptive-icon foreground full-bleed,
+      # which the Android system mask crops. Use the vendored tauri CLI
+      # (with the safe-zone fix) so the APK ships a properly centered icon.
+      - name: Build Tauri CLI (from vendor/tauri submodule)
+        if: matrix.platform == 'android'
+        run: |
+          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
+          echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
+
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
         run: pnpm tauri android init
@@ -180,7 +189,7 @@ jobs:
       # the default Tauri logo.
       - name: Generate Android launcher icons
         if: matrix.platform == 'android'
-        run: pnpm tauri icon src-tauri/icons/icon.png
+        run: cargo tauri icon src-tauri/icons/icon.png
 
       - name: Patch Android flavor dimensions
         if: matrix.platform == 'android'
