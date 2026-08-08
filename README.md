@@ -22,8 +22,9 @@
 | Linux | `.AppImage` / `.deb` |
 | Android | `.apk` |
 | iOS/iPadOS | `.ipa`（自签名安装，需将设备 UDID 加入开发者描述文件） |
+| OpenHarmony（鸿蒙） | `.hap`（alpha，未签名，可能需要自签名安装） |
 
-> **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+
+> **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+ / HarmonyOS NEXT 5.0+（API 12）
 
 ## 使用
 
