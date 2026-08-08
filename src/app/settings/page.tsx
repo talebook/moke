@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Download, LogOut, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, LogOut, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -271,12 +271,19 @@ function UpdateSection() {
   const error = useUpdateStore((s) => s.error);
   const progressPercent = useUpdateStore((s) => s.progressPercent);
   const checkedAt = useUpdateStore((s) => s.checkedAt);
+  const platform = useUpdateStore((s) => s.platform);
   const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
   const installUpdate = useUpdateStore((s) => s.installUpdate);
+  const copyReleaseUrl = useUpdateStore((s) => s.copyReleaseUrl);
 
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return null;
 
+  // 移动端（安卓/OHOS/iOS）没有内置 updater，且 opener 插件无法调起系统
+  // 浏览器，所以"检查更新"退化为复制 GitHub release 下载链接。
+  const isMobile = platform === 'mobile';
+
   const statusText = (() => {
+    if (isMobile) return '前往 GitHub 下载最新版本';
     if (status === 'checking') return '正在检查更新...';
     if (error) return `检查失败: ${error}`;
     if (status === 'downloading') return `下载中 ${progressPercent}%`;
@@ -320,12 +327,14 @@ function UpdateSection() {
             </button>
           )}
           <button
-            onClick={() => void checkForUpdates()}
+            onClick={() => void (isMobile ? copyReleaseUrl() : checkForUpdates())}
             disabled={isBusy}
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-50 transition-colors flex items-center gap-1"
           >
-            <RefreshCw className={`w-3 h-3 ${status === 'checking' ? 'animate-spin' : ''}`} />
-            检查
+            {isMobile
+              ? <Copy className="w-3 h-3" />
+              : <RefreshCw className={`w-3 h-3 ${status === 'checking' ? 'animate-spin' : ''}`} />}
+            {isMobile ? '复制链接' : '检查'}
           </button>
         </div>
       </div>

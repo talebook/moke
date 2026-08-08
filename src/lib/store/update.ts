@@ -14,7 +14,40 @@ type UpdateStatus =
   | 'restarting'
   | 'error';
 
+// GitHub 上每次发版都会上传安卓 APK / OHOS HAP / 桌面安装包。
+// 移动端（android/ios/ohos）没有内置 updater（@tauri-apps/plugin-updater
+// 官方不支持移动端），检查更新时提示用户去浏览器手动下载。
+// 注意：tauri-plugin-opener 的 openUrl 在移动端走 open crate 的 unix 分支
+//（依赖 xdg-open/gio 等），Android/OHOS 上都不存在这些命令，因此无法调起
+// 系统浏览器——这里改为复制下载链接让用户自己粘贴打开。
+const RELEASE_URL = 'https://github.com/talebook/moke/releases/latest';
+
 const DISMISSED_KEY = 'moke-dismissed-update-version';
+
+// 跨平台复制文本：优先 Clipboard API，失败回退到 execCommand。
+// 不用 @tauri-apps/plugin-clipboard-manager——它被 readest 的 cfg 排除在
+// OHOS 之外（见 readest lib.rs 的 clipboard-manager 注册），动态 import 会失败。
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 function readDismissed(): string | null {
   try { return localStorage.getItem(DISMISSED_KEY); } catch { return null; }
@@ -49,10 +82,13 @@ interface UpdateStore {
   error: string | null;
   checkedAt: number | null;
   shouldPrompt: boolean;
+  /** null 表示尚未检测；mobile = 无内置 updater，走跳转 release 流程 */
+  platform: 'desktop' | 'mobile' | null;
 
   initialize: () => Promise<void>;
   checkForUpdates: () => Promise<void>;
   installUpdate: () => Promise<void>;
+  copyReleaseUrl: () => Promise<void>;
   dismissPrompt: () => void;
   simulateUpdate: () => Promise<void>;
 }
@@ -78,6 +114,18 @@ async function importProcess(): Promise<ProcessMod | null> {
   try { return await import('@tauri-apps/plugin-process'); } catch { return null; }
 }
 
+// NEXT_PUBLIC_APP_PLATFORM 无法区分桌面与 OHOS/安卓（都是 'tauri'），
+// 需要运行时平台检测来判定是否有内置 updater。
+async function resolvePlatform(): Promise<'desktop' | 'mobile'> {
+  try {
+    const { getMokeRuntimePlatform, isSingleWebviewRuntime } = await import('@/lib/moke-reader');
+    if (isSingleWebviewRuntime(await getMokeRuntimePlatform())) return 'mobile';
+  } catch {
+    // 运行时检测失败时按桌面处理（兼容旧后端）
+  }
+  return 'desktop';
+}
+
 export const useUpdateStore = create<UpdateStore>((set, get) => ({
   status: 'idle',
   availableVersion: null,
@@ -88,25 +136,36 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   error: null,
   checkedAt: null,
   shouldPrompt: false,
+  platform: null,
 
   initialize: async () => {
     if (startupDone || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
-    // OHOS/移动端单 WebView 构建里没有注册 updater 插件，跳过更新检查。
-    // NEXT_PUBLIC_APP_PLATFORM 无法区分桌面与 OHOS（都是 'tauri'），
-    // 需要运行时平台检测。
-    try {
-      const { getMokeRuntimePlatform, isSingleWebviewRuntime } = await import('@/lib/moke-reader');
-      if (isSingleWebviewRuntime(await getMokeRuntimePlatform())) return;
-    } catch {
-      // 运行时检测失败时按桌面处理（兼容旧后端）
-    }
+    // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
+    // 官方不支持移动端，需要运行时平台检测区分。
+    const runtimePlatform = await resolvePlatform();
+    set({ platform: runtimePlatform });
     startupDone = true;
+
+    // 移动端不自动检查（避免启动即弹浏览器），由用户在设置页点击跳转 release。
+    if (runtimePlatform === 'mobile') return;
 
     await new Promise((r) => setTimeout(r, 5000));
     try { await get().checkForUpdates(); } catch { /* silent */ }
   },
 
   checkForUpdates: async () => {
+    // 平台未缓存时先检测（initialize 尚未完成时点击也能正确跳转）。
+    let platform = get().platform;
+    if (!platform) {
+      platform = await resolvePlatform();
+      set({ platform });
+    }
+    // 移动端：没有内置 updater，复制下载链接让用户去浏览器手动下载。
+    if (platform === 'mobile') {
+      await get().copyReleaseUrl();
+      return;
+    }
+
     const updater = await importUpdater();
     if (!updater) return;
     if (downloading) return;
@@ -230,6 +289,18 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   installUpdate: async () => {
+    // 平台未缓存时先检测，避免移动端误走内置 updater。
+    let platform = get().platform;
+    if (!platform) {
+      platform = await resolvePlatform();
+      set({ platform });
+    }
+    // 移动端：复制下载链接，由用户去浏览器手动下载安装（没有内置安装流程）。
+    if (platform === 'mobile') {
+      await get().copyReleaseUrl();
+      return;
+    }
+
     // ponytail: fake update skips real Tauri calls, just simulates restart
     if (fake) {
       writeDismissed(null);
@@ -321,6 +392,16 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         error: e instanceof Error ? e.message : String(e),
         shouldPrompt: true,
       });
+    }
+  },
+
+  copyReleaseUrl: async () => {
+    const copied = await copyTextToClipboard(RELEASE_URL);
+    const toast = (await import('@/lib/toast')).useToast.getState();
+    if (copied) {
+      toast.show('已复制下载链接，请在浏览器中打开并下载安装。', 'info');
+    } else {
+      toast.show(`复制失败，请手动访问 ${RELEASE_URL}`, 'error');
     }
   },
 
