@@ -88,7 +88,10 @@ tauri-runtime = { path = "../vendor/tauri/crates/tauri-runtime" }
 tauri-runtime-wry = { path = "../vendor/tauri/crates/tauri-runtime-wry" }
 tauri-utils = { path = "../vendor/tauri/crates/tauri-utils" }
 
-wry = { git = "https://github.com/tauri-apps/wry", branch = "feat/open-harmony" }
+# wry is vendored at vendor/wry (fork of tauri-apps/wry, feat/open-harmony
+# branch) so OHOS fixes (linux-body cross-compile, ArkWeb eval) can be made
+# locally and upstreamed as a separate PR to tauri-apps/wry.
+wry = { path = "../vendor/wry" }
 tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }
 
 # wry (feat/open-harmony) depends on openharmony-ability via git without a rev

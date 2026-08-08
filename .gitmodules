@@ -20,3 +20,7 @@
 [submodule "vendor/openharmony-ability"]
 	path = vendor/openharmony-ability
 	url = https://github.com/harmony-contrib/openharmony-ability.git
+[submodule "vendor/wry"]
+	path = vendor/wry
+	url = https://github.com/hehetoshang/wry.git
+	branch = feat/open-harmony

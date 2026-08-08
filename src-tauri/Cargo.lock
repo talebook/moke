@@ -9756,7 +9756,6 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.56.0"
-source = "git+https://github.com/tauri-apps/wry?branch=feat%2Fopen-harmony#6aaf4b84b6e420015c6a14f264f1c7399f150392"
 dependencies = [
  "base64 0.22.1",
  "block2",
