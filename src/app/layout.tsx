@@ -5,7 +5,11 @@ import { useEffect } from 'react';
 import { ServerProvider } from '@/components/providers/ServerProvider';
 import { ReaderProgressProvider } from '@/components/providers/ReaderProgressProvider';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
+import { installConsoleCapture } from '@/lib/debug-log';
 import { useSettingsStore } from '@/lib/store/settings';
+
+// 在浏览器端尽早 patch console，使 console.error/warn/log 也进入调试面板
+installConsoleCapture();
 
 export default function RootLayout({
   children,
