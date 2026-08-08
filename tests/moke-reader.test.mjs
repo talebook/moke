@@ -17,6 +17,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
       filePath: 'C:\\Users\\reader\\我的书.pdf',
       eink: true,
       mokeBookId: '14',
+      serverUrl: 'http://192.168.1.5:8080',
       restoreProgress: {
         schema: 'moke.readest.progress.v1',
         reader: 'readest',
@@ -33,6 +34,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(url.searchParams.get('moke'), '1');
   assert.equal(url.searchParams.get('mokeEink'), '1');
   assert.equal(url.searchParams.get('mokeBookId'), '14');
+  assert.equal(url.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
   assert.deepEqual(JSON.parse(url.searchParams.get('mokeRestoreProgress')), {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',

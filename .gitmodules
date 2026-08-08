@@ -17,3 +17,6 @@
 [submodule "vendor/js-mdict"]
 	path = vendor/js-mdict
 	url = https://github.com/readest/js-mdict.git
+[submodule "vendor/openharmony-ability"]
+	path = vendor/openharmony-ability
+	url = https://github.com/harmony-contrib/openharmony-ability.git

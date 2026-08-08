@@ -4731,22 +4731,22 @@
           "markdownDescription": "Denies the get_storage_info command without any pre-configured scope."
         },
         {
-          "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-ask`\n- `allow-confirm`\n- `allow-message`\n- `allow-save`\n- `allow-open`",
+          "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`",
           "type": "string",
           "const": "dialog:default",
-          "markdownDescription": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-ask`\n- `allow-confirm`\n- `allow-message`\n- `allow-save`\n- `allow-open`"
+          "markdownDescription": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n\n#### This default permission set includes:\n\n- `allow-message`\n- `allow-save`\n- `allow-open`"
         },
         {
-          "description": "Enables the ask command without any pre-configured scope.",
+          "description": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
           "type": "string",
           "const": "dialog:allow-ask",
-          "markdownDescription": "Enables the ask command without any pre-configured scope."
+          "markdownDescription": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
         },
         {
-          "description": "Enables the confirm command without any pre-configured scope.",
+          "description": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
           "type": "string",
           "const": "dialog:allow-confirm",
-          "markdownDescription": "Enables the confirm command without any pre-configured scope."
+          "markdownDescription": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)"
         },
         {
           "description": "Enables the message command without any pre-configured scope.",
@@ -4767,16 +4767,16 @@
           "markdownDescription": "Enables the save command without any pre-configured scope."
         },
         {
-          "description": "Denies the ask command without any pre-configured scope.",
+          "description": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
           "type": "string",
           "const": "dialog:deny-ask",
-          "markdownDescription": "Denies the ask command without any pre-configured scope."
+          "markdownDescription": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
         },
         {
-          "description": "Denies the confirm command without any pre-configured scope.",
+          "description": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
           "type": "string",
           "const": "dialog:deny-confirm",
-          "markdownDescription": "Denies the confirm command without any pre-configured scope."
+          "markdownDescription": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)"
         },
         {
           "description": "Denies the message command without any pre-configured scope.",
@@ -6633,10 +6633,10 @@
           "markdownDescription": "Denies the log command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-text-selection-suppressed`",
           "type": "string",
           "const": "native-bridge:default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-text-selection-suppressed`"
         },
         {
           "description": "Enables the auth_with_custom_tab command without any pre-configured scope.",
@@ -6649,6 +6649,12 @@
           "type": "string",
           "const": "native-bridge:allow-auth-with-safari",
           "markdownDescription": "Enables the auth_with_safari command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the capture_webview_region command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-capture-webview-region",
+          "markdownDescription": "Enables the capture_webview_region command without any pre-configured scope."
         },
         {
           "description": "Enables the check_permissions command without any pre-configured scope.",
@@ -6667,6 +6673,12 @@
           "type": "string",
           "const": "native-bridge:allow-clear-lookup-dictionary",
           "markdownDescription": "Enables the clear_lookup_dictionary command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-clear-secure-item",
+          "markdownDescription": "Enables the clear_secure_item command without any pre-configured scope."
         },
         {
           "description": "Enables the clear_sync_passphrase command without any pre-configured scope.",
@@ -6709,6 +6721,12 @@
           "type": "string",
           "const": "native-bridge:allow-get-screen-brightness",
           "markdownDescription": "Enables the get_screen_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-get-secure-item",
+          "markdownDescription": "Enables the get_secure_item command without any pre-configured scope."
         },
         {
           "description": "Enables the get_status_bar_height command without any pre-configured scope.",
@@ -6801,6 +6819,12 @@
           "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
         },
         {
+          "description": "Enables the refresh_eink_screen command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-refresh-eink-screen",
+          "markdownDescription": "Enables the refresh_eink_screen command without any pre-configured scope."
+        },
+        {
           "description": "Enables the register_listener command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-register-listener",
@@ -6849,6 +6873,12 @@
           "markdownDescription": "Enables the set_screen_brightness command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-set-secure-item",
+          "markdownDescription": "Enables the set_secure_item command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_sync_passphrase command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-set-sync-passphrase",
@@ -6861,10 +6891,22 @@
           "markdownDescription": "Enables the set_system_ui_visibility command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_text_selection_suppressed command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-set-text-selection-suppressed",
+          "markdownDescription": "Enables the set_text_selection_suppressed command without any pre-configured scope."
+        },
+        {
           "description": "Enables the show_lookup_popover command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-show-lookup-popover",
           "markdownDescription": "Enables the show_lookup_popover command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_reading_widget command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-update-reading-widget",
+          "markdownDescription": "Enables the update_reading_widget command without any pre-configured scope."
         },
         {
           "description": "Enables the use_background_audio command without any pre-configured scope.",
@@ -6885,6 +6927,12 @@
           "markdownDescription": "Denies the auth_with_safari command without any pre-configured scope."
         },
         {
+          "description": "Denies the capture_webview_region command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-capture-webview-region",
+          "markdownDescription": "Denies the capture_webview_region command without any pre-configured scope."
+        },
+        {
           "description": "Denies the check_permissions command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-check-permissions",
@@ -6901,6 +6949,12 @@
           "type": "string",
           "const": "native-bridge:deny-clear-lookup-dictionary",
           "markdownDescription": "Denies the clear_lookup_dictionary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-clear-secure-item",
+          "markdownDescription": "Denies the clear_secure_item command without any pre-configured scope."
         },
         {
           "description": "Denies the clear_sync_passphrase command without any pre-configured scope.",
@@ -6943,6 +6997,12 @@
           "type": "string",
           "const": "native-bridge:deny-get-screen-brightness",
           "markdownDescription": "Denies the get_screen_brightness command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-get-secure-item",
+          "markdownDescription": "Denies the get_secure_item command without any pre-configured scope."
         },
         {
           "description": "Denies the get_status_bar_height command without any pre-configured scope.",
@@ -7035,6 +7095,12 @@
           "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
         },
         {
+          "description": "Denies the refresh_eink_screen command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-refresh-eink-screen",
+          "markdownDescription": "Denies the refresh_eink_screen command without any pre-configured scope."
+        },
+        {
           "description": "Denies the register_listener command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-register-listener",
@@ -7083,6 +7149,12 @@
           "markdownDescription": "Denies the set_screen_brightness command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_secure_item command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-set-secure-item",
+          "markdownDescription": "Denies the set_secure_item command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_sync_passphrase command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-set-sync-passphrase",
@@ -7095,10 +7167,22 @@
           "markdownDescription": "Denies the set_system_ui_visibility command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_text_selection_suppressed command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-set-text-selection-suppressed",
+          "markdownDescription": "Denies the set_text_selection_suppressed command without any pre-configured scope."
+        },
+        {
           "description": "Denies the show_lookup_popover command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-show-lookup-popover",
           "markdownDescription": "Denies the show_lookup_popover command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_reading_widget command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-update-reading-widget",
+          "markdownDescription": "Denies the update_reading_widget command without any pre-configured scope."
         },
         {
           "description": "Denies the use_background_audio command without any pre-configured scope.",
@@ -7107,10 +7191,10 @@
           "markdownDescription": "Denies the use_background_audio command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-init`\n- `allow-speak`\n- `allow-stop`\n- `allow-pause`\n- `allow-resume`\n- `allow-set-rate`\n- `allow-set-pitch`\n- `allow-set-voice`\n- `allow-get-all-voices`\n- `allow-set-media-session-active`\n- `allow-update-media-session-state`\n- `allow-update-media-session-metadata`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-init`\n- `allow-speak`\n- `allow-stop`\n- `allow-pause`\n- `allow-resume`\n- `allow-set-rate`\n- `allow-set-pitch`\n- `allow-set-voice`\n- `allow-get-all-voices`\n- `allow-set-media-session-active`\n- `allow-update-media-session-state`\n- `allow-update-media-session-metadata`\n- `allow-update-carplay-state`\n- `allow-playout-enqueue`\n- `allow-playout-control`\n- `allow-playout-position`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`",
           "type": "string",
           "const": "native-tts:default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-init`\n- `allow-speak`\n- `allow-stop`\n- `allow-pause`\n- `allow-resume`\n- `allow-set-rate`\n- `allow-set-pitch`\n- `allow-set-voice`\n- `allow-get-all-voices`\n- `allow-set-media-session-active`\n- `allow-update-media-session-state`\n- `allow-update-media-session-metadata`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-init`\n- `allow-speak`\n- `allow-stop`\n- `allow-pause`\n- `allow-resume`\n- `allow-set-rate`\n- `allow-set-pitch`\n- `allow-set-voice`\n- `allow-get-all-voices`\n- `allow-set-media-session-active`\n- `allow-update-media-session-state`\n- `allow-update-media-session-metadata`\n- `allow-update-carplay-state`\n- `allow-playout-enqueue`\n- `allow-playout-control`\n- `allow-playout-position`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`"
         },
         {
           "description": "Enables the check_permissions command without any pre-configured scope.",
@@ -7141,6 +7225,24 @@
           "type": "string",
           "const": "native-tts:allow-pause",
           "markdownDescription": "Enables the pause command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the playout_control command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:allow-playout-control",
+          "markdownDescription": "Enables the playout_control command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the playout_enqueue command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:allow-playout-enqueue",
+          "markdownDescription": "Enables the playout_enqueue command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the playout_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:allow-playout-position",
+          "markdownDescription": "Enables the playout_position command without any pre-configured scope."
         },
         {
           "description": "Enables the register_listener command without any pre-configured scope.",
@@ -7209,6 +7311,12 @@
           "markdownDescription": "Enables the stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the update_carplay_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:allow-update-carplay-state",
+          "markdownDescription": "Enables the update_carplay_state command without any pre-configured scope."
+        },
+        {
           "description": "Enables the update_media_session_metadata command without any pre-configured scope.",
           "type": "string",
           "const": "native-tts:allow-update-media-session-metadata",
@@ -7249,6 +7357,24 @@
           "type": "string",
           "const": "native-tts:deny-pause",
           "markdownDescription": "Denies the pause command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the playout_control command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:deny-playout-control",
+          "markdownDescription": "Denies the playout_control command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the playout_enqueue command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:deny-playout-enqueue",
+          "markdownDescription": "Denies the playout_enqueue command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the playout_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:deny-playout-position",
+          "markdownDescription": "Denies the playout_position command without any pre-configured scope."
         },
         {
           "description": "Denies the register_listener command without any pre-configured scope.",
@@ -7315,6 +7441,12 @@
           "type": "string",
           "const": "native-tts:deny-stop",
           "markdownDescription": "Denies the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_carplay_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-tts:deny-update-carplay-state",
+          "markdownDescription": "Denies the update_carplay_state command without any pre-configured scope."
         },
         {
           "description": "Denies the update_media_session_metadata command without any pre-configured scope.",

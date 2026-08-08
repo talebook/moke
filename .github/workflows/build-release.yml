@@ -221,6 +221,15 @@ jobs:
           path: src-tauri/target/release/bundle/**/*.sig
           if-no-files-found: ignore
 
+      # The stock tauri-cli renders the adaptive-icon foreground full-bleed,
+      # which the Android system mask crops. Use the vendored tauri CLI
+      # (with the safe-zone fix) so the APK ships a properly centered icon.
+      - name: Build Tauri CLI (from vendor/tauri submodule)
+        if: matrix.platform == 'android'
+        run: |
+          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
+          echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
+
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
         run: pnpm tauri android init
@@ -232,7 +241,20 @@ jobs:
       # the default Tauri logo.
       - name: Generate Android launcher icons
         if: matrix.platform == 'android'
-        run: pnpm tauri icon src-tauri/icons/icon.png
+        run: cargo tauri icon src-tauri/icons/icon.png
+
+      # `tauri android init` scaffolds a default MainActivity that lacks the
+      # KeyDownInterceptor interface readest's native-bridge plugin requires, so
+      # the intercept_keys command (volume-key page turn) silently no-ops
+      # (talebook/moke#17). Overlay our key-interception MainActivity so KeyEvents
+      # are forwarded to the WebView. Find the generated path so this stays valid
+      # if the app identifier/package ever changes.
+      - name: Overlay key-interception MainActivity
+        if: matrix.platform == 'android'
+        run: |
+          for f in $(find src-tauri/gen/android/app/src/main/java -name MainActivity.kt); do
+            cp src-tauri/android/MainActivity.kt "$f"
+          done
 
       - name: Patch Android flavor dimensions
         if: matrix.platform == 'android'

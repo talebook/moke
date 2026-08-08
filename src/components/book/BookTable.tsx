@@ -22,6 +22,9 @@ export interface BookRow {
     wants?: boolean;
     download?: number;
   };
+  /** Network-library book identity — lets rows link to `/network-book` instead of `/detail?id=`. */
+  source_id?: number;
+  book_url?: string;
 }
 
 interface BookTableProps {
@@ -33,6 +36,11 @@ interface BookTableProps {
   onToggleSelect?: (id: string, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
   /** Right-click / long-press: open the context menu at (x, y) for this book. */
   onContextAction?: (id: string, x: number, y: number) => void;
+  /**
+   * Per-row href override (e.g. network books link to `/network-book` instead of
+   * `/detail?id=`). Falls back to `/detail?id=${id}` when omitted.
+   */
+  getRowHref?: (row: BookRow) => string;
 }
 
 type SortKey = 'title' | 'author' | 'publisher' | 'format' | 'size' | 'added' | 'wants' | 'download';
@@ -186,6 +194,7 @@ export function BookTable({
   selectedIds,
   onToggleSelect,
   onContextAction,
+  getRowHref,
 }: BookTableProps) {
   const { serverUrl } = useServerStore();
   const [sort, setSort] = useState<SortState | null>(null);
@@ -263,6 +272,7 @@ export function BookTable({
           const fmt = row.files?.[0]?.format?.toUpperCase();
           const size = formatSize(row.files?.[0]?.size);
           const isSelected = selectedIds?.has(id) ?? false;
+          const rowHref = getRowHref ? getRowHref(row) : `/detail?id=${id}`;
           const content = (
             <>
               {selectable && (
@@ -290,8 +300,8 @@ export function BookTable({
               {...makeRowHandlers(id)}
               className={`border-b border-amber-950/5 last:border-b-0 ${isSelected ? 'bg-amber-100/70 ring-1 ring-inset ring-primary/40' : 'active:bg-amber-50/60'}`}
             >
-              {linkable && !batchMode ? (
-                <Link href={`/detail?id=${id}`} className="flex min-w-0 items-center gap-3 px-3 py-3.5">
+              {linkable && !batchMode && rowHref ? (
+                <Link href={rowHref} className="flex min-w-0 items-center gap-3 px-3 py-3.5">
                   {content}
                 </Link>
               ) : (
@@ -335,6 +345,7 @@ export function BookTable({
               const inShelf = Boolean(row.state?.wants);
               const downloaded = Boolean(row.state?.download);
               const isSelected = selectedIds?.has(id) ?? false;
+              const rowHref = getRowHref ? getRowHref(row) : `/detail?id=${id}`;
               return (
                 <tr
                   key={id}
@@ -347,9 +358,9 @@ export function BookTable({
                     </span>
                   </td>
                   <td className="px-4 py-2 align-middle">
-                    {linkable && !batchMode ? (
+                    {linkable && !batchMode && rowHref ? (
                       <Link
-                        href={`/detail?id=${id}`}
+                        href={rowHref}
                         className="flex items-center gap-3 min-w-0 group"
                       >
                         <TinyCover title={row.title} src={coverUrl} />
