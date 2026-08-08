@@ -61,6 +61,13 @@ tauri-plugin-updater = "2"
 [target.'cfg(target_env = "ohos")'.dependencies]
 napi-ohos = "1.1"
 napi-derive-ohos = "1.1"
+# Vendored at vendor/openharmony-ability (pinned to 6c52bb4), the last
+# pre-pluginize release that still exposes the `webview` feature the wry
+# feat/open-harmony branch requires. wry depends on this crate via git without
+# a rev; the [patch] below points that git source at this vendored path so both
+# resolve to the same pinned commit.
+openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
+openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
 
 [patch.crates-io]
 # turso_ext's build.rs checks `cfg!(target_os = "windows")` which evaluates
@@ -84,8 +91,13 @@ tauri-utils = { path = "../vendor/tauri/crates/tauri-utils" }
 wry = { git = "https://github.com/tauri-apps/wry", branch = "feat/open-harmony" }
 tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }
 
-openharmony-ability = { git = "https://github.com/harmony-contrib/openharmony-ability.git" }
-openharmony-ability-derive = { git = "https://github.com/harmony-contrib/openharmony-ability.git" }
+# wry (feat/open-harmony) depends on openharmony-ability via git without a rev
+# and requires its `webview` feature, which the upstream default branch removed
+# after the 6c52bb4 pluginize refactor. Point that git source at the vendored
+# copy (pinned to 6c52bb4) so the `webview` feature resolves.
+[patch."https://github.com/harmony-contrib/openharmony-ability.git"]
+openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
+openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
 
 [profile.release]
 codegen-units = 1
