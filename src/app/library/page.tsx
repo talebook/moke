@@ -10,6 +10,8 @@ import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { buildNetworkBookHref } from '@/lib/network-book-core';
+import { pollNetworkSaveForBook, saveNetworkBook } from '@/lib/network-books';
 import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
 import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionBar';
 import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookContextMenu';
@@ -18,7 +20,7 @@ import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { downloadBookBlob } from '@/lib/api';
 import { saveOfflineBook } from '@/lib/offline-books';
 import { useToast } from '@/lib/toast';
-import { Check, Download, ListChecks } from 'lucide-react';
+import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
 
 interface BookItem {
   id: string | number;
@@ -63,6 +65,9 @@ interface NetworkBook {
   cover_url?: string;
   img?: string;
   thumb?: string;
+  /** 书籍来源的书源 id（搜索时按源分组，需要在扁平化时保留）。 */
+  source_id?: number;
+  source_name?: string;
 }
 
 const colors = [
@@ -91,6 +96,7 @@ export default function LibraryPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchMode, setBatchMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
+  const [networkContextMenu, setNetworkContextMenu] = useState<{ x: number; y: number; book: NetworkBook } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
 
   // Clear selection when tab switches or server changes
@@ -98,6 +104,7 @@ export default function LibraryPage() {
     setSelectedIds(new Set());
     setBatchMode(false);
     setContextMenu(null);
+    setNetworkContextMenu(null);
     lastSelectedIdRef.current = null;
   }, [activeTab, serverUrl]);
 
@@ -222,7 +229,7 @@ export default function LibraryPage() {
       const params = new URLSearchParams({ source_id: String(selectedSourceId), url: categoryUrl, page: String(page) });
       const res = await request(`${serverUrl}/api/network/explore?${params.toString()}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: NetworkBook[] }>(res, '网络书籍解析失败。');
-      setNetworkBooks(data.books || []);
+      setNetworkBooks((data.books || []).map((b) => ({ ...b, source_id: selectedSourceId })));
     } catch (error) {
       setNetworkBooks([]);
       toast(getErrorMessage(error, '网络书籍加载失败。'));
@@ -248,12 +255,18 @@ export default function LibraryPage() {
         await new Promise((r) => setTimeout(r, 1000));
         attempts++;
         const pollRes = await request(`${serverUrl}/api/network/search/status?task_id=${taskId}`, { credentials: 'include' });
-        const pollData = await readApiJson<{ err?: string; msg?: string; results?: Array<{ books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook>; finished?: boolean }>(pollRes, '网络搜索结果解析失败。');
-        const partial: NetworkBook[] = (pollData.results || []).flatMap((r: { books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
+        const pollData = await readApiJson<{ err?: string; msg?: string; results?: Array<{ source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook>; finished?: boolean }>(pollRes, '网络搜索结果解析失败。');
+        const partial: NetworkBook[] = (pollData.results || []).flatMap((r: { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
           if (Array.isArray(r)) return r;
           if (typeof r === 'object' && r !== null) {
-            const asResult = r as { books?: NetworkBook[]; items?: NetworkBook[] };
-            return asResult.books || asResult.items || [];
+            const asResult = r as { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] };
+            const items = asResult.books || asResult.items || [];
+            // 保留来源书源 id/名称：后续点击进入网络书详情需要 source_id + book_url。
+            return items.map((b) => ({
+              ...b,
+              source_id: b.source_id ?? asResult.source_id,
+              source_name: b.source_name ?? asResult.source_name,
+            }));
           }
           return [];
         });
@@ -409,6 +422,62 @@ export default function LibraryPage() {
 
   const openContextMenu = (bookId: string, x: number, y: number) => {
     setContextMenu({ x, y, bookId });
+  };
+
+  // ── Network-book actions (在线书库) ─────────────────────────────────────────
+  const openNetworkContextMenu = (book: NetworkBook, x: number, y: number) => {
+    setNetworkContextMenu({ x, y, book });
+  };
+
+  const saveNetworkBookWithFeedback = async (book: NetworkBook) => {
+    const sourceId = book.source_id;
+    if (sourceId == null || !book.book_url) {
+      toast('缺少书源信息，无法保存。');
+      return;
+    }
+    const title = book.title || book.name || '该书';
+    try {
+      await saveNetworkBook(serverUrl, sourceId, book.book_url);
+      toast(`已开始保存《${title}》到本地书库`);
+      const result = await pollNetworkSaveForBook(serverUrl, sourceId, book.book_url, {
+        intervalMs: 1500,
+        maxMisses: 3,
+      });
+      if (result.status === 'completed') {
+        toast(`《${title}》已保存到书库`);
+      } else if (result.status === 'failed') {
+        toast(`《${title}》保存失败：${result.error || '未知错误'}`);
+      } else {
+        toast('保存进度丢失，可能服务器已重启，请稍后重试。');
+      }
+    } catch (error) {
+      toast(getErrorMessage(error, '保存失败，请检查网络或登录状态。'));
+    }
+  };
+
+  const buildNetworkMenuItems = (book: NetworkBook): ContextMenuItem[] => {
+    const sourceId = book.source_id;
+    const title = book.title || book.name || '该书';
+    return [
+      {
+        key: 'open',
+        label: '查看详情',
+        icon: <BookOpen className="w-3.5 h-3.5" />,
+        onClick: () => {
+          if (sourceId != null && book.book_url) {
+            router.push(buildNetworkBookHref(sourceId, book.book_url));
+          }
+        },
+      },
+      { key: 'sep-1', label: '', separator: true },
+      {
+        key: 'save',
+        label: '保存到本地书库',
+        icon: <Download className="w-3.5 h-3.5" />,
+        disabled: sourceId == null || !book.book_url,
+        onClick: () => void saveNetworkBookWithFeedback(book),
+      },
+    ];
   };
 
   // Empty selection while in batch mode → leave batch mode.
@@ -806,9 +875,9 @@ export default function LibraryPage() {
                   <p className="mt-2 text-sm text-muted-foreground">换个关键词试试。</p>
                 </div>
               ) : viewMode === 'rows' ? (
-                <NetworkBookTable books={networkSearchResults} />
+                <NetworkBookTable books={networkSearchResults} onContextAction={openNetworkContextMenu} />
               ) : (
-                <NetworkBookGrid books={networkSearchResults} viewMode={viewMode} />
+                <NetworkBookGrid books={networkSearchResults} viewMode={viewMode} onContextAction={openNetworkContextMenu} />
               )}
             </div>
           ) : (
@@ -841,9 +910,9 @@ export default function LibraryPage() {
                     <p className="mt-2 text-sm text-muted-foreground">换个分类试试，或稍后再来看看。</p>
                   </div>
                 ) : viewMode === 'rows' ? (
-                  <NetworkBookTable books={networkBooks} />
+                  <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} />
                 ) : (
-                  <NetworkBookGrid books={networkBooks} viewMode={viewMode} />
+                  <NetworkBookGrid books={networkBooks} viewMode={viewMode} onContextAction={openNetworkContextMenu} />
                 )}
               </div>
 
@@ -890,6 +959,13 @@ export default function LibraryPage() {
           />
         );
       })()}
+      {networkContextMenu && (
+        <BookContextMenu
+          position={{ x: networkContextMenu.x, y: networkContextMenu.y }}
+          items={buildNetworkMenuItems(networkContextMenu.book)}
+          onClose={() => setNetworkContextMenu(null)}
+        />
+      )}
     </DesktopLayout>
   );
 }
@@ -905,21 +981,89 @@ function networkBookToRow(book: NetworkBook, idx: number): BookRow {
       ? authorRaw.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
       : '';
   // Network books don't carry a stable id; synthesize one from the index so the table
-  // can key rows. The detail link is intentionally not wired for these — they're
-  // search/explore results and we'd need the originating server to resolve a real id.
+  // can key rows. Rows are made clickable via `getRowHref`, which resolves the
+  // network-book detail page from `source_id` + `book_url` (see NetworkBookTable).
   return {
     id: `network-${idx}`,
     title,
     author,
     img: book.cover_url || book.img || book.thumb,
+    source_id: book.source_id,
+    book_url: book.book_url,
   };
 }
 
-function NetworkBookTable({ books }: { books: NetworkBook[] }) {
-  return <BookTable books={books.map((b, i) => networkBookToRow(b, i))} linkable={false} />;
+function NetworkBookTable({
+  books,
+  onContextAction,
+}: {
+  books: NetworkBook[];
+  onContextAction?: (book: NetworkBook, x: number, y: number) => void;
+}) {
+  return (
+    <BookTable
+      books={books.map((b, i) => networkBookToRow(b, i))}
+      getRowHref={(row) =>
+        row.source_id != null && row.book_url ? buildNetworkBookHref(row.source_id, row.book_url) : ''
+      }
+      onContextAction={
+        onContextAction
+          ? (id, x, y) => {
+              const idx = parseInt(String(id).replace(/^network-/, ''), 10);
+              const book = books[idx];
+              if (book) onContextAction(book, x, y);
+            }
+          : undefined
+      }
+    />
+  );
 }
 
-function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: ViewMode }) {
+function buildNetworkCardHandlers(
+  book: NetworkBook,
+  onContextAction: (book: NetworkBook, x: number, y: number) => void,
+) {
+  let pressTimer: number | null = null;
+  let didLongPress = false;
+  let touchX = 0;
+  let touchY = 0;
+  return {
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault();
+      onContextAction(book, e.clientX, e.clientY);
+    },
+    onTouchStart: (e: React.TouchEvent) => {
+      didLongPress = false;
+      const t = e.touches[0];
+      touchX = t?.clientX ?? 0;
+      touchY = t?.clientY ?? 0;
+      pressTimer = window.setTimeout(() => {
+        didLongPress = true;
+        if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+        onContextAction(book, touchX, touchY);
+      }, 500);
+    },
+    onTouchEnd: () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    },
+    onTouchMove: () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    },
+    onClick: (e: React.MouseEvent) => {
+      if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+    },
+  };
+}
+
+function NetworkBookGrid({
+  books,
+  viewMode,
+  onContextAction,
+}: {
+  books: NetworkBook[];
+  viewMode: ViewMode;
+  onContextAction?: (book: NetworkBook, x: number, y: number) => void;
+}) {
   return (
     <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
       {books.map((book, idx) => {
@@ -932,32 +1076,49 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
             : '';
         const coverUrl = book.cover_url || book.img || book.thumb;
         const ci = getColorIndex(title + idx);
-        return viewMode === 'grid' ? (
-          <div key={idx} className="book-card-motion group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
-            <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
-              {coverUrl ? (
-                <img
-                  src={coverUrl}
-                  alt={title}
-                  className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  loading={idx === 0 ? 'eager' : 'lazy'}
-                  fetchPriority={idx === 0 ? 'high' : 'auto'}
-                />
-              ) : (
-                <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
-                  <span className="text-foreground/20 text-2xl font-bold font-serif">{title[0]}</span>
-                </div>
-              )}
-              <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
-              <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
+        const href =
+          book.source_id != null && book.book_url ? buildNetworkBookHref(book.source_id, book.book_url) : '';
+        const cardHandlers = onContextAction ? buildNetworkCardHandlers(book, onContextAction) : {};
+
+        if (viewMode === 'grid') {
+          const card = (
+            <>
+              <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
+                {coverUrl ? (
+                  <img
+                    src={coverUrl}
+                    alt={title}
+                    className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    loading={idx === 0 ? 'eager' : 'lazy'}
+                    fetchPriority={idx === 0 ? 'high' : 'auto'}
+                  />
+                ) : (
+                  <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
+                    <span className="text-foreground/20 text-2xl font-bold font-serif">{title[0]}</span>
+                  </div>
+                )}
+                <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
+                <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
+              </div>
+              <div className="flex flex-col gap-0.5 px-0.5">
+                <span className="book-title-motion text-sm font-semibold truncate text-foreground">{title}</span>
+                {author && <span className="text-xs truncate text-muted-foreground">{author}</span>}
+              </div>
+            </>
+          );
+          return href ? (
+            <Link key={idx} href={href} {...cardHandlers} className="book-card-motion group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
+              {card}
+            </Link>
+          ) : (
+            <div key={idx} {...cardHandlers} className="book-card-motion group flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)]">
+              {card}
             </div>
-            <div className="flex flex-col gap-0.5 px-0.5">
-              <span className="book-title-motion text-sm font-semibold truncate text-foreground">{title}</span>
-              {author && <span className="text-xs truncate text-muted-foreground">{author}</span>}
-            </div>
-          </div>
-        ) : (
-          <div key={idx} className="book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4">
+          );
+        }
+
+        const card = (
+          <>
             <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
               {coverUrl ? (
                 <img
@@ -978,6 +1139,15 @@ function NetworkBookGrid({ books, viewMode }: { books: NetworkBook[]; viewMode: 
               {author && <p className="text-xs text-muted-foreground truncate">{author}</p>}
             </div>
             <span className="shrink-0 rounded-md border border-border/40 bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">在线</span>
+          </>
+        );
+        return href ? (
+          <Link key={idx} href={href} {...cardHandlers} className="book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4">
+            {card}
+          </Link>
+        ) : (
+          <div key={idx} {...cardHandlers} className="book-list-motion group flex min-w-0 items-center gap-3 rounded-2xl border border-transparent px-2 py-3 transition-all hover:border-amber-950/10 hover:bg-white/70 hover:shadow-sm sm:gap-4 sm:px-3 sm:py-4">
+            {card}
           </div>
         );
       })}

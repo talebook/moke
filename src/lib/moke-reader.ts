@@ -59,12 +59,19 @@ export async function navigateFullDocument(
 
 export async function openEmbeddedReaderHome({
   eink,
+  serverUrl,
   navigate,
 }: {
   eink: boolean;
+  serverUrl: string;
   navigate: (href: string) => void;
 }): Promise<void> {
-  const href = `/readest/${eink ? '?moke=1&mokeEink=1' : '?moke=1&mokeEink=0'}`;
+  const params = new URLSearchParams({
+    moke: '1',
+    mokeEink: eink ? '1' : '0',
+    mokeServerUrl: serverUrl,
+  });
+  const href = `/readest/?${params.toString()}`;
 
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     navigate(href);
@@ -109,17 +116,20 @@ export function buildEmbeddedReaderUrl({
   eink,
   mokeBookId,
   restoreProgress,
+  serverUrl,
 }: {
   filePath: string;
   eink: boolean;
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
+  serverUrl: string;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
     moke: '1',
     mokeEink: eink ? '1' : '0',
     mokeBookId,
+    mokeServerUrl: serverUrl,
   });
 
   if (restoreProgress) {

@@ -243,6 +243,19 @@ jobs:
         if: matrix.platform == 'android'
         run: cargo tauri icon src-tauri/icons/icon.png
 
+      # `tauri android init` scaffolds a default MainActivity that lacks the
+      # KeyDownInterceptor interface readest's native-bridge plugin requires, so
+      # the intercept_keys command (volume-key page turn) silently no-ops
+      # (talebook/moke#17). Overlay our key-interception MainActivity so KeyEvents
+      # are forwarded to the WebView. Find the generated path so this stays valid
+      # if the app identifier/package ever changes.
+      - name: Overlay key-interception MainActivity
+        if: matrix.platform == 'android'
+        run: |
+          for f in $(find src-tauri/gen/android/app/src/main/java -name MainActivity.kt); do
+            cp src-tauri/android/MainActivity.kt "$f"
+          done
+
       - name: Patch Android flavor dimensions
         if: matrix.platform == 'android'
         run: |
