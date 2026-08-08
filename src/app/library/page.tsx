@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Search, ArrowLeft, Loader2 } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { getErrorMessage, readApiJson, request } from '@/lib/api';
+import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
@@ -429,6 +429,10 @@ export default function LibraryPage() {
     setNetworkContextMenu({ x, y, book });
   };
 
+  const openNetworkBookUnavailable = (book: NetworkBook) => {
+    toast(`《${book.title || book.name || '该书'}》的书源未提供链接，无法查看详情或保存，可尝试搜索书名。`);
+  };
+
   const saveNetworkBookWithFeedback = async (book: NetworkBook) => {
     const sourceId = book.source_id;
     if (sourceId == null || !book.book_url) {
@@ -451,6 +455,15 @@ export default function LibraryPage() {
         toast('保存进度丢失，可能服务器已重启，请稍后重试。');
       }
     } catch (error) {
+      if (error instanceof MokeApiError && error.code === 'permission.not_permit') {
+        toast('当前账号没有保存网络书的权限，请联系管理员在后台开启「保存」权限。');
+        return;
+      }
+      if (error instanceof MokeApiError && error.code === 'user.need_login') {
+        toast('登录状态已失效，请重新登录后重试。');
+        router.push('/login');
+        return;
+      }
       toast(getErrorMessage(error, '保存失败，请检查网络或登录状态。'));
     }
   };
@@ -463,6 +476,7 @@ export default function LibraryPage() {
         key: 'open',
         label: '查看详情',
         icon: <BookOpen className="w-3.5 h-3.5" />,
+        disabled: sourceId == null || !book.book_url,
         onClick: () => {
           if (sourceId != null && book.book_url) {
             router.push(buildNetworkBookHref(sourceId, book.book_url));
@@ -877,7 +891,7 @@ export default function LibraryPage() {
               ) : viewMode === 'rows' ? (
                 <NetworkBookTable books={networkSearchResults} onContextAction={openNetworkContextMenu} />
               ) : (
-                <NetworkBookGrid books={networkSearchResults} viewMode={viewMode} onContextAction={openNetworkContextMenu} />
+                <NetworkBookGrid books={networkSearchResults} viewMode={viewMode} onContextAction={openNetworkContextMenu} onOpenUnavailable={openNetworkBookUnavailable} />
               )}
             </div>
           ) : (
@@ -912,7 +926,7 @@ export default function LibraryPage() {
                 ) : viewMode === 'rows' ? (
                   <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} />
                 ) : (
-                  <NetworkBookGrid books={networkBooks} viewMode={viewMode} onContextAction={openNetworkContextMenu} />
+                  <NetworkBookGrid books={networkBooks} viewMode={viewMode} onContextAction={openNetworkContextMenu} onOpenUnavailable={openNetworkBookUnavailable} />
                 )}
               </div>
 
@@ -1022,6 +1036,7 @@ function NetworkBookTable({
 function buildNetworkCardHandlers(
   book: NetworkBook,
   onContextAction: (book: NetworkBook, x: number, y: number) => void,
+  onTap?: (book: NetworkBook) => void,
 ) {
   let pressTimer: number | null = null;
   let didLongPress = false;
@@ -1050,7 +1065,9 @@ function buildNetworkCardHandlers(
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
     },
     onClick: (e: React.MouseEvent) => {
-      if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+      if (didLongPress) { e.preventDefault(); e.stopPropagation(); return; }
+      // 没有可打开链接的书：普通点击给提示（否则卡片是「死的」）
+      if (onTap) onTap(book);
     },
   };
 }
@@ -1059,10 +1076,13 @@ function NetworkBookGrid({
   books,
   viewMode,
   onContextAction,
+  onOpenUnavailable,
 }: {
   books: NetworkBook[];
   viewMode: ViewMode;
   onContextAction?: (book: NetworkBook, x: number, y: number) => void;
+  /** 该书没有 book_url（无法打开详情）时，普通点击的回调（用于提示）。 */
+  onOpenUnavailable?: (book: NetworkBook) => void;
 }) {
   return (
     <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
@@ -1078,7 +1098,14 @@ function NetworkBookGrid({
         const ci = getColorIndex(title + idx);
         const href =
           book.source_id != null && book.book_url ? buildNetworkBookHref(book.source_id, book.book_url) : '';
-        const cardHandlers = onContextAction ? buildNetworkCardHandlers(book, onContextAction) : {};
+        // 书源未提供 book_url 时没有可打开的详情页：让普通点击给出提示而不是死卡片。
+        const cardHandlers = onContextAction
+          ? buildNetworkCardHandlers(
+              book,
+              onContextAction,
+              href ? undefined : onOpenUnavailable,
+            )
+          : {};
 
         if (viewMode === 'grid') {
           const card = (

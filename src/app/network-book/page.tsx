@@ -100,6 +100,10 @@ function NetworkBookContent() {
         router.push('/login');
         return;
       }
+      if (e instanceof MokeApiError && e.code === 'permission.not_permit') {
+        setSaveError('当前账号没有保存网络书的权限，请联系管理员在后台开启「保存」权限。');
+        return;
+      }
       setSaveError(getErrorMessage(e, '发起保存失败。'));
     } finally {
       if (aliveRef.current) setSaving(false);
