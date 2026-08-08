@@ -147,6 +147,16 @@ jobs:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
+      # ohos init 用模板默认图标（蓝底系统图标）。`tauri icon` 现在支持
+      # OpenHarmony：gen/ohos 已存在，它会把 Moke 图标写进
+      # gen/ohos/{entry,AppScope}/resources/base/media（foreground/background/
+      # startIcon），否则 APK 会带默认图标。CLI 来自上面编译的 vendor/tauri。
+      - name: Generate OpenHarmony launcher icons
+        run: cargo tauri icon src-tauri/icons/icon.png
+        env:
+          OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
+          HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
+
       # 提前 ohpm install，让 scripts/prepare-ohos.mjs 能改到
       # oh_modules/@ohos-rs/ability 里的 DefaultWebview.ets（补 domStorageAccess(true)，
       # 否则 zustand persist 的 localStorage 不可用）。该脚本在 beforeBuildCommand
