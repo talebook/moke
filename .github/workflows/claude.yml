@@ -31,23 +31,25 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install ocgo
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/kiowx/ocgo/main/install.sh | bash
-          sudo mv ocgo /usr/local/bin/
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
-      - name: Start ocgo proxy with Kimi K3
-        env:
-          OCGO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+      - name: Install opencode-api
+        run: npm install -g opencode-api
+
+      - name: Start opencode-api proxy
         run: |
-          ocgo launch claude --model kimi-k3 --port 11434 &
+          opencode-api start &
           sleep 5
 
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
-          ANTHROPIC_BASE_URL: "http://127.0.0.1:11434"
+          ANTHROPIC_BASE_URL: "http://127.0.0.1:4141"
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENCODE_GO_API_KEY }}
           ANTHROPIC_MODEL: kimi-k3
           ANTHROPIC_DEFAULT_OPUS_MODEL: kimi-k3
           ANTHROPIC_DEFAULT_SONNET_MODEL: kimi-k3
