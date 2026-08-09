@@ -2,11 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+import {
+  buildEmbeddedReaderHomeUrl,
   buildEmbeddedReaderUrl,
   buildReaderHomeWindowLabel,
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
+} from '../src/lib/moke-reader.ts';
 } from '../src/lib/moke-reader.ts';
 
 test('OHOS uses the single-WebView reader flow', () => {
@@ -93,4 +96,35 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     location: 'page=142',
     updated_at: '2026-07-24T00:00:00.000Z',
   });
+});
+
+test('buildEmbeddedReaderHomeUrl passes mokeServerUrl only when the reader must save progress itself', () => {
+  // Single-WebView runtimes: reader-home window must direct-save progress.
+  const mobile = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: true,
+      serverUrl: 'http://192.168.1.5:8080',
+      includeServerUrl: true,
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(mobile.pathname, '/readest/');
+  assert.equal(mobile.searchParams.get('moke'), '1');
+  assert.equal(mobile.searchParams.get('mokeEink'), '1');
+  assert.equal(mobile.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+
+  // Desktop: no mokeServerUrl so the main window's ReaderProgressProvider is the
+  // single saver (no duplicate write via mokeBridge's direct POST).
+  const desktop = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: false,
+      serverUrl: 'http://192.168.1.5:8080',
+      includeServerUrl: false,
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(desktop.pathname, '/readest/');
+  assert.equal(desktop.searchParams.get('moke'), '1');
+  assert.equal(desktop.searchParams.get('mokeEink'), '0');
+  assert.equal(desktop.searchParams.get('mokeServerUrl'), null);
 });

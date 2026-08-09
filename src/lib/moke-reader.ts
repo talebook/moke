@@ -92,6 +92,27 @@ export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): stri
   return `moke-home-${timestamp}`;
 }
 
+export function buildEmbeddedReaderHomeUrl({
+  eink,
+  serverUrl,
+  includeServerUrl,
+}: {
+  eink: boolean;
+  serverUrl: string;
+  includeServerUrl: boolean;
+}): string {
+  const params = new URLSearchParams({
+    moke: '1',
+    mokeEink: eink ? '1' : '0',
+  });
+
+  if (includeServerUrl) {
+    params.set('mokeServerUrl', serverUrl);
+  }
+
+  return `/readest/?${params.toString()}`;
+}
+
 export async function openEmbeddedReaderHome({
   eink,
   serverUrl,
@@ -101,21 +122,33 @@ export async function openEmbeddedReaderHome({
   serverUrl: string;
   navigate: (href: string) => void;
 }): Promise<void> {
-  const params = new URLSearchParams({
-    moke: '1',
-    mokeEink: eink ? '1' : '0',
-    mokeServerUrl: serverUrl,
-  });
-  const href = `/readest/?${params.toString()}`;
+  const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
-  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+  let currentPlatform = 'web';
+  if (isTauri) {
+    currentPlatform = await getMokeRuntimePlatform();
+  }
+
+  const singleWebview = isSingleWebviewRuntime(currentPlatform);
+
+  // Only pass mokeServerUrl where the reader must save progress itself: single-
+  // WebView runtimes (OHOS/Android/iOS) and the web build replace the host app,
+  // so there is no main-window ReaderProgressProvider to save for them. Desktop
+  // keeps the old behavior — the reader-home window gets no serverUrl and the
+  // main window's ReaderProgressProvider is the single saver (mokeBridge would
+  // otherwise POST a second, duplicate write on every page:changed).
+  const href = buildEmbeddedReaderHomeUrl({
+    eink,
+    serverUrl,
+    includeServerUrl: !isTauri || singleWebview,
+  });
+
+  if (!isTauri) {
     navigate(href);
     return;
   }
 
-  const currentPlatform = await getMokeRuntimePlatform();
-
-  if (isSingleWebviewRuntime(currentPlatform)) {
+  if (singleWebview) {
     await navigateFullDocument(href, navigate);
     return;
   }
