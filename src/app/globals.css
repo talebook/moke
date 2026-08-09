@@ -592,6 +592,21 @@
   border-color: #000000 !important;
 }
 
+/* Loading spinners: the ring is border-primary/20 (shelf) or
+   border-muted-foreground/20 (everywhere else) with a border-t-primary
+   rotating segment. The border-primary/20 rule above would flatten both the
+   ring and the segment to black — an invisible "solid black disc" that no
+   longer reads as a spinner. Restore the classic e-ink spinner look: a light
+   gray ring with a solid black rotating segment, and give the gray-ring
+   spinners the same treatment (they were left fully colored before). */
+[data-eink='true'] [class*='animate-spin'][class*='border-primary/'],
+[data-eink='true'] [class*='animate-spin'][class*='border-muted-foreground/'] {
+  border-color: #E5E5E5 !important;
+}
+[data-eink='true'] [class*='animate-spin'][class*='border-t-primary'] {
+  border-top-color: #000000 !important;
+}
+
 /* from-primary / via-primary / to-primary: brown-gradient avatar /
    icon containers (e.g. the user page profile avatar). The brown
    gradient collapses to a muddy gray on e-ink; invert to solid black
