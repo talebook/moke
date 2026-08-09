@@ -14,16 +14,34 @@
     "shell:default",
     "opener:default",
     {
-      "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**" }]
-    },
-    {
       "identifier": "fs:allow-read",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$APPCACHE" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$APPLOG" },
+        { "path": "$APPLOG/**" },
+        { "path": "$TEMP" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
