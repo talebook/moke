@@ -457,6 +457,14 @@ jobs:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
+      # 显式先跑 prepare-ohos.mjs：vendored tauri-cli 的 ohos build 用
+      # Target::Android 加载平台配置（open_harmony/build.rs），tauri.ohos.conf.json
+      # 的 beforeBuildCommand 不会被读取，因此 back-key / domStorageAccess 补丁
+      # 必须在此处显式应用，再构建 HAP。
+      - name: Apply OHOS back-key patch
+        if: matrix.platform == 'ohos'
+        run: node scripts/prepare-ohos.mjs
+
       - name: Build OHOS HAP
         if: matrix.platform == 'ohos'
         run: cargo tauri ohos build
