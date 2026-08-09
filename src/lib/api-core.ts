@@ -52,8 +52,12 @@ export function getErrorMessage(error: unknown, fallback = '操作失败，请�
   if (error instanceof MokeApiError) return error.message || fallback;
   if (error instanceof Error) {
     if (error.message === 'server.url.missing') return '服务器地址丢失，请重新连接书库。';
+    if (error.message === 'image.url.invalid') return '图片地址无效。';
+    if (error.message.startsWith('image.http.')) return '封面加载失败。';
     if (error.message.startsWith('http.')) return `服务器返回 ${error.message.replace('http.', '')}。`;
-    return error.message || fallback;
+    // 未知 Error：不把原始（可能是英文/内部）报错文本直接暴露给用户，
+    // 统一走调用方传入的兜底文案。
+    return fallback;
   }
   return fallback;
 }

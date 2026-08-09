@@ -104,8 +104,8 @@ export async function request(url: string | URL, options?: RequestInit): Promise
       throw e;
     }
     debugLog('error', 'request', `✗ ${method} ${urlStr} 网络异常 (${Date.now() - startedAt}ms)`, errMsg);
-    // 延迟导入避免在 RSC/SSR 中加载 zustand store
-    import('@/lib/toast').then(m => m.useToast.getState().show(`网络连接失败：${errMsg}`)).catch(() => {});
+    // 不在这里弹 toast：页面层各自 catch 后按业务文案提示，
+    // 避免网络错误时页面 toast 与这里重复弹出两条。此处只记录日志。
     throw e;
   }
 

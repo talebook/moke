@@ -61,6 +61,11 @@ test('错误提示映射覆盖地址丢失、HTTP 错误和未知错误', () => 
   assert.equal(getErrorMessage(new Error('server.url.missing')), '服务器地址丢失，请重新连接书库。');
   assert.equal(getErrorMessage(new Error('http.502')), '服务器返回 502。');
   assert.equal(getErrorMessage(null, '稍后重试'), '稍后重试');
+  // 未知 Error：不暴露原始（可能英文/内部）报错文本，回退到兜底文案
+  assert.equal(getErrorMessage(new Error('Failed to fetch')), '操作失败，请稍后重试。');
+  assert.equal(getErrorMessage(new Error('Failed to fetch'), '网络异常'), '网络异常');
+  // MokeApiError 保留服务端业务提示
+  assert.equal(getErrorMessage(new MokeApiError('没有权限', 'permission.denied', 403)), '没有权限');
 });
 
 test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {
