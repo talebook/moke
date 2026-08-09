@@ -28,7 +28,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var keyLearnModeEnabled = false
 
     // DOWN 已被本 Activity 消费（并转发到 webview）的按键集合。被拦截的按键
-    // 必须把配套的 ACTION_UP/ACTION_CANCEL 也一并消费，否则按键组合会泄漏到
+    // 必须把配套的 ACTION_UP 也一并消费，否则按键组合会泄漏到
     // 系统默认处理。用集合而非单个 keyCode 以容忍快速连按/按键回滚。
     private val interceptedKeyCodes = mutableSetOf<Int>()
 
@@ -114,9 +114,9 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
                 interceptedKeyCodes.add(event.keyCode)
                 return true
             }
-            // 配套的 UP / CANCEL 也要消费，保证被拦截的按键组合不会泄漏到
-            // 系统默认处理（例如 BACK 的 UP 落到默认行为）。
-            KeyEvent.ACTION_UP, KeyEvent.ACTION_CANCEL -> {
+            // 配套的 UP 也要消费（KeyEvent 没有 CANCEL；CANCEL 属 MotionEvent），
+            // 保证被拦截的按键组合不会泄漏到系统默认处理（例如 BACK 的 UP 落到默认行为）。
+            KeyEvent.ACTION_UP -> {
                 if (interceptedKeyCodes.remove(event.keyCode)) return true
                 return super.dispatchKeyEvent(event)
             }
