@@ -89,8 +89,11 @@ fn write_moke_downloads(app: &AppHandle, books: &[MokeDownloadedBook]) -> Result
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    fs::write(path, serde_json::to_vec(books).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())
+    // 原子写入：先写同目录临时文件再 rename，避免写入中途崩溃/断电留下截断损坏的索引。
+    let tmp_path = path.with_extension("json.tmp");
+    fs::write(&tmp_path, serde_json::to_vec(books).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    fs::rename(&tmp_path, &path).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

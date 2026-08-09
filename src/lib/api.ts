@@ -508,3 +508,95 @@ export async function downloadBookBlob(
     throw new Error(reason || 'network.error');
   }
 }
+
+const BOOK_TAIL_WINDOW = 22 + 0xffff + 4096;
+
+function keepTailBytes(tail: Uint8Array, chunk: Uint8Array, windowSize: number): Uint8Array {
+  const combinedLength = tail.length + chunk.length;
+  if (combinedLength <= windowSize) {
+    const combined = new Uint8Array(combinedLength);
+    combined.set(tail, 0);
+    combined.set(chunk, tail.length);
+    return combined;
+  }
+
+  const result = new Uint8Array(windowSize);
+  if (chunk.length >= windowSize) {
+    result.set(chunk.subarray(chunk.length - windowSize));
+    return result;
+  }
+  const tailKeep = windowSize - chunk.length;
+  result.set(tail.subarray(tail.length - tailKeep), 0);
+  result.set(chunk, tailKeep);
+  return result;
+}
+
+/** 流式下载：把响应体逐块交给 write()，仅保留文件尾部用于 EPUB 校验，
+ *  避免把整本书累积在内存中（大书/低内存设备 OOM）。 */
+export async function streamBookDownload(
+  bookId: string | number,
+  format = 'epub',
+  options: {
+    write: (chunk: Uint8Array) => Promise<void>;
+    onProgress?: (progress: number) => void;
+    signal?: AbortSignal;
+  },
+): Promise<{ mimeType: string; size: number }> {
+  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const url = `${serverUrl}/api/book/${bookId}.${format}`;
+
+  const response = await request(url, {
+    ...(isTauriApp
+      ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+      : { credentials: 'include', signal: options?.signal }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`http.${response.status}`);
+  }
+
+  const total = Number(response.headers.get('content-length') || 0);
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    const blob = await response.blob();
+    options.onProgress?.(99);
+    await options.write(new Uint8Array(await blob.arrayBuffer()));
+    if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
+      throw new Error('book.epub.invalid');
+    }
+    return {
+      mimeType: response.headers.get('content-type') || 'application/octet-stream',
+      size: blob.size,
+    };
+  }
+
+  let tail: Uint8Array = new Uint8Array(0);
+  let received = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) break;
+    if (!value) continue;
+
+    await options.write(value);
+    received += value.length;
+    tail = keepTailBytes(tail, value, BOOK_TAIL_WINDOW);
+
+    if (total > 0) {
+      options.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
+    }
+  }
+
+  options.onProgress?.(99);
+
+  if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
+    throw new Error('book.epub.invalid');
+  }
+
+  return {
+    mimeType: response.headers.get('content-type') || 'application/octet-stream',
+    size: received,
+  };
+}

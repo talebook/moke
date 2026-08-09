@@ -4,8 +4,13 @@ import { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { downloadBookBlob, getErrorMessage, readApiJson, request } from '@/lib/api';
-import { deleteOfflineBook, getOfflineBook, saveOfflineBook } from '@/lib/offline-books';
+import { getErrorMessage, readApiJson, request } from '@/lib/api';
+import { deleteOfflineBook, getOfflineBook } from '@/lib/offline-books';
+import {
+  beginOfflineDownload,
+  downloadAndSaveOfflineBook,
+  endOfflineDownload,
+} from '@/lib/offline-download';
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
@@ -58,6 +63,7 @@ function DetailContent() {
   const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
   const downloadControllerRef = useRef<AbortController | null>(null);
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -192,6 +198,10 @@ function DetailContent() {
 
   const handleDownload = async () => {
     if (!book || downloading) return;
+    if (!beginOfflineDownload(serverUrl, String(book.id))) {
+      setMessage('该书籍正在下载中，请稍候。');
+      return;
+    }
 
     const controller = new AbortController();
     downloadControllerRef.current = controller;
@@ -200,19 +210,13 @@ function DetailContent() {
     setMessage('');
 
     try {
-      const blob = await downloadBookBlob(book.id, selectedFormat, {
-        onProgress: (progress) => {
-          setDownloadProgress(progress);
-        },
-        signal: controller.signal,
-      });
-      await saveOfflineBook({
+      await downloadAndSaveOfflineBook({
         serverUrl,
         bookId: String(book.id),
         title: book.title,
-        fileName: `${book.title}.${selectedFormat}`,
-        mimeType: blob.type || getDefaultMimeType(selectedFormat),
-        blob,
+        format: selectedFormat,
+        onProgress: setDownloadProgress,
+        signal: controller.signal,
       });
 
       setDownloadProgress(100);
@@ -233,13 +237,14 @@ function DetailContent() {
         setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
       } else if (reason === 'Failed to save book to file system') {
         setMessage('下载失败：保存文件到本地时出错。');
-      } else if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+      } else if (!isTauriApp) {
         setMessage('下载失败：当前浏览器模式下可能被跨域策略拦截。桌面版会走 Tauri 原生下载通道。');
       } else {
         setMessage('下载失败，请检查服务器连接或登录状态后重试。');
       }
       setDownloadProgress(0);
     } finally {
+      endOfflineDownload(serverUrl, String(book.id));
       if (downloadControllerRef.current === controller) {
         downloadControllerRef.current = null;
         setDownloading(false);
@@ -358,44 +363,52 @@ function DetailContent() {
               </div>
             </div>
 
-            <button
-              onClick={downloaded ? handleOfflineRead : handleDownload}
-              disabled={downloading}
-              className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
-            >
-              {downloading && <span className="absolute inset-0 bg-primary/15" />}
-              {downloading && (
-                <span
-                  className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-150 ease-out"
-                  style={{ width: `${downloadProgress}%` }}
-                />
-              )}
-              <span className="relative z-10 flex items-center justify-center gap-2 text-primary-foreground">
-                {downloaded && <BookOpen className="w-4 h-4" />}
-                {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
-              </span>
-            </button>
-            {book.files && book.files.length > 1 && !downloaded && (
-              <div className="mt-3 w-full md:w-[220px]">
-                <div className="flex flex-wrap gap-1.5">
-                  {book.files.map((f) => {
-                    const fmt = f.format.toLowerCase();
-                    const isActive = selectedFormat === fmt;
-                    return (
-                      <button
-                        key={fmt}
-                        onClick={() => setSelectedFormat(fmt)}
-                        className={`h-7 px-2.5 rounded-lg text-xs font-medium transition-all border ${
-                          isActive
-                            ? 'bg-primary/10 border-primary/30 text-primary'
-                            : 'bg-muted/50 border-border/40 text-muted-foreground hover:border-border'
-                        }`}
-                      >
-                        {fmt.toUpperCase()}
-                      </button>
-                    );
-                  })}
-                </div>
+            {isTauriApp ? (
+              <>
+                <button
+                  onClick={downloaded ? handleOfflineRead : handleDownload}
+                  disabled={downloading}
+                  className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
+                >
+                  {downloading && <span className="absolute inset-0 bg-primary/15" />}
+                  {downloading && (
+                    <span
+                      className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-150 ease-out"
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  )}
+                  <span className="relative z-10 flex items-center justify-center gap-2 text-primary-foreground">
+                    {downloaded && <BookOpen className="w-4 h-4" />}
+                    {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
+                  </span>
+                </button>
+                {book.files && book.files.length > 1 && !downloaded && (
+                  <div className="mt-3 w-full md:w-[220px]">
+                    <div className="flex flex-wrap gap-1.5">
+                      {book.files.map((f) => {
+                        const fmt = f.format.toLowerCase();
+                        const isActive = selectedFormat === fmt;
+                        return (
+                          <button
+                            key={fmt}
+                            onClick={() => setSelectedFormat(fmt)}
+                            className={`h-7 px-2.5 rounded-lg text-xs font-medium transition-all border ${
+                              isActive
+                                ? 'bg-primary/10 border-primary/30 text-primary'
+                                : 'bg-muted/50 border-border/40 text-muted-foreground hover:border-border'
+                            }`}
+                          >
+                            {fmt.toUpperCase()}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="mt-5 flex h-11 w-full items-center justify-center rounded-xl border border-border/60 bg-muted/40 px-3 text-center text-xs leading-snug text-muted-foreground md:mt-6 md:w-[220px]">
+                离线下载与离线阅读仅支持桌面版
               </div>
             )}
             <button
@@ -585,19 +598,6 @@ function normalizeNames(items?: string[] | Array<{ name: string }>, fallback?: s
   }
 
   return [];
-}
-
-function getDefaultMimeType(format: string) {
-  const mimeMap: Record<string, string> = {
-    epub: 'application/epub+zip',
-    pdf: 'application/pdf',
-    mobi: 'application/x-mobipocket-ebook',
-    azw3: 'application/vnd.amazon.ebook',
-    txt: 'text/plain',
-    rtf: 'application/rtf',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  };
-  return mimeMap[format.toLowerCase()] || 'application/octet-stream';
 }
 
 function formatFileSize(size: number) {

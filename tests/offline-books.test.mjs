@@ -7,6 +7,8 @@ import {
   saveOfflineBook,
 } from '../src/lib/offline-books.ts';
 import {
+  beginOfflineDownload,
+  endOfflineDownload,
   hasEpubCentralDirectory,
   makeOfflineBookKey,
   sanitizeOfflineFileName,
@@ -21,6 +23,24 @@ test('EPUB requires a ZIP central directory at the end of the file', async () =>
 
   assert.equal(await hasEpubCentralDirectory(validEpub), true);
   assert.equal(await hasEpubCentralDirectory(truncatedEpub), false);
+});
+
+test('EPUB 允许 EOCD 之后存在少量尾部字节', async () => {
+  const eocd = new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+  const trailing = new Blob([
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    eocd,
+    new Uint8Array([0x0a, 0x0d, 0x0a]),
+  ]);
+  assert.equal(await hasEpubCentralDirectory(trailing), true);
+
+  const excessive = new Blob([
+    new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+    eocd,
+    new Uint8Array(5000),
+  ]);
+  assert.equal(await hasEpubCentralDirectory(excessive), false);
 });
 
 function makeAsyncRequest(operation) {
@@ -117,6 +137,30 @@ test('离线书籍键会隔离不同服务器和书籍', () => {
 test('离线文件名会清理系统不允许的字符', () => {
   assert.equal(sanitizeOfflineFileName('三体:全集?.epub.'), '三体_全集_.epub');
   assert.equal(sanitizeOfflineFileName('...'), 'book.epub');
+});
+
+test('离线文件名会规避 Windows 保留名并截断超长名称', () => {
+  assert.equal(sanitizeOfflineFileName('CON.epub'), '_CON.epub');
+  assert.equal(sanitizeOfflineFileName('nul.pdf'), '_nul.pdf');
+  assert.equal(sanitizeOfflineFileName('LPT1.txt'), '_LPT1.txt');
+  assert.equal(sanitizeOfflineFileName('aux'), '_aux');
+
+  const longName = sanitizeOfflineFileName(`${'书'.repeat(300)}.epub`);
+  assert.ok(longName.length <= 120);
+  assert.ok(longName.endsWith('.epub'));
+});
+
+test('下载在途去重按 服务器+书 维度生效', () => {
+  assert.equal(beginOfflineDownload('https://a.example', '1'), true);
+  assert.equal(beginOfflineDownload('https://a.example', '1'), false);
+  assert.equal(beginOfflineDownload('https://a.example', '2'), true);
+  assert.equal(beginOfflineDownload('https://b.example', '1'), true);
+
+  endOfflineDownload('https://a.example', '1');
+  assert.equal(beginOfflineDownload('https://a.example', '1'), true);
+  endOfflineDownload('https://a.example', '1');
+  endOfflineDownload('https://a.example', '2');
+  endOfflineDownload('https://b.example', '1');
 });
 
 test('网页版可以保存并重新读取离线书籍', async () => {

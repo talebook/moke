@@ -17,8 +17,11 @@ import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionB
 import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookContextMenu';
 import { Select } from '@/components/ui/Select';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
-import { downloadBookBlob } from '@/lib/api';
-import { saveOfflineBook } from '@/lib/offline-books';
+import {
+  beginOfflineDownload,
+  downloadAndSaveOfflineBook,
+  endOfflineDownload,
+} from '@/lib/offline-download';
 import { useToast } from '@/lib/toast';
 import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
 
@@ -86,6 +89,7 @@ function getColorIndex(str: unknown) {
 export default function LibraryPage() {
   const { serverUrl } = useServerStore();
   const router = useRouter();
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   // Shared
   const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
@@ -378,20 +382,23 @@ export default function LibraryPage() {
   const downloadOne = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
+    if (!beginOfflineDownload(serverUrl, id)) {
+      toast(`《${book.title}》正在下载中`);
+      return;
+    }
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
     try {
-      const blob = await downloadBookBlob(id, format);
-      await saveOfflineBook({
+      await downloadAndSaveOfflineBook({
         serverUrl,
         bookId: id,
         title: book.title,
-        fileName: `${book.title}.${format}`,
-        mimeType: blob.type || 'application/octet-stream',
-        blob,
+        format,
       });
       toast(`《${book.title}》已下载`);
     } catch {
       toast('下载失败');
+    } finally {
+      endOfflineDownload(serverUrl, id);
     }
   };
 
@@ -404,12 +411,14 @@ export default function LibraryPage() {
         icon: <Check className="w-3.5 h-3.5" />,
         onClick: () => (inShelf ? removeFromShelf(String(book.id)) : addToShelf(String(book.id))),
       },
-      {
-        key: 'download',
-        label: '下载',
-        icon: <Download className="w-3.5 h-3.5" />,
-        onClick: () => downloadOne(String(book.id)),
-      },
+      ...(isTauriApp
+        ? [{
+            key: 'download',
+            label: '下载',
+            icon: <Download className="w-3.5 h-3.5" />,
+            onClick: () => downloadOne(String(book.id)),
+          }]
+        : []),
       { key: 'sep-1', label: '', separator: true },
       {
         key: 'select-many',
@@ -524,26 +533,27 @@ export default function LibraryPage() {
       if (ok > 0) toast(`已加入 ${ok} 本到书架`);
       if (fail > 0) toast(`${fail} 本加入失败`);
     } else if (action === 'download') {
+      let skipped = 0;
       for (const id of ids) {
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
+        if (!beginOfflineDownload(serverUrl, id)) { skipped++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
         try {
-          const blob = await downloadBookBlob(id, format);
-          await saveOfflineBook({
+          await downloadAndSaveOfflineBook({
             serverUrl,
             bookId: id,
             title: book.title,
-            fileName: `${book.title}.${format}`,
-            mimeType: blob.type || 'application/octet-stream',
-            blob,
+            format,
           });
           ok++;
         } catch { fail++; }
+        finally { endOfflineDownload(serverUrl, id); }
       }
       exitBatchMode();
       if (ok > 0) toast(`已下载 ${ok} 本`);
       if (fail > 0) toast(`${fail} 本下载失败`);
+      if (skipped > 0) toast(`${skipped} 本正在下载中，已跳过`);
     }
     return { ok, fail };
   };
@@ -956,7 +966,7 @@ export default function LibraryPage() {
         totalCount={books.length}
         canAddShelf
         canRemoveShelf={false}
-        canDownload
+        canDownload={isTauriApp}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}
