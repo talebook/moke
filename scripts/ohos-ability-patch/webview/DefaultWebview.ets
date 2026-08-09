@@ -49,6 +49,7 @@ function WebBuilder(data: WebviewNodeData) {
     .backgroundColor(data?.style?.backgroundColor)
     .visibility(data?.style?.visible === "hidden" ? Visibility.Hidden : Visibility.Visible)
     .javaScriptAccess(data?.javascriptEnable)
+    .domStorageAccess(true)
     .mediaPlayGestureAccess(
       typeof data?.autoplay === "boolean" && data.autoplay === true ? false : true,
     )

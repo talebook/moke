@@ -27,6 +27,11 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var interceptPageTurnerKeysEnabled = false
     private var keyLearnModeEnabled = false
 
+    // DOWN 已被本 Activity 消费（并转发到 webview）的按键集合。被拦截的按键
+    // 必须把配套的 ACTION_UP 也一并消费，否则按键组合会泄漏到
+    // 系统默认处理。用集合而非单个 keyCode 以容忍快速连按/按键回滚。
+    private val interceptedKeyCodes = mutableSetOf<Int>()
+
     private val keyEventMap = mapOf(
         KeyEvent.KEYCODE_BACK to "Back",
         KeyEvent.KEYCODE_VOLUME_DOWN to "VolumeDown",
@@ -44,11 +49,15 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private fun keyNameFor(keyCode: Int): String =
         keyEventMap[keyCode] ?: mediaKeyMap[keyCode] ?: "Keycode$keyCode"
 
-    private fun forwardKeyToWebView(keyName: String, keyCode: Int) {
-        wv?.evaluateJavascript(
+    // 转发按键到 webview。webview 尚未创建（onWebViewCreate 未调用）时返回
+    // false，调用方必须放行 super 而不是消费按键，避免"拦截但不转发"导致按键丢失。
+    private fun forwardKeyToWebView(keyName: String, keyCode: Int): Boolean {
+        val webView = wv ?: return false
+        webView.evaluateJavascript(
             """try { window.onNativeKeyDown("$keyName", $keyCode); } catch (_) {}""",
             null,
         )
+        return true
     }
 
     override fun onWebViewCreate(webView: WebView) {
@@ -71,39 +80,48 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         keyLearnModeEnabled = enabled
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            val keyCode = event.keyCode
+    // 判断某个按键当前是否应被本 Activity 拦截（与按键方向无关）。
+    private fun shouldIntercept(keyCode: Int): Boolean {
+        // Learn mode: forward and consume every key except BACK so the settings
+        // UI can capture whatever the remote sends. BACK stays excluded to match
+        // the reader: PageTurnerSettings explicitly does not allow binding Back
+        // (it is reserved for back navigation, and dialogs must still receive
+        // BACK to cancel their onCancel handler).
+        if (keyLearnModeEnabled && keyCode != KeyEvent.KEYCODE_BACK) return true
 
-            // Learn mode: forward and consume every key so the settings UI
-            // can capture whatever the remote sends.
-            if (keyLearnModeEnabled && keyCode != KeyEvent.KEYCODE_BACK) {
-                forwardKeyToWebView(keyNameFor(keyCode), keyCode)
-                return true
-            }
+        // Hardware page turner: intercept media keys when enabled.
+        if (interceptPageTurnerKeysEnabled && mediaKeyMap.containsKey(keyCode)) return true
 
-            // Hardware page turner: intercept media keys when enabled.
-            if (interceptPageTurnerKeysEnabled && mediaKeyMap.containsKey(keyCode)) {
-                forwardKeyToWebView(mediaKeyMap[keyCode]!!, keyCode)
-                return true
-            }
-
-            val keyName = keyEventMap[keyCode]
-            if (keyName != null) {
-                val shouldIntercept = when (keyCode) {
-                    KeyEvent.KEYCODE_BACK -> interceptBackKeyEnabled
-                    KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN ->
-                        interceptVolumeKeysEnabled
-                    else -> false
-                }
-
-                if (shouldIntercept) {
-                    forwardKeyToWebView(keyName, keyCode)
-                    return true
-                }
-            }
+        return when (keyCode) {
+            KeyEvent.KEYCODE_BACK -> interceptBackKeyEnabled
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN ->
+                interceptVolumeKeysEnabled
+            else -> false
         }
-        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (!shouldIntercept(event.keyCode)) {
+                    return super.dispatchKeyEvent(event)
+                }
+                // 只消费真正转发成功的按键；webview 未就绪时放行默认处理，
+                // 避免拦截到但转发不出去的按键被吞掉。
+                if (!forwardKeyToWebView(keyNameFor(event.keyCode), event.keyCode)) {
+                    return super.dispatchKeyEvent(event)
+                }
+                interceptedKeyCodes.add(event.keyCode)
+                return true
+            }
+            // 配套的 UP 也要消费（KeyEvent 没有 CANCEL；CANCEL 属 MotionEvent），
+            // 保证被拦截的按键组合不会泄漏到系统默认处理（例如 BACK 的 UP 落到默认行为）。
+            KeyEvent.ACTION_UP -> {
+                if (interceptedKeyCodes.remove(event.keyCode)) return true
+                return super.dispatchKeyEvent(event)
+            }
+            else -> return super.dispatchKeyEvent(event)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

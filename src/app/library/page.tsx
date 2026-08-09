@@ -9,7 +9,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { BookTable, type BookRow, type SortState } from '@/components/book/BookTable';
 import { buildNetworkBookHref } from '@/lib/network-book-core';
 import { pollNetworkSaveForBook, saveNetworkBook } from '@/lib/network-books';
 import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
@@ -17,8 +17,11 @@ import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionB
 import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookContextMenu';
 import { Select } from '@/components/ui/Select';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
-import { downloadBookBlob } from '@/lib/api';
-import { saveOfflineBook } from '@/lib/offline-books';
+import {
+  beginOfflineDownload,
+  downloadAndSaveOfflineBook,
+  endOfflineDownload,
+} from '@/lib/offline-download';
 import { useToast } from '@/lib/toast';
 import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
 
@@ -86,6 +89,7 @@ function getColorIndex(str: unknown) {
 export default function LibraryPage() {
   const { serverUrl } = useServerStore();
   const router = useRouter();
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   // Shared
   const [activeTab, setActiveTab] = useState<'local' | 'online'>('local');
@@ -98,6 +102,17 @@ export default function LibraryPage() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
   const [networkContextMenu, setNetworkContextMenu] = useState<{ x: number; y: number; book: NetworkBook } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
+
+  const networkSaveAbortRef = useRef<Set<AbortController>>(new Set());
+  const [networkSavingKeys, setNetworkSavingKeys] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const abortControllers = networkSaveAbortRef.current;
+    return () => {
+      for (const controller of abortControllers) controller.abort();
+      abortControllers.clear();
+    };
+  }, []);
 
   // Clear selection when tab switches or server changes
   useEffect(() => {
@@ -378,20 +393,23 @@ export default function LibraryPage() {
   const downloadOne = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
+    if (!beginOfflineDownload(serverUrl, id)) {
+      toast(`《${book.title}》正在下载中`);
+      return;
+    }
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
     try {
-      const blob = await downloadBookBlob(id, format);
-      await saveOfflineBook({
+      await downloadAndSaveOfflineBook({
         serverUrl,
         bookId: id,
         title: book.title,
-        fileName: `${book.title}.${format}`,
-        mimeType: blob.type || 'application/octet-stream',
-        blob,
+        format,
       });
       toast(`《${book.title}》已下载`);
     } catch {
       toast('下载失败');
+    } finally {
+      endOfflineDownload(serverUrl, id);
     }
   };
 
@@ -404,12 +422,14 @@ export default function LibraryPage() {
         icon: <Check className="w-3.5 h-3.5" />,
         onClick: () => (inShelf ? removeFromShelf(String(book.id)) : addToShelf(String(book.id))),
       },
-      {
-        key: 'download',
-        label: '下载',
-        icon: <Download className="w-3.5 h-3.5" />,
-        onClick: () => downloadOne(String(book.id)),
-      },
+      ...(isTauriApp
+        ? [{
+            key: 'download',
+            label: '下载',
+            icon: <Download className="w-3.5 h-3.5" />,
+            onClick: () => downloadOne(String(book.id)),
+          }]
+        : []),
       { key: 'sep-1', label: '', separator: true },
       {
         key: 'select-many',
@@ -439,22 +459,33 @@ export default function LibraryPage() {
       toast('缺少书源信息，无法保存。');
       return;
     }
+    const key = `${sourceId}:${book.book_url}`;
+    if (networkSavingKeys.has(key)) return;
+    setNetworkSavingKeys((prev) => new Set(prev).add(key));
+    const controller = new AbortController();
+    networkSaveAbortRef.current.add(controller);
     const title = book.title || book.name || '该书';
     try {
       await saveNetworkBook(serverUrl, sourceId, book.book_url);
+      if (controller.signal.aborted) return;
       toast(`已开始保存《${title}》到本地书库`);
       const result = await pollNetworkSaveForBook(serverUrl, sourceId, book.book_url, {
         intervalMs: 1500,
         maxMisses: 3,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (result.status === 'completed') {
         toast(`《${title}》已保存到书库`);
       } else if (result.status === 'failed') {
         toast(`《${title}》保存失败：${result.error || '未知错误'}`);
-      } else {
+      } else if (result.status === 'timeout') {
+        toast(`《${title}》保存超时，请稍后到书库查看或重试。`);
+      } else if (result.status === 'lost') {
         toast('保存进度丢失，可能服务器已重启，请稍后重试。');
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       if (error instanceof MokeApiError && error.code === 'permission.not_permit') {
         toast('当前账号没有保存网络书的权限，请联系管理员在后台开启「保存」权限。');
         return;
@@ -465,6 +496,13 @@ export default function LibraryPage() {
         return;
       }
       toast(getErrorMessage(error, '保存失败，请检查网络或登录状态。'));
+    } finally {
+      networkSaveAbortRef.current.delete(controller);
+      setNetworkSavingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -488,7 +526,8 @@ export default function LibraryPage() {
         key: 'save',
         label: '保存到本地书库',
         icon: <Download className="w-3.5 h-3.5" />,
-        disabled: sourceId == null || !book.book_url,
+        disabled:
+          sourceId == null || !book.book_url || networkSavingKeys.has(`${sourceId}:${book.book_url}`),
         onClick: () => void saveNetworkBookWithFeedback(book),
       },
     ];
@@ -524,26 +563,27 @@ export default function LibraryPage() {
       if (ok > 0) toast(`已加入 ${ok} 本到书架`);
       if (fail > 0) toast(`${fail} 本加入失败`);
     } else if (action === 'download') {
+      let skipped = 0;
       for (const id of ids) {
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
+        if (!beginOfflineDownload(serverUrl, id)) { skipped++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
         try {
-          const blob = await downloadBookBlob(id, format);
-          await saveOfflineBook({
+          await downloadAndSaveOfflineBook({
             serverUrl,
             bookId: id,
             title: book.title,
-            fileName: `${book.title}.${format}`,
-            mimeType: blob.type || 'application/octet-stream',
-            blob,
+            format,
           });
           ok++;
         } catch { fail++; }
+        finally { endOfflineDownload(serverUrl, id); }
       }
       exitBatchMode();
       if (ok > 0) toast(`已下载 ${ok} 本`);
       if (fail > 0) toast(`${fail} 本下载失败`);
+      if (skipped > 0) toast(`${skipped} 本正在下载中，已跳过`);
     }
     return { ok, fail };
   };
@@ -672,6 +712,8 @@ export default function LibraryPage() {
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 onContextAction={openContextMenu}
+                paged={totalPages > 1}
+                onSortChange={() => setCurrentPage(1)}
               />
             ) : (
               <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
@@ -924,7 +966,7 @@ export default function LibraryPage() {
                     <p className="mt-2 text-sm text-muted-foreground">换个分类试试，或稍后再来看看。</p>
                   </div>
                 ) : viewMode === 'rows' ? (
-                  <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} />
+                  <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} paged onSortChange={() => setNetworkPage(1)} />
                 ) : (
                   <NetworkBookGrid books={networkBooks} viewMode={viewMode} onContextAction={openNetworkContextMenu} onOpenUnavailable={openNetworkBookUnavailable} />
                 )}
@@ -956,7 +998,7 @@ export default function LibraryPage() {
         totalCount={books.length}
         canAddShelf
         canRemoveShelf={false}
-        canDownload
+        canDownload={isTauriApp}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}
@@ -973,13 +1015,16 @@ export default function LibraryPage() {
           />
         );
       })()}
-      {networkContextMenu && (
-        <BookContextMenu
-          position={{ x: networkContextMenu.x, y: networkContextMenu.y }}
-          items={buildNetworkMenuItems(networkContextMenu.book)}
-          onClose={() => setNetworkContextMenu(null)}
-        />
-      )}
+      {networkContextMenu && (() => {
+        const book = networkContextMenu.book;
+        return (
+          <BookContextMenu
+            position={{ x: networkContextMenu.x, y: networkContextMenu.y }}
+            items={buildNetworkMenuItems(book)}
+            onClose={() => setNetworkContextMenu(null)}
+          />
+        );
+      })()}
     </DesktopLayout>
   );
 }
@@ -1010,9 +1055,14 @@ function networkBookToRow(book: NetworkBook, idx: number): BookRow {
 function NetworkBookTable({
   books,
   onContextAction,
+  paged = false,
+  onSortChange,
 }: {
   books: NetworkBook[];
   onContextAction?: (book: NetworkBook, x: number, y: number) => void;
+  /** 网络书籍也是分页加载时，排序只作用于当前页：显示提示并配合 onSortChange 重置页码。 */
+  paged?: boolean;
+  onSortChange?: (sort: SortState | null) => void;
 }) {
   return (
     <BookTable
@@ -1020,6 +1070,8 @@ function NetworkBookTable({
       getRowHref={(row) =>
         row.source_id != null && row.book_url ? buildNetworkBookHref(row.source_id, row.book_url) : ''
       }
+      paged={paged}
+      onSortChange={onSortChange}
       onContextAction={
         onContextAction
           ? (id, x, y) => {

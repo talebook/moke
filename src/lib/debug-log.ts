@@ -143,6 +143,9 @@ let consoleCaptureInstalled = false;
  * 这样任何直接调用 console.error / warn / log 的代码（第三方库、
  * 未接入 debugLog 的路径、浏览器内部的 unhandledrejection 打印等）
  * 都会出现在调试面板中。应在应用启动时调用一次。
+ *
+ * 注意：这会全局 patch console，并为每类日志缓存最多 1000 条，仅在
+ * 开发环境或已解锁开发者模式的用户上启用（见 app/layout.tsx 的门控）。
  */
 export function installConsoleCapture() {
   // SSR 下 window 不存在，跳过；服务端日志不应进入客户端面板
@@ -169,4 +172,18 @@ export function installConsoleCapture() {
   console.debug = (...args) => capture('info', originalConsole.debug, args);
   console.warn = (...args) => capture('warn', originalConsole.warn, args);
   console.error = (...args) => capture('error', originalConsole.error, args);
+}
+
+/**
+ * 撤销 installConsoleCapture 的 patch，恢复原生 console 方法。
+ * 用于生产环境用户在未解锁开发者模式时（或锁定后）关闭全局捕获。
+ */
+export function uninstallConsoleCapture() {
+  if (!consoleCaptureInstalled || typeof window === 'undefined') return;
+  consoleCaptureInstalled = false;
+  console.log = originalConsole.log;
+  console.info = originalConsole.info;
+  console.debug = originalConsole.debug;
+  console.warn = originalConsole.warn;
+  console.error = originalConsole.error;
 }

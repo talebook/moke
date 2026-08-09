@@ -72,10 +72,12 @@ export async function fetchNetworkSaveStatus(
   serverUrl: string,
   sourceId: number,
   bookUrl: string,
+  signal?: AbortSignal,
 ): Promise<NetworkSaveStatusResponse> {
   const params = new URLSearchParams({ source_id: String(sourceId), book_url: bookUrl });
   const response = await request(`${serverUrl}/api/network/save/status?${params.toString()}`, {
     credentials: 'include',
+    signal,
   });
   const data = await readApiJson<NetworkSaveStatusResponse>(response, '查询保存进度失败。');
   return data;
@@ -84,6 +86,8 @@ export async function fetchNetworkSaveStatus(
 export type PollNetworkSaveOptions = {
   intervalMs?: number;
   maxMisses?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
   onUpdate?: (state: NetworkSaveState) => void;
 };
@@ -97,6 +101,6 @@ export function pollNetworkSaveForBook(
 ): Promise<NetworkSaveState> {
   return pollNetworkSave({
     ...options,
-    fetchStatus: () => fetchNetworkSaveStatus(serverUrl, sourceId, bookUrl),
+    fetchStatus: (signal) => fetchNetworkSaveStatus(serverUrl, sourceId, bookUrl, signal),
   });
 }

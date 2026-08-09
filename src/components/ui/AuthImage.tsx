@@ -25,10 +25,13 @@ export function AuthImage({ src, fallback, alt = '', ...imgProps }: AuthImagePro
   const currentObjectUrl = useRef<string | null>(null);
 
   useEffect(() => {
+    // 每次换源都重置失败标记（不区分平台）：
+    // web 模式下 effect 会在平台分支提前 return，若不先重置，src 更换后
+    // failed 仍为 true，一直显示占位封面。
+    setFailed(false);
     if (!isTauriApp || !src) return;
 
     let cancelled = false;
-    setFailed(false);
 
     fetchImageObjectUrl(src)
       .then((url) => {

@@ -16,6 +16,32 @@ export async function getMokeRuntimePlatform(): Promise<string> {
   }
 }
 
+export type RuntimeCategory = 'desktop' | 'mobile';
+
+/**
+ * 运行时平台分类：单 WebView 运行时（OHOS/Android/iOS）→ 'mobile'，其余 → 'desktop'。
+ *
+ * 与 `getMokeRuntimePlatform` 不同，这里在 `moke_runtime_platform` 不可用时
+ * 直接按 mobile 判定。原因：plugin-os 在 OHOS 上会报 "linux"（Rust target_os
+ * = linux），`isSingleWebviewRuntime('linux')` 为 false，降级结果会误判为桌面，
+ * 进而去调用未注册的 updater 插件导致检查更新静默失败。而单 WebView 移动构建
+ * 必定注册 `moke_runtime_platform`，invoke 失败只可能是旧桌面后端或 IPC 异常，
+ * 此时按 mobile 走"复制下载链接"流程是最安全的兜底。
+ */
+export async function resolveRuntimeCategory(): Promise<RuntimeCategory> {
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return 'desktop';
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return runtimeCategoryFromPlatform(await invoke<string>('moke_runtime_platform'));
+  } catch {
+    return 'mobile';
+  }
+}
+
+export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
+  return isSingleWebviewRuntime(platform) ? 'mobile' : 'desktop';
+}
+
 /**
  * Full-document navigation for single-WebView runtimes (OHOS/Android/iOS).
  *
