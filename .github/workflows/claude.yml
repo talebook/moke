@@ -31,18 +31,30 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code via DeepSeek
+      - name: Install ocgo
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/kiowx/ocgo/main/install.sh | bash
+          sudo mv ocgo /usr/local/bin/
+
+      - name: Start ocgo proxy with Kimi K3
+        env:
+          OCGO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+        run: |
+          ocgo launch claude --model kimi-k3 --port 11434 &
+          sleep 5
+
+      - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
-          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
-          ANTHROPIC_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-flash
-          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-v4-flash
+          ANTHROPIC_BASE_URL: "http://127.0.0.1:11434"
+          ANTHROPIC_MODEL: kimi-k3
+          ANTHROPIC_DEFAULT_OPUS_MODEL: kimi-k3
+          ANTHROPIC_DEFAULT_SONNET_MODEL: kimi-k3
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: kimi-k3
+          CLAUDE_CODE_SUBAGENT_MODEL: kimi-k3
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: "dummy-key"
           additional_permissions: |
             actions: read
           claude_args: |
