@@ -3,6 +3,18 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
+/**
+ * Whether the reader itself must save progress to the server (and therefore the
+ * embedded reader URL should carry `mokeServerUrl`).
+ *
+ * Single-WebView runtimes (OHOS/Android/iOS) and the web build replace the host
+ * app, so there is no main-window ReaderProgressProvider to save for them.
+ * Desktop keeps the old behavior — the reader-home window gets no serverUrl and
+ * the main window's ReaderProgressProvider is the single saver.
+ */
+export const shouldIncludeServerUrl = (isTauri: boolean, platform: string): boolean =>
+  !isTauri || isSingleWebviewRuntime(platform);
+
 export async function getMokeRuntimePlatform(): Promise<string> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return 'web';
 
@@ -100,21 +112,19 @@ export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): stri
 export function buildEmbeddedReaderHomeUrl({
   eink,
   serverUrl,
-  includeServerUrl,
 }: {
   eink: boolean;
-  serverUrl: string;
-  includeServerUrl: boolean;
+  serverUrl?: string;
 }): string {
   const params = new URLSearchParams({
     moke: '1',
     mokeEink: eink ? '1' : '0',
   });
 
-  // Guard against the callers' `serverUrl || ''` convention: an empty string
-  // must not produce a bare `mokeServerUrl=` param that readest would treat as
-  // "server configured" when it only checks for the param's presence.
-  if (includeServerUrl && serverUrl) {
+  // Only carry mokeServerUrl when non-empty: a bare `mokeServerUrl=` param would
+  // be treated by readest as "server configured" when it only checks for the
+  // param's presence. Omit the param on desktop (callers simply don't pass it).
+  if (serverUrl) {
     params.set('mokeServerUrl', serverUrl);
   }
 
@@ -127,28 +137,38 @@ export async function openEmbeddedReaderHome({
   navigate,
 }: {
   eink: boolean;
-  serverUrl: string;
+  serverUrl?: string;
   navigate: (href: string) => void;
 }): Promise<void> {
   const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   let currentPlatform = 'web';
   if (isTauri) {
-    currentPlatform = await getMokeRuntimePlatform();
+    try {
+      currentPlatform = await getMokeRuntimePlatform();
+    } catch (error) {
+      // A failed probe must not block opening the reader — the desktop path
+      // never uses the probe result. Treat as desktop (non single-WebView).
+      console.warn('Unable to detect runtime platform, assuming desktop reader window flow:', error);
+      currentPlatform = 'desktop';
+    }
   }
 
   const singleWebview = isSingleWebviewRuntime(currentPlatform);
 
-  // Only pass mokeServerUrl where the reader must save progress itself: single-
-  // WebView runtimes (OHOS/Android/iOS) and the web build replace the host app,
-  // so there is no main-window ReaderProgressProvider to save for them. Desktop
-  // keeps the old behavior — the reader-home window gets no serverUrl and the
-  // main window's ReaderProgressProvider is the single saver (mokeBridge would
-  // otherwise POST a second, duplicate write on every page:changed).
+  // Only pass mokeServerUrl where the reader must save progress itself:
+  // single-WebView runtimes (OHOS/Android/iOS) and the web build replace the
+  // host app, so there is no main-window ReaderProgressProvider to save for
+  // them (mokeBridge would otherwise POST a second, duplicate write on every
+  // page:changed). Desktop keeps the old behavior — the reader-home window gets
+  // no serverUrl and the main window's ReaderProgressProvider is the single
+  // saver. That is safe for the desktop built-in library: it does not read
+  // mokeServerUrl at all — server browsing (shelf/library/search/detail) is
+  // served by the main window, and the reader-home window is only a reading
+  // container.
   const href = buildEmbeddedReaderHomeUrl({
     eink,
-    serverUrl,
-    includeServerUrl: !isTauri || singleWebview,
+    serverUrl: shouldIncludeServerUrl(isTauri, currentPlatform) ? serverUrl : undefined,
   });
 
   if (!isTauri) {
@@ -201,15 +221,20 @@ export function buildEmbeddedReaderUrl({
   eink: boolean;
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
-  serverUrl: string;
+  serverUrl?: string;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
     moke: '1',
     mokeEink: eink ? '1' : '0',
     mokeBookId,
-    mokeServerUrl: serverUrl,
   });
+
+  // Same empty-value guard as buildEmbeddedReaderHomeUrl: callers may pass ''
+  // and a bare `mokeServerUrl=` would be treated as "server configured".
+  if (serverUrl) {
+    params.set('mokeServerUrl', serverUrl);
+  }
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));

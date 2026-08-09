@@ -81,7 +81,7 @@ export default function SettingsPage() {
     try {
       await openEmbeddedReaderHome({
         eink: useSettingsStore.getState().eink,
-        serverUrl: serverUrl || '',
+        serverUrl,
         navigate: (href) => router.push(href),
       });
     } catch (error) {
