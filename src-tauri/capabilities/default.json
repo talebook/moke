@@ -74,15 +74,10 @@
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },

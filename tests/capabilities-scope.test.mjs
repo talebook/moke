@@ -29,6 +29,10 @@ const ALLOWED_FS_OPEN_PREFIXES = [
   '$TEMP',
 ];
 
+function readCapability(file) {
+  return JSON.parse(readFileSync(join(repoRoot, file), 'utf8'));
+}
+
 function collectFsOpenerAllowEntries(capability) {
   const entries = [];
   for (const permission of capability.permissions) {
@@ -48,16 +52,22 @@ function hasParentDirTraversal(path) {
   return path.split(/[\\/]/).includes('..');
 }
 
+// A path is restricted only when it points strictly *inside* an allowed base
+// dir — `$APPDATA/**`, `$APPDATA/settings.json`, `$APPDATA\books\x` — and not
+// at the bare root itself. A bare `$APPDATA` entry would put the whole
+// app-data root into scope, allowing `remove(appDataDir(), {recursive:true})`
+// etc. (the exact regression this PR removed), so bare roots are rejected.
+// Matching must use a single backslash (`\`), the form JSON.parse produces.
 function isRestrictedToPrivateDirs(path) {
   if (hasParentDirTraversal(path)) return false;
   return ALLOWED_FS_OPEN_PREFIXES.some(
-    (prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\\\`)
+    (prefix) => path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\`)
   );
 }
 
 for (const file of CAPABILITY_FILES) {
   test(`${file} fs/opener allow entries are restricted to app-private/temp dirs`, () => {
-    const capability = JSON.parse(readFileSync(join(repoRoot, file), 'utf8'));
+    const capability = readCapability(file);
     const offenders = collectFsOpenerAllowEntries(capability)
       .filter(({ path }) => !isRestrictedToPrivateDirs(path))
       .map(({ identifier, path }) => `${identifier}: ${path}`);
@@ -65,15 +75,29 @@ for (const file of CAPABILITY_FILES) {
   });
 }
 
-test('default.json and ohos.json fs:scope allow lists are identical', () => {
-  const readScope = (file) => {
-    const capability = JSON.parse(readFileSync(join(repoRoot, file), 'utf8'));
-    const scope = capability.permissions.find(
-      (p) => typeof p === 'object' && p.identifier === 'fs:scope'
-    );
-    assert.ok(scope, `${file} must declare fs:scope`);
-    return JSON.stringify(scope.allow ?? []);
-  };
-  const [defaultFile, ohosFile] = CAPABILITY_FILES;
-  assert.equal(readScope(defaultFile), readScope(ohosFile));
-});
+const FS_LIST_PERMISSIONS = [
+  'fs:allow-read',
+  'fs:allow-write',
+  'fs:allow-write-text-file',
+  'fs:allow-write-file',
+  'fs:allow-mkdir',
+  'fs:scope',
+];
+
+// The Tauri v2 fs plugin merges every fs allow list into one global scope, so
+// default.json and ohos.json must agree on all of them — not just fs:scope.
+// Compare the parsed arrays directly (deepEqual) to avoid order-sensitivity.
+for (const identifier of FS_LIST_PERMISSIONS) {
+  test(`default.json and ohos.json ${identifier} allow lists are identical`, () => {
+    const getList = (file) => {
+      const capability = readCapability(file);
+      const permission = capability.permissions.find(
+        (p) => typeof p === 'object' && p.identifier === identifier
+      );
+      assert.ok(permission, `${file} must declare ${identifier}`);
+      return permission.allow ?? [];
+    };
+    const [defaultFile, ohosFile] = CAPABILITY_FILES;
+    assert.deepEqual(getList(defaultFile), getList(ohosFile));
+  });
+}
