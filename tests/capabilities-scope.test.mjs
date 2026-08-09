@@ -82,11 +82,13 @@ const FS_LIST_PERMISSIONS = [
   'fs:allow-write-file',
   'fs:allow-mkdir',
   'fs:scope',
+  'fs:scope-appdata-recursive',
+  'fs:scope-appconfig-recursive',
 ];
 
 // The Tauri v2 fs plugin merges every fs allow list into one global scope, so
 // default.json and ohos.json must agree on all of them — not just fs:scope.
-// Compare the parsed arrays directly (deepEqual) to avoid order-sensitivity.
+// Compare sorted-by-path entry lists (order-independent).
 for (const identifier of FS_LIST_PERMISSIONS) {
   test(`default.json and ohos.json ${identifier} allow lists are identical`, () => {
     const getList = (file) => {
@@ -95,7 +97,10 @@ for (const identifier of FS_LIST_PERMISSIONS) {
         (p) => typeof p === 'object' && p.identifier === identifier
       );
       assert.ok(permission, `${file} must declare ${identifier}`);
-      return permission.allow ?? [];
+      return (permission.allow ?? [])
+        .map((e) => e.path)
+        .filter((p) => p !== undefined)
+        .sort();
     };
     const [defaultFile, ohosFile] = CAPABILITY_FILES;
     assert.deepEqual(getList(defaultFile), getList(ohosFile));

@@ -14,6 +14,12 @@ crate-type = ["staticlib", "cdylib", "lib"]
 [build-dependencies]
 tauri-build = { path = "../vendor/tauri/crates/tauri-build", features = [] }
 
+[dev-dependencies]
+# Same glob crate version tauri resolves (0.3.4, already in Cargo.lock via tauri).
+# Used by the fs-scope regression test that locks the "$APPDATA/** does not
+# match the bare $APPDATA root" security property (HOU-30).
+glob = "0.3"
+
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
