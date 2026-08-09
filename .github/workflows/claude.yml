@@ -37,12 +37,30 @@ jobs:
           node-version: '18'
 
       - name: Install opencode-api
-        run: npm install -g opencode-api
+        run: |
+          npm install -g opencode-api
+          echo "✅ opencode-api installed"
 
       - name: Start opencode-api proxy
+        env:
+          OPENCODE_MODEL: kimi-k3
+          OPENCODE_LOG_LEVEL: debug
         run: |
-          opencode-api start &
+          echo "🚀 Starting opencode-api proxy..."
+          opencode-api start --log-level debug &
           sleep 5
+          echo "🔍 Checking health endpoint..."
+          curl -v http://127.0.0.1:4141/health || echo "⚠️ Health check failed, but continuing..."
+          echo "✅ opencode-api started on port 4141"
+
+      - name: Debug - Check proxy status
+        run: |
+          echo "📡 Checking if proxy is responding..."
+          curl -X POST http://127.0.0.1:4141/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: dummy" \
+            -d '{"model":"kimi-k3","max_tokens":10,"messages":[{"role":"user","content":"test"}]}' \
+            --max-time 5 || echo "⚠️ Test call failed (expected if no valid key in test)"
 
       - name: Run Claude Code
         id: claude
@@ -55,9 +73,24 @@ jobs:
           ANTHROPIC_DEFAULT_SONNET_MODEL: kimi-k3
           ANTHROPIC_DEFAULT_HAIKU_MODEL: kimi-k3
           CLAUDE_CODE_SUBAGENT_MODEL: kimi-k3
+          # Claude Code 详细日志
+          CLAUDE_CODE_VERBOSE: "true"
+          CLAUDE_CODE_DEBUG: "true"
+          DEBUG: "anthropic:*"
         with:
           anthropic_api_key: "dummy-key"
           additional_permissions: |
             actions: read
           claude_args: |
+            --verbose
+            --debug
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue:*),Bash(gh search:*),Bash(gh label:*),Bash(git fetch:*),Bash(gh api:*),Bash(curl:*),WebFetch"
+
+      - name: Print Claude output
+        if: always()
+        run: |
+          echo "📝 Claude Response:"
+          echo "${{ steps.claude.outputs.result }}" | head -100
+          echo "---"
+          echo "❌ Error (if any):"
+          echo "${{ steps.claude.outputs.error }}"
