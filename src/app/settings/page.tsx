@@ -255,18 +255,34 @@ function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMo
     { value: 'system', label: '跟随系统', icon: Settings2 },
   ];
 
+  // Resolve the actual applied theme so the row's leading icon matches what
+  // the user sees (in 'system' mode that follows prefers-color-scheme).
+  const [systemDark, setSystemDark] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    setSystemDark(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  const effectiveDark = value === 'dark' || (value === 'system' && systemDark);
+
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
       <div className="flex items-start gap-3.5 min-w-0">
         <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
-          {value === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+          {effectiveDark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
         </div>
         <div className="min-w-0 py-0.5">
           <p className="text-sm font-medium text-foreground">外观</p>
           <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">选择浅色、深色或跟随系统外观</p>
         </div>
       </div>
-      <div className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm">
+      <div
+        role="radiogroup"
+        aria-label="外观主题"
+        className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm"
+      >
         {options.map((opt) => {
           const Icon = opt.icon;
           const active = value === opt.value;
@@ -274,6 +290,8 @@ function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMo
             <button
               key={opt.value}
               type="button"
+              role="radio"
+              aria-checked={active}
               aria-label={opt.label}
               title={opt.label}
               onClick={() => onChange(opt.value)}
