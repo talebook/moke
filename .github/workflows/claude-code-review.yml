@@ -31,13 +31,13 @@ jobs:
         with:
           fetch-depth: 0        # 获取完整历史，便于审查
 
-      - name: Run Claude Review
+      - name: Run Claude Review via DeepSeek
         id: claude-review
         uses: anthropics/claude-code-action@v1
         env:
           # ---- DeepSeek 接入配置 ----
-          ANTHROPIC_BASE_URL: ${{ secrets.CC_SWITCH_API_URL }}
-          ANTHROPIC_AUTH_TOKEN: ${{ secrets.OPENCODE_GO_API_KEY }}   # 你的 DeepSeek API Key
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}   # 你的 DeepSeek API Key
           # ---- 模型指定 ----
           ANTHROPIC_MODEL: "deepseek-v4-flash"                     # 主模型用 Flash
           ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash"        # 映射 Opus → Flash
@@ -46,7 +46,7 @@ jobs:
           CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"          # 子代理也用 Flash
         with:
           # 认证密钥（与 env 中 ANTHROPIC_AUTH_TOKEN 保持一致，但这里也需要显式传递）
-          anthropic_api_key: ${{ secrets.OPENCODE_GO_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
