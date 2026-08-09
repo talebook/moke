@@ -3,10 +3,10 @@
 import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { getErrorMessage, readApiJson, request } from '@/lib/api';
+import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow } from '@/components/book/BookTable';
@@ -20,6 +20,7 @@ import {
   endOfflineDownload,
 } from '@/lib/offline-download';
 import { useToast } from '@/lib/toast';
+import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
 
 interface BookItem {
@@ -44,6 +45,7 @@ function hasFormat(book: BookItem, filter: string) {
 
 function SearchContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { serverUrl } = useServerStore();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   const [query, setQuery] = useState(searchParams.get('q') || '');
@@ -60,6 +62,7 @@ function SearchContent() {
   const lastSelectedIdRef = useRef<string | null>(null);
   // 请求序号：连续搜索 / URL 参数变化时，慢的旧响应不会覆盖新结果。
   const searchSeqRef = useRef(0);
+  const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
   const filteredResults = useMemo(
     () => results.filter((book) => hasFormat(book, activeFilter)),
     [activeFilter, results],
@@ -89,12 +92,20 @@ function SearchContent() {
     setSearched(true);
     try {
       const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
-      const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。');
+      const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。', ['ok', 'user.need_login']);
+      if (data.err === 'user.need_login') {
+        router.push('/login');
+        return;
+      }
       if (seq !== searchSeqRef.current) return;
       if (data.err === 'ok') setResults(data.books || data.items || []);
     } catch (error) {
       if (seq !== searchSeqRef.current) return;
       setResults([]);
+      if (error instanceof MokeApiError && error.code === 'user.need_login') {
+        router.push('/login');
+        return;
+      }
       toast(getErrorMessage(error, '搜索失败，请检查服务器连接。'));
     } finally { if (seq === searchSeqRef.current) setLoading(false); }
   };
@@ -148,7 +159,7 @@ function SearchContent() {
   };
 
   // ── Single-item actions (from right-click / long-press menu) ────────────
-  const addToShelf = async (id: string) => {
+  const setShelf = async (id: string, inShelf: boolean) => {
     const book = results.find((b) => String(b.id) === id);
     if (!book) return;
     try {
@@ -156,13 +167,23 @@ function SearchContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ shelf: true }),
+        body: JSON.stringify({ shelf: inShelf }),
       });
       const data = await res.json();
-      if (data.err === 'ok') toast(`《${book.title}》已加入书架`);
-      else toast(data.msg || '加入失败');
+      if (data.err === 'user.need_login') {
+        router.push('/login');
+        return;
+      }
+      if (data.err === 'ok') {
+        setResults((prev) => prev.map((b) =>
+          String(b.id) === id ? { ...b, state: { ...(b as any).state, wants: inShelf } } : b,
+        ));
+        toast(inShelf ? `《${book.title}》已加入书架` : `《${book.title}》已移出书架`);
+      } else {
+        toast(data.msg || (inShelf ? '加入失败' : '移出失败'));
+      }
     } catch {
-      toast('加入失败，请检查网络');
+      toast(inShelf ? '加入失败，请检查网络' : '移出失败，请检查网络');
     }
   };
 
@@ -196,7 +217,7 @@ function SearchContent() {
         key: inShelf ? 'remove' : 'add',
         label: inShelf ? '移出书架' : '加入书架',
         icon: <Check className="w-3.5 h-3.5" />,
-        onClick: () => addToShelf(String(book.id)),
+        onClick: () => setShelf(String(book.id), !inShelf),
       },
       ...(isTauriApp
         ? [{
@@ -216,8 +237,22 @@ function SearchContent() {
     ];
   };
 
-  const openContextMenu = (bookId: string, x: number, y: number) => {
+  const openContextMenu = async (bookId: string, x: number, y: number) => {
     setContextMenu({ x, y, bookId });
+    // 搜索结果不带 state，菜单打开时回查 /readstate 刷新真实书架状态（L5）。
+    try {
+      const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, { credentials: 'include' });
+      const data = await res.json();
+      if (data.err === 'ok') {
+        setResults((prev) => prev.map((b) =>
+          String(b.id) === bookId ? { ...b, state: { ...(b as any).state, wants: Boolean(data.wants) } } : b,
+        ));
+      } else if (data.err === 'user.need_login') {
+        router.push('/login');
+      }
+    } catch {
+      // 回查失败时保持当前展示状态，菜单仍可打开
+    }
   };
 
   useEffect(() => {
@@ -233,7 +268,7 @@ function SearchContent() {
     let fail = 0;
 
     if (action === 'add-shelf') {
-      const results = await Promise.allSettled(
+      const settled = await Promise.allSettled(
         ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -241,9 +276,17 @@ function SearchContent() {
           body: JSON.stringify({ shelf: true }),
         }).then((r) => r.json())),
       );
-      for (const r of results) {
-        if (r.status === 'fulfilled' && r.value?.err === 'ok') ok++;
+      const succeeded: string[] = [];
+      for (let i = 0; i < ids.length; i++) {
+        const r = settled[i];
+        if (r.status === 'fulfilled' && r.value?.err === 'ok') { ok++; succeeded.push(ids[i]); }
         else fail++;
+      }
+      if (succeeded.length > 0) {
+        const done = new Set(succeeded);
+        setResults((prev) => prev.map((b) =>
+          done.has(String(b.id)) ? { ...b, state: { ...(b as any).state, wants: true } } : b,
+        ));
       }
       exitBatchMode();
       if (ok > 0) toast(`已加入 ${ok} 本到书架`);
@@ -356,10 +399,6 @@ function SearchContent() {
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const selected = selectedIds.has(bookId);
-                  const pressTimerRef = { current: null as number | null };
-                  const didLongPressRef = { current: false };
-                  let touchX = 0;
-                  let touchY = 0;
                   const cardHandlers = batchMode
                     ? {
                         onClick: (e: React.MouseEvent) => {
@@ -372,32 +411,7 @@ function SearchContent() {
                           toggleSelect(bookId, { shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
                         },
                       }
-                    : {
-                        onContextMenu: (e: React.MouseEvent) => {
-                          e.preventDefault();
-                          openContextMenu(bookId, e.clientX, e.clientY);
-                        },
-                        onTouchStart: (e: React.TouchEvent) => {
-                          didLongPressRef.current = false;
-                          const t = e.touches[0];
-                          touchX = t?.clientX ?? 0;
-                          touchY = t?.clientY ?? 0;
-                          pressTimerRef.current = window.setTimeout(() => {
-                            didLongPressRef.current = true;
-                            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
-                            openContextMenu(bookId, touchX, touchY);
-                          }, 500);
-                        },
-                        onTouchEnd: () => {
-                          if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-                        },
-                        onTouchMove: () => {
-                          if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-                        },
-                        onClick: (e: React.MouseEvent) => {
-                          if (didLongPressRef.current) { e.preventDefault(); e.stopPropagation(); }
-                        },
-                      };
+                    : makeLongPressHandlers(bookId, openContextMenu);
 
                   if (viewMode === 'grid') {
                   return (

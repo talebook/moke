@@ -22,6 +22,7 @@ import {
   downloadAndSaveOfflineBook,
   endOfflineDownload,
 } from '@/lib/offline-download';
+import { useLongPressRegistry } from '@/lib/long-press';
 import { useToast } from '@/lib/toast';
 import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
 
@@ -102,6 +103,7 @@ export default function LibraryPage() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
   const [networkContextMenu, setNetworkContextMenu] = useState<{ x: number; y: number; book: NetworkBook } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
+  const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
 
   const networkSaveAbortRef = useRef<Set<AbortController>>(new Set());
   const [networkSavingKeys, setNetworkSavingKeys] = useState<Set<string>>(new Set());
@@ -770,10 +772,6 @@ export default function LibraryPage() {
                   const selected = selectedIds.has(bookId);
                   // Build interaction handlers: batch mode toggles selection; otherwise
                   // right-click / long-press opens the context menu.
-                  const pressTimerRef = { current: null as number | null };
-                  const didLongPressRef = { current: false };
-                  let touchX = 0;
-                  let touchY = 0;
                   const cardHandlers = batchMode
                     ? {
                         onClick: (e: React.MouseEvent) => {
@@ -786,32 +784,7 @@ export default function LibraryPage() {
                           toggleSelect(bookId, { shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
                         },
                       }
-                    : {
-                        onContextMenu: (e: React.MouseEvent) => {
-                          e.preventDefault();
-                          openContextMenu(bookId, e.clientX, e.clientY);
-                        },
-                        onTouchStart: (e: React.TouchEvent) => {
-                          didLongPressRef.current = false;
-                          const t = e.touches[0];
-                          touchX = t?.clientX ?? 0;
-                          touchY = t?.clientY ?? 0;
-                          pressTimerRef.current = window.setTimeout(() => {
-                            didLongPressRef.current = true;
-                            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
-                            openContextMenu(bookId, touchX, touchY);
-                          }, 500);
-                        },
-                        onTouchEnd: () => {
-                          if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-                        },
-                        onTouchMove: () => {
-                          if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-                        },
-                        onClick: (e: React.MouseEvent) => {
-                          if (didLongPressRef.current) { e.preventDefault(); e.stopPropagation(); }
-                        },
-                      };
+                    : makeLongPressHandlers(bookId, openContextMenu);
                   return viewMode === 'grid' ? (
                     <Link key={bookId} href={`/detail?id=${bookId}`} {...cardHandlers} className={`book-card-motion group relative flex flex-col gap-3 rounded-[22px] p-2.5 transition-all duration-300 hover:bg-white/65 hover:shadow-[0_18px_45px_-30px_rgba(74,57,35,0.65)] ${selected ? 'ring-2 ring-primary/60 bg-white/70' : batchMode ? 'cursor-pointer' : ''}`}>
                       <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>

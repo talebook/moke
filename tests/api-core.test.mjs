@@ -57,6 +57,21 @@ test('API 的无效 JSON 和业务错误会转换成统一错误', async () => {
   );
 });
 
+test('need_login 未列入 okErrs 时抛 MokeApiError（会话失效场景）', async () => {
+  await assert.rejects(
+    () => readApiJson(
+      new Response(JSON.stringify({ err: 'user.need_login', msg: '请先登录' }), { status: 200 }),
+      '响应无效',
+    ),
+    (error) => {
+      assert.ok(error instanceof MokeApiError);
+      assert.equal(error.code, 'user.need_login');
+      assert.equal(error.message, '请先登录');
+      return true;
+    },
+  );
+});
+
 test('错误提示映射覆盖地址丢失、HTTP 错误和未知错误', () => {
   assert.equal(getErrorMessage(new Error('server.url.missing')), '服务器地址丢失，请重新连接书库。');
   assert.equal(getErrorMessage(new Error('http.502')), '服务器返回 502。');
