@@ -109,6 +109,17 @@ export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): stri
   return `moke-home-${timestamp}`;
 }
 
+/**
+ * Only carry mokeServerUrl when non-empty: a bare `mokeServerUrl=` param would
+ * be treated by readest as "server configured" when it only checks for the
+ * param's presence. Shared by both embedded-reader URL builders.
+ */
+function setServerUrlParam(params: URLSearchParams, serverUrl?: string): void {
+  if (serverUrl) {
+    params.set('mokeServerUrl', serverUrl);
+  }
+}
+
 export function buildEmbeddedReaderHomeUrl({
   eink,
   serverUrl,
@@ -121,12 +132,7 @@ export function buildEmbeddedReaderHomeUrl({
     mokeEink: eink ? '1' : '0',
   });
 
-  // Only carry mokeServerUrl when non-empty: a bare `mokeServerUrl=` param would
-  // be treated by readest as "server configured" when it only checks for the
-  // param's presence. Omit the param on desktop (callers simply don't pass it).
-  if (serverUrl) {
-    params.set('mokeServerUrl', serverUrl);
-  }
+  setServerUrlParam(params, serverUrl);
 
   return `/readest/?${params.toString()}`;
 }
@@ -143,14 +149,17 @@ export async function openEmbeddedReaderHome({
   const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   let currentPlatform = 'web';
+  let probeFailed = false;
   if (isTauri) {
     try {
       currentPlatform = await getMokeRuntimePlatform();
     } catch (error) {
-      // A failed probe must not block opening the reader — the desktop path
-      // never uses the probe result. Treat as desktop (non single-WebView).
+      // A failed probe must not block opening the reader. Fall back to the
+      // desktop window flow (on single-WebView runtimes window creation fails
+      // and we degrade to in-place navigation, which is the right flow there).
       console.warn('Unable to detect runtime platform, assuming desktop reader window flow:', error);
       currentPlatform = 'desktop';
+      probeFailed = true;
     }
   }
 
@@ -166,9 +175,17 @@ export async function openEmbeddedReaderHome({
   // mokeServerUrl at all — server browsing (shelf/library/search/detail) is
   // served by the main window, and the reader-home window is only a reading
   // container.
+  //
+  // Trade-off on probe failure: keep mokeServerUrl. A single-WebView runtime
+  // that fails the probe (its main-window ReaderProgressProvider is already
+  // unloaded) would otherwise silently lose progress saving — worse than an
+  // occasional duplicate save on desktop.
+  const includeServerUrl =
+    (isTauri && probeFailed) || shouldIncludeServerUrl(isTauri, currentPlatform);
+
   const href = buildEmbeddedReaderHomeUrl({
     eink,
-    serverUrl: shouldIncludeServerUrl(isTauri, currentPlatform) ? serverUrl : undefined,
+    serverUrl: includeServerUrl ? serverUrl : undefined,
   });
 
   if (!isTauri) {
@@ -230,11 +247,7 @@ export function buildEmbeddedReaderUrl({
     mokeBookId,
   });
 
-  // Same empty-value guard as buildEmbeddedReaderHomeUrl: callers may pass ''
-  // and a bare `mokeServerUrl=` would be treated as "server configured".
-  if (serverUrl) {
-    params.set('mokeServerUrl', serverUrl);
-  }
+  setServerUrlParam(params, serverUrl);
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));
@@ -246,6 +259,7 @@ export function buildEmbeddedReaderUrl({
 export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
+  platformOverride?: string,
 ): Promise<void> {
-  await navigateFullDocument(href, navigate);
+  await navigateFullDocument(href, navigate, platformOverride);
 }

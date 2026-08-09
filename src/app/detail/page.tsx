@@ -305,7 +305,7 @@ function DetailContent() {
             restoreProgress,
             serverUrl: useServerStore.getState().serverUrl,
           });
-          await openEmbeddedReaderBook(href, router.push);
+          await openEmbeddedReaderBook(href, router.push, currentPlatform);
           return;
         }
 
