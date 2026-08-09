@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useDebugLogStore, type DebugLogLevel, type DebugLogType } from '@/lib/debug-log';
 import { useDeveloperStore } from '@/lib/store/developer';
 
@@ -75,9 +76,8 @@ export function DebugLogPanel() {
           `[${l.time}] ${levelLabel[l.level]} [${l.tag}] ${l.message}${l.detail ? '\n' + l.detail : ''}`
       )
       .join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
+    const copied = await copyTextToClipboard(text);
+    if (!copied) {
       // 某些环境无剪贴板权限：退而把日志放进一个可选中的 prompt
       window.prompt('复制下面的日志：', text);
     }
