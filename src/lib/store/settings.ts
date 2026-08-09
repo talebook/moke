@@ -3,6 +3,18 @@ import { persist } from 'zustand/middleware';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export type ResolvedTheme = 'light' | 'dark';
+
+/**
+ * Single source of truth for resolving a ThemeMode into the actual theme.
+ * Used by the layout effect, the settings page, and (as an inlined copy) the
+ * anti-flash head script in layout.tsx — keep all three in sync when this
+ * changes.
+ */
+export function resolveTheme(theme: ThemeMode, prefersDark: boolean): ResolvedTheme {
+  return theme === 'dark' || (theme === 'system' && prefersDark) ? 'dark' : 'light';
+}
+
 interface SettingsState {
   // Manual force switch. Auto e-ink styling is handled in CSS via media queries
   // (@media (update: slow), (max-color: 1)); this just adds the .eink class for

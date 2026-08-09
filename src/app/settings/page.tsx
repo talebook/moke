@@ -8,7 +8,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
-import { useSettingsStore } from '@/lib/store/settings';
+import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import type { ThemeMode } from '@/lib/store/settings';
 import { cn } from '@/lib/utils';
 import { useUpdateStore } from '@/lib/store/update';
@@ -155,6 +155,7 @@ export default function SettingsPage() {
             <ThemeRow
               value={theme}
               onChange={setTheme}
+              disabled={eink}
             />
           </SettingsSection>
 
@@ -248,7 +249,7 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
   );
 }
 
-function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMode) => void }) {
+function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (v: ThemeMode) => void; disabled?: boolean }) {
   const options: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
     { value: 'light', label: '浅色', icon: Sun },
     { value: 'dark', label: '深色', icon: Moon },
@@ -261,27 +262,46 @@ function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMo
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     setSystemDark(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const onMediaChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener('change', onMediaChange);
+    return () => mq.removeEventListener('change', onMediaChange);
   }, []);
-  const effectiveDark = value === 'dark' || (value === 'system' && systemDark);
+  const effectiveDark = resolveTheme(value, systemDark) === 'dark';
+
+  // Roving tabindex + arrow keys so the radiogroup behaves per ARIA APG.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const index = options.findIndex((o) => o.value === value);
+    let next = index;
+    if (e.key === 'ArrowLeft') next = (index - 1 + options.length) % options.length;
+    else if (e.key === 'ArrowRight') next = (index + 1) % options.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = options.length - 1;
+    onChange(options[next].value);
+  };
 
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors ${disabled ? 'opacity-60' : 'hover:bg-muted/60'}`}>
       <div className="flex items-start gap-3.5 min-w-0">
         <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
           {effectiveDark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
         </div>
         <div className="min-w-0 py-0.5">
           <p className="text-sm font-medium text-foreground">外观</p>
-          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">选择浅色、深色或跟随系统外观</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
+            {disabled ? '墨水屏模式下外观已固定为黑白主题' : '选择浅色、深色或跟随系统外观'}
+          </p>
         </div>
       </div>
       <div
         role="radiogroup"
         aria-label="外观主题"
-        className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm"
+        aria-disabled={disabled || undefined}
+        onKeyDown={handleKeyDown}
+        className={`flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm ${disabled ? 'pointer-events-none' : ''}`}
       >
         {options.map((opt) => {
           const Icon = opt.icon;
@@ -294,6 +314,8 @@ function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMo
               aria-checked={active}
               aria-label={opt.label}
               title={opt.label}
+              disabled={disabled}
+              tabIndex={active ? 0 : -1}
               onClick={() => onChange(opt.value)}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all',

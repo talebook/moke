@@ -99,9 +99,10 @@
    bg-muted / border-border / ...) flip automatically via the CSS variables in
    @layer base. The rules below dark-adapt the hardcoded warm recipe used across
    pages — translucent white glass surfaces, amber hairline borders, amber tint
-   fills, status colors — mirroring the [data-eink] convention below. E-ink
-   rules come later in the file, so on an e-ink device dark mode loses to the
-   black/white override (as it should).
+   fills, status colors — mirroring the [data-eink] convention below.
+   E-ink and dark mode are mutually exclusive at the runtime level (layout.tsx
+   never adds the .dark class while data-eink='true'), so these rules and the
+   e-ink rules below can never apply to the same element at the same time.
 
    These use exact class-token matching ([class~='...']) instead of substring
    matching so a static token (bg-white/70) never leaks into hover/focus
@@ -226,28 +227,32 @@
    emerald-600, red-600, rose-500, blue-700) so light shades like
    text-amber-400 / text-green-400 keep their brightness, two-state
    hover:text-* transitions aren't flattened, and any existing Tailwind
-   dark:text-* variant on the same element keeps working. */
-.dark [class~='text-amber-700']:not([class*='dark:']),
-.dark [class~='text-amber-600']:not([class*='dark:']),
-.dark [class~='text-amber-500']:not([class*='dark:']) {
+   dark:text-* variant on the same element keeps working.
+   Guard note: we exclude elements that already carry a dark:text-* class so
+   the Tailwind utility wins; the guard is scoped to 'dark:text-' (not the
+   broad 'dark:') so a future dark:bg-* class on the same element can't
+   accidentally disable the text lightening. */
+.dark [class~='text-amber-700']:not([class*='dark:text-']),
+.dark [class~='text-amber-600']:not([class*='dark:text-']),
+.dark [class~='text-amber-500']:not([class*='dark:text-']) {
   color: #e2b97c !important;
 }
-.dark [class~='text-green-600']:not([class*='dark:']) {
+.dark [class~='text-green-600']:not([class*='dark:text-']) {
   color: #9dbb7a !important;
 }
-.dark [class~='text-green-400']:not([class*='dark:']) {
+.dark [class~='text-green-400']:not([class*='dark:text-']) {
   color: #a5c888 !important;
 }
-.dark [class~='text-emerald-600']:not([class*='dark:']) {
+.dark [class~='text-emerald-600']:not([class*='dark:text-']) {
   color: #8fbe9c !important;
 }
-.dark [class~='text-red-600']:not([class*='dark:']) {
+.dark [class~='text-red-600']:not([class*='dark:text-']) {
   color: #e07a6e !important;
 }
-.dark [class~='text-rose-500']:not([class*='dark:']) {
+.dark [class~='text-rose-500']:not([class*='dark:text-']) {
   color: #e58a9a !important;
 }
-.dark [class~='text-blue-700']:not([class*='dark:']) {
+.dark [class~='text-blue-700']:not([class*='dark:text-']) {
   color: #8faad9 !important;
 }
 /* Warm translucent "glass" / gradient page shells. */

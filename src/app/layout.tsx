@@ -6,7 +6,7 @@ import { ServerProvider } from '@/components/providers/ServerProvider';
 import { ReaderProgressProvider } from '@/components/providers/ReaderProgressProvider';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
 import { installConsoleCapture } from '@/lib/debug-log';
-import { useSettingsStore } from '@/lib/store/settings';
+import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 
 // 在浏览器端尽早 patch console，使 console.error/warn/log 也进入调试面板
 installConsoleCapture();
@@ -29,10 +29,15 @@ export default function RootLayout({
   // Appearance theme: 'light' | 'dark' | 'system'. 'system' resolves through
   // prefers-color-scheme and stays in sync while the app is running. The inline
   // head script below applies the theme before first paint to avoid a flash.
+  //
+  // E-ink mode is its own standalone theme: while it's on we never add the
+  // 'dark' class (nor switch color-scheme), so the black/white e-ink rules are
+  // the only ones in play and never fight the dark palette (see globals.css).
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
-      const dark = theme === 'dark' || (theme === 'system' && mq.matches);
+      const resolved = resolveTheme(theme, mq.matches);
+      const dark = !eink && resolved === 'dark';
       const el = document.documentElement;
       el.classList.toggle('dark', dark);
       el.style.colorScheme = dark ? 'dark' : 'light';
@@ -40,7 +45,7 @@ export default function RootLayout({
     apply();
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
-  }, [theme]);
+  }, [theme, eink]);
 
   return (
     <html lang="zh-CN" suppressHydrationWarning>
@@ -49,12 +54,15 @@ export default function RootLayout({
             already dark when dark mode is on (no flash of white). Reads the
             zustand persist payload directly; falls back to the OS preference
             for 'system'. Also syncs color-scheme so native scrollbars/form
-            controls match the theme.
+            controls match the theme. E-ink mode suppresses dark entirely.
+            WARNING: this duplicates resolveTheme() from src/lib/store/settings.ts
+            and assumes the zustand persist shape { state: { theme, eink } } —
+            keep it in sync when either changes.
             Note: the only reason for suppressHydrationWarning on <html> is
             that this script mutates the class attribute before hydration. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var t=s&&s.state&&s.state.theme||'system';var mq=window.matchMedia('(prefers-color-scheme: dark)');var dark=t==='dark'||(t==='system'&&mq.matches);if(dark){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark'}}catch(e){}})();`,
+            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var st=s&&s.state||{};var t=st.theme||'system';var eink=!!st.eink;var mq=window.matchMedia('(prefers-color-scheme: dark)');var dark=!eink&&(t==='dark'||(t==='system'&&mq.matches));if(dark){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark'}else{document.documentElement.style.colorScheme='light'}}catch(e){}})();`,
           }}
         />
         {/* Keep the first render independent from third-party font servers. The
