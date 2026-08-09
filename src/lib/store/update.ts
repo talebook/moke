@@ -118,12 +118,12 @@ async function importProcess(): Promise<ProcessMod | null> {
 // 需要运行时平台检测来判定是否有内置 updater。
 async function resolvePlatform(): Promise<'desktop' | 'mobile'> {
   try {
-    const { getMokeRuntimePlatform, isSingleWebviewRuntime } = await import('@/lib/moke-reader');
-    if (isSingleWebviewRuntime(await getMokeRuntimePlatform())) return 'mobile';
+    const { resolveRuntimeCategory } = await import('@/lib/moke-reader');
+    return await resolveRuntimeCategory();
   } catch {
-    // 运行时检测失败时按桌面处理（兼容旧后端）
+    // 模块加载失败时按桌面处理（兼容旧后端）。
+    return 'desktop';
   }
-  return 'desktop';
 }
 
 export const useUpdateStore = create<UpdateStore>((set, get) => ({
