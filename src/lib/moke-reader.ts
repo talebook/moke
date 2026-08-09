@@ -55,20 +55,25 @@ export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
 export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
+  platformOverride?: string,
 ): Promise<void> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     fallback(href);
     return;
   }
   let currentPlatform: string;
-  try {
-    currentPlatform = await getMokeRuntimePlatform();
-  } catch (error) {
-    // If the runtime probe fails (e.g. IPC unavailable in dev mode), never
-    // block navigation — fall through to the client router.
-    console.warn('Unable to detect runtime platform, using router navigation:', error);
-    fallback(href);
-    return;
+  if (platformOverride) {
+    currentPlatform = platformOverride;
+  } else {
+    try {
+      currentPlatform = await getMokeRuntimePlatform();
+    } catch (error) {
+      // If the runtime probe fails (e.g. IPC unavailable in dev mode), never
+      // block navigation — fall through to the client router.
+      console.warn('Unable to detect runtime platform, using router navigation:', error);
+      fallback(href);
+      return;
+    }
   }
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
@@ -106,7 +111,10 @@ export function buildEmbeddedReaderHomeUrl({
     mokeEink: eink ? '1' : '0',
   });
 
-  if (includeServerUrl) {
+  // Guard against the callers' `serverUrl || ''` convention: an empty string
+  // must not produce a bare `mokeServerUrl=` param that readest would treat as
+  // "server configured" when it only checks for the param's presence.
+  if (includeServerUrl && serverUrl) {
     params.set('mokeServerUrl', serverUrl);
   }
 
@@ -149,7 +157,9 @@ export async function openEmbeddedReaderHome({
   }
 
   if (singleWebview) {
-    await navigateFullDocument(href, navigate);
+    // Reuse the platform already probed above instead of probing again inside
+    // navigateFullDocument (each probe is a Rust IPC call).
+    await navigateFullDocument(href, navigate, currentPlatform);
     return;
   }
 

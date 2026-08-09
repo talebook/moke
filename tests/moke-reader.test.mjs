@@ -127,4 +127,19 @@ test('buildEmbeddedReaderHomeUrl passes mokeServerUrl only when the reader must 
   assert.equal(desktop.searchParams.get('moke'), '1');
   assert.equal(desktop.searchParams.get('mokeEink'), '0');
   assert.equal(desktop.searchParams.get('mokeServerUrl'), null);
+
+  // Empty serverUrl must not produce a bare `mokeServerUrl=` param even when
+  // includeServerUrl is true (callers pass `serverUrl || ''`).
+  const empty = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: false,
+      serverUrl: '',
+      includeServerUrl: true,
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(empty.pathname, '/readest/');
+  assert.equal(empty.searchParams.get('moke'), '1');
+  assert.equal(empty.searchParams.get('mokeEink'), '0');
+  assert.equal(empty.searchParams.get('mokeServerUrl'), null);
 });
