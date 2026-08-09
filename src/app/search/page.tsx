@@ -58,6 +58,8 @@ function SearchContent() {
   const [batchMode, setBatchMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
+  // 请求序号：连续搜索 / URL 参数变化时，慢的旧响应不会覆盖新结果。
+  const searchSeqRef = useRef(0);
   const filteredResults = useMemo(
     () => results.filter((book) => hasFormat(book, activeFilter)),
     [activeFilter, results],
@@ -82,16 +84,19 @@ function SearchContent() {
   const handleSearch = async (q?: string) => {
     const term = (q || query).trim();
     if (!term) return;
+    const seq = ++searchSeqRef.current;
     setLoading(true);
     setSearched(true);
     try {
       const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。');
+      if (seq !== searchSeqRef.current) return;
       if (data.err === 'ok') setResults(data.books || data.items || []);
     } catch (error) {
+      if (seq !== searchSeqRef.current) return;
       setResults([]);
       toast(getErrorMessage(error, '搜索失败，请检查服务器连接。'));
-    } finally { setLoading(false); }
+    } finally { if (seq === searchSeqRef.current) setLoading(false); }
   };
 
   // ── Selection ─────────────────────────────────────────────────────────────

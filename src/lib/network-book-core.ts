@@ -13,6 +13,54 @@ export function buildNetworkBookHref(sourceId: number, bookUrl: string): string 
   return `/network-book?${params.toString()}`;
 }
 
+/** 网络书（在线书库）通用字段。 */
+export interface NetworkBook {
+  title?: string;
+  name?: string;
+  author?: string;
+  authors?: string | Array<{ name: string }>;
+  book_url: string;
+  cover_url?: string;
+  img?: string;
+  thumb?: string;
+  /** 书籍来源的书源 id（搜索时按源分组，需要在扁平化时保留）。 */
+  source_id?: number;
+  source_name?: string;
+}
+
+/** 网络搜索状态查询（`/api/network/search/status`）的归一化响应。 */
+export interface NetworkSearchStatusResponse {
+  err?: string;
+  msg?: string;
+  results?: Array<
+    | { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] }
+    | NetworkBook
+  >;
+  finished?: boolean;
+}
+
+/**
+ * 把按来源分组（或散装）的搜索结果扁平化为单本书列表，并在扁平化时保留
+ * 每本书所属的书源 id/名称（后续进入网络书详情需要 `source_id` + `book_url`）。
+ */
+export function flattenNetworkSearchResults(
+  results?: NetworkSearchStatusResponse['results'],
+): NetworkBook[] {
+  return (results || []).flatMap((r: { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
+    if (Array.isArray(r)) return r;
+    if (typeof r === 'object' && r !== null) {
+      const asResult = r as { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] };
+      const items = asResult.books || asResult.items || [];
+      return items.map((b) => ({
+        ...b,
+        source_id: b.source_id ?? asResult.source_id,
+        source_name: b.source_name ?? asResult.source_name,
+      }));
+    }
+    return [];
+  });
+}
+
 /** `/api/network/save/status` 的归一化响应（`readApiJson` 返回的原始字段）。 */
 export interface NetworkSaveStatusResponse {
   err?: string;
@@ -143,4 +191,44 @@ export async function pollNetworkSave({
     onUpdate?.(failed);
     return failed;
   }
+}
+
+/**
+ * 轮询网络搜索任务直到 `finished`，或达到 `maxAttempts` 上限，或收到取消信号。
+ *
+ * - 每次轮询返回的中间结果通过 `onPartial` 回调上报（由调用方决定是否回写 UI）。
+ * - `fetchStatus` 抛错会向上传播（调用方据此提示错误并停止，与原实现一致）。
+ * - `signal` 已中止时，在 sleep 前后与 `fetchStatus` 之后都会提前返回 `null`，
+ *   调用方据此判断是"取消"而不是"失败"，从而避免陈旧结果覆盖 / 后台空转。
+ */
+export async function pollNetworkSearch({
+  fetchStatus,
+  signal,
+  intervalMs = 1000,
+  maxAttempts = 60,
+  sleep = defaultSleep,
+  onPartial,
+}: {
+  fetchStatus: () => Promise<NetworkSearchStatusResponse | null>;
+  signal?: AbortSignal;
+  intervalMs?: number;
+  maxAttempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+  onPartial?: (books: NetworkBook[]) => void;
+}): Promise<NetworkSearchStatusResponse | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal?.aborted) return null;
+    await sleep(intervalMs);
+    if (signal?.aborted) return null;
+
+    const status = await fetchStatus();
+    if (signal?.aborted) return null;
+    if (!status) continue;
+
+    const books = flattenNetworkSearchResults(status.results);
+    if (books.length > 0) onPartial?.(books);
+
+    if (status.finished) return status;
+  }
+  return null;
 }

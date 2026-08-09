@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   buildNetworkBookHref,
+  flattenNetworkSearchResults,
   pollNetworkSave,
+  pollNetworkSearch,
 } from '../src/lib/network-book-core.ts';
 
 function noopSleep() {
@@ -198,4 +200,125 @@ test('pollNetworkSave 超时上限后未知状态也返回 timeout（防无限�
     maxMisses: 100,
   });
   assert.deepEqual(state, { status: 'timeout' });
+});
+
+test('flattenNetworkSearchResults 保留分组的 source_id/source_name', () => {
+  const books = flattenNetworkSearchResults([
+    {
+      source_id: 1,
+      source_name: '源A',
+      books: [{ title: '书A', book_url: 'u1' }],
+    },
+    {
+      source_id: 2,
+      source_name: '源B',
+      items: [{ title: '书B', book_url: 'u2' }],
+    },
+  ]);
+  assert.deepEqual(books, [
+    { title: '书A', book_url: 'u1', source_id: 1, source_name: '源A' },
+    { title: '书B', book_url: 'u2', source_id: 2, source_name: '源B' },
+  ]);
+});
+
+test('flattenNetworkSearchResults 单本自带的 source_id 优先于分组', () => {
+  const books = flattenNetworkSearchResults([
+    {
+      source_id: 1,
+      source_name: '源A',
+      books: [{ title: '书A', book_url: 'u1', source_id: 9, source_name: '源X' }],
+    },
+  ]);
+  assert.deepEqual(books, [{ title: '书A', book_url: 'u1', source_id: 9, source_name: '源X' }]);
+});
+
+test('flattenNetworkSearchResults 空/散装条目安全返回空数组', () => {
+  assert.deepEqual(flattenNetworkSearchResults(undefined), []);
+  assert.deepEqual(flattenNetworkSearchResults([]), []);
+  assert.deepEqual(flattenNetworkSearchResults([{}, null, 'x']), []);
+});
+
+test('pollNetworkSearch 直到 finished 才返回，中间结果通过 onPartial 上报', async () => {
+  const partials = [];
+  const responses = [
+    { results: [{ source_id: 1, books: [{ title: 'A', book_url: 'u' }] }], finished: false },
+    { results: [{ source_id: 2, books: [{ title: 'B', book_url: 'v' }] }], finished: true },
+  ];
+  const result = await pollNetworkSearch({
+    fetchStatus: async () => responses.shift() ?? null,
+    sleep: noopSleep,
+    onPartial: (books) => partials.push(books),
+  });
+  assert.equal(result?.finished, true);
+  assert.equal(partials.length, 2);
+  assert.equal(partials[0][0].title, 'A');
+  assert.equal(partials[1][0].title, 'B');
+});
+
+test('pollNetworkSearch 达到 maxAttempts 未完成时返回 null', async () => {
+  const { calls, sleep } = makeFakeSleep();
+  const result = await pollNetworkSearch({
+    fetchStatus: async () => ({ results: [], finished: false }),
+    sleep,
+    maxAttempts: 3,
+  });
+  assert.equal(result, null);
+  assert.equal(calls(), 3);
+});
+
+test('pollNetworkSearch 已中止的 signal 立即返回 null', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let fetches = 0;
+  const result = await pollNetworkSearch({
+    fetchStatus: async () => {
+      fetches++;
+      return { results: [], finished: false };
+    },
+    signal: controller.signal,
+    sleep: noopSleep,
+  });
+  assert.equal(result, null);
+  assert.equal(fetches, 0);
+});
+
+test('pollNetworkSearch 轮询途中 abort 后不再回写 onPartial', async () => {
+  const controller = new AbortController();
+  const partials = [];
+  let fetches = 0;
+  let sleeps = 0;
+  const result = await pollNetworkSearch({
+    fetchStatus: async () => {
+      fetches++;
+      if (fetches === 1) {
+        return { results: [{ source_id: 1, books: [{ title: 'A', book_url: 'u' }] }], finished: false };
+      }
+      return { results: [{ source_id: 2, books: [{ title: 'B', book_url: 'v' }] }], finished: true };
+    },
+    signal: controller.signal,
+    sleep: async () => {
+      sleeps++;
+      if (sleeps === 2) controller.abort();
+    },
+    onPartial: (books) => partials.push(books),
+  });
+  // 第一次轮询已回写 partial A；第二次 sleep 中 abort → 立即返回 null，不再发起第二次轮询。
+  assert.equal(result, null);
+  assert.equal(fetches, 1);
+  assert.equal(sleeps, 2);
+  assert.equal(partials.length, 1);
+  assert.equal(partials[0][0].title, 'A');
+});
+
+test('pollNetworkSearch 轮询错误向上传播，不吞异常', async () => {
+  await assert.rejects(
+    () => pollNetworkSearch({
+      fetchStatus: async () => {
+        throw new Error('network down');
+      },
+      sleep: noopSleep,
+      maxAttempts: 2,
+    }),
+    (error) => error instanceof Error && error.message === 'network down',
+  );
 });
