@@ -56,7 +56,18 @@ export async function deleteOfflineBook(serverUrl: string, bookId: string): Prom
       const { remove } = await import('@tauri-apps/plugin-fs');
       await remove(record.filePath);
     } catch (e) {
-      console.error('Failed to delete book file:', e);
+      // 文件删除失败时确认文件是否仍在磁盘上：若仍在则保留记录并报错，
+      // 让调用方提示用户重试，避免残留文件被 legacy 扫描重新暴露成幽灵书。
+      let stillThere = true;
+      try {
+        const { exists } = await import('@tauri-apps/plugin-fs');
+        stillThere = await exists(record.filePath);
+      } catch {
+        // 无法确认时按“仍存在”处理，保守保留记录。
+      }
+      if (stillThere) {
+        throw new Error('Failed to delete book file');
+      }
     }
   }
 
@@ -87,45 +98,159 @@ export async function saveOfflineBook(input: {
   mimeType: string;
   blob: Blob;
 }): Promise<void> {
-  const db = await openDatabase();
-  let filePath: string | undefined;
-  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
-
   const fileName = sanitizeOfflineFileName(input.fileName);
 
-  if (isTauriApp) {
-    try {
-      const { writeFile, BaseDirectory, mkdir } = await import('@tauri-apps/plugin-fs');
-      const { appDataDir, join } = await import('@tauri-apps/api/path');
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+    // 桌面版也走流式落盘，避免 blob.arrayBuffer() 造成整本全量拷贝。
+    await saveOfflineBookStream({
+      ...input,
+      fileName,
+      write: async (writer) => {
+        const reader = input.blob.stream().getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) await writer.write(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        return input.mimeType;
+      },
+    });
+    return;
+  }
 
+  await commitOfflineBookRecord({
+    serverUrl: input.serverUrl,
+    bookId: input.bookId,
+    title: input.title,
+    fileName,
+    mimeType: input.mimeType,
+    blob: input.blob,
+  });
+}
+
+export interface OfflineFileWriter {
+  write(data: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+}
+
+async function openOfflineBookFile(fileName: string): Promise<{ writer: OfflineFileWriter; filePath: string }> {
+  const { open, BaseDirectory, mkdir } = await import('@tauri-apps/plugin-fs');
+  const { appDataDir, join } = await import('@tauri-apps/api/path');
+
+  try {
+    await mkdir('books', { baseDir: BaseDirectory.AppData, recursive: true });
+  } catch (e) {
+    // Ignore if directory already exists
+  }
+
+  const relativePath = await join('books', fileName);
+  const file = await open(relativePath, {
+    write: true,
+    create: true,
+    truncate: true,
+    baseDir: BaseDirectory.AppData,
+  });
+
+  const dir = await appDataDir();
+  const filePath = await join(dir, 'books', fileName);
+
+  return {
+    writer: {
+      write: (data) => file.write(data).then(() => undefined),
+      close: () => file.close(),
+    },
+    filePath,
+  };
+}
+
+/** 桌面版流式落盘：逐块写入磁盘（边读边写），成功后登记索引并清理旧文件。 */
+export async function saveOfflineBookStream(input: {
+  serverUrl: string;
+  bookId: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  write: (writer: OfflineFileWriter) => Promise<string | void>;
+}): Promise<void> {
+  const fileName = sanitizeOfflineFileName(input.fileName);
+  const previous = await getOfflineBook(input.serverUrl, input.bookId);
+
+  let writer: OfflineFileWriter | null = null;
+  let filePath: string | undefined;
+
+  try {
+    const handle = await openOfflineBookFile(fileName);
+    writer = handle.writer;
+    filePath = handle.filePath;
+
+    const actualMime = (await input.write(writer)) || input.mimeType;
+    await writer.close();
+    writer = null;
+
+    await commitOfflineBookRecord({
+      serverUrl: input.serverUrl,
+      bookId: input.bookId,
+      title: input.title,
+      fileName,
+      mimeType: actualMime,
+      filePath,
+    });
+  } catch (e) {
+    // 清理半成品/孤儿文件，避免被 legacy 扫描重新暴露成幽灵书。
+    if (filePath) {
       try {
-        await mkdir('books', { baseDir: BaseDirectory.AppData, recursive: true });
-      } catch (e) {
-        // Ignore if directory already exists
+        if (writer) await writer.close();
+      } catch {
+        // ignore
       }
+      try {
+        const { remove } = await import('@tauri-apps/plugin-fs');
+        await remove(filePath);
+      } catch {
+        // ignore
+      }
+    }
+    throw e;
+  }
 
-      const relativePath = await join('books', fileName);
-      const arrayBuffer = await input.blob.arrayBuffer();
-      await writeFile(relativePath, new Uint8Array(arrayBuffer), { baseDir: BaseDirectory.AppData });
-
-      const dir = await appDataDir();
-      filePath = await join(dir, 'books', fileName);
-    } catch (e) {
-      console.error('Failed to save book to file system:', e);
-      throw new Error('Failed to save book to file system');
+  // M1：同书换格式/改名再下载时，删除旧的残留磁盘文件，避免目录扫描
+  // 重新把旧文件暴露成 legacy 幽灵书。
+  if (previous?.filePath && filePath && previous.filePath !== filePath) {
+    try {
+      const { remove } = await import('@tauri-apps/plugin-fs');
+      await remove(previous.filePath);
+    } catch (error) {
+      console.warn('Failed to remove stale offline book file:', error);
     }
   }
+}
+
+async function commitOfflineBookRecord(input: {
+  serverUrl: string;
+  bookId: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  blob?: Blob;
+  filePath?: string;
+}): Promise<void> {
+  const db = await openDatabase();
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   const record: OfflineBookRecord = {
     id: makeOfflineBookKey(input.serverUrl, input.bookId),
     serverUrl: input.serverUrl,
     bookId: input.bookId,
     title: input.title,
-    fileName,
+    fileName: input.fileName,
     mimeType: input.mimeType,
     blob: isTauriApp ? undefined : input.blob,
     updatedAt: Date.now(),
-    filePath,
+    filePath: input.filePath,
   };
 
   await new Promise<void>((resolve, reject) => {
