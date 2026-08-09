@@ -84,9 +84,73 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   useEffect(() => {
     if (mode === 'image') {
       fetchImageCaptcha();
-    } else if (mode === 'geetest') {
-      initGeetest(config);
-    } else if (mode === 'webcode') {
+      return;
+    }
+
+    if (mode === 'geetest') {
+      if (!config) return;
+
+      let disposed = false;
+      let script: HTMLScriptElement | null = null;
+      let isOhos = false;
+
+      const handleLoad = () => {
+        if (disposed) return;
+        renderGeetest(config, isOhos);
+      };
+
+      const handleError = () => {
+        if (disposed) return;
+        setMode('error');
+        setError('极验 SDK 加载失败');
+      };
+
+      getMokeRuntimePlatform()
+        .then((platform) => {
+          if (disposed) return;
+          isOhos = platform === 'ohos';
+
+          // SDK 已就绪：直接渲染，不重复挂监听
+          if ((window as any).initGeetest4) {
+            renderGeetest(config, isOhos);
+            return;
+          }
+
+          const scriptId = 'geetest-sdk-script';
+          script = document.getElementById(scriptId) as HTMLScriptElement | null;
+
+          if (!script) {
+            script = document.createElement('script');
+            script.id = scriptId;
+            script.src = config.sdkUrl || 'https://static.geetest.com/v4/gt4.js';
+            script.async = true;
+            document.head.appendChild(script);
+          }
+
+          script.addEventListener('load', handleLoad);
+          script.addEventListener('error', handleError);
+
+          // 脚本已加载但监听挂得太晚
+          if ((window as any).initGeetest4) {
+            renderGeetest(config, isOhos);
+          }
+        })
+        .catch(() => {
+          if (disposed) return;
+          setMode('error');
+          setError('极验 SDK 加载失败');
+        });
+
+      return () => {
+        disposed = true;
+        if (script) {
+          script.removeEventListener('load', handleLoad);
+          script.removeEventListener('error', handleError);
+        }
+      };
+    }
+
+    if (mode === 'webcode') {
       fetchAndInjectWebCode(config);
     }
   }, [mode]);
@@ -106,50 +170,6 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     } finally {
       setLoading(false);
     }
-  };
-
-  const initGeetest = async (captchaConfig: any) => {
-    if (!captchaConfig) return;
-
-    const isOhos = (await getMokeRuntimePlatform()) === 'ohos';
-    
-    if ((window as any).initGeetest4) {
-      renderGeetest(captchaConfig, isOhos);
-      return;
-    }
-
-    const scriptId = 'geetest-sdk-script';
-    let script = document.getElementById(scriptId) as HTMLScriptElement;
-
-    if (!script) {
-      script = document.createElement('script');
-      script.id = scriptId;
-      script.src = captchaConfig.sdkUrl || 'https://static.geetest.com/v4/gt4.js';
-      script.async = true;
-      document.head.appendChild(script);
-    }
-
-    const handleLoad = () => {
-      renderGeetest(captchaConfig, isOhos);
-    };
-
-    const handleError = () => {
-      setMode('error');
-      setError('极验 SDK 加载失败');
-    };
-
-    script.addEventListener('load', handleLoad);
-    script.addEventListener('error', handleError);
-
-    // If script is already loaded but event listeners were attached too late
-    if ((window as any).initGeetest4) {
-      renderGeetest(captchaConfig, isOhos);
-    }
-
-    return () => {
-      script.removeEventListener('load', handleLoad);
-      script.removeEventListener('error', handleError);
-    };
   };
 
   const renderGeetest = (captchaConfig: any, isOhos: boolean) => {

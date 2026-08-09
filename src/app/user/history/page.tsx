@@ -8,6 +8,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
+import { filterReadingStateBooks } from '@/lib/reading-state';
 import { AuthImage } from '@/components/ui/AuthImage';
 
 type HistoryType = 'reading' | 'finished' | 'read_history' | 'download_history' | 'push_history' | 'upload_history';
@@ -109,7 +110,7 @@ export default function UserHistoryPage() {
 
         const extra = data.user?.extra || {};
         const readHistory = Array.isArray(extra.read_history) ? extra.read_history : [];
-        const { reading, finished } = await filterReadingStateBooks(serverUrl, readHistory);
+        const { reading, finished } = await filterReadingStateBooks(request, serverUrl, readHistory as HistoryItem[]);
         setHistoryMap({
           reading,
           finished,
@@ -236,29 +237,6 @@ export default function UserHistoryPage() {
       </div>
     </DesktopLayout>
   );
-}
-
-async function filterReadingStateBooks(serverUrl: string, books: HistoryItem[]) {
-  const states = await Promise.all(
-    books.map(async (book) => {
-      if (typeof book.state?.read_state === 'number') return book.state.read_state;
-
-      try {
-        const res = await request(`${serverUrl}/api/book/${book.id}/readstate`, {
-          credentials: 'include',
-        });
-        const data = await res.json();
-        return data.err === 'ok' ? data.read_state : 0;
-      } catch {
-        return 0;
-      }
-    }),
-  );
-
-  return {
-    reading: books.filter((_, index) => states[index] === 1),
-    finished: books.filter((_, index) => states[index] === 2),
-  };
 }
 
 function formatTimestamp(timestamp?: number) {

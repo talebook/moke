@@ -37,6 +37,13 @@ interface BookTableProps {
   /** Right-click / long-press: open the context menu at (x, y) for this book. */
   onContextAction?: (id: string, x: number, y: number) => void;
   /**
+   * 当前列表是分页加载（每页只取部分数据，客户端排序只作用于当前页）时设为 true，
+   * 会在排序生效时显示「仅当前页」提示，避免用户误以为排序作用于全量数据。
+   */
+  paged?: boolean;
+  /** 排序变化回调：分页场景下父组件可用它把页码重置回第 1 页。 */
+  onSortChange?: (sort: SortState | null) => void;
+  /**
    * Per-row href override (e.g. network books link to `/network-book` instead of
    * `/detail?id=`). Falls back to `/detail?id=${id}` when omitted.
    */
@@ -46,7 +53,7 @@ interface BookTableProps {
 type SortKey = 'title' | 'author' | 'publisher' | 'format' | 'size' | 'added' | 'wants' | 'download';
 type SortDir = 'asc' | 'desc';
 
-interface SortState {
+export interface SortState {
   key: SortKey;
   dir: SortDir;
 }
@@ -194,12 +201,19 @@ export function BookTable({
   selectedIds,
   onToggleSelect,
   onContextAction,
+  paged = false,
+  onSortChange,
   getRowHref,
 }: BookTableProps) {
   const { serverUrl } = useServerStore();
   const [sort, setSort] = useState<SortState | null>(null);
   const selectable = Boolean(batchMode && selectedIds && onToggleSelect);
   const contextual = Boolean(!batchMode && onContextAction);
+
+  const applySort = (next: SortState | null) => {
+    setSort(next);
+    onSortChange?.(next);
+  };
 
   const sorted = useMemo(() => {
     if (!sort) return books;
@@ -264,6 +278,11 @@ export function BookTable({
 
   return (
     <>
+      {paged && sort && (
+        <p className="mb-2 text-xs text-muted-foreground/80">
+          排序仅作用于当前页，翻页后按新页内容重新排序。
+        </p>
+      )}
       <div className="overflow-hidden rounded-[22px] app-card md:hidden">
         {sorted.map((row) => {
           const id = String(row.id);
@@ -320,17 +339,17 @@ export function BookTable({
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide border-b border-amber-950/10 bg-white/40">
               <th className={`overflow-hidden text-center text-primary transition-all duration-200 ease-out ${selectable ? 'w-[40px] px-3 py-2.5 opacity-100' : 'w-0 p-0 opacity-0'}`}>已选</th>
-              <SortHeader label="标题" sortKey="title" sort={sort} onChange={setSort} />
-              <SortHeader label="作者" sortKey="author" sort={sort} onChange={setSort} />
-              <SortHeader label="出版商" sortKey="publisher" sort={sort} onChange={setSort} className="hidden md:table-cell" />
-              <SortHeader label="格式" sortKey="format" sort={sort} onChange={setSort} className="hidden sm:table-cell" />
-              <SortHeader label="大小" sortKey="size" sort={sort} onChange={setSort} className="hidden lg:table-cell" align="right" />
-              <SortHeader label="添加" sortKey="added" sort={sort} onChange={setSort} className="hidden lg:table-cell" />
+              <SortHeader label="标题" sortKey="title" sort={sort} onChange={applySort} />
+              <SortHeader label="作者" sortKey="author" sort={sort} onChange={applySort} />
+              <SortHeader label="出版商" sortKey="publisher" sort={sort} onChange={applySort} className="hidden md:table-cell" />
+              <SortHeader label="格式" sortKey="format" sort={sort} onChange={applySort} className="hidden sm:table-cell" />
+              <SortHeader label="大小" sortKey="size" sort={sort} onChange={applySort} className="hidden lg:table-cell" align="right" />
+              <SortHeader label="添加" sortKey="added" sort={sort} onChange={applySort} className="hidden lg:table-cell" />
               {showStatus && (
-                <SortHeader label="在架" sortKey="wants" sort={sort} onChange={setSort} className="hidden sm:table-cell" align="center" title="在架" />
+                <SortHeader label="在架" sortKey="wants" sort={sort} onChange={applySort} className="hidden sm:table-cell" align="center" title="在架" />
               )}
               {showStatus && (
-                <SortHeader label="下载" sortKey="download" sort={sort} onChange={setSort} className="hidden sm:table-cell" align="center" title="已下载" />
+                <SortHeader label="下载" sortKey="download" sort={sort} onChange={applySort} className="hidden sm:table-cell" align="center" title="已下载" />
               )}
             </tr>
           </thead>

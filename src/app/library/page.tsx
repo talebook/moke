@@ -9,7 +9,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { BookTable, type BookRow } from '@/components/book/BookTable';
+import { BookTable, type BookRow, type SortState } from '@/components/book/BookTable';
 import { buildNetworkBookHref } from '@/lib/network-book-core';
 import { pollNetworkSaveForBook, saveNetworkBook } from '@/lib/network-books';
 import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
@@ -712,6 +712,8 @@ export default function LibraryPage() {
                 selectedIds={selectedIds}
                 onToggleSelect={toggleSelect}
                 onContextAction={openContextMenu}
+                paged={totalPages > 1}
+                onSortChange={() => setCurrentPage(1)}
               />
             ) : (
               <div className={cn('rounded-[24px] app-card p-2 sm:rounded-[30px] sm:p-4', viewMode === 'grid' ? 'grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-7 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6' : 'grid grid-cols-1 gap-1 lg:grid-cols-2 lg:gap-4')}>
@@ -964,7 +966,7 @@ export default function LibraryPage() {
                     <p className="mt-2 text-sm text-muted-foreground">换个分类试试，或稍后再来看看。</p>
                   </div>
                 ) : viewMode === 'rows' ? (
-                  <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} />
+                  <NetworkBookTable books={networkBooks} onContextAction={openNetworkContextMenu} paged onSortChange={() => setNetworkPage(1)} />
                 ) : (
                   <NetworkBookGrid books={networkBooks} viewMode={viewMode} onContextAction={openNetworkContextMenu} onOpenUnavailable={openNetworkBookUnavailable} />
                 )}
@@ -1053,9 +1055,14 @@ function networkBookToRow(book: NetworkBook, idx: number): BookRow {
 function NetworkBookTable({
   books,
   onContextAction,
+  paged = false,
+  onSortChange,
 }: {
   books: NetworkBook[];
   onContextAction?: (book: NetworkBook, x: number, y: number) => void;
+  /** 网络书籍也是分页加载时，排序只作用于当前页：显示提示并配合 onSortChange 重置页码。 */
+  paged?: boolean;
+  onSortChange?: (sort: SortState | null) => void;
 }) {
   return (
     <BookTable
@@ -1063,6 +1070,8 @@ function NetworkBookTable({
       getRowHref={(row) =>
         row.source_id != null && row.book_url ? buildNetworkBookHref(row.source_id, row.book_url) : ''
       }
+      paged={paged}
+      onSortChange={onSortChange}
       onContextAction={
         onContextAction
           ? (id, x, y) => {
