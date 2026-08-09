@@ -16,13 +16,17 @@ const CAPABILITY_FILES = [
 // come back, whether written exactly, as `**/*`, under a home/root prefix
 // (`$HOME/**`, `C:\**`), or any other equivalent full-disk pattern. Only
 // application-private / temp base dirs are allowed in fs/opener allow entries.
+//
+// `$RESOURCE` (the install dir) is deliberately NOT whitelisted: none of the
+// capability files grants it, and writing to it would overwrite the app
+// binary/resources. Static packaged assets are served via the asset protocol
+// (see tauri.conf.json assetProtocol scope), not the fs plugin.
 const ALLOWED_FS_OPEN_PREFIXES = [
   '$APPDATA',
   '$APPCONFIG',
   '$APPCACHE',
   '$APPLOG',
   '$TEMP',
-  '$RESOURCE',
 ];
 
 function collectFsOpenerAllowEntries(capability) {
@@ -40,7 +44,12 @@ function collectFsOpenerAllowEntries(capability) {
   return entries;
 }
 
+function hasParentDirTraversal(path) {
+  return path.split(/[\\/]/).includes('..');
+}
+
 function isRestrictedToPrivateDirs(path) {
+  if (hasParentDirTraversal(path)) return false;
   return ALLOWED_FS_OPEN_PREFIXES.some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\\\`)
   );

@@ -60,90 +60,60 @@
     {
       "identifier": "fs:allow-read",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
     {
       "identifier": "fs:allow-write",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
     {
       "identifier": "fs:allow-write-file",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$APPDATA" },
         { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG" },
         { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE" },
         { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG" },
         { "path": "$APPLOG/**" },
-        { "path": "$TEMP" },
         { "path": "$TEMP/**" }
       ]
     },
