@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 // ponytail: state machine mirrors cc-haha but without DesktopHost abstraction
 // (Moke is Tauri-only). Proxy settings skipped — add when LAN users need them.
@@ -23,31 +24,6 @@ type UpdateStatus =
 const RELEASE_URL = 'https://github.com/talebook/moke/releases/latest';
 
 const DISMISSED_KEY = 'moke-dismissed-update-version';
-
-// 跨平台复制文本：优先 Clipboard API，失败回退到 execCommand。
-// 不用 @tauri-apps/plugin-clipboard-manager——它被 readest 的 cfg 排除在
-// OHOS 之外（见 readest lib.rs 的 clipboard-manager 注册），动态 import 会失败。
-async function copyTextToClipboard(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      const ok = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 function readDismissed(): string | null {
   try { return localStorage.getItem(DISMISSED_KEY); } catch { return null; }
