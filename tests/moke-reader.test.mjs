@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildEmbeddedReaderUrl,
+  buildReaderHomeWindowLabel,
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
@@ -51,6 +52,14 @@ test('resolveRuntimeCategory resolves desktop outside the tauri platform', async
   } finally {
     if (prev !== undefined) process.env.NEXT_PUBLIC_APP_PLATFORM = prev;
   }
+});
+
+test('reader-home window label never matches the extension reader-* enumeration', () => {
+  // H20-L4: 书库首页窗口不能被扩展当成阅读器窗口寻址。
+  const label = buildReaderHomeWindowLabel(1234);
+  assert.equal(label, 'moke-home-1234');
+  assert.ok(!label.startsWith('reader-'));
+  assert.ok(label.startsWith('moke-home-'));
 });
 
 test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => {
