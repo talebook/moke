@@ -443,9 +443,11 @@ jobs:
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
       # 提前 ohpm install，让 scripts/prepare-ohos.mjs 能改到
-      # oh_modules/@ohos-rs/ability 里的 DefaultWebview.ets（补 domStorageAccess(true)，
-      # 否则 zustand persist 的 localStorage 不可用）。该脚本在 beforeBuildCommand
-      # 里执行，而 ohpm install 在构建中途才跑，首次构建会因 oh_modules 不存在而跳过补丁。
+      # oh_modules/@ohos-rs/ability 里的文件（补 domStorageAccess(true) +
+      # back-key 处理：MainPage.onBackPress / AppStorage 注册 / backwardIfPossible，
+      # 统一由该脚本维护，取代原来的 patch-ohos-ability.ps1）。该脚本在
+      # beforeBuildCommand 里执行，而 ohpm install 在构建中途才跑，首次构建会因
+      # oh_modules 不存在而跳过补丁。
       - name: Install ohpm dependencies
         if: matrix.platform == 'ohos'
         run: |
@@ -470,6 +472,31 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER: ${{ env.OHOS_NDK_HOME }}/native/llvm/bin/clang
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_OHOS_LINKER: ${{ env.OHOS_NDK_HOME }}/native/llvm/bin/clang
           NODE_OPTIONS: --max-old-space-size=4096
+
+      # 断言 prepare-ohos.mjs 把 back-key 补丁真正应用进了构建产物：
+      # MainPage.ets 必须含 onBackPress（back-key 处理），DefaultWebview.ets
+      # 必须含 domStorageAccess（zustand persist 的 localStorage）。
+      # ohpm 可能把包装到 entry/oh_modules 或根 oh_modules，两个位置都检查。
+      - name: Assert OHOS back-key patch applied
+        if: matrix.platform == 'ohos'
+        run: |
+          for base in \
+            src-tauri/gen/ohos/entry/oh_modules/@ohos-rs/ability/src/main/ets \
+            src-tauri/gen/ohos/oh_modules/@ohos-rs/ability/src/main/ets; do
+            main="$base/components/MainPage.ets"
+            webview="$base/webview/DefaultWebview.ets"
+            if [ -f "$main" ]; then
+              grep -q 'onBackPress' "$main" \
+                || { echo "FAIL: $main missing onBackPress (back-key patch not applied)"; exit 1; }
+              echo "OK: onBackPress found in $main"
+              grep -q 'domStorageAccess' "$webview" \
+                || { echo "FAIL: $webview missing domStorageAccess"; exit 1; }
+              echo "OK: domStorageAccess found in $webview"
+              exit 0
+            fi
+          done
+          echo "FAIL: @ohos-rs/ability package not found under src-tauri/gen/ohos"
+          exit 1
 
       - name: List HAP artifacts
         if: matrix.platform == 'ohos'
