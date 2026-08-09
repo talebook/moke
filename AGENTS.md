@@ -106,12 +106,15 @@ the *same* `out/` directory, so Tauri's `frontendDist: "../out"` ships both apps
 runs on port 3001 (`localhost:3001/reader`); in a build it's served at `/readest/reader`. Moke builds
 **only readest's frontend, never its `src-tauri` `run()`** (that's why `default-features=false`).
 
-As of 2026-06-29, `readest/` is a **plain folder in this repo** (formerly a git submodule, flattened
-along with its nested submodules; readest git history discarded). Edit reader code directly under
-`readest/apps/readest-app/` — it's normal committable source. Do **not** propose merging the two apps
-into one package.json/single build: that was evaluated and rejected (113+57 deps, `@/*` alias clash,
-`app/{library,opds,user}` route-segment collisions). The reader depends on the workspace package
-`vendor/foliate-js` and cannot be lifted out on its own.
+`readest/` is a **git submodule** pointing at the fork
+[hehetoshang/readest](https://github.com/hehetoshang/readest) (it was briefly flattened into a plain
+folder on 2026-06-29, but is a submodule again — the `readest` entry in `.gitmodules` and the
+`160000` gitlink are authoritative). To change reader code, commit on a branch inside the
+`readest/` submodule checkout and push it to the fork, then bump the submodule gitlink in this
+repo on the same PR. Do **not** propose merging the two apps into one package.json/single build:
+that was evaluated and rejected (113+57 deps, `@/*` alias clash, `app/{library,opds,user}`
+route-segment collisions). The reader depends on the workspace package `vendor/foliate-js` and
+cannot be lifted out on its own.
 
 ### `CODE_NEED/talebook/`
 

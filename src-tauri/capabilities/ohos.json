@@ -58,10 +58,6 @@
     "fs:allow-fstat",
     "fs:allow-lstat",
     {
-      "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**" }]
-    },
-    {
       "identifier": "fs:allow-read",
       "allow": [
         { "path": "$APPDATA" },
