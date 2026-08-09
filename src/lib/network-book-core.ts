@@ -26,39 +26,78 @@ export interface NetworkSaveStatusResponse {
   error?: string;
 }
 
-/** 保存到本地书库的轮询状态：终态为 completed / failed / lost。 */
+/** 保存到本地书库的轮询状态：终态为 completed / failed / lost / timeout / aborted。 */
 export type NetworkSaveState =
   | { status: 'running'; done: number; total: number; progress: number }
-  | { status: 'completed'; bookId: number }
+  | { status: 'completed'; bookId?: number }
   | { status: 'failed'; error: string }
-  | { status: 'lost' };
+  | { status: 'lost' }
+  | { status: 'timeout' }
+  | { status: 'aborted' };
+
+/** 服务器显式终态之外的 status 取值（pending / queued 等）视为未知，按 miss 容忍。 */
+const KNOWN_TERMINAL_OR_RUNNING = ['running', 'completed', 'failed'] as const;
+
+type KnownSaveStatus = (typeof KNOWN_TERMINAL_OR_RUNNING)[number];
+
+function isKnownSaveStatus(
+  status: NetworkSaveStatusResponse | null,
+): status is NetworkSaveStatusResponse & { status: KnownSaveStatus } {
+  return (
+    status != null &&
+    status.found === true &&
+    status.status != null &&
+    (KNOWN_TERMINAL_OR_RUNNING as readonly string[]).includes(status.status)
+  );
+}
+
+/** 轮询总时长上限（默认 10 分钟），超时后返回 `timeout`，避免任务卡死在 running 时无限轮询。 */
+export const DEFAULT_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * 轮询网络书保存任务直到终态。
  *
- * - `!found` 或 `fetchStatus` 抛错计一次 miss，连续 `maxMisses` 次判 `lost`
- *   （容忍瞬时错误 / 任务注册竞态；后台任务可能因服务器重启丢失）。
+ * - `!found`、`fetchStatus` 抛错或 status 为未知取值（pending/queued/字段缺失）各计一次
+ *   miss，连续 `maxMisses` 次判 `lost`（容忍瞬时错误 / 任务注册竞态 / 排队中的任务）。
  * - `running` 时通过 `onUpdate` 回报进度，然后 `sleep` 后继续。
  * - `completed` / `failed` 立即返回。
+ * - 总耗时超过 `timeoutMs` 返回 `timeout`；`signal` 被中止返回 `aborted`（组件卸载时可取消）。
  */
 export async function pollNetworkSave({
   fetchStatus,
   intervalMs = 1500,
   maxMisses = 3,
+  timeoutMs = DEFAULT_POLL_TIMEOUT_MS,
+  signal,
   sleep = defaultSleep,
   onUpdate,
 }: {
   fetchStatus: () => Promise<NetworkSaveStatusResponse | null>;
   intervalMs?: number;
   maxMisses?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
   onUpdate?: (state: NetworkSaveState) => void;
 }): Promise<NetworkSaveState> {
+  const startedAt = Date.now();
   let misses = 0;
 
   for (;;) {
+    if (signal?.aborted) {
+      const aborted: NetworkSaveState = { status: 'aborted' };
+      onUpdate?.(aborted);
+      return aborted;
+    }
+
+    if (Date.now() - startedAt >= timeoutMs) {
+      const timeout: NetworkSaveState = { status: 'timeout' };
+      onUpdate?.(timeout);
+      return timeout;
+    }
+
     let status: NetworkSaveStatusResponse | null;
     try {
       status = await fetchStatus();
@@ -66,7 +105,7 @@ export async function pollNetworkSave({
       status = null;
     }
 
-    if (!status || !status.found) {
+    if (!isKnownSaveStatus(status)) {
       misses += 1;
       if (misses >= maxMisses) {
         const lost: NetworkSaveState = { status: 'lost' };
@@ -94,7 +133,7 @@ export async function pollNetworkSave({
     if (status.status === 'completed') {
       const completed: NetworkSaveState = {
         status: 'completed',
-        bookId: status.book_id ?? 0,
+        bookId: status.book_id ?? undefined,
       };
       onUpdate?.(completed);
       return completed;

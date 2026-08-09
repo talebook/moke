@@ -119,3 +119,83 @@ test('pollNetworkSave 异常后恢复：先抛错再完成，不误判 lost', as
   });
   assert.deepEqual(state, { status: 'completed', bookId: 9 });
 });
+
+test('pollNetworkSave completed 但缺 book_id 时仍返回 completed（不误判丢失）', async () => {
+  const state = await pollNetworkSave({
+    fetchStatus: async () => ({ found: true, status: 'completed' }),
+    sleep: noopSleep,
+  });
+  assert.deepEqual(state, { status: 'completed', bookId: undefined });
+});
+
+test('pollNetworkSave 未知 status（pending/queued）按 miss 计数，不直接判 failed', async () => {
+  const { calls, sleep } = makeFakeSleep();
+  const state = await pollNetworkSave({
+    fetchStatus: async () => ({ found: true, status: 'pending' }),
+    intervalMs: 100,
+    maxMisses: 3,
+    sleep,
+  });
+  assert.equal(calls(), 2); // pending#1 与 pending#2 后各等待一次，pending#3 直接判 lost
+  assert.deepEqual(state, { status: 'lost' });
+});
+
+test('pollNetworkSave 未知 status 后恢复 running/completed 不误判', async () => {
+  const responses = [
+    { found: true, status: 'pending' },
+    { found: true, status: 'running', progress: 20, done: 1, total: 5 },
+    { found: true, status: 'completed', book_id: 11 },
+  ];
+  const state = await pollNetworkSave({
+    fetchStatus: async () => responses.shift() ?? { found: false },
+    sleep: noopSleep,
+    maxMisses: 3,
+  });
+  assert.deepEqual(state, { status: 'completed', bookId: 11 });
+});
+
+test('pollNetworkSave 超过总时长上限返回 timeout', async () => {
+  const state = await pollNetworkSave({
+    fetchStatus: async () => ({ found: true, status: 'running', progress: 10, done: 1, total: 10 }),
+    sleep: noopSleep,
+    timeoutMs: 0, // 立即超时
+  });
+  assert.deepEqual(state, { status: 'timeout' });
+});
+
+test('pollNetworkSave 收到 AbortSignal 后返回 aborted', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const state = await pollNetworkSave({
+    fetchStatus: async () => ({ found: true, status: 'running', progress: 10, done: 1, total: 10 }),
+    sleep: noopSleep,
+    signal: controller.signal,
+  });
+  assert.deepEqual(state, { status: 'aborted' });
+});
+
+test('pollNetworkSave 轮询途中取消返回 aborted，不再继续请求', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const state = await pollNetworkSave({
+    fetchStatus: async () => {
+      requests += 1;
+      if (requests >= 2) controller.abort();
+      return { found: true, status: 'running', progress: 10, done: 1, total: 10 };
+    },
+    sleep: noopSleep,
+    signal: controller.signal,
+  });
+  assert.equal(requests, 2);
+  assert.deepEqual(state, { status: 'aborted' });
+});
+
+test('pollNetworkSave 超时上限后未知状态也返回 timeout（防无限轮询）', async () => {
+  const state = await pollNetworkSave({
+    fetchStatus: async () => ({ found: true, status: 'pending' }),
+    sleep: noopSleep,
+    timeoutMs: 0,
+    maxMisses: 100,
+  });
+  assert.deepEqual(state, { status: 'timeout' });
+});

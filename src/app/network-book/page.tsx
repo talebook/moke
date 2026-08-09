@@ -27,13 +27,18 @@ function NetworkBookContent() {
   const [saving, setSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ percent: number; done: number; total: number } | null>(null);
   const [saveError, setSaveError] = useState('');
+  const [saveDone, setSaveDone] = useState(false);
   const sourceId = sourceIdParam ? Number(sourceIdParam) : null;
   const aliveRef = useRef(true);
+  const saveAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
+    const controller = new AbortController();
+    saveAbortRef.current = controller;
     return () => {
       aliveRef.current = false;
+      controller.abort();
     };
   }, []);
 
@@ -69,12 +74,14 @@ function NetworkBookContent() {
     if (!serverUrl || sourceId == null || !bookUrl || saving) return;
     setSaving(true);
     setSaveError('');
+    setSaveDone(false);
     setSaveProgress(null);
     try {
       await saveNetworkBook(serverUrl, sourceId, bookUrl, fmt);
       const result = await pollNetworkSaveForBook(serverUrl, sourceId, bookUrl, {
         intervalMs: 1500,
         maxMisses: 3,
+        signal: saveAbortRef.current?.signal,
         onUpdate: (state) => {
           if (state.status === 'running' && aliveRef.current) {
             setSaveProgress({ percent: state.progress, done: state.done, total: state.total });
@@ -82,12 +89,21 @@ function NetworkBookContent() {
         },
       });
       if (!aliveRef.current) return;
-      if (result.status === 'completed' && result.bookId) {
+      if (result.status === 'completed') {
         setSaveProgress(null);
-        router.push(`/detail?id=${result.bookId}`);
+        if (result.bookId) {
+          router.push(`/detail?id=${result.bookId}`);
+          return;
+        }
+        setSaveDone(true);
         return;
       }
       setSaveProgress(null);
+      if (result.status === 'timeout') {
+        setSaveError('保存超时，请稍后到书库查看或重试。');
+        return;
+      }
+      if (result.status === 'aborted') return;
       setSaveError(
         result.status === 'failed' && result.error
           ? result.error
@@ -212,6 +228,13 @@ function NetworkBookContent() {
                 <p className="mt-3 flex w-full items-start gap-1.5 px-1 text-xs leading-relaxed text-destructive md:w-[220px]">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   {saveError}
+                </p>
+              )}
+
+              {saveDone && (
+                <p className="mt-3 flex w-full items-start gap-1.5 px-1 text-xs leading-relaxed text-primary md:w-[220px]">
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  已保存到书库，请到书库查看。
                 </p>
               )}
             </div>

@@ -84,6 +84,8 @@ export async function fetchNetworkSaveStatus(
 export type PollNetworkSaveOptions = {
   intervalMs?: number;
   maxMisses?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
   sleep?: (ms: number) => Promise<void>;
   onUpdate?: (state: NetworkSaveState) => void;
 };

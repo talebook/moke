@@ -99,6 +99,15 @@ export default function LibraryPage() {
   const [networkContextMenu, setNetworkContextMenu] = useState<{ x: number; y: number; book: NetworkBook } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
 
+  const networkSaveAbortRef = useRef<AbortController | null>(null);
+  const [networkSavingKeys, setNetworkSavingKeys] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      networkSaveAbortRef.current?.abort();
+    };
+  }, []);
+
   // Clear selection when tab switches or server changes
   useEffect(() => {
     setSelectedIds(new Set());
@@ -439,22 +448,33 @@ export default function LibraryPage() {
       toast('缺少书源信息，无法保存。');
       return;
     }
+    const key = `${sourceId}:${book.book_url}`;
+    if (networkSavingKeys.has(key)) return;
+    setNetworkSavingKeys((prev) => new Set(prev).add(key));
+    const controller = new AbortController();
+    networkSaveAbortRef.current = controller;
     const title = book.title || book.name || '该书';
     try {
       await saveNetworkBook(serverUrl, sourceId, book.book_url);
+      if (controller.signal.aborted) return;
       toast(`已开始保存《${title}》到本地书库`);
       const result = await pollNetworkSaveForBook(serverUrl, sourceId, book.book_url, {
         intervalMs: 1500,
         maxMisses: 3,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (result.status === 'completed') {
         toast(`《${title}》已保存到书库`);
       } else if (result.status === 'failed') {
         toast(`《${title}》保存失败：${result.error || '未知错误'}`);
-      } else {
+      } else if (result.status === 'timeout') {
+        toast(`《${title}》保存超时，请稍后到书库查看或重试。`);
+      } else if (result.status === 'lost') {
         toast('保存进度丢失，可能服务器已重启，请稍后重试。');
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       if (error instanceof MokeApiError && error.code === 'permission.not_permit') {
         toast('当前账号没有保存网络书的权限，请联系管理员在后台开启「保存」权限。');
         return;
@@ -465,6 +485,12 @@ export default function LibraryPage() {
         return;
       }
       toast(getErrorMessage(error, '保存失败，请检查网络或登录状态。'));
+    } finally {
+      setNetworkSavingKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -488,10 +514,10 @@ export default function LibraryPage() {
         key: 'save',
         label: '保存到本地书库',
         icon: <Download className="w-3.5 h-3.5" />,
-        disabled: sourceId == null || !book.book_url,
+        disabled:
+          sourceId == null || !book.book_url || networkSavingKeys.has(`${sourceId}:${book.book_url}`),
         onClick: () => void saveNetworkBookWithFeedback(book),
-      },
-    ];
+      },    ];
   };
 
   // Empty selection while in batch mode → leave batch mode.
@@ -973,13 +999,16 @@ export default function LibraryPage() {
           />
         );
       })()}
-      {networkContextMenu && (
-        <BookContextMenu
-          position={{ x: networkContextMenu.x, y: networkContextMenu.y }}
-          items={buildNetworkMenuItems(networkContextMenu.book)}
-          onClose={() => setNetworkContextMenu(null)}
-        />
-      )}
+      {networkContextMenu && (() => {
+        const book = networkContextMenu.book;
+        return (
+          <BookContextMenu
+            position={{ x: networkContextMenu.x, y: networkContextMenu.y }}
+            items={buildNetworkMenuItems(book)}
+            onClose={() => setNetworkContextMenu(null)}
+          />
+        );
+      })()}
     </DesktopLayout>
   );
 }
