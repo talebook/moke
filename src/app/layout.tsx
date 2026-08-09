@@ -33,18 +33,27 @@ export default function RootLayout({
   // E-ink mode is its own standalone theme: while it's on we never add the
   // 'dark' class (nor switch color-scheme), so the black/white e-ink rules are
   // the only ones in play and never fight the dark palette (see globals.css).
+  // This includes the *auto* e-ink path — devices that match the slow-refresh /
+  // monochrome media query but never get the manual data-eink toggle (e.g. a
+  // Kindle-class screen with the OS set to dark). We fold that media query into
+  // the same gate so auto-e-ink also suppresses the dark palette.
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
+    const autoEinkMq = window.matchMedia('(update: slow), (max-color: 1)');
     const apply = () => {
-      const resolved = resolveTheme(theme, mq.matches);
-      const dark = !eink && resolved === 'dark';
+      const resolved = resolveTheme(theme, darkMq.matches);
+      const dark = !eink && !autoEinkMq.matches && resolved === 'dark';
       const el = document.documentElement;
       el.classList.toggle('dark', dark);
       el.style.colorScheme = dark ? 'dark' : 'light';
     };
     apply();
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
+    darkMq.addEventListener('change', apply);
+    autoEinkMq.addEventListener('change', apply);
+    return () => {
+      darkMq.removeEventListener('change', apply);
+      autoEinkMq.removeEventListener('change', apply);
+    };
   }, [theme, eink]);
 
   return (
@@ -62,7 +71,7 @@ export default function RootLayout({
             that this script mutates the class attribute before hydration. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var st=s&&s.state||{};var t=st.theme||'system';var eink=!!st.eink;var mq=window.matchMedia('(prefers-color-scheme: dark)');var dark=!eink&&(t==='dark'||(t==='system'&&mq.matches));if(dark){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark'}else{document.documentElement.style.colorScheme='light'}}catch(e){}})();`,
+            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var st=s&&s.state||{};var t=st.theme||'system';var eink=!!st.eink;var darkMq=window.matchMedia('(prefers-color-scheme: dark)');var autoEink=window.matchMedia('(update: slow), (max-color: 1)').matches;var dark=!eink&&!autoEink&&(t==='dark'||(t==='system'&&darkMq.matches));if(dark){document.documentElement.classList.add('dark');document.documentElement.style.colorScheme='dark'}else{document.documentElement.style.colorScheme='light'}}catch(e){}})();`,
           }}
         />
         {/* Keep the first render independent from third-party font servers. The

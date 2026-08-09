@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Copy, Download, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, Sun, User, Code2 } from 'lucide-react';
@@ -269,6 +269,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
   const effectiveDark = resolveTheme(value, systemDark) === 'dark';
 
   // Roving tabindex + arrow keys so the radiogroup behaves per ARIA APG.
+  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
@@ -281,6 +282,9 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
     else if (e.key === 'Home') next = 0;
     else if (e.key === 'End') next = options.length - 1;
     onChange(options[next].value);
+    // Move focus to the newly selected option so the visible focus ring and
+    // the radiogroup selection stay in sync (ARIA APG roving tabindex).
+    optionRefs.current[next]?.focus();
   };
 
   return (
@@ -306,9 +310,11 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
         {options.map((opt) => {
           const Icon = opt.icon;
           const active = value === opt.value;
+          const optionIndex = options.indexOf(opt);
           return (
             <button
               key={opt.value}
+              ref={(el) => { optionRefs.current[optionIndex] = el; }}
               type="button"
               role="radio"
               aria-checked={active}

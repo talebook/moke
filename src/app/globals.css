@@ -140,8 +140,9 @@
 }
 /* Low-opacity bg-white/15/10/5 only appear inside .moke-sidebar, whose dark
    theme is handled in the sidebar block below — no general rule needed here. */
-/* Warm translucent header / glass surfaces (bg-[#fffdf8]/80) → dark surface. */
-.dark [class*='bg-[#fffdf8]'] {
+/* Warm translucent header / glass surfaces (bg-[#fffdf8]/80) → dark surface.
+   Exact token match, consistent with the [class~=] convention elsewhere. */
+.dark [class~='bg-[#fffdf8]/80'] {
   background-color: rgba(26, 24, 20, 0.8) !important;
 }
 /* Warm hairline borders (border-amber-950/10 etc.) → light hairline. Only the
@@ -221,6 +222,21 @@
 .dark [class~='hover:bg-green-50']:hover {
   background-color: rgba(122, 139, 94, 0.2) !important;
 }
+/* text-primary / text-primary/N are used both as button-surface
+   primary-foreground (white text, keep) and as emphasis text (small captions,
+   links, card-title hover). The dark-mode --primary is tuned for surfaces
+   (contrast vs white), which makes it too dark as text on the dark bg (~2.5-3:1).
+   Lighten the emphasis-text usages only — never text-primary-foreground. */
+.dark [class~='text-primary'],
+.dark [class*='text-primary/'] {
+  color: #d9b48f !important;
+}
+/* group-hover:text-primary only fires when the parent .group is hovered;
+   Tailwind's own rule targets `.group:hover ...`, so mirror it here instead of
+   a plain :hover which would miss hovering elsewhere on the card. */
+.dark .group:hover [class~='group-hover:text-primary'] {
+  color: #d9b48f !important;
+}
 /* Colored text: dark shades (amber-600/700, green-600, red-600, ...) lose
    contrast on the dark background — lighten them. Only the shades actually
    used in the app are enumerated (amber-400/500/600/700, green-400/600,
@@ -278,6 +294,15 @@
 }
 .dark .eink-bordered {
   border-color: rgba(255, 255, 255, 0.12);
+}
+/* Book-cover containers use solid bg-white as the surface behind the cover
+   image; in dark mode the white flashes during lazy-load / failed / fallback.
+   Scope to .book-cover-shadow (the cover container) — NOT a global bg-white
+   rule, which would also repaint the white Toggle knobs. ring-black/5 is
+   softened to a dark hairline too. */
+.dark .book-cover-shadow {
+  background-color: hsl(var(--card)) !important;
+  --tw-ring-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* Dark sidebar: in light mode the sidebar is the warm-brown bg-primary bar
