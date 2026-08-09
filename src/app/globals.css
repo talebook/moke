@@ -225,6 +225,39 @@
   border-color: rgba(255, 255, 255, 0.12);
 }
 
+/* Dark sidebar: in light mode the sidebar is the warm-brown bg-primary bar
+   with white text. In dark mode the (lightened) primary brown would read as a
+   glaring light slab, so the sidebar becomes a deep warm dark panel with a
+   right hairline, keeping the primary-brown as the active-item highlight.
+   The white-based text/icon classes (text-primary-foreground, text-white/N)
+   already work against a dark background, so only the surface + hairlines
+   need overriding here. */
+.dark .moke-sidebar {
+  background: hsl(36 12% 12%) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+.dark .moke-sidebar :where(.border-white\/10) {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/10) {
+  background-color: rgba(184, 149, 106, 0.22) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/15) {
+  background-color: rgba(184, 149, 106, 0.3) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/5) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+.dark .moke-sidebar :where(.text-white\/55) {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+.dark .moke-sidebar :where(.text-white\/45) {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+.dark .moke-sidebar :where(.text-white\/30) {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
 /* ===== E-ink rendering ===== */
 /* Auto path: native media features, no JS, no hydration flash.
    (update: slow) = slow-refresh displays (most e-ink); (max-color: 1) = monochrome
