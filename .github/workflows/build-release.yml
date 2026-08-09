@@ -476,27 +476,27 @@ jobs:
       # 断言 prepare-ohos.mjs 把 back-key 补丁真正应用进了构建产物：
       # MainPage.ets 必须含 onBackPress（back-key 处理），DefaultWebview.ets
       # 必须含 domStorageAccess（zustand persist 的 localStorage）。
-      # ohpm 可能把包装到 entry/oh_modules 或根 oh_modules，两个位置都检查。
+      # ohpm 可能把包装到 entry/oh_modules 或根 oh_modules，脚本对两个位置都
+      # 打补丁，这里对**所有存在的位置**都断言（与 scripts/ohos-prepare-core.mjs
+      # 的 packageRootsFor 顺序保持一致）。
       - name: Assert OHOS back-key patch applied
         if: matrix.platform == 'ohos'
         run: |
+          found_any=0
           for base in \
             src-tauri/gen/ohos/entry/oh_modules/@ohos-rs/ability/src/main/ets \
             src-tauri/gen/ohos/oh_modules/@ohos-rs/ability/src/main/ets; do
-            main="$base/components/MainPage.ets"
-            webview="$base/webview/DefaultWebview.ets"
-            if [ -f "$main" ]; then
-              grep -q 'onBackPress' "$main" \
-                || { echo "FAIL: $main missing onBackPress (back-key patch not applied)"; exit 1; }
-              echo "OK: onBackPress found in $main"
-              grep -q 'domStorageAccess' "$webview" \
-                || { echo "FAIL: $webview missing domStorageAccess"; exit 1; }
-              echo "OK: domStorageAccess found in $webview"
-              exit 0
+            if [ -d "$base" ]; then
+              found_any=1
+              grep -q 'onBackPress' "$base/components/MainPage.ets" \
+                || { echo "FAIL: $base/components/MainPage.ets missing onBackPress (back-key patch not applied)"; exit 1; }
+              grep -q 'domStorageAccess' "$base/webview/DefaultWebview.ets" \
+                || { echo "FAIL: $base/webview/DefaultWebview.ets missing domStorageAccess"; exit 1; }
+              echo "OK: back-key patch content present in $base"
             fi
           done
-          echo "FAIL: @ohos-rs/ability package not found under src-tauri/gen/ohos"
-          exit 1
+          [ "$found_any" -eq 1 ] \
+            || { echo "FAIL: @ohos-rs/ability package not found under src-tauri/gen/ohos"; exit 1; }
 
       - name: List HAP artifacts
         if: matrix.platform == 'ohos'
