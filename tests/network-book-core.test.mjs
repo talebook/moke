@@ -63,28 +63,29 @@ test('flattenNetworkSearchResults 裸书对象不再被静默丢弃', () => {
   assert.deepEqual(flat, [{ name: '裸书1', book_url: '/n1', source_id: 3, source_name: '裸源' }]);
 });
 
-test('flattenNetworkSearchResults 裸书对象缺 source 时使用 fallback 源', () => {
-  const flat = flattenNetworkSearchResults(
-    [{ name: '裸书2', book_url: '/n2' }],
-    { source_id: 7, source_name: '搜索源' },
-  );
-  assert.deepEqual(flat, [{ name: '裸书2', book_url: '/n2', source_id: 7, source_name: '搜索源' }]);
+test('flattenNetworkSearchResults 裸书对象缺 source 时原样保留', () => {
+  const flat = flattenNetworkSearchResults([{ name: '裸书2', book_url: '/n2' }]);
+  assert.deepEqual(flat, [{ name: '裸书2', book_url: '/n2' }]);
 });
 
-test('flattenNetworkSearchResults 裸数组逐项补齐 source_id/source_name', () => {
+test('flattenNetworkSearchResults 无书字段的占位对象被丢弃', () => {
+  assert.deepEqual(flattenNetworkSearchResults([{ source_id: 3, source_name: '源C' }]), []);
+});
+
+test('flattenNetworkSearchResults 裸数组逐项透传（服务器不提供整体源信息）', () => {
   const flat = flattenNetworkSearchResults([
     [{ name: '裸组1', book_url: '/g1' }, { name: '裸组2', book_url: '/g2' }],
-  ], { source_id: 5, source_name: '搜索源' });
+  ]);
   assert.deepEqual(flat, [
-    { name: '裸组1', book_url: '/g1', source_id: 5, source_name: '搜索源' },
-    { name: '裸组2', book_url: '/g2', source_id: 5, source_name: '搜索源' },
+    { name: '裸组1', book_url: '/g1' },
+    { name: '裸组2', book_url: '/g2' },
   ]);
 });
 
 test('flattenNetworkSearchResults 裸数组条目自带 source 时保留条目自身', () => {
   const flat = flattenNetworkSearchResults([
     [{ name: '裸组1', book_url: '/g1', source_id: 11, source_name: '自带源' }],
-  ], { source_id: 5, source_name: '搜索源' });
+  ]);
   assert.deepEqual(flat, [{ name: '裸组1', book_url: '/g1', source_id: 11, source_name: '自带源' }]);
 });
 
@@ -94,18 +95,25 @@ test('flattenNetworkSearchResults 空/非法条目安全返回空数组', () => 
   assert.deepEqual(flattenNetworkSearchResults([null, 42, 'x']), []);
 });
 
+test('flattenNetworkSearchResults results 非数组时安全返回空数组', () => {
+  assert.deepEqual(flattenNetworkSearchResults({ books: [{ name: '书1', book_url: '/a1' }] }), []);
+  assert.deepEqual(flattenNetworkSearchResults('not-an-array'), []);
+  assert.deepEqual(flattenNetworkSearchResults(null), []);
+});
+
 test('parseNetworkSourceId 合法数字字符串返回数字', () => {
   assert.equal(parseNetworkSourceId('12'), 12);
   assert.equal(parseNetworkSourceId('0'), 0);
   assert.equal(parseNetworkSourceId(' 7 '), 7);
 });
 
-test('parseNetworkSourceId 非数字/空串/缺失返回 null', () => {
+test('parseNetworkSourceId 非数字/非整数/空串/缺失返回 null', () => {
   assert.equal(parseNetworkSourceId('abc'), null);
   assert.equal(parseNetworkSourceId(''), null);
   assert.equal(parseNetworkSourceId('   '), null);
   assert.equal(parseNetworkSourceId(null), null);
   assert.equal(parseNetworkSourceId('12.5x'), null);
+  assert.equal(parseNetworkSourceId('12.5'), null);
 });
 
 test('buildNetworkBookHref 携带 source_id 并编码 book_url', () => {

@@ -20,8 +20,9 @@ function NetworkBookContent() {
   const { serverUrl } = useServerStore();
   const sourceIdParam = searchParams.get('source_id');
   const bookUrl = searchParams.get('book_url');
-  // 用 Number.isFinite 校验：`Number('abc')` 得 NaN，`NaN == null` 为 false，
-  // 会让守卫放行并向服务器发出 `source_id=NaN` 请求；非法值归一为 null 走守卫。
+  // 用 Number.isInteger 校验：`Number('abc')` 得 NaN、`Number('12.5')` 得小数，
+  // 都不是合法的书源 id；`NaN == null` 为 false，会让守卫放行并向服务器发出
+  // `source_id=NaN` 请求；非法值归一为 null 走守卫。
   const sourceId = parseNetworkSourceId(sourceIdParam);
 
   const [book, setBook] = useState<NetworkBookDetail | null>(null);

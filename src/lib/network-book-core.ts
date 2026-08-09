@@ -66,25 +66,27 @@ export interface NetworkSearchStatusResponse {
 /**
  * 把搜索结果扁平化为带 `source_id` / `source_name` 的书籍列表。
  *
+ * 服务器实际只返回分组形态（talebook `SearchTaskService.get_status` 仅汇总
+ * `state == "done"` 且 `books` 非空的源）；裸书 / 裸数组分支仅为归一化入口的防御，
+ * 服务器不提供整体源信息，无源可补，保持原样透传。
+ *
  * 条目有三种形态，统一处理：
  * - 分组对象 `{ source_id, source_name, books/items }`：展开其书籍，缺省时补
  *   分组携带的源信息；
- * - 裸书对象（无 `books`/`items` 分组）：不再静默丢弃，保留书籍自身的源信息；
- * - 裸数组：逐项补齐源信息，避免透传后书籍无法打开详情 / 保存。
+ * - 裸数组：逐项透传；
+ * - 裸书对象：须带书字段（`book_url` / `title` / `name`）才算书，保留书籍自身
+ *   的源信息；否则视为占位对象（如仅有 `source_id`/`source_name` 的空分组）丢弃，
+ *   避免渲染成点不开的幽灵卡片。
  *
- * `fallback` 为本搜索整体归属的源（按源搜索时传入），仅作最后兜底。
+ * 运行时 `results` 来自未校验的 JSON，非数组时安全返回空数组。
  */
 export function flattenNetworkSearchResults(
   results: NetworkSearchResultEntry[] | undefined,
-  fallback?: { source_id?: number; source_name?: string },
 ): NetworkSearchBook[] {
-  return (results || []).flatMap((r) => {
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((r) => {
     if (Array.isArray(r)) {
-      return r.map((b) => ({
-        ...b,
-        source_id: b.source_id ?? fallback?.source_id,
-        source_name: b.source_name ?? fallback?.source_name,
-      }));
+      return r;
     }
     if (typeof r === 'object' && r !== null) {
       const group = r as NetworkSearchGroupResult;
@@ -92,30 +94,27 @@ export function flattenNetworkSearchResults(
       if (Array.isArray(items)) {
         return items.map((b) => ({
           ...b,
-          source_id: b.source_id ?? group.source_id ?? fallback?.source_id,
-          source_name: b.source_name ?? group.source_name ?? fallback?.source_name,
+          source_id: b.source_id ?? group.source_id,
+          source_name: b.source_name ?? group.source_name,
         }));
       }
-      return [
-        {
-          ...(r as NetworkSearchBook),
-          source_id: (r as NetworkSearchBook).source_id ?? fallback?.source_id,
-          source_name: (r as NetworkSearchBook).source_name ?? fallback?.source_name,
-        },
-      ];
+      const book = r as NetworkSearchBook;
+      if (!book.book_url && !book.title && !book.name) return [];
+      return [book];
     }
     return [];
   });
 }
 
 /**
- * 解析 URL 参数中的 `source_id`。空串 / 缺失 / 非数字都返回 `null`，
- * 避免把 `Number('abc')` 的 `NaN` 透传给服务器。
+ * 解析 URL 参数中的 `source_id`。空串 / 缺失 / 非数字 / 非整数都返回 `null`，
+ * 避免把 `Number('abc')` 的 `NaN` 或 `Number('12.5')` 的小数透传给服务器
+ * （书源 id 是数据库整数）。
  */
 export function parseNetworkSourceId(raw: string | null): number | null {
   if (raw == null || raw.trim() === '') return null;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  return Number.isInteger(n) ? n : null;
 }
 /** `/api/network/save/status` 的归一化响应（`readApiJson` 返回的原始字段）。 */
 export interface NetworkSaveStatusResponse {
