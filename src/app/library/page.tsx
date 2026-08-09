@@ -99,12 +99,14 @@ export default function LibraryPage() {
   const [networkContextMenu, setNetworkContextMenu] = useState<{ x: number; y: number; book: NetworkBook } | null>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
 
-  const networkSaveAbortRef = useRef<AbortController | null>(null);
+  const networkSaveAbortRef = useRef<Set<AbortController>>(new Set());
   const [networkSavingKeys, setNetworkSavingKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    const abortControllers = networkSaveAbortRef.current;
     return () => {
-      networkSaveAbortRef.current?.abort();
+      for (const controller of abortControllers) controller.abort();
+      abortControllers.clear();
     };
   }, []);
 
@@ -452,7 +454,7 @@ export default function LibraryPage() {
     if (networkSavingKeys.has(key)) return;
     setNetworkSavingKeys((prev) => new Set(prev).add(key));
     const controller = new AbortController();
-    networkSaveAbortRef.current = controller;
+    networkSaveAbortRef.current.add(controller);
     const title = book.title || book.name || '该书';
     try {
       await saveNetworkBook(serverUrl, sourceId, book.book_url);
@@ -486,6 +488,7 @@ export default function LibraryPage() {
       }
       toast(getErrorMessage(error, '保存失败，请检查网络或登录状态。'));
     } finally {
+      networkSaveAbortRef.current.delete(controller);
       setNetworkSavingKeys((prev) => {
         const next = new Set(prev);
         next.delete(key);
@@ -517,7 +520,8 @@ export default function LibraryPage() {
         disabled:
           sourceId == null || !book.book_url || networkSavingKeys.has(`${sourceId}:${book.book_url}`),
         onClick: () => void saveNetworkBookWithFeedback(book),
-      },    ];
+      },
+    ];
   };
 
   // Empty selection while in batch mode → leave batch mode.

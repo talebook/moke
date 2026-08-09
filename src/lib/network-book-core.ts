@@ -74,7 +74,7 @@ export async function pollNetworkSave({
   sleep = defaultSleep,
   onUpdate,
 }: {
-  fetchStatus: () => Promise<NetworkSaveStatusResponse | null>;
+  fetchStatus: (signal?: AbortSignal) => Promise<NetworkSaveStatusResponse | null>;
   intervalMs?: number;
   maxMisses?: number;
   timeoutMs?: number;
@@ -100,7 +100,7 @@ export async function pollNetworkSave({
 
     let status: NetworkSaveStatusResponse | null;
     try {
-      status = await fetchStatus();
+      status = await fetchStatus(signal);
     } catch {
       status = null;
     }
