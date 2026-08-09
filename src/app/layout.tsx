@@ -17,6 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   const eink = useSettingsStore((s) => s.eink);
+  const theme = useSettingsStore((s) => s.theme);
 
   // Manual override: set the [data-eink='true'] attribute (same signal readest
   // uses) so Moke + the embedded reader share one convention. Auto e-ink
@@ -25,9 +26,32 @@ export default function RootLayout({
     document.documentElement.setAttribute('data-eink', eink.toString());
   }, [eink]);
 
+  // Appearance theme: 'light' | 'dark' | 'system'. 'system' resolves through
+  // prefers-color-scheme and stays in sync while the app is running. The inline
+  // head script below applies the theme before first paint to avoid a flash.
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && mq.matches);
+      document.documentElement.classList.toggle('dark', dark);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [theme]);
+
   return (
-    <html lang="zh-CN" className="light">
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
+        {/* Apply the persisted theme before hydration so the first paint is
+            already dark when dark mode is on (no flash of white). Reads the
+            zustand persist payload directly; falls back to the OS preference
+            for 'system'. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var t=s&&s.state&&s.state.theme||'system';var mq=window.matchMedia('(prefers-color-scheme: dark)');var dark=t==='dark'||(t==='system'&&mq.matches);if(dark){document.documentElement.classList.add('dark')}}catch(e){}})();`,
+          }}
+        />
         {/* Keep the first render independent from third-party font servers. The
             system stack in globals.css avoids a render-blocking Google Fonts
             request on LAN/Tauri deployments. */}

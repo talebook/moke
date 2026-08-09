@@ -34,10 +34,50 @@
 }
 
 @layer base {
+  :root {
+    --background: 47 53% 97%;
+    --foreground: 240 1% 18%;
+    --card: 36 33% 94%;
+    --card-foreground: 240 1% 18%;
+    --primary: 33 35% 57%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 43 28% 90%;
+    --muted-foreground: 27 4% 53%;
+    --accent: 42 30% 92%;
+    --accent-foreground: 240 1% 18%;
+    --destructive: 6 63% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 83 19% 46%;
+    --success-foreground: 0 0% 100%;
+    --border: 35 21% 89%;
+    --input: 42 30% 92%;
+    --ring: 33 35% 57%;
+  }
+
+  .dark {
+    --background: 36 12% 9%;
+    --foreground: 40 20% 92%;
+    --card: 36 12% 13%;
+    --card-foreground: 40 20% 92%;
+    --primary: 33 40% 62%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 36 10% 18%;
+    --muted-foreground: 35 8% 62%;
+    --accent: 36 10% 16%;
+    --accent-foreground: 40 20% 92%;
+    --destructive: 6 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 83 19% 56%;
+    --success-foreground: 0 0% 100%;
+    --border: 35 10% 22%;
+    --input: 36 10% 16%;
+    --ring: 33 40% 62%;
+  }
+
   html, body {
     font-family: 'Moke Inter', 'Moke Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-    background: #FBF9F2;
-    color: #2C2C2E;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -51,6 +91,138 @@
   .font-serif {
     font-family: 'Moke Noto Serif SC', 'Songti SC', 'STSong', serif;
   }
+}
+
+/* ===== Dark theme ===== */
+/* Semantic Tailwind tokens (bg-background / text-foreground / bg-primary /
+   bg-muted / border-border / ...) flip automatically via the CSS variables in
+   @layer base. The rules below dark-adapt the hardcoded warm recipe used across
+   pages — translucent white glass surfaces, amber hairline borders, amber tint
+   fills, status colors — mirroring the [data-eink] convention below. E-ink
+   rules come later in the file, so on an e-ink device dark mode loses to the
+   black/white override (as it should). */
+.dark [class*='bg-white/95'] {
+  background-color: rgba(28, 26, 22, 0.97) !important;
+}
+.dark [class*='bg-white/80'] {
+  background-color: rgba(30, 27, 23, 0.85) !important;
+}
+.dark [class*='bg-white/70'] {
+  background-color: rgba(30, 27, 23, 0.78) !important;
+}
+.dark [class*='bg-white/65'] {
+  background-color: rgba(30, 27, 23, 0.75) !important;
+}
+.dark [class*='bg-white/60'] {
+  background-color: rgba(30, 27, 23, 0.72) !important;
+}
+.dark [class*='bg-white/55'] {
+  background-color: rgba(30, 27, 23, 0.65) !important;
+}
+.dark [class*='bg-white/50'] {
+  background-color: rgba(30, 27, 23, 0.6) !important;
+}
+.dark [class*='bg-white/40'],
+.dark [class*='bg-white/35'] {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+.dark [class*='bg-white/25'] {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+/* Warm translucent header / glass surfaces (bg-[#fffdf8]/80) → dark surface. */
+.dark [class*='bg-[#fffdf8]'] {
+  background-color: rgba(26, 24, 20, 0.8) !important;
+}
+/* Warm hairline borders (border-amber-950/10 etc.) → light hairline. */
+.dark [class*='border-amber-950/'] {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.dark [class*='divide-amber-950/'] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+/* Amber tint fills (Select hover/selected, context menu, tags). */
+.dark [class*='bg-amber-50/'],
+.dark [class*='bg-amber-100/'] {
+  background-color: rgba(184, 149, 106, 0.18) !important;
+}
+.dark [class*='hover:bg-amber-50/']:hover,
+.dark [class*='hover:bg-amber-100/']:hover {
+  background-color: rgba(184, 149, 106, 0.24) !important;
+}
+/* Solid-white input focus/hover states (Select, shelf search). */
+.dark [class*='hover:bg-white']:hover,
+.dark [class*='focus:bg-white']:focus {
+  background-color: rgba(30, 27, 23, 0.85) !important;
+}
+/* Status pills (extensions / reset-password / context menu). */
+.dark [class*='bg-green-50'] {
+  background-color: rgba(122, 139, 94, 0.15) !important;
+}
+.dark [class*='border-green-200'] {
+  border-color: rgba(122, 139, 94, 0.4) !important;
+}
+.dark [class*='bg-green-500/'],
+.dark [class*='border-green-500/'] {
+  background-color: rgba(122, 139, 94, 0.2) !important;
+}
+.dark [class*='border-green-500/'] {
+  border-color: rgba(122, 139, 94, 0.5) !important;
+}
+.dark [class*='bg-blue-50'] {
+  background-color: rgba(90, 120, 180, 0.15) !important;
+}
+.dark [class*='bg-red-50'] {
+  background-color: rgba(192, 57, 43, 0.15) !important;
+}
+.dark [class*='hover:bg-red-50']:hover {
+  background-color: rgba(192, 57, 43, 0.2) !important;
+}
+.dark [class*='hover:bg-green-50']:hover {
+  background-color: rgba(122, 139, 94, 0.2) !important;
+}
+/* Colored text: dark shades (amber-600/700, green-600, red-600, ...) lose
+   contrast on the dark background — lighten them. */
+.dark [class*='text-amber-'] {
+  color: #e2b97c !important;
+}
+.dark [class*='text-green-'] {
+  color: #9dbb7a !important;
+}
+.dark [class*='text-emerald-'] {
+  color: #8fbe9c !important;
+}
+.dark [class*='text-red-'] {
+  color: #e07a6e !important;
+}
+.dark [class*='text-rose-'] {
+  color: #e58a9a !important;
+}
+.dark [class*='text-blue-'] {
+  color: #8faad9 !important;
+}
+/* Warm translucent "glass" / gradient page shells. */
+.dark .app-warm-bg {
+  background:
+    radial-gradient(circle at top left, rgba(184, 149, 106, 0.1), transparent 32%),
+    linear-gradient(180deg, #201d19 0%, #1c1a16 44%, #171512 100%);
+}
+.dark .app-glass {
+  background: rgba(30, 27, 23, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px -45px rgba(0, 0, 0, 0.8);
+}
+.dark .app-card {
+  background: rgba(30, 27, 23, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 50px -40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.dark .moke-shelf-bg {
+  background:
+    radial-gradient(circle at top left, rgba(184, 149, 106, 0.1), transparent 32%),
+    linear-gradient(180deg, #201d19 0%, #1c1a16 44%, #171512 100%) !important;
+}
+.dark .eink-bordered {
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 /* ===== E-ink rendering ===== */

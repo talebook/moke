@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Copy, Download, LogOut, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, Sun, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
+import type { ThemeMode } from '@/lib/store/settings';
+import { cn } from '@/lib/utils';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
@@ -22,6 +24,8 @@ export default function SettingsPage() {
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const eink = useSettingsStore((s) => s.eink);
   const setEink = useSettingsStore((s) => s.setEink);
+  const theme = useSettingsStore((s) => s.theme);
+  const setTheme = useSettingsStore((s) => s.setTheme);
   const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
 
@@ -148,6 +152,10 @@ export default function SettingsPage() {
               checked={eink}
               onChange={setEink}
             />
+            <ThemeRow
+              value={theme}
+              onChange={setTheme}
+            />
           </SettingsSection>
 
           {/* 只有桌面端才显示拓展管理入口 */}
@@ -237,6 +245,52 @@ function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typ
       </div>
       <ArrowRight className={`w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-200 shrink-0 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />
     </button>
+  );
+}
+
+function ThemeRow({ value, onChange }: { value: ThemeMode; onChange: (v: ThemeMode) => void }) {
+  const options: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
+    { value: 'light', label: '浅色', icon: Sun },
+    { value: 'dark', label: '深色', icon: Moon },
+    { value: 'system', label: '跟随系统', icon: Settings2 },
+  ];
+
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
+      <div className="flex items-start gap-3.5 min-w-0">
+        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
+          {value === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+        </div>
+        <div className="min-w-0 py-0.5">
+          <p className="text-sm font-medium text-foreground">外观</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">选择浅色、深色或跟随系统外观</p>
+        </div>
+      </div>
+      <div className="flex items-center rounded-lg p-1 shrink-0 border border-amber-950/10 bg-white/65 eink-bordered shadow-sm">
+        {options.map((opt) => {
+          const Icon = opt.icon;
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              aria-label={opt.label}
+              title={opt.label}
+              onClick={() => onChange(opt.value)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all',
+                active
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="w-4 h-4" />
+              <span className="hidden sm:inline">{opt.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
