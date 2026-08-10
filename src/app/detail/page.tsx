@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
+import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { deleteOfflineBook, getOfflineBook } from '@/lib/offline-books';
 import {
   beginOfflineDownload,
@@ -125,11 +125,7 @@ function DetailContent() {
     setLoading(true);
     try {
       const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include', signal: controller.signal });
-      const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。', ['ok', 'user.need_login']);
-      if (data.err === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
+      const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。');
       if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
@@ -144,10 +140,6 @@ function DetailContent() {
     } catch (error) {
       if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       setBook(null);
-      if (error instanceof MokeApiError && error.code === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
       setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
     } finally {
       if (!controller.signal.aborted && seq === loadBookSeqRef.current) setLoading(false);
@@ -161,10 +153,6 @@ function DetailContent() {
       });
       const data = await res.json();
       if (seq !== loadBookSeqRef.current) return;
-      if (data.err === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
       if (data.err === 'ok') {
         setInShelf(Boolean(data.wants));
       }

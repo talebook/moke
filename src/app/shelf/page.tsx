@@ -20,7 +20,6 @@ import {
   endOfflineDownload,
 } from '@/lib/offline-download';
 import { useToast } from '@/lib/toast';
-import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
 
 interface BookItem {
@@ -62,7 +61,6 @@ function BookCard({
   const authorName = book.author || book.authors?.[0]?.name || '';
   const bookId = String(book.id);
   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
-  const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
   const colors = [
     'from-emerald-800/20 via-teal-700/15 to-cyan-700/20',
     'from-amber-700/20 via-yellow-600/15 to-orange-700/20',
@@ -93,7 +91,36 @@ function BookCard({
       };
     }
     if (onContextAction) {
-      return makeLongPressHandlers(bookId, onContextAction);
+      let pressTimer: number | null = null;
+      let didLongPress = false;
+      let touchX = 0;
+      let touchY = 0;
+      return {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          onContextAction(bookId, e.clientX, e.clientY);
+        },
+        onTouchStart: (e: React.TouchEvent) => {
+          didLongPress = false;
+          const t = e.touches[0];
+          touchX = t?.clientX ?? 0;
+          touchY = t?.clientY ?? 0;
+          pressTimer = window.setTimeout(() => {
+            didLongPress = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+            onContextAction(bookId, touchX, touchY);
+          }, 500);
+        },
+        onTouchEnd: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onTouchMove: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onClick: (e: React.MouseEvent) => {
+          if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+        },
+      };
     }
     return {};
   }

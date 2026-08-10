@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, Check, Download } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
-import { useLongPressRegistry } from '@/lib/long-press';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 
@@ -208,7 +207,6 @@ export function BookTable({
 }: BookTableProps) {
   const { serverUrl } = useServerStore();
   const [sort, setSort] = useState<SortState | null>(null);
-  const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
   const selectable = Boolean(batchMode && selectedIds && onToggleSelect);
   const contextual = Boolean(!batchMode && onContextAction);
 
@@ -244,7 +242,36 @@ export function BookTable({
       };
     }
     if (contextual) {
-      return makeLongPressHandlers(id, onContextAction!);
+      let pressTimer: number | null = null;
+      let didLongPress = false;
+      let touchX = 0;
+      let touchY = 0;
+      return {
+        onContextMenu: (e: React.MouseEvent) => {
+          e.preventDefault();
+          onContextAction!(id, e.clientX, e.clientY);
+        },
+        onTouchStart: (e: React.TouchEvent) => {
+          didLongPress = false;
+          const t = e.touches[0];
+          touchX = t?.clientX ?? 0;
+          touchY = t?.clientY ?? 0;
+          pressTimer = window.setTimeout(() => {
+            didLongPress = true;
+            if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(50);
+            onContextAction!(id, touchX, touchY);
+          }, 500);
+        },
+        onTouchEnd: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onTouchMove: () => {
+          if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+        },
+        onClick: (e: React.MouseEvent) => {
+          if (didLongPress) { e.preventDefault(); e.stopPropagation(); }
+        },
+      };
     }
     return {};
   }

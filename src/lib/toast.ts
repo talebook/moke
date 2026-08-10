@@ -10,7 +10,7 @@ export const useToast = create<{
 }>((set) => ({
   message: null,
   type: 'info',
-  show: (msg, type = 'info') => {
+  show: (msg, type = 'error') => {
     if (timer) clearTimeout(timer);
     set({ message: msg, type });
     timer = setTimeout(() => set({ message: null }), 5000);
