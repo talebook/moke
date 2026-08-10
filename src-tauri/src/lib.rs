@@ -274,3 +274,90 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod fs_scope_tests {
+    use glob::{MatchOptions, Pattern};
+    use serde_json::Value;
+    use std::path::Path;
+
+    // Mirrors the exact MatchOptions tauri's `fs::Scope::is_allowed` uses
+    // (tauri/src/scope/fs.rs): require_literal_separator: true so `/dir/*`
+    // doesn't match files inside subdirectories.
+    fn tauri_match_options() -> MatchOptions {
+        MatchOptions {
+            require_literal_separator: true,
+            require_literal_leading_dot: false,
+            case_sensitive: true,
+        }
+    }
+
+    // HOU-30 security regression: "removing bare roots" only holds if
+    // `$APPDATA/**` does NOT match the bare `$APPDATA` directory itself.
+    // `remove(appDataDir(), {recursive:true})` / `rename` / `mkdir(appDataDir())`
+    // must all be rejected by the merged fs scope. This asserts the real glob
+    // matching behavior (same crate version + MatchOptions Tauri uses), so the
+    // hardening can't silently regress if the glob pattern form changes.
+    #[test]
+    fn double_star_does_not_match_bare_root() {
+        let opts = tauri_match_options();
+        let p = Pattern::new("/home/u/AppData/**").unwrap();
+        assert!(!p.matches_path_with(Path::new("/home/u/AppData"), opts));
+        assert!(p.matches_path_with(Path::new("/home/u/AppData/books"), opts));
+        assert!(p.matches_path_with(Path::new("/home/u/AppData/settings.json"), opts));
+        assert!(!p.matches_path_with(Path::new("/home/u/AppDataX/evil"), opts));
+    }
+
+    // Every `$VAR/**` entry in the committed capability files must keep the
+    // bare `$VAR` root out of scope. Parse the real default.json / ohos.json
+    // and exercise the same matching `is_allowed` performs.
+    #[test]
+    fn capability_fs_allow_entries_keep_bare_roots_out_of_scope() {
+        let opts = tauri_match_options();
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let files = [
+            manifest_dir.join("capabilities/default.json"),
+            manifest_dir.join("capabilities/ohos.json"),
+        ];
+        for file in &files {
+            let text = std::fs::read_to_string(file)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+            let cap: Value = serde_json::from_str(&text).unwrap();
+            let perms = cap["permissions"].as_array().unwrap();
+            for perm in perms {
+                let Some(id) = perm["identifier"].as_str() else { continue };
+                if !id.starts_with("fs:") && !id.starts_with("opener:") {
+                    continue;
+                }
+                let Some(allow) = perm["allow"].as_array() else { continue };
+                for entry in allow {
+                    let Some(path) = entry["path"].as_str() else { continue };
+                    // Replace the $VAR with a concrete root to exercise glob
+                    // matching the way the resolved scope would.
+                    let resolved = path
+                        .replace("$APPDATA", "/appdata")
+                        .replace("$APPCONFIG", "/appconfig")
+                        .replace("$APPCACHE", "/appcache")
+                        .replace("$APPLOG", "/applog")
+                        .replace("$TEMP", "/temp");
+                    let bare_root = match path.split('/').next() {
+                        Some("$APPDATA") => "/appdata",
+                        Some("$APPCONFIG") => "/appconfig",
+                        Some("$APPCACHE") => "/appcache",
+                        Some("$APPLOG") => "/applog",
+                        Some("$TEMP") => "/temp",
+                        _ => continue,
+                    };
+                    let p = Pattern::new(&resolved).unwrap_or_else(|e| {
+                        panic!("bad glob {resolved} in {} ({id}): {e}", file.display())
+                    });
+                    assert!(
+                        !p.matches_path_with(Path::new(bare_root), opts),
+                        "{} {id} allow path {path} matches bare root {bare_root}",
+                        file.display()
+                    );
+                }
+            }
+        }
+    }
+}
