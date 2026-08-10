@@ -2,8 +2,32 @@
  * 网络书（在线书库）相关的纯逻辑，与 DOM / `@/` 别名无关，便于 Node 单测。
  *
  * 上层 `network-books.ts`（client 侧）负责调用服务器 API 并把 `fetchStatus`
- * 绑定到 `pollNetworkSave`；本文件只做 URL 构造和状态轮询。
+ * 绑定到 `pollNetworkSave`；本文件只做 URL 构造、状态轮询和搜索结果归一化。
  */
+
+export interface NetworkSearchBook {
+  title?: string;
+  name?: string;
+  author?: string;
+  authors?: string | Array<{ name: string }>;
+  book_url: string;
+  cover_url?: string;
+  img?: string;
+  thumb?: string;
+  source_id?: number;
+  source_name?: string;
+}
+
+/** 按源分组的搜索结果条目（`{ source_id, source_name, books/items }`）。 */
+export interface NetworkSearchGroupResult {
+  source_id?: number;
+  source_name?: string;
+  books?: NetworkSearchBook[];
+  items?: NetworkSearchBook[];
+}
+
+/** 搜索结果数组中的单个条目：分组对象、裸书对象，或裸数组。 */
+export type NetworkSearchResultEntry = NetworkSearchGroupResult | NetworkSearchBook | NetworkSearchBook[];
 
 export function buildNetworkBookHref(sourceId: number, bookUrl: string): string {
   const params = new URLSearchParams({
@@ -40,27 +64,58 @@ export interface NetworkSearchStatusResponse {
 }
 
 /**
- * 把按来源分组（或散装）的搜索结果扁平化为单本书列表，并在扁平化时保留
- * 每本书所属的书源 id/名称（后续进入网络书详情需要 `source_id` + `book_url`）。
+ * 把搜索结果扁平化为带 `source_id` / `source_name` 的书籍列表。
+ *
+ * 服务器实际只返回分组形态（talebook `SearchTaskService.get_status` 仅汇总
+ * `state == "done"` 且 `books` 非空的源）；裸书 / 裸数组分支仅为归一化入口的防御，
+ * 服务器不提供整体源信息，无源可补，保持原样透传。
+ *
+ * 条目有三种形态，统一处理：
+ * - 分组对象 `{ source_id, source_name, books/items }`：展开其书籍，缺省时补
+ *   分组携带的源信息；
+ * - 裸数组：逐项透传；
+ * - 裸书对象：须带书字段（`book_url` / `title` / `name`）才算书，保留书籍自身
+ *   的源信息；否则视为占位对象（如仅有 `source_id`/`source_name` 的空分组）丢弃，
+ *   避免渲染成点不开的幽灵卡片。
+ *
+ * 运行时 `results` 来自未校验的 JSON，非数组时安全返回空数组。
  */
 export function flattenNetworkSearchResults(
-  results?: NetworkSearchStatusResponse['results'],
-): NetworkBook[] {
-  return (results || []).flatMap((r: { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
-    if (Array.isArray(r)) return r;
+  results: NetworkSearchResultEntry[] | undefined,
+): NetworkSearchBook[] {
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((r) => {
+    if (Array.isArray(r)) {
+      return r;
+    }
     if (typeof r === 'object' && r !== null) {
-      const asResult = r as { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] };
-      const items = asResult.books || asResult.items || [];
-      return items.map((b) => ({
-        ...b,
-        source_id: b.source_id ?? asResult.source_id,
-        source_name: b.source_name ?? asResult.source_name,
-      }));
+      const group = r as NetworkSearchGroupResult;
+      const items = group.books || group.items;
+      if (Array.isArray(items)) {
+        return items.map((b) => ({
+          ...b,
+          source_id: b.source_id ?? group.source_id,
+          source_name: b.source_name ?? group.source_name,
+        }));
+      }
+      const book = r as NetworkSearchBook;
+      if (!book.book_url && !book.title && !book.name) return [];
+      return [book];
     }
     return [];
   });
 }
 
+/**
+ * 解析 URL 参数中的 `source_id`。空串 / 缺失 / 非数字 / 非整数都返回 `null`，
+ * 避免把 `Number('abc')` 的 `NaN` 或 `Number('12.5')` 的小数透传给服务器
+ * （书源 id 是数据库整数）。
+ */
+export function parseNetworkSourceId(raw: string | null): number | null {
+  if (raw == null || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) ? n : null;
+}
 /** `/api/network/save/status` 的归一化响应（`readApiJson` 返回的原始字段）。 */
 export interface NetworkSaveStatusResponse {
   err?: string;

@@ -12,6 +12,7 @@ import {
   saveNetworkBook,
   type NetworkBookDetail,
 } from '@/lib/network-books';
+import { parseNetworkSourceId } from '@/lib/network-book-core';
 
 function NetworkBookContent() {
   const searchParams = useSearchParams();
@@ -19,6 +20,10 @@ function NetworkBookContent() {
   const { serverUrl } = useServerStore();
   const sourceIdParam = searchParams.get('source_id');
   const bookUrl = searchParams.get('book_url');
+  // 用 Number.isInteger 校验：`Number('abc')` 得 NaN、`Number('12.5')` 得小数，
+  // 都不是合法的书源 id；`NaN == null` 为 false，会让守卫放行并向服务器发出
+  // `source_id=NaN` 请求；非法值归一为 null 走守卫。
+  const sourceId = parseNetworkSourceId(sourceIdParam);
 
   const [book, setBook] = useState<NetworkBookDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,7 +33,6 @@ function NetworkBookContent() {
   const [saveProgress, setSaveProgress] = useState<{ percent: number; done: number; total: number } | null>(null);
   const [saveError, setSaveError] = useState('');
   const [saveDone, setSaveDone] = useState(false);
-  const sourceId = sourceIdParam ? Number(sourceIdParam) : null;
   const aliveRef = useRef(true);
   const saveAbortRef = useRef<AbortController | null>(null);
 
