@@ -36,13 +36,13 @@ jobs:
         uses: anthropics/claude-code-action@v1
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.CC_SWITCH_API_URL }}
-          ANTHROPIC_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-flash
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-flash
-          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-v4-flash
+          #ANTHROPIC_MODEL: deepseek-v4-flash
+          #ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-flash
+          #ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-flash
+          #ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-flash
+          #CLAUDE_CODE_SUBAGENT_MODEL: deepseek-v4-flash
         with:
-          anthropic_api_key: ${{ secrets.OPENCODE_GO_API_KEY }}
+          #anthropic_api_key: ${{ secrets.OPENCODE_GO_API_KEY }}
           additional_permissions: |
             actions: read
           claude_args: |
