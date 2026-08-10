@@ -512,8 +512,8 @@ export default function ShelfPage() {
             <div className="flex min-h-[420px] items-center justify-center px-4 py-16 text-center sm:px-8 md:min-h-[520px] md:py-24">
               <div className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-amber-950/10 bg-white/65 eink-bordered px-5 py-10 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur sm:rounded-[32px] sm:px-8 sm:py-12">
                 <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
-                <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-amber-200/40 text-primary shadow-inner dark:to-amber-900/40 eink:!bg-white eink:!shadow-[inset_0_0_0_1px_#000]">
-                  <Search className="w-10 h-10 eink:!text-black" />
+                <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-amber-200/40 text-primary shadow-inner dark:to-amber-900/40">
+                  <Search className="w-10 h-10" />
                 </div>
                 <p className="relative text-lg font-semibold mb-2 text-foreground">{requiresLogin ? '登录后查看你的书架' : '书架还是空的'}</p>
                 <p className="relative text-sm leading-6 max-w-xs mx-auto text-muted-foreground">

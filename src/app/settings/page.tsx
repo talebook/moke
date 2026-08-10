@@ -270,6 +270,12 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
   }, []);
   const effectiveDark = !disabled && resolveTheme(value, systemDark) === 'dark';
 
+  // Normalize an out-of-options value (e.g. corrupted persisted data, or a
+  // future mode not synced here) to a known option so the group keeps a single
+  // tab stop and a checked item — otherwise every radio would be tabIndex=-1
+  // and aria-checked=false, making the radiogroup unreachable by keyboard.
+  const safeValue = options.some((o) => o.value === value) ? value : 'system';
+
   // Roving tabindex + arrow keys so the radiogroup behaves per ARIA APG.
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -277,10 +283,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
     const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
     if (!keys.includes(e.key)) return;
     e.preventDefault();
-    const index = options.findIndex((o) => o.value === value);
-    // value not in options (e.g. corrupted persisted data, or a future mode
-    // not synced here) — bail out rather than mis-selecting a neighbour.
-    if (index === -1) return;
+    const index = options.findIndex((o) => o.value === safeValue);
     let next = index;
     if (e.key === 'ArrowLeft') next = (index - 1 + options.length) % options.length;
     else if (e.key === 'ArrowRight') next = (index + 1) % options.length;
@@ -314,7 +317,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
       >
         {options.map((opt) => {
           const Icon = opt.icon;
-          const active = value === opt.value;
+          const active = safeValue === opt.value;
           const optionIndex = options.indexOf(opt);
           return (
             <button

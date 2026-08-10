@@ -258,6 +258,7 @@
    which weakens focus, selection and hover affordances. Lighten these too,
    matching the emphasis-text treatment. Exact tokens for border/ring; the
    bg-primary/N fills use the /10,/15,/5,90 shades that actually appear. */
+.dark [class~='border-primary'],
 .dark [class~='border-primary/60'],
 .dark [class~='border-primary/40'],
 .dark [class~='border-primary/30'],
@@ -669,6 +670,21 @@
 [data-eink='true'] [class*='via-primary'],
 [data-eink='true'] [class*='to-primary'] {
   background: #000000 !important;
+}
+
+/* Shelf empty-state icon circle (shelf/page.tsx): it uses a
+   from-primary/15 -> to-amber-200/40 gradient with a text-primary Search
+   icon. The from-primary rule above would turn it black-on-black (invisible
+   icon), so give the circle an explicit white surface + black inset ring +
+   black icon. Written as unlayered !important (same as the rest of the e-ink
+   block) rather than a Tailwind eink: variant, so it reliably beats the
+   layered utilities regardless of how postcss-cascade-layers processes them.
+   Scope: only the /15 fade token, so the solid from-primary avatars above
+   keep their black-invert behaviour. */
+[data-eink='true'] [class*='from-primary/15'] {
+  background: #FFFFFF !important;
+  box-shadow: inset 0 0 0 1px #000000 !important;
+  color: #000000 !important;
 }
 
 /* All other colored book-cover placeholder gradients (the fallback

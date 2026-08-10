@@ -27,9 +27,15 @@ export default function RootLayout({
 
   // Manual override: set the [data-eink='true'] attribute (same signal readest
   // uses) so Moke + the embedded reader share one convention. Auto e-ink
-  // styling is applied via CSS media queries regardless.
+  // styling is applied via CSS media queries regardless. Use set/remove so the
+  // attribute is absent when e-ink is off (matching the inline head script and
+  // the auto media-query path, which never set it) — a lingering
+  // data-eink="false" would be read as "present" by any hasAttribute/truthy
+  // check (e.g. window.__MOKE_EINK in the reader bridge).
   useEffect(() => {
-    document.documentElement.setAttribute('data-eink', eink.toString());
+    const el = document.documentElement;
+    if (eink) el.setAttribute('data-eink', 'true');
+    else el.removeAttribute('data-eink');
   }, [eink]);
 
   // Appearance theme: 'light' | 'dark' | 'system'. 'system' resolves through
