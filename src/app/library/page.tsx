@@ -10,7 +10,7 @@ import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { BookTable, type BookRow, type SortState } from '@/components/book/BookTable';
-import { buildNetworkBookHref } from '@/lib/network-book-core';
+import { buildNetworkBookHref, pollNetworkSearch, type NetworkSearchStatusResponse } from '@/lib/network-book-core';
 import { pollNetworkSaveForBook, saveNetworkBook } from '@/lib/network-books';
 import { ViewModeToggle, type ViewMode } from '@/components/book/ViewModeToggle';
 import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionBar';
@@ -148,6 +148,23 @@ export default function LibraryPage() {
   const [networkSearchResults, setNetworkSearchResults] = useState<NetworkBook[]>([]);
   const [networkSearchLoading, setNetworkSearchLoading] = useState(false);
 
+  // 请求序号：每个数据请求在发起时取号，回写 setState 前校验仍是当前最新，
+  // 慢的旧请求即使后返回也不会覆盖新结果（翻页/切 tab/连搜/详情跳转的竞态保护）。
+  const booksSeqRef = useRef(0);
+  const categoriesSeqRef = useRef(0);
+  const networkBooksSeqRef = useRef(0);
+  const networkSearchSeqRef = useRef(0);
+  // 在途网络搜索的控制句柄：新搜索/卸载时 abort，防止并行轮询与卸载后后台空转。
+  const networkSearchControllerRef = useRef<AbortController | null>(null);
+
+  // 卸载时终止在途的网络搜索轮询，避免离开页面后仍在后台每 1s 打 status。
+  useEffect(() => {
+    return () => {
+      networkSearchControllerRef.current?.abort();
+      networkSearchControllerRef.current = null;
+    };
+  }, []);
+
   // ── Local tab effects ────────────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab === 'local') loadBooks(currentPage);
@@ -159,6 +176,7 @@ export default function LibraryPage() {
   }, [serverUrl]);
 
   const loadBooks = async (page: number) => {
+    const seq = ++booksSeqRef.current;
     setLocalLoading(true);
     try {
       const params = new URLSearchParams({
@@ -169,14 +187,16 @@ export default function LibraryPage() {
       if (selectedFormat !== '全部') params.set('format', selectedFormat.toLowerCase());
       const res = await request(`${serverUrl}/api/library?${params.toString()}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[]; total?: number }>(res, '书库列表解析失败。', ['ok', 'user.need_login']);
+      if (seq !== booksSeqRef.current) return;
       if (data.err === 'user.need_login') { router.push('/login'); return; }
       setBooks(data.books || data.items || []);
       setTotal(data.total || 0);
     } catch (error) {
+      if (seq !== booksSeqRef.current) return;
       setBooks([]);
       setTotal(0);
       toast(getErrorMessage(error, '书库加载失败，请检查服务器连接。'));
-    } finally { setLocalLoading(false); }
+    } finally { if (seq === booksSeqRef.current) setLocalLoading(false); }
   };
 
   const loadTags = async () => {
@@ -226,72 +246,93 @@ export default function LibraryPage() {
   };
 
   const loadCategories = async (sourceId: number) => {
+    const seq = ++categoriesSeqRef.current;
     setCategoriesLoading(true);
     try {
       const res = await request(`${serverUrl}/api/network/categories?source_id=${sourceId}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; items?: NetworkCategory[] }>(res, '分类解析失败。');
+      if (seq !== categoriesSeqRef.current) return;
       setCategories(data.items || []);
     } catch (error) {
+      if (seq !== categoriesSeqRef.current) return;
       setCategories([]);
       toast(getErrorMessage(error, '分类加载失败。'));
-    } finally { setCategoriesLoading(false); }
+    } finally { if (seq === categoriesSeqRef.current) setCategoriesLoading(false); }
   };
 
   const loadNetworkBooks = async (categoryUrl: string, page: number) => {
     if (!selectedSourceId) return;
+    const seq = ++networkBooksSeqRef.current;
     setNetworkBooksLoading(true);
     try {
       const params = new URLSearchParams({ source_id: String(selectedSourceId), url: categoryUrl, page: String(page) });
       const res = await request(`${serverUrl}/api/network/explore?${params.toString()}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: NetworkBook[] }>(res, '网络书籍解析失败。');
+      if (seq !== networkBooksSeqRef.current) return;
       setNetworkBooks((data.books || []).map((b) => ({ ...b, source_id: selectedSourceId })));
     } catch (error) {
+      if (seq !== networkBooksSeqRef.current) return;
       setNetworkBooks([]);
       toast(getErrorMessage(error, '网络书籍加载失败。'));
-    } finally { setNetworkBooksLoading(false); }
+    } finally { if (seq === networkBooksSeqRef.current) setNetworkBooksLoading(false); }
   };
 
   // ── Network search ───────────────────────────────────────────────────────────
   const doNetworkSearch = useCallback(async (q: string) => {
     if (!q.trim() || !serverUrl) return;
+    // 发起新搜索时终止上一路在途轮询，避免两条并行循环互相覆盖结果/loading 状态。
+    networkSearchControllerRef.current?.abort();
+    const controller = new AbortController();
+    networkSearchControllerRef.current = controller;
+    const seq = ++networkSearchSeqRef.current;
     setNetworkSearchMode(true);
     setNetworkSearchLoading(true);
     setNetworkSearchResults([]);
     try {
       const params = new URLSearchParams({ key: q.trim() });
-      const initRes = await request(`${serverUrl}/api/network/search?${params.toString()}`, { credentials: 'include' });
+      const initRes = await request(`${serverUrl}/api/network/search?${params.toString()}`, { credentials: 'include', signal: controller.signal });
       const initData = await readApiJson<{ err?: string; msg?: string; task_id?: string | number }>(initRes, '网络搜索任务解析失败。');
       const taskId = initData.task_id;
       if (taskId == null) throw new Error('网络搜索任务创建失败。');
-      // Poll until finished
-      let done = false;
-      let attempts = 0;
-      while (!done && attempts < 60) {
-        await new Promise((r) => setTimeout(r, 1000));
-        attempts++;
-        const pollRes = await request(`${serverUrl}/api/network/search/status?task_id=${taskId}`, { credentials: 'include' });
-        const pollData = await readApiJson<{ err?: string; msg?: string; results?: Array<{ source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook>; finished?: boolean }>(pollRes, '网络搜索结果解析失败。');
-        const partial: NetworkBook[] = (pollData.results || []).flatMap((r: { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] } | NetworkBook) => {
-          if (Array.isArray(r)) return r;
-          if (typeof r === 'object' && r !== null) {
-            const asResult = r as { source_id?: number; source_name?: string; books?: NetworkBook[]; items?: NetworkBook[] };
-            const items = asResult.books || asResult.items || [];
-            // 保留来源书源 id/名称：后续点击进入网络书详情需要 source_id + book_url。
-            return items.map((b) => ({
-              ...b,
-              source_id: b.source_id ?? asResult.source_id,
-              source_name: b.source_name ?? asResult.source_name,
-            }));
-          }
-          return [];
-        });
-        setNetworkSearchResults(partial);
-        if (pollData.finished) done = true;
-      }
+      // 轮询在 abort（新搜索 / 卸载）时提前返回 null，不再继续打 status。
+      await pollNetworkSearch({
+        fetchStatus: async () => {
+          const pollRes = await request(`${serverUrl}/api/network/search/status?task_id=${taskId}`, { credentials: 'include', signal: controller.signal });
+          return readApiJson<NetworkSearchStatusResponse>(pollRes, '网络搜索结果解析失败。');
+        },
+        signal: controller.signal,
+        intervalMs: 1000,
+        maxAttempts: 60,
+        onPartial: (books) => {
+          if (seq !== networkSearchSeqRef.current) return;
+          setNetworkSearchResults(books);
+        },
+      });
     } catch (error) {
+      // 已取消（新搜索接管或组件卸载）时静默退出，不弹错误、不回写状态。
+      if (controller.signal.aborted) return;
+      if (seq !== networkSearchSeqRef.current) return;
       toast(getErrorMessage(error, '网络搜索失败。'));
-    } finally { setNetworkSearchLoading(false); }
+    } finally {
+      // 仅当仍是当前最新的一路时才收尾，避免旧的先结束时提前把 loading 置 false。
+      if (seq === networkSearchSeqRef.current && networkSearchControllerRef.current === controller) {
+        networkSearchControllerRef.current = null;
+        setNetworkSearchLoading(false);
+      }
+    }
   }, [serverUrl]);
+
+  // 返回浏览 / 切走在线 tab 时终止在途网络搜索轮询。
+  const cancelNetworkSearch = useCallback(() => {
+    networkSearchControllerRef.current?.abort();
+    networkSearchControllerRef.current = null;
+    networkSearchSeqRef.current++;
+    setNetworkSearchLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'online') cancelNetworkSearch();
+  }, [activeTab, cancelNetworkSearch]);
 
   const submitActiveSearch = () => {
     if (activeTab === 'local') {
@@ -302,7 +343,11 @@ export default function LibraryPage() {
   };
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') submitActiveSearch();
+    if (e.key === 'Enter') {
+      // 网络搜索进行中忽略 Enter，避免并行启动第二条轮询。
+      if (activeTab === 'online' && networkSearchLoading) return;
+      submitActiveSearch();
+    }
   };
 
   // ── Selection (local tab only — online books have no stable ids) ───────────
@@ -910,7 +955,7 @@ export default function LibraryPage() {
             <div className="flex-1 min-h-0 overflow-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
               <div className="flex items-center gap-3 mb-6">
                 <button
-                  onClick={() => { setNetworkSearchMode(false); setNetworkSearchQ(''); setNetworkSearchResults([]); }}
+                  onClick={() => { cancelNetworkSearch(); setNetworkSearchMode(false); setNetworkSearchQ(''); setNetworkSearchResults([]); }}
                   className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />

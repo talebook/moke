@@ -64,6 +64,10 @@ function DetailContent() {
   const [message, setMessage] = useState('');
   const downloadControllerRef = useRef<AbortController | null>(null);
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+  // 请求序号 + abort：详情页 id 跳转（同一组件实例复用）或卸载时终止在途请求，
+  // 防止 A 的慢响应把 B 的书显示在页面上。
+  const loadBookSeqRef = useRef(0);
+  const loadBookControllerRef = useRef<AbortController | null>(null);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -75,7 +79,16 @@ function DetailContent() {
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
 
   useEffect(() => {
-    if (id) loadBook();
+    if (!id) return;
+    // id 变化时 abort 上一本在途请求，避免旧详情覆盖新详情。
+    loadBookControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadBookControllerRef.current = controller;
+    loadBook(controller);
+    return () => {
+      controller.abort();
+      if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -107,33 +120,39 @@ function DetailContent() {
     return () => downloadControllerRef.current?.abort();
   }, []);
 
-  const loadBook = async () => {
+  const loadBook = async (controller: AbortController) => {
+    const seq = ++loadBookSeqRef.current;
     setLoading(true);
     try {
-      const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include' });
+      const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include', signal: controller.signal });
       const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。');
+      if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
         setInShelf(Boolean(nextBook?.state?.wants));
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        loadReadingState(nextBook?.id || String(id));
+        loadReadingState(nextBook?.id || String(id), seq);
       } else {
         throw new Error(data.msg || '书籍详情加载失败。');
       }
     } catch (error) {
+      if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       setBook(null);
       setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
-    } finally { setLoading(false); }
+    } finally {
+      if (!controller.signal.aborted && seq === loadBookSeqRef.current) setLoading(false);
+    }
   };
 
-  const loadReadingState = async (bookId: string | number) => {
+  const loadReadingState = async (bookId: string | number, seq: number) => {
     try {
       const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
         credentials: 'include',
       });
       const data = await res.json();
+      if (seq !== loadBookSeqRef.current) return;
       if (data.err === 'ok') {
         setInShelf(Boolean(data.wants));
       }
