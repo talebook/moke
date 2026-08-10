@@ -107,7 +107,19 @@
    These use exact class-token matching ([class~='...']) instead of substring
    matching so a static token (bg-white/70) never leaks into hover/focus
    variants (hover:bg-white/70) — rows that are transparent at rest and only
-   turn translucent on hover keep that behaviour in dark mode. */
+   turn translucent on hover keep that behaviour in dark mode.
+
+   MAINTENANCE CONSTRAINT: every color/opacity token enumerated below is an
+   explicit allow-list. When a component introduces a NEW shade of an
+   enumerated family (e.g. bg-white/20, border-primary/45, text-amber-800),
+   it will silently render as an un-dark-adapted bright/colored surface in
+   dark mode — no error, no warning. Always add the new token to the matching
+   block below (or to the e-ink rules) when you add it in a component.
+   Layer note: these rules are unlayered + !important, which beats plain
+   utilities but loses to any dark:!* important utility on the same element,
+   and a plain dark:* variant will be overridden by them — if you need a
+   per-element dark:* override here, exclude the exact token first (as the
+   colored-text block does with :not([class~='dark:text-...'])). */
 .dark [class~='bg-white/95'] {
   background-color: rgba(28, 26, 22, 0.97) !important;
 }

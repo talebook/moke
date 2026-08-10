@@ -37,12 +37,14 @@ const inlineScript = extractInlineScript(layoutSrc);
 
 function runScript({ theme, prefersDark, eink, autoEink }) {
   const classList = new Set();
+  const attrs = {};
   const document = {
     documentElement: {
       classList: {
         add: (c) => { classList.add(c); },
       },
       style: {},
+      setAttribute: (name, value) => { attrs[name] = value; },
     },
   };
   const matchMedia = (query) => {
@@ -65,6 +67,7 @@ function runScript({ theme, prefersDark, eink, autoEink }) {
   return {
     dark: classList.has('dark'),
     colorScheme: document.documentElement.style.colorScheme,
+    dataEink: attrs['data-eink'] ?? null,
   };
 }
 
@@ -79,9 +82,13 @@ for (const theme of themes) {
       for (const autoEink of autoEinkValues) {
         test(`inline script matches resolveTheme (${theme}, prefersDark=${prefersDark}, eink=${eink}, autoEink=${autoEink})`, () => {
           const expected = !eink && !autoEink && resolveTheme(theme, prefersDark) === 'dark';
-          const { dark, colorScheme } = runScript({ theme, prefersDark, eink, autoEink });
+          const { dark, colorScheme, dataEink } = runScript({ theme, prefersDark, eink, autoEink });
           assert.equal(dark, expected);
           assert.equal(colorScheme, expected ? 'dark' : 'light');
+          // Persisted e-ink must set data-eink before first paint so the
+          // black/white theme applies without a warm-light flash (and dark is
+          // suppressed). Auto-e-ink (media query) is handled by CSS, not here.
+          assert.equal(dataEink, eink ? 'true' : null);
         });
       }
     }

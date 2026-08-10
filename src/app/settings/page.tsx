@@ -278,6 +278,9 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
     if (!keys.includes(e.key)) return;
     e.preventDefault();
     const index = options.findIndex((o) => o.value === value);
+    // value not in options (e.g. corrupted persisted data, or a future mode
+    // not synced here) — bail out rather than mis-selecting a neighbour.
+    if (index === -1) return;
     let next = index;
     if (e.key === 'ArrowLeft') next = (index - 1 + options.length) % options.length;
     else if (e.key === 'ArrowRight') next = (index + 1) % options.length;
