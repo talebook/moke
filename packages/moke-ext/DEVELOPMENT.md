@@ -79,17 +79,77 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/api/v1/info` | GET | 宿主和服务器信息 |
+| `/api/v1/info` | GET | 宿主和服务器信息（含运行时形态与阅读器窗口） |
 | `/api/v1/books` | POST | 查询书库（分页/搜索） |
 | `/api/v1/books/{id}` | GET | 书籍详情 |
 | `/api/v1/user` | GET | 当前用户 |
 | `/api/v1/server` | GET | 服务器信息 |
 | `/api/v1/reader/windows` | GET | 活跃的阅读器窗口列表 |
 | `/api/v1/reader/{label}/state` | GET | 阅读器状态 |
-| `/api/v1/reader/{label}/command` | POST | 向阅读器发指令 |
+| `/api/v1/reader/{label}/command` | POST | 向阅读器发指令（可阻塞等待回执） |
 | `/api/v1/extension/sidebar/add` | POST | 动态添加侧边栏 |
 | `/api/v1/extension/page/register` | POST | 注册自定义页面 |
 | `/api/v1/extension/storage/{key}` | GET/PUT/DELETE | 持久化存储 |
+
+### 阅读器窗口寻址
+
+- `/api/v1/info` 的 `runtime` 字段返回 `multi_window`（桌面多窗口）或 `single_webview`（OHOS / Android / iOS 单 WebView）。
+- 多窗口形态下，阅读器窗口 label 以 `reader-` 开头；单 WebView 形态下阅读器运行在 `main` 窗口中，`/api/v1/reader/windows` 与 `reader_windows` 会把 `main` 一并列出，直接用 `main` 作为 `{label}` 寻址即可。
+
+### 命令与回执（request_id 关联）
+
+`POST /api/v1/reader/{label}/command` 的 body 是透传给阅读器的命令对象。推荐带上 `request_id`，并**订阅 WS 的 `reader:command:result` 事件**接收回执（未订阅则收不到回执，属正常订阅过滤）：
+
+```json
+{
+  "request_id": "ext-abc-123",
+  "command": "go_to_fraction",
+  "fraction": 0.42
+}
+```
+
+响应：
+
+```json
+{ "sent": true, "request_id": "ext-abc-123" }
+```
+
+若需要**同步拿到执行结果**，可在 body 里加 `wait_ms`（毫秒）启用阻塞等待。服务端会在超时内等待 `reader:command:result` 回执并按 `request_id` 关联返回：
+
+```json
+{
+  "request_id": "ext-abc-123",
+  "command": "get_position",
+  "wait_ms": 5000
+}
+```
+
+成功时返回阅读器回执（含 `result` 或 `error`），超时返回 `timed_out: true`：
+
+```json
+{ "sent": true, "request_id": "ext-abc-123", "result": { "view_key": "...", "progress": { "page": 42, "fraction": 0.42 } } }
+```
+
+```json
+{ "sent": true, "request_id": "ext-abc-123", "timed_out": true }
+```
+
+阅读器侧的命令回执示例（WS 事件 `reader:command:result`）：
+
+```json
+{
+  "event": "reader:command:result",
+  "timestamp": 1719777601000,
+  "data": {
+    "request_id": "ext-abc-123",
+    "command": "go_to_fraction",
+    "success": true,
+    "result": { "fraction": 0.42 }
+  }
+}
+```
+
+失败时 `success` 为 `false`，并带 `error` 字段说明原因（如 `No active reader view`）。
 
 ### WebSocket 事件 — `ws://127.0.0.1:19556`
 
@@ -129,6 +189,7 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 | `reader:page:changed` | 翻页 |
 | `reader:highlight:created` | 创建划线 |
 | `reader:annotation:created` | 创建笔记 |
+| `reader:command:result` | `/command` 命令的执行回执（`data.request_id` 关联请求） |
 
 ## 三种拓展类型
 

@@ -38,6 +38,11 @@ pub struct ExtensionRuntime {
     pub ws_port: u16,
     /// WebSocket 广播发送端，供 ext_reader_event 等向外广播事件
     pub ws_broadcast: Sender<events::WsBroadcast>,
+    /// 阻塞等待命令回执的注册表：request_id → 回执发送端。
+    /// 与 api_server 的 ServerContext 共享同一份，ext_reader_event 收到
+    /// `command:result` 时按 request_id 投递给等待中的 /command 调用。
+    pub pending_commands:
+        Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>>,
     /// 端口分配的起始值（wrap 时回到这里）
     pub port_range_start: u16,
 }
@@ -438,7 +443,7 @@ fn ext_diagnostics(
     let all_windows: Vec<String> = app.webview_windows().keys().cloned().collect();
     let reader_windows: Vec<String> = all_windows
         .iter()
-        .filter(|l| l.starts_with("reader-"))
+        .filter(|l| api_server::is_reader_window_label(l))
         .cloned()
         .collect();
 
@@ -462,6 +467,21 @@ fn ext_reader_event(
     event: String,
     data: serde_json::Value,
 ) -> Result<(), String> {
+    // 命令回执投递：若有 REST /command 正在阻塞等待该 request_id，
+    // 先把回执发给等待方（不改变原有的 WS/Tauri 广播路径）。
+    if event == "command:result" {
+        if let Some(request_id) = data.get("request_id").and_then(|v| v.as_str()) {
+            if let Some(tx) = state
+                .pending_commands
+                .lock()
+                .unwrap()
+                .remove(request_id)
+            {
+                let _ = tx.send(data.clone());
+            }
+        }
+    }
+
     // 通过 WS 广播给已连接的后端拓展（Tauri emit 和 WS broadcast 统一使用 reader: 前缀）
     let full_event = format!("reader:{}", event);
     let data_str = serde_json::to_string(&data).unwrap_or_default();
@@ -580,11 +600,17 @@ pub fn init(app: &AppHandle) {
     // 1. 先启动 WebSocket 服务器（先占端口），保留 sender 用于事件广播
     let (ws_port, ws_sender) = events::start(enabled.clone(), WS_SERVER_PORT);
 
+    // 命令回执等待注册表：api_server 与 ext_reader_event 共享同一份 Arc
+    let pending_commands: Arc<
+        Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>,
+    > = Arc::new(Mutex::new(HashMap::new()));
+
     // 2. 再启动 REST API Server（如果 WS 回退了端口，REST 继续往后试）
     let api_ctx = Arc::new(api_server::ServerContext {
         enabled: enabled.clone(),
         extensions_dir: extensions_dir.clone(),
         app_handle: app.clone(),
+        pending_commands: pending_commands.clone(),
     });
     let api_port = api_server::start(api_ctx, API_SERVER_PORT);
 
@@ -622,6 +648,7 @@ pub fn init(app: &AppHandle) {
         api_port,
         ws_port,
         ws_broadcast: ws_sender,
+        pending_commands,
         port_range_start,
     };
 

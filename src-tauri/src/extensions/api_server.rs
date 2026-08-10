@@ -10,6 +10,32 @@ use tauri::Emitter;
 use tauri::Manager;
 
 // ---------------------------------------------------------------------------
+// 运行时形态
+// ---------------------------------------------------------------------------
+
+/// 当前是否为单 WebView 运行时（OHOS / Android / iOS）。
+/// 与前端 `src/lib/moke-reader.ts` 的 `isSingleWebviewRuntime` 保持一致：
+/// 这些平台上阅读器运行在唯一 WebView（label 为 `main`）里，而不是独立的
+/// `reader-*` 窗口，扩展必须能把 `main` 当作阅读器寻址。
+pub(crate) fn is_single_webview_runtime() -> bool {
+    #[cfg(target_env = "ohos")]
+    {
+        return true;
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        matches!(std::env::consts::OS, "android" | "ios")
+    }
+}
+
+/// 判断一个窗口 label 是否代表阅读器窗口。
+/// - 桌面多窗口形态：`reader-*` 前缀（含独立阅读器窗口）；
+/// - 单 WebView 形态：`main` 窗口即阅读器宿主。
+pub(crate) fn is_reader_window_label(label: &str) -> bool {
+    label.starts_with("reader-") || (is_single_webview_runtime() && label == "main")
+}
+
+// ---------------------------------------------------------------------------
 // 共享上下文
 // ---------------------------------------------------------------------------
 
@@ -18,6 +44,10 @@ pub struct ServerContext {
     pub enabled: Arc<Mutex<HashMap<String, EnabledExtension>>>,
     pub extensions_dir: std::path::PathBuf,
     pub app_handle: tauri::AppHandle,
+    /// 阻塞等待命令回执的注册表：request_id → 回执发送端。
+    /// 由 `ext_reader_event`（收到 `command:result` 时）向对应发送端投递结果，
+    /// `/command` 的阻塞等待模式通过它做 request_id 关联。
+    pub pending_commands: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -214,12 +244,13 @@ fn handle_info(ctx: &ServerContext, _ext_name: &str) -> Result<String, String> {
 
     let windows: Vec<String> = all_windows
         .into_iter()
-        .filter(|l| l.starts_with("reader-"))
+        .filter(|l| is_reader_window_label(l))
         .collect();
 
     let info = serde_json::json!({
         "host_version": env!("CARGO_PKG_VERSION"),
         "reader_windows": windows,
+        "runtime": if is_single_webview_runtime() { "single_webview" } else { "multi_window" },
     });
 
     Ok(info.to_string())
@@ -239,7 +270,7 @@ fn handle_reader(
             .app_handle
             .webview_windows()
             .keys()
-            .filter(|l| l.starts_with("reader-"))
+            .filter(|l| is_reader_window_label(l))
             .cloned()
             .collect();
         return Ok(serde_json::json!({"windows": windows}).to_string());
@@ -274,10 +305,69 @@ fn handle_reader(
                 // 注：此处只是透传；阅读器前端需要监听此事件
                 let payload: serde_json::Value = serde_json::from_str(body)
                     .unwrap_or(serde_json::Value::Null);
+
+                // request_id 关联：若调用方携带 request_id，回显到响应中，
+                // 并支持阻塞等待（wait_ms>0 时）直到 `reader:command:result`
+                // 回执到达或超时，供扩展做请求/响应匹配。
+                let request_id = payload
+                    .get("request_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let wait_ms = payload
+                    .get("wait_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+
+                // 阻塞等待模式：先注册一个 request_id → 结果通道，再转发命令，
+                // 由 ext_reader_event 在收到 command:result 时投递回执。
+                let result_rx = if wait_ms > 0 {
+                    if let Some(rid) = &request_id {
+                        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+                        ctx.pending_commands
+                            .lock()
+                            .unwrap()
+                            .insert(rid.clone(), tx);
+                        Some((rid.clone(), rx))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 if let Err(e) = window.emit("reader:command", &payload) {
+                    if let Some((rid, _)) = &result_rx {
+                        ctx.pending_commands.lock().unwrap().remove(rid);
+                    }
                     return Err(format!("发送命令失败: {e}"));
                 }
-                return Ok(serde_json::json!({"sent": true}).to_string());
+
+                if let Some((rid, rx)) = result_rx {
+                    let timeout = std::time::Duration::from_millis(wait_ms);
+                    return match rx.recv_timeout(timeout) {
+                        Ok(result) => Ok(serde_json::json!({
+                            "sent": true,
+                            "request_id": rid,
+                            "result": result,
+                        })
+                        .to_string()),
+                        Err(_) => {
+                            ctx.pending_commands.lock().unwrap().remove(&rid);
+                            Ok(serde_json::json!({
+                                "sent": true,
+                                "request_id": rid,
+                                "timed_out": true,
+                            })
+                            .to_string())
+                        }
+                    };
+                }
+
+                let mut response = serde_json::json!({"sent": true});
+                if let Some(rid) = request_id {
+                    response["request_id"] = serde_json::Value::String(rid);
+                }
+                return Ok(response.to_string());
             } else {
                 return Err(format!("阅读器窗口「{label}」不存在"));
             }
