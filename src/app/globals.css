@@ -34,10 +34,51 @@
 }
 
 @layer base {
+  :root {
+    --background: 47 53% 97%;
+    --foreground: 240 1% 18%;
+    --card: 36 33% 94%;
+    --card-foreground: 240 1% 18%;
+    --primary: 33 35% 57%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 43 28% 90%;
+    --muted-foreground: 27 4% 53%;
+    --accent: 42 30% 92%;
+    --accent-foreground: 240 1% 18%;
+    --destructive: 6 63% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 83 19% 46%;
+    --success-foreground: 0 0% 100%;
+    --border: 35 21% 89%;
+    --input: 42 30% 92%;
+    --ring: 33 35% 57%;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 36 12% 9%;
+    --foreground: 40 20% 92%;
+    --card: 36 12% 13%;
+    --card-foreground: 40 20% 92%;
+    --primary: 33 40% 42%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 36 10% 18%;
+    --muted-foreground: 35 8% 62%;
+    --accent: 36 10% 16%;
+    --accent-foreground: 40 20% 92%;
+    --destructive: 6 63% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 83 19% 56%;
+    --success-foreground: 0 0% 100%;
+    --border: 35 10% 22%;
+    --input: 36 10% 16%;
+    --ring: 33 40% 42%;
+  }
+
   html, body {
     font-family: 'Moke Inter', 'Moke Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
-    background: #FBF9F2;
-    color: #2C2C2E;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -51,6 +92,306 @@
   .font-serif {
     font-family: 'Moke Noto Serif SC', 'Songti SC', 'STSong', serif;
   }
+}
+
+/* ===== Dark theme ===== */
+/* Semantic Tailwind tokens (bg-background / text-foreground / bg-primary /
+   bg-muted / border-border / ...) flip automatically via the CSS variables in
+   @layer base. The rules below dark-adapt the hardcoded warm recipe used across
+   pages — translucent white glass surfaces, amber hairline borders, amber tint
+   fills, status colors — mirroring the [data-eink] convention below.
+   E-ink and dark mode are mutually exclusive at the runtime level (layout.tsx
+   never adds the .dark class while data-eink='true'), so these rules and the
+   e-ink rules below can never apply to the same element at the same time.
+
+   These use exact class-token matching ([class~='...']) instead of substring
+   matching so a static token (bg-white/70) never leaks into hover/focus
+   variants (hover:bg-white/70) — rows that are transparent at rest and only
+   turn translucent on hover keep that behaviour in dark mode.
+
+   MAINTENANCE CONSTRAINT: every color/opacity token enumerated below is an
+   explicit allow-list. When a component introduces a NEW shade of an
+   enumerated family (e.g. bg-white/20, border-primary/45, text-amber-800),
+   it will silently render as an un-dark-adapted bright/colored surface in
+   dark mode — no error, no warning. Always add the new token to the matching
+   block below (or to the e-ink rules) when you add it in a component.
+   Layer note: these rules are unlayered + !important, which beats plain
+   utilities but loses to any dark:!* important utility on the same element,
+   and a plain dark:* variant will be overridden by them — if you need a
+   per-element dark:* override here, exclude the exact token first (as the
+   colored-text block does with :not([class~='dark:text-...'])). */
+.dark [class~='bg-white/95'] {
+  background-color: rgba(28, 26, 22, 0.97) !important;
+}
+.dark [class~='bg-white/80'] {
+  background-color: rgba(30, 27, 23, 0.85) !important;
+}
+.dark [class~='bg-white/70'] {
+  background-color: rgba(30, 27, 23, 0.78) !important;
+}
+.dark [class~='bg-white/65'] {
+  background-color: rgba(30, 27, 23, 0.75) !important;
+}
+.dark [class~='bg-white/60'] {
+  background-color: rgba(30, 27, 23, 0.72) !important;
+}
+.dark [class~='bg-white/55'] {
+  background-color: rgba(30, 27, 23, 0.65) !important;
+}
+.dark [class~='bg-white/50'] {
+  background-color: rgba(30, 27, 23, 0.6) !important;
+}
+.dark [class~='bg-white/40'] {
+  background-color: rgba(30, 27, 23, 0.5) !important;
+}
+.dark [class~='bg-white/35'] {
+  background-color: rgba(30, 27, 23, 0.45) !important;
+}
+.dark [class~='bg-white/25'] {
+  background-color: rgba(30, 27, 23, 0.35) !important;
+}
+/* Low-opacity bg-white/15/10/5 only appear inside .moke-sidebar, whose dark
+   theme is handled in the sidebar block below — no general rule needed here. */
+/* Warm translucent header / glass surfaces (bg-[#fffdf8]/80) → dark surface.
+   Exact token match, consistent with the [class~=] convention elsewhere. */
+.dark [class~='bg-[#fffdf8]/80'] {
+  background-color: rgba(26, 24, 20, 0.8) !important;
+}
+/* Warm hairline borders (border-amber-950/10 etc.) → light hairline. Only the
+   static tokens; the hover: variants get their own rules below. */
+.dark [class~='border-amber-950/10'],
+.dark [class~='border-amber-950/20'],
+.dark [class~='border-amber-950/5'] {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.dark [class*='divide-amber-950/'] > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+.dark [class~='hover:border-amber-950/10']:hover,
+.dark [class~='hover:border-amber-950/20']:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+/* Amber tint fills (Select hover/selected, context menu, tags). Exact tokens
+   only, so unselected options carrying just a hover:bg-amber-50/* stay clear
+   at rest and get the tint only on hover. */
+.dark [class~='bg-amber-50'],
+.dark [class~='bg-amber-50/40'],
+.dark [class~='bg-amber-50/60'],
+.dark [class~='bg-amber-50/70'],
+.dark [class~='bg-amber-100/70'],
+.dark [class~='bg-amber-500/10'] {
+  background-color: rgba(184, 149, 106, 0.18) !important;
+}
+.dark [class~='hover:bg-amber-50/40']:hover,
+.dark [class~='hover:bg-amber-50/60']:hover,
+.dark [class~='hover:bg-amber-50/70']:hover,
+.dark [class~='hover:bg-amber-100/70']:hover {
+  background-color: rgba(184, 149, 106, 0.24) !important;
+}
+/* Hover/focus of translucent-white surfaces: elevate each shade a step above
+   its resting dark surface so the hover affordance survives in dark mode.
+   Only the shades actually used as hover/focus targets are listed; the pure
+   hover:bg-white/focus:bg-white (inputs, Select trigger) gets a near-solid
+   dark. Sidebar hover tints are overridden in the sidebar block below. */
+.dark [class~='hover:bg-white/80']:hover {
+  background-color: rgba(44, 40, 34, 0.9) !important;
+}
+.dark [class~='hover:bg-white/70']:hover {
+  background-color: rgba(44, 40, 34, 0.85) !important;
+}
+.dark [class~='hover:bg-white/65']:hover {
+  background-color: rgba(44, 40, 34, 0.82) !important;
+}
+.dark [class~='hover:bg-white/55']:hover {
+  background-color: rgba(44, 40, 34, 0.72) !important;
+}
+.dark [class~='hover:bg-white']:hover,
+.dark [class~='focus:bg-white']:focus {
+  background-color: rgba(44, 40, 34, 0.92) !important;
+}
+/* Status pills (extensions / reset-password / context menu). */
+.dark [class~='bg-green-50'] {
+  background-color: rgba(122, 139, 94, 0.15) !important;
+}
+.dark [class~='border-green-200'] {
+  border-color: rgba(122, 139, 94, 0.4) !important;
+}
+.dark [class~='bg-green-500/10'] {
+  background-color: rgba(122, 139, 94, 0.2) !important;
+}
+.dark [class~='border-green-500/30'] {
+  border-color: rgba(122, 139, 94, 0.5) !important;
+}
+.dark [class~='bg-blue-50'] {
+  background-color: rgba(90, 120, 180, 0.15) !important;
+}
+.dark [class~='bg-red-50'] {
+  background-color: rgba(192, 57, 43, 0.15) !important;
+}
+.dark [class~='hover:bg-red-50']:hover {
+  background-color: rgba(192, 57, 43, 0.2) !important;
+}
+.dark [class~='hover:bg-green-50']:hover {
+  background-color: rgba(122, 139, 94, 0.2) !important;
+}
+/* text-primary / text-primary/N are used both as button-surface
+   primary-foreground (white text, keep) and as emphasis text (small captions,
+   links, card-title hover). The dark-mode --primary is tuned for surfaces
+   (contrast vs white), which makes it too dark as text on the dark bg (~2.5-3:1).
+   Lighten the emphasis-text usages only — never text-primary-foreground.
+   Exact tokens only ([class~=]) so hover:/group-hover:/dark: variants of
+   text-primary/N stay out of scope (consistent with the convention below). */
+.dark [class~='text-primary'],
+.dark [class~='text-primary/80'] {
+  color: #d9b48f !important;
+}
+/* group-hover:text-primary only fires when the parent .group is hovered;
+   Tailwind's own rule targets `.group:hover ...`, so mirror it here instead of
+   a plain :hover which would miss hovering elsewhere on the card. */
+.dark .group:hover [class~='group-hover:text-primary'] {
+  color: #d9b48f !important;
+}
+
+/* border-primary/N, ring-primary/N, bg-primary/N: the dark --primary is tuned
+   for solid surfaces (white text on a button); as a hairline/focus ring/soft
+   fill against the dark background it is almost invisible (~2.5:1 or less),
+   which weakens focus, selection and hover affordances. Lighten these too,
+   matching the emphasis-text treatment. Exact tokens for border/ring; the
+   bg-primary/N fills use the /10,/15,/5,90 shades that actually appear. */
+.dark [class~='border-primary'],
+.dark [class~='border-primary/60'],
+.dark [class~='border-primary/40'],
+.dark [class~='border-primary/30'],
+.dark [class~='border-primary/20'],
+.dark [class~='border-primary/15'] {
+  border-color: rgba(217, 180, 143, 0.55) !important;
+}
+.dark [class~='ring-primary/60'],
+.dark [class~='ring-primary/40'] {
+  --tw-ring-color: rgba(217, 180, 143, 0.55) !important;
+}
+.dark [class~='bg-primary/15'],
+.dark [class~='bg-primary/10'],
+.dark [class~='bg-primary/5'] {
+  background-color: rgba(217, 180, 143, 0.16) !important;
+}
+.dark [class~='group-hover:border-primary/30']:hover,
+.dark [class~='group-hover:border-primary/20']:hover {
+  border-color: rgba(217, 180, 143, 0.6) !important;
+}
+.dark [class~='group-hover:ring-primary/40']:hover {
+  --tw-ring-color: rgba(217, 180, 143, 0.6) !important;
+}
+.dark [class~='focus:border-primary/60']:focus {
+  border-color: rgba(217, 180, 143, 0.7) !important;
+}
+/* Colored text: dark shades (amber-600/700, green-600, red-600, ...) lose
+   contrast on the dark background — lighten them. Only the shades actually
+   used in the app are enumerated (amber-400/500/600/700, green-400/600,
+   emerald-600, red-600, rose-500, blue-700) so light shades like
+   text-amber-400 / text-green-400 keep their brightness, two-state
+   hover:text-* transitions aren't flattened, and any existing Tailwind
+   dark:text-* variant on the same element keeps working.
+   Guard note: we exclude only the exact dark:text-* tokens that actually
+   exist (dark:text-amber-400, dark:text-green-400) so the Tailwind utility
+   wins. A future hover or group-hover variant of dark:text-* on the same
+   element is a different token and won't disable the resting lightening. */
+.dark [class~='text-amber-700']:not([class~='dark:text-amber-400']),
+.dark [class~='text-amber-600']:not([class~='dark:text-amber-400']),
+.dark [class~='text-amber-500']:not([class~='dark:text-amber-400']) {
+  color: #e2b97c !important;
+}
+.dark [class~='text-green-600']:not([class~='dark:text-green-400']) {
+  color: #9dbb7a !important;
+}
+.dark [class~='text-green-400'] {
+  color: #a5c888 !important;
+}
+.dark [class~='text-emerald-600'] {
+  color: #8fbe9c !important;
+}
+.dark [class~='text-red-600'] {
+  color: #e07a6e !important;
+}
+.dark [class~='text-rose-500'] {
+  color: #e58a9a !important;
+}
+.dark [class~='text-blue-700'] {
+  color: #8faad9 !important;
+}
+/* Warm translucent "glass" / gradient page shells. */
+.dark .app-warm-bg {
+  background:
+    radial-gradient(circle at top left, rgba(184, 149, 106, 0.1), transparent 32%),
+    linear-gradient(180deg, #201d19 0%, #1c1a16 44%, #171512 100%);
+}
+.dark .app-glass {
+  background: rgba(30, 27, 23, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 24px 70px -45px rgba(0, 0, 0, 0.8);
+}
+.dark .app-card {
+  background: rgba(30, 27, 23, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 50px -40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.dark .moke-shelf-bg {
+  background:
+    radial-gradient(circle at top left, rgba(184, 149, 106, 0.1), transparent 32%),
+    linear-gradient(180deg, #201d19 0%, #1c1a16 44%, #171512 100%) !important;
+}
+.dark .eink-bordered {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+/* Book-cover containers use solid bg-white as the surface behind the cover
+   image; in dark mode the white flashes during lazy-load / failed / fallback.
+   Scope to .book-cover-shadow (the cover container) — NOT a global bg-white
+   rule, which would also repaint the white Toggle knobs. ring-black/5 is
+   softened to a dark hairline too. */
+.dark .book-cover-shadow {
+  background-color: hsl(var(--card)) !important;
+  --tw-ring-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Dark sidebar: in light mode the sidebar is the warm-brown bg-primary bar
+   with white text. In dark mode the (lightened) primary brown would read as a
+   glaring light slab, so the sidebar becomes a deep warm dark panel with a
+   right hairline, keeping the primary-brown as the active-item highlight.
+   The white-based text/icon classes (text-primary-foreground, text-white/N)
+   already work against a dark background, so only the surface + hairlines
+   need overriding here. */
+.dark .moke-sidebar {
+  background: hsl(36 12% 12%) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+.dark .moke-sidebar :where(.border-white\/10) {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/10) {
+  background-color: rgba(184, 149, 106, 0.22) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/15) {
+  background-color: rgba(184, 149, 106, 0.3) !important;
+}
+.dark .moke-sidebar :where(.bg-white\/5) {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+.dark .moke-sidebar :where(.text-white\/55) {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+.dark .moke-sidebar :where(.text-white\/45) {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+.dark .moke-sidebar :where(.text-white\/30) {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+/* Sidebar hover targets are hover:bg-white/15 (登录按钮) and
+   hover:bg-white/5 (导航项). The general hover rules above don't cover the
+   /15 and /5 shades, so give the sidebar its own warm hover so it never
+   falls back to a white flash or the generic dark surface. */
+.dark .moke-sidebar :where(.hover\:bg-white\/15):hover,
+.dark .moke-sidebar :where(.hover\:bg-white\/5):hover {
+  background-color: rgba(184, 149, 106, 0.3) !important;
 }
 
 /* ===== E-ink rendering ===== */
@@ -146,8 +487,13 @@
   border-color: #000000 !important;
 }
 
-/* eink-bordered: the readest convention for visible boundaries on e-ink, where
-   shadows don't render. Swaps to solid 1px border + flat surface in e-ink. */
+/* eink-bordered: a three-state shared hairline/boundary class (the name is
+   historical — it is NOT e-ink-only):
+   - light theme: warm translucent 1px hairline (rgba(74,57,35,0.1));
+   - dark theme: 1px white hairline (see .dark .eink-bordered above);
+   - e-ink:      1px solid black border + flat white surface (below).
+   Components use it as a neutral "visible panel boundary" hook; adjust the
+   three states together if the visual contract changes. */
 .eink-bordered {
   border-width: 1px;
   border-color: rgba(74, 57, 35, 0.1);
@@ -299,6 +645,21 @@
   border-color: #000000 !important;
 }
 
+/* Loading spinners: the ring is border-primary/20 (shelf) or
+   border-muted-foreground/20 (everywhere else) with a border-t-primary
+   rotating segment. The border-primary/20 rule above would flatten both the
+   ring and the segment to black — an invisible "solid black disc" that no
+   longer reads as a spinner. Restore the classic e-ink spinner look: a light
+   gray ring with a solid black rotating segment, and give the gray-ring
+   spinners the same treatment (they were left fully colored before). */
+[data-eink='true'] [class*='animate-spin'][class*='border-primary/'],
+[data-eink='true'] [class*='animate-spin'][class*='border-muted-foreground/'] {
+  border-color: #E5E5E5 !important;
+}
+[data-eink='true'] [class*='animate-spin'][class*='border-t-primary'] {
+  border-top-color: #000000 !important;
+}
+
 /* from-primary / via-primary / to-primary: brown-gradient avatar /
    icon containers (e.g. the user page profile avatar). The brown
    gradient collapses to a muddy gray on e-ink; invert to solid black
@@ -309,6 +670,21 @@
 [data-eink='true'] [class*='via-primary'],
 [data-eink='true'] [class*='to-primary'] {
   background: #000000 !important;
+}
+
+/* Shelf empty-state icon circle (shelf/page.tsx): it uses a
+   from-primary/15 -> to-amber-200/40 gradient with a text-primary Search
+   icon. The from-primary rule above would turn it black-on-black (invisible
+   icon), so give the circle an explicit white surface + black inset ring +
+   black icon. Written as unlayered !important (same as the rest of the e-ink
+   block) rather than a Tailwind eink: variant, so it reliably beats the
+   layered utilities regardless of how postcss-cascade-layers processes them.
+   Scope: only the /15 fade token, so the solid from-primary avatars above
+   keep their black-invert behaviour. */
+[data-eink='true'] [class*='from-primary/15'] {
+  background: #FFFFFF !important;
+  box-shadow: inset 0 0 0 1px #000000 !important;
+  color: #000000 !important;
 }
 
 /* All other colored book-cover placeholder gradients (the fallback

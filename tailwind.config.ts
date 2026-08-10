@@ -1,39 +1,40 @@
 import type { Config } from 'tailwindcss';
 
 const config: Config = {
+  darkMode: 'class',
   content: [
     './src/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
     extend: {
       colors: {
-        background: '#FBF9F2',
-        foreground: '#2C2C2E',
-        card: '#F5F1EB',
-        'card-foreground': '#2C2C2E',
+        background: 'hsl(var(--background) / <alpha-value>)',
+        foreground: 'hsl(var(--foreground) / <alpha-value>)',
+        card: 'hsl(var(--card) / <alpha-value>)',
+        'card-foreground': 'hsl(var(--card-foreground) / <alpha-value>)',
         primary: {
-          DEFAULT: '#B8956A',
-          foreground: '#FFFFFF',
+          DEFAULT: 'hsl(var(--primary) / <alpha-value>)',
+          foreground: 'hsl(var(--primary-foreground) / <alpha-value>)',
         },
         muted: {
-          DEFAULT: '#EDE9DF',
-          foreground: '#8B8682',
+          DEFAULT: 'hsl(var(--muted) / <alpha-value>)',
+          foreground: 'hsl(var(--muted-foreground) / <alpha-value>)',
         },
         accent: {
-          DEFAULT: '#F0ECE3',
-          foreground: '#2C2C2E',
+          DEFAULT: 'hsl(var(--accent) / <alpha-value>)',
+          foreground: 'hsl(var(--accent-foreground) / <alpha-value>)',
         },
         destructive: {
-          DEFAULT: '#C0392B',
-          foreground: '#FFFFFF',
+          DEFAULT: 'hsl(var(--destructive) / <alpha-value>)',
+          foreground: 'hsl(var(--destructive-foreground) / <alpha-value>)',
         },
         success: {
-          DEFAULT: '#7A8B5E',
-          foreground: '#FFFFFF',
+          DEFAULT: 'hsl(var(--success) / <alpha-value>)',
+          foreground: 'hsl(var(--success-foreground) / <alpha-value>)',
         },
-        border: '#E8E3DC',
-        input: '#F0ECE3',
-        ring: '#B8956A',
+        border: 'hsl(var(--border) / <alpha-value>)',
+        input: 'hsl(var(--input) / <alpha-value>)',
+        ring: 'hsl(var(--ring) / <alpha-value>)',
       },
       fontFamily: {
         sans: [
