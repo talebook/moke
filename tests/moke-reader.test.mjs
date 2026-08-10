@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildEmbeddedReaderHomeUrl,
   buildEmbeddedReaderUrl,
   buildReaderHomeWindowLabel,
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
+  shouldIncludeServerUrl,
 } from '../src/lib/moke-reader.ts';
 
 test('OHOS uses the single-WebView reader flow', () => {
@@ -62,6 +64,22 @@ test('reader-home window label never matches the extension reader-* enumeration'
   assert.ok(label.startsWith('moke-home-'));
 });
 
+test('shouldIncludeServerUrl maps runtime → serverUrl inclusion decision', () => {
+  // Web build: reader replaces the host app, must save progress itself.
+  assert.equal(shouldIncludeServerUrl(false, 'web'), true);
+  assert.equal(shouldIncludeServerUrl(false, 'desktop'), true);
+
+  // Single-WebView runtimes: reader replaces the host app, must save itself.
+  assert.equal(shouldIncludeServerUrl(true, 'ohos'), true);
+  assert.equal(shouldIncludeServerUrl(true, 'android'), true);
+  assert.equal(shouldIncludeServerUrl(true, 'ios'), true);
+
+  // Desktop: main-window ReaderProgressProvider is the single saver.
+  assert.equal(shouldIncludeServerUrl(true, 'windows'), false);
+  assert.equal(shouldIncludeServerUrl(true, 'linux'), false);
+  assert.equal(shouldIncludeServerUrl(true, 'macos'), false);
+});
+
 test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => {
   const url = new URL(
     buildEmbeddedReaderUrl({
@@ -93,4 +111,60 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     location: 'page=142',
     updated_at: '2026-07-24T00:00:00.000Z',
   });
+
+  // Empty serverUrl must not produce a bare `mokeServerUrl=` param.
+  const empty = new URL(
+    buildEmbeddedReaderUrl({
+      filePath: 'C:\\book.pdf',
+      eink: false,
+      mokeBookId: '15',
+      restoreProgress: null,
+      serverUrl: '',
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(empty.searchParams.get('moke'), '1');
+  assert.equal(empty.searchParams.get('mokeServerUrl'), null);
+});
+
+test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () => {
+  // Reader must save progress itself: a serverUrl is carried verbatim.
+  const mobile = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: true,
+      serverUrl: 'http://192.168.1.5:8080',
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(mobile.pathname, '/readest/');
+  assert.equal(mobile.searchParams.get('moke'), '1');
+  assert.equal(mobile.searchParams.get('mokeEink'), '1');
+  assert.equal(mobile.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+
+  // Desktop: callers omit serverUrl, so no mokeServerUrl is emitted and the
+  // main window's ReaderProgressProvider is the single saver (no duplicate
+  // write via mokeBridge's direct POST).
+  const desktop = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: false,
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(desktop.pathname, '/readest/');
+  assert.equal(desktop.searchParams.get('moke'), '1');
+  assert.equal(desktop.searchParams.get('mokeEink'), '0');
+  assert.equal(desktop.searchParams.get('mokeServerUrl'), null);
+
+  // Empty serverUrl must not produce a bare `mokeServerUrl=` param either.
+  const empty = new URL(
+    buildEmbeddedReaderHomeUrl({
+      eink: false,
+      serverUrl: '',
+    }),
+    'https://moke.invalid',
+  );
+  assert.equal(empty.pathname, '/readest/');
+  assert.equal(empty.searchParams.get('moke'), '1');
+  assert.equal(empty.searchParams.get('mokeEink'), '0');
+  assert.equal(empty.searchParams.get('mokeServerUrl'), null);
 });

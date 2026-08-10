@@ -3,6 +3,18 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
+/**
+ * Whether the reader itself must save progress to the server (and therefore the
+ * embedded reader URL should carry `mokeServerUrl`).
+ *
+ * Single-WebView runtimes (OHOS/Android/iOS) and the web build replace the host
+ * app, so there is no main-window ReaderProgressProvider to save for them.
+ * Desktop keeps the old behavior — the reader-home window gets no serverUrl and
+ * the main window's ReaderProgressProvider is the single saver.
+ */
+export const shouldIncludeServerUrl = (isTauri: boolean, platform: string): boolean =>
+  !isTauri || isSingleWebviewRuntime(platform);
+
 export async function getMokeRuntimePlatform(): Promise<string> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return 'web';
 
@@ -55,20 +67,25 @@ export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
 export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
+  platformOverride?: string,
 ): Promise<void> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     fallback(href);
     return;
   }
   let currentPlatform: string;
-  try {
-    currentPlatform = await getMokeRuntimePlatform();
-  } catch (error) {
-    // If the runtime probe fails (e.g. IPC unavailable in dev mode), never
-    // block navigation — fall through to the client router.
-    console.warn('Unable to detect runtime platform, using router navigation:', error);
-    fallback(href);
-    return;
+  if (platformOverride) {
+    currentPlatform = platformOverride;
+  } else {
+    try {
+      currentPlatform = await getMokeRuntimePlatform();
+    } catch (error) {
+      // If the runtime probe fails (e.g. IPC unavailable in dev mode), never
+      // block navigation — fall through to the client router.
+      console.warn('Unable to detect runtime platform, using router navigation:', error);
+      fallback(href);
+      return;
+    }
   }
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
@@ -92,31 +109,94 @@ export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): stri
   return `moke-home-${timestamp}`;
 }
 
+/**
+ * Only carry mokeServerUrl when non-empty: a bare `mokeServerUrl=` param would
+ * be treated by readest as "server configured" when it only checks for the
+ * param's presence. Shared by both embedded-reader URL builders.
+ */
+function setServerUrlParam(params: URLSearchParams, serverUrl?: string): void {
+  if (serverUrl) {
+    params.set('mokeServerUrl', serverUrl);
+  }
+}
+
+export function buildEmbeddedReaderHomeUrl({
+  eink,
+  serverUrl,
+}: {
+  eink: boolean;
+  serverUrl?: string;
+}): string {
+  const params = new URLSearchParams({
+    moke: '1',
+    mokeEink: eink ? '1' : '0',
+  });
+
+  setServerUrlParam(params, serverUrl);
+
+  return `/readest/?${params.toString()}`;
+}
+
 export async function openEmbeddedReaderHome({
   eink,
   serverUrl,
   navigate,
 }: {
   eink: boolean;
-  serverUrl: string;
+  serverUrl?: string;
   navigate: (href: string) => void;
 }): Promise<void> {
-  const params = new URLSearchParams({
-    moke: '1',
-    mokeEink: eink ? '1' : '0',
-    mokeServerUrl: serverUrl,
-  });
-  const href = `/readest/?${params.toString()}`;
+  const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
-  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+  let currentPlatform = 'web';
+  let probeFailed = false;
+  if (isTauri) {
+    try {
+      currentPlatform = await getMokeRuntimePlatform();
+    } catch (error) {
+      // A failed probe must not block opening the reader. Fall back to the
+      // desktop window flow (on single-WebView runtimes window creation fails
+      // and we degrade to in-place navigation, which is the right flow there).
+      console.warn('Unable to detect runtime platform, assuming desktop reader window flow:', error);
+      currentPlatform = 'desktop';
+      probeFailed = true;
+    }
+  }
+
+  const singleWebview = isSingleWebviewRuntime(currentPlatform);
+
+  // Only pass mokeServerUrl where the reader must save progress itself:
+  // single-WebView runtimes (OHOS/Android/iOS) and the web build replace the
+  // host app, so there is no main-window ReaderProgressProvider to save for
+  // them (mokeBridge would otherwise POST a second, duplicate write on every
+  // page:changed). Desktop keeps the old behavior — the reader-home window gets
+  // no serverUrl and the main window's ReaderProgressProvider is the single
+  // saver. That is safe for the desktop built-in library: it does not read
+  // mokeServerUrl at all — server browsing (shelf/library/search/detail) is
+  // served by the main window, and the reader-home window is only a reading
+  // container.
+  //
+  // Trade-off on probe failure: keep mokeServerUrl. A single-WebView runtime
+  // that fails the probe (its main-window ReaderProgressProvider is already
+  // unloaded) would otherwise silently lose progress saving — worse than an
+  // occasional duplicate save on desktop.
+  const includeServerUrl =
+    (isTauri && probeFailed) || shouldIncludeServerUrl(isTauri, currentPlatform);
+
+  const href = buildEmbeddedReaderHomeUrl({
+    eink,
+    serverUrl: includeServerUrl ? serverUrl : undefined,
+  });
+
+  if (!isTauri) {
     navigate(href);
     return;
   }
 
-  const currentPlatform = await getMokeRuntimePlatform();
-
-  if (isSingleWebviewRuntime(currentPlatform)) {
-    await navigateFullDocument(href, navigate);
+  if (singleWebview) {
+    // Reuse the platform already probed above instead of probing again inside
+    // navigateFullDocument (each probe is a Rust IPC call).
+    await navigateFullDocument(href, navigate, currentPlatform);
     return;
   }
 
@@ -158,15 +238,16 @@ export function buildEmbeddedReaderUrl({
   eink: boolean;
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
-  serverUrl: string;
+  serverUrl?: string;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
     moke: '1',
     mokeEink: eink ? '1' : '0',
     mokeBookId,
-    mokeServerUrl: serverUrl,
   });
+
+  setServerUrlParam(params, serverUrl);
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));
@@ -178,6 +259,7 @@ export function buildEmbeddedReaderUrl({
 export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
+  platformOverride?: string,
 ): Promise<void> {
-  await navigateFullDocument(href, navigate);
+  await navigateFullDocument(href, navigate, platformOverride);
 }

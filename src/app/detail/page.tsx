@@ -303,9 +303,9 @@ function DetailContent() {
             eink: useSettingsStore.getState().eink,
             mokeBookId: String(book.id),
             restoreProgress,
-            serverUrl: useServerStore.getState().serverUrl || '',
+            serverUrl: useServerStore.getState().serverUrl,
           });
-          await openEmbeddedReaderBook(href, router.push);
+          await openEmbeddedReaderBook(href, router.push, currentPlatform);
           return;
         }
 
