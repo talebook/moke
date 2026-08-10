@@ -34,6 +34,12 @@ interface UserInfoResponse {
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
 
+/**
+ * 服务器原始响应可能携带邮箱/昵称/头像等个人信息。生产构建不输出原始正文，
+ * 仅在开发环境（dev server）保留全文，避免敏感信息无条件进入 devtools 与调试面板。
+ */
+const isDev = process.env.NODE_ENV !== 'production';
+
 function isRequestCancelled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   const message = error instanceof Error ? error.message : String(error);
@@ -331,8 +337,12 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
 
     const rawText = await response.text();
-    console.log('[validateServerConnection] raw (first 500):', rawText.substring(0, 500));
-    debugLog('info', 'validate', `服务器返回正文 (${rawText.length} 字节)`, rawText.substring(0, 800));
+    if (isDev) {
+      console.log('[validateServerConnection] raw (first 500):', rawText.substring(0, 500));
+      debugLog('info', 'validate', `服务器返回正文 (${rawText.length} 字节)`, rawText.substring(0, 800));
+    } else {
+      debugLog('info', 'validate', `服务器返回正文 (${rawText.length} 字节)`);
+    }
 
     let data: UserInfoResponse;
     try {
@@ -409,7 +419,8 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
     };
   }
 
-  console.log('[checkWelcomeRequirement]', data.err, data);
+  if (isDev) console.log('[checkWelcomeRequirement]', data.err, data);
+  else console.log('[checkWelcomeRequirement] err=%s', data.err);
 
   if (data.err === 'ok') {
     return {
@@ -449,7 +460,8 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
   });
 
   const result = await response.json();
-  console.log('[submitWelcomeCode]', result);
+  if (isDev) console.log('[submitWelcomeCode]', result);
+  else console.log('[submitWelcomeCode] err=%s', result.err);
   return result;
 }
 
