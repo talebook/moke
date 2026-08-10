@@ -258,6 +258,8 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
 
   // Resolve the actual applied theme so the row's leading icon matches what
   // the user sees (in 'system' mode that follows prefers-color-scheme).
+  // e-ink mode (disabled) locks the UI to the black/white light theme, so the
+  // icon must not reflect a stored dark preference.
   const [systemDark, setSystemDark] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -266,7 +268,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
     mq.addEventListener('change', onMediaChange);
     return () => mq.removeEventListener('change', onMediaChange);
   }, []);
-  const effectiveDark = resolveTheme(value, systemDark) === 'dark';
+  const effectiveDark = !disabled && resolveTheme(value, systemDark) === 'dark';
 
   // Roving tabindex + arrow keys so the radiogroup behaves per ARIA APG.
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -326,7 +328,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
               className={cn(
                 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all',
                 active
-                  ? 'bg-background text-foreground shadow-sm'
+                  ? 'bg-background text-foreground shadow-sm dark:bg-white/10 dark:shadow-none'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >

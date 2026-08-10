@@ -226,9 +226,11 @@
    primary-foreground (white text, keep) and as emphasis text (small captions,
    links, card-title hover). The dark-mode --primary is tuned for surfaces
    (contrast vs white), which makes it too dark as text on the dark bg (~2.5-3:1).
-   Lighten the emphasis-text usages only — never text-primary-foreground. */
+   Lighten the emphasis-text usages only — never text-primary-foreground.
+   Exact tokens only ([class~=]) so hover:/group-hover:/dark: variants of
+   text-primary/N stay out of scope (consistent with the convention below). */
 .dark [class~='text-primary'],
-.dark [class*='text-primary/'] {
+.dark [class~='text-primary/80'] {
   color: #d9b48f !important;
 }
 /* group-hover:text-primary only fires when the parent .group is hovered;
@@ -237,6 +239,39 @@
 .dark .group:hover [class~='group-hover:text-primary'] {
   color: #d9b48f !important;
 }
+
+/* border-primary/N, ring-primary/N, bg-primary/N: the dark --primary is tuned
+   for solid surfaces (white text on a button); as a hairline/focus ring/soft
+   fill against the dark background it is almost invisible (~2.5:1 or less),
+   which weakens focus, selection and hover affordances. Lighten these too,
+   matching the emphasis-text treatment. Exact tokens for border/ring; the
+   bg-primary/N fills use the /10,/15,/5,90 shades that actually appear. */
+.dark [class~='border-primary/60'],
+.dark [class~='border-primary/40'],
+.dark [class~='border-primary/30'],
+.dark [class~='border-primary/20'],
+.dark [class~='border-primary/15'] {
+  border-color: rgba(217, 180, 143, 0.55) !important;
+}
+.dark [class~='ring-primary/60'],
+.dark [class~='ring-primary/40'] {
+  --tw-ring-color: rgba(217, 180, 143, 0.55) !important;
+}
+.dark [class~='bg-primary/15'],
+.dark [class~='bg-primary/10'],
+.dark [class~='bg-primary/5'] {
+  background-color: rgba(217, 180, 143, 0.16) !important;
+}
+.dark [class~='group-hover:border-primary/30']:hover,
+.dark [class~='group-hover:border-primary/20']:hover {
+  border-color: rgba(217, 180, 143, 0.6) !important;
+}
+.dark [class~='group-hover:ring-primary/40']:hover {
+  --tw-ring-color: rgba(217, 180, 143, 0.6) !important;
+}
+.dark [class~='focus:border-primary/60']:focus {
+  border-color: rgba(217, 180, 143, 0.7) !important;
+}
 /* Colored text: dark shades (amber-600/700, green-600, red-600, ...) lose
    contrast on the dark background — lighten them. Only the shades actually
    used in the app are enumerated (amber-400/500/600/700, green-400/600,
@@ -244,31 +279,31 @@
    text-amber-400 / text-green-400 keep their brightness, two-state
    hover:text-* transitions aren't flattened, and any existing Tailwind
    dark:text-* variant on the same element keeps working.
-   Guard note: we exclude elements that already carry a dark:text-* class so
-   the Tailwind utility wins; the guard is scoped to 'dark:text-' (not the
-   broad 'dark:') so a future dark:bg-* class on the same element can't
-   accidentally disable the text lightening. */
-.dark [class~='text-amber-700']:not([class*='dark:text-']),
-.dark [class~='text-amber-600']:not([class*='dark:text-']),
-.dark [class~='text-amber-500']:not([class*='dark:text-']) {
+   Guard note: we exclude only the exact dark:text-* tokens that actually
+   exist (dark:text-amber-400, dark:text-green-400) so the Tailwind utility
+   wins. A future hover or group-hover variant of dark:text-* on the same
+   element is a different token and won't disable the resting lightening. */
+.dark [class~='text-amber-700']:not([class~='dark:text-amber-400']),
+.dark [class~='text-amber-600']:not([class~='dark:text-amber-400']),
+.dark [class~='text-amber-500']:not([class~='dark:text-amber-400']) {
   color: #e2b97c !important;
 }
-.dark [class~='text-green-600']:not([class*='dark:text-']) {
+.dark [class~='text-green-600']:not([class~='dark:text-green-400']) {
   color: #9dbb7a !important;
 }
-.dark [class~='text-green-400']:not([class*='dark:text-']) {
+.dark [class~='text-green-400'] {
   color: #a5c888 !important;
 }
-.dark [class~='text-emerald-600']:not([class*='dark:text-']) {
+.dark [class~='text-emerald-600'] {
   color: #8fbe9c !important;
 }
-.dark [class~='text-red-600']:not([class*='dark:text-']) {
+.dark [class~='text-red-600'] {
   color: #e07a6e !important;
 }
-.dark [class~='text-rose-500']:not([class*='dark:text-']) {
+.dark [class~='text-rose-500'] {
   color: #e58a9a !important;
 }
-.dark [class~='text-blue-700']:not([class*='dark:text-']) {
+.dark [class~='text-blue-700'] {
   color: #8faad9 !important;
 }
 /* Warm translucent "glass" / gradient page shells. */
@@ -439,8 +474,13 @@
   border-color: #000000 !important;
 }
 
-/* eink-bordered: the readest convention for visible boundaries on e-ink, where
-   shadows don't render. Swaps to solid 1px border + flat surface in e-ink. */
+/* eink-bordered: a three-state shared hairline/boundary class (the name is
+   historical — it is NOT e-ink-only):
+   - light theme: warm translucent 1px hairline (rgba(74,57,35,0.1));
+   - dark theme: 1px white hairline (see .dark .eink-bordered above);
+   - e-ink:      1px solid black border + flat white surface (below).
+   Components use it as a neutral "visible panel boundary" hook; adjust the
+   three states together if the visual contract changes. */
 .eink-bordered {
   border-width: 1px;
   border-color: rgba(74, 57, 35, 0.1);
