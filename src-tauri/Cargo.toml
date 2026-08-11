@@ -67,11 +67,10 @@ tauri-plugin-updater = "2"
 [target.'cfg(target_env = "ohos")'.dependencies]
 napi-ohos = "1.1"
 napi-derive-ohos = "1.1"
-# Vendored at vendor/openharmony-ability (pinned to 6c52bb4), the last
-# pre-pluginize release that still exposes the `webview` feature the wry
-# feat/open-harmony branch requires. wry depends on this crate via git without
-# a rev; the [patch] below points that git source at this vendored path so both
-# resolve to the same pinned commit.
+# Vendored at vendor/openharmony-ability (pinned to 16719fc), which exposes the
+# `webview` navigation API required by the wry feat/open-harmony branch. The
+# [patch] below points wry's matching pinned Git dependency at this vendored
+# path so both resolve to the same commit.
 openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
 openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
 
@@ -100,10 +99,10 @@ tauri-utils = { path = "../vendor/tauri/crates/tauri-utils" }
 wry = { path = "../vendor/wry" }
 tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }
 
-# wry (feat/open-harmony) depends on openharmony-ability via git without a rev
-# and requires its `webview` feature, which the upstream default branch removed
-# after the 6c52bb4 pluginize refactor. Point that git source at the vendored
-# copy (pinned to 6c52bb4) so the `webview` feature resolves.
+# wry (feat/open-harmony) requires openharmony-ability's `webview` feature,
+# which the upstream default branch removed after its pluginization. Point the
+# pinned Git source at the vendored copy (also 16719fc) so Cargo resolves the
+# feature and the navigation API from the same revision.
 [patch."https://github.com/harmony-contrib/openharmony-ability.git"]
 openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
 openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
