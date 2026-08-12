@@ -103,6 +103,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(url.searchParams.get('moke'), '1');
   assert.equal(url.searchParams.get('mokeEink'), '1');
   assert.equal(url.searchParams.get('mokeBookId'), '14');
+  assert.equal(url.searchParams.get('mokeReturnTo'), '/library');
   assert.equal(url.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
   assert.deepEqual(JSON.parse(url.searchParams.get('mokeRestoreProgress')), {
     schema: 'moke.readest.progress.v1',

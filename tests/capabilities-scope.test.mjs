@@ -11,6 +11,16 @@ const CAPABILITY_FILES = [
   'src-tauri/capabilities/ohos.json',
 ];
 
+for (const file of CAPABILITY_FILES) {
+  test(`${file} allows seek for Readest random-access book parsing`, () => {
+    const capability = readCapability(file);
+    assert.ok(
+      capability.permissions.includes('fs:allow-seek'),
+      `${file} must allow plugin:fs|seek for NativeFile EPUB/MOBI reads`,
+    );
+  });
+}
+
 // HOU-15 H1 / HOU-30 regression guard. The fs/opener capability allow lists
 // were narrowed away from unrestricted path grants. A `**` catch-all must not
 // come back, whether written exactly, as `**/*`, under a home/root prefix

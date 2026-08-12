@@ -52,6 +52,7 @@
     "core:path:allow-resolve-directory",
     "fs:read-meta",
     "fs:allow-open",
+    "fs:allow-seek",
     "fs:allow-rename",
     "fs:allow-remove",
     "fs:allow-stat",

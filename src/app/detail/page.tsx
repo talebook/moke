@@ -17,6 +17,13 @@ import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
+import { bookSummaryText } from '@/lib/book-detail-core';
+import {
+  getOfflineDownloadSnapshot,
+  startOfflineDownload,
+  subscribeOfflineDownload,
+} from '@/lib/offline-download-manager';
+import { makeOfflineBookKey } from '@/lib/offline-book-core';
 
 interface BookDetail {
   id: string;
@@ -62,7 +69,6 @@ function DetailContent() {
   const [inShelf, setInShelf] = useState(false);
   const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
-  const downloadControllerRef = useRef<AbortController | null>(null);
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   // 请求序号 + abort：详情页 id 跳转（同一组件实例复用）或卸载时终止在途请求，
   // 防止 A 的慢响应把 B 的书显示在页面上。
@@ -71,7 +77,8 @@ function DetailContent() {
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
-  const summary = (book?.comments || book?.description || '').trim();
+  const summary = bookSummaryText(book?.comments || book?.description);
+  const downloadKey = serverUrl && id ? makeOfflineBookKey(serverUrl, id) : '';
   const primaryFile = book?.files?.[0];
   const fileFormats = Array.from(new Set(
     book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
@@ -117,8 +124,16 @@ function DetailContent() {
   }, [id, serverUrl]);
 
   useEffect(() => {
-    return () => downloadControllerRef.current?.abort();
-  }, []);
+    if (!downloadKey) return;
+    const applySnapshot = (snapshot: ReturnType<typeof getOfflineDownloadSnapshot>) => {
+      if (!snapshot) return;
+      setDownloading(snapshot.status === 'downloading');
+      setDownloadProgress(snapshot.progress);
+      if (snapshot.status === 'completed') setDownloaded(true);
+    };
+    applySnapshot(getOfflineDownloadSnapshot(downloadKey));
+    return subscribeOfflineDownload(downloadKey, applySnapshot);
+  }, [downloadKey]);
 
   const loadBook = async (controller: AbortController) => {
     const seq = ++loadBookSeqRef.current;
@@ -229,25 +244,29 @@ function DetailContent() {
 
   const handleDownload = async () => {
     if (!book || downloading) return;
-    if (!beginOfflineDownload(serverUrl, String(book.id))) {
-      setMessage('该书籍正在下载中，请稍候。');
-      return;
-    }
-
-    const controller = new AbortController();
-    downloadControllerRef.current = controller;
     setDownloading(true);
     setDownloadProgress(0);
     setMessage('');
 
     try {
-      await downloadAndSaveOfflineBook({
-        serverUrl,
-        bookId: String(book.id),
-        title: book.title,
-        format: selectedFormat,
-        onProgress: setDownloadProgress,
-        signal: controller.signal,
+      await startOfflineDownload({
+        key: makeOfflineBookKey(serverUrl, String(book.id)),
+        run: async (onProgress) => {
+          if (!beginOfflineDownload(serverUrl, String(book.id))) {
+            throw new Error('book.download.in_progress');
+          }
+          try {
+            await downloadAndSaveOfflineBook({
+              serverUrl,
+              bookId: String(book.id),
+              title: book.title,
+              format: selectedFormat,
+              onProgress,
+            });
+          } finally {
+            endOfflineDownload(serverUrl, String(book.id));
+          }
+        },
       });
 
       setDownloadProgress(100);
@@ -260,9 +279,10 @@ function DetailContent() {
       } : current);
       setMessage('已下载到本地，现在可以阅读。');
     } catch (error) {
-      if (controller.signal.aborted) return;
       const reason = error instanceof Error ? error.message : '';
-      if (reason.startsWith('http.')) {
+      if (reason === 'book.download.in_progress') {
+        setMessage('该书籍正在下载中，请稍候。');
+      } else if (reason.startsWith('http.')) {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
       } else if (reason === 'book.epub.invalid') {
         setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
@@ -275,11 +295,7 @@ function DetailContent() {
       }
       setDownloadProgress(0);
     } finally {
-      endOfflineDownload(serverUrl, String(book.id));
-      if (downloadControllerRef.current === controller) {
-        downloadControllerRef.current = null;
-        setDownloading(false);
-      }
+      setDownloading(false);
     }
   };
 

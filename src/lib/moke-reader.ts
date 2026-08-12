@@ -245,6 +245,7 @@ export function buildEmbeddedReaderUrl({
     moke: '1',
     mokeEink: eink ? '1' : '0',
     mokeBookId,
+    mokeReturnTo: '/library',
   });
 
   setServerUrlParam(params, serverUrl);
