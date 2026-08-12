@@ -62,18 +62,75 @@ export function getErrorMessage(error: unknown, fallback = '操作失败，请�
   return fallback;
 }
 
+function responseTextDetail(rawText: string): string {
+  const normalized = rawText
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 网关的纯文本原因（如 Cloudflare `error code: 1033`）对排障很重要；
+  // HTML 错误页可能很长且夹带脚本，不直接展示给用户。
+  if (!normalized || /<\/?(?:html|head|body|script|style)\b/i.test(normalized)) return '';
+  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized;
+}
+
+function withoutTrailingPunctuation(message: string): string {
+  return message.replace(/[.。！!]\s*$/, '');
+}
+
+/**
+ * 读取一次响应体并解析 JSON。
+ *
+ * 不使用 `Response.json()` 是为了在解析失败时仍能保留网关返回的
+ * 纯文本错误，同时避免对 Tauri plugin-http 的流式响应做克隆/并发读取。
+ */
+export async function readJsonResponse<T>(
+  response: Response,
+  fallbackMessage = '服务器返回内容无效。',
+): Promise<T> {
+  let rawText: string;
+
+  try {
+    rawText = await response.text();
+  } catch {
+    throw new MokeApiError('服务器响应读取失败，请稍后重试。', 'server.response_read_failed', response.status);
+  }
+
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    const detail = responseTextDetail(rawText);
+    const message = response.ok
+      ? detail
+        ? `${withoutTrailingPunctuation(fallbackMessage)}：${detail}`
+        : fallbackMessage
+      : detail
+        ? `服务器返回 ${response.status}：${detail}`
+        : `服务器返回 ${response.status}，且响应内容无效。`;
+
+    throw new MokeApiError(
+      message,
+      response.ok ? 'server.invalid_response' : `http.${response.status}`,
+      response.status,
+    );
+  }
+}
+
+/** 让尚未迁移到 `readApiJson` 的调用点也共享同一套安全解析与错误信息。 */
+export function attachSafeJsonReader(response: Response): Response {
+  Object.defineProperty(response, 'json', {
+    configurable: true,
+    value: <T>() => readJsonResponse<T>(response),
+  });
+  return response;
+}
+
 export async function readApiJson<T extends ApiEnvelope>(
   response: Response,
   fallbackMessage = '服务器返回内容无效。',
   okErrs: string[] = ['ok'],
 ): Promise<T> {
-  let data: T;
-
-  try {
-    data = await response.json();
-  } catch {
-    throw new MokeApiError(fallbackMessage, 'server.invalid_response', response.status);
-  }
+  const data = await readJsonResponse<T>(response, fallbackMessage);
 
   if (!response.ok) {
     throw new MokeApiError(

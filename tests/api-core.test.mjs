@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  attachSafeJsonReader,
   MokeApiError,
   buildTauriRequestInit,
   getErrorMessage,
   isAbsoluteHttpUrl,
   readApiJson,
+  readJsonResponse,
   resolveAppPlatform,
 } from '../src/lib/api-core.ts';
 
@@ -54,6 +56,79 @@ test('API 的无效 JSON 和业务错误会转换成统一错误', async () => {
   await assert.rejects(
     () => readApiJson(new Response(JSON.stringify({ err: 'book.not_found' }), { status: 200 })),
     (error) => error instanceof MokeApiError && error.code === 'book.not_found',
+  );
+});
+
+test('纯文本网关错误保留真实原因，不暴露 JSON 解析异常', async () => {
+  await assert.rejects(
+    () => readApiJson(new Response('error code: 1033', {
+      status: 530,
+      headers: { 'content-type': 'text/plain' },
+    })),
+    (error) => {
+      assert.ok(error instanceof MokeApiError);
+      assert.equal(error.code, 'http.530');
+      assert.equal(error.status, 530);
+      assert.equal(error.message, '服务器返回 530：error code: 1033');
+      assert.doesNotMatch(error.message, /JSON|ReadableStream|controller/i);
+      return true;
+    },
+  );
+});
+
+test('成功 JSON 响应只读取一次正文，不调用 Response.json', async () => {
+  const response = new Response(JSON.stringify({ err: 'ok', value: 42 }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+  Object.defineProperty(response, 'json', {
+    value: () => {
+      throw new Error('不应调用 response.json()');
+    },
+  });
+
+  assert.deepEqual(await readJsonResponse(response), { err: 'ok', value: 42 });
+  assert.equal(response.bodyUsed, true);
+});
+
+test('共享请求层的历史 response.json 调用同样使用安全解析', async () => {
+  const response = attachSafeJsonReader(new Response('error code: 1033', {
+    status: 530,
+    headers: { 'content-type': 'text/plain' },
+  }));
+
+  await assert.rejects(
+    () => response.json(),
+    (error) => error instanceof MokeApiError
+      && error.code === 'http.530'
+      && error.message === '服务器返回 530：error code: 1033',
+  );
+});
+
+test('HTML 错误页不直接暴露，响应流读取失败转换为可理解错误', async () => {
+  await assert.rejects(
+    () => readJsonResponse(new Response('<html><script>secret()</script></html>', {
+      status: 502,
+      headers: { 'content-type': 'text/html' },
+    })),
+    (error) => error instanceof MokeApiError
+      && error.code === 'http.502'
+      && error.message === '服务器返回 502，且响应内容无效。',
+  );
+
+  const brokenResponse = {
+    ok: false,
+    status: 503,
+    text: async () => {
+      throw new TypeError("Failed to execute 'close' on 'ReadableStreamDefaultController'");
+    },
+  };
+  await assert.rejects(
+    () => readJsonResponse(brokenResponse),
+    (error) => error instanceof MokeApiError
+      && error.code === 'server.response_read_failed'
+      && error.message === '服务器响应读取失败，请稍后重试。'
+      && !error.message.includes('ReadableStream'),
   );
 });
 

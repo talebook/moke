@@ -1,14 +1,17 @@
 import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
 import {
+  attachSafeJsonReader,
   buildTauriRequestInit,
   getErrorMessage,
   isAbsoluteHttpUrl,
+  MokeApiError,
   readApiJson,
+  readJsonResponse,
   resolveAppPlatform,
 } from '@/lib/api-core';
 import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
-export { getErrorMessage, MokeApiError, readApiJson } from '@/lib/api-core';
+export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
   err: string;
@@ -51,23 +54,6 @@ async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob>
     throw new Error('book.epub.invalid');
   }
   return blob;
-}
-
-async function interceptNotInvited(response: Response): Promise<void> {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) return;
-  try {
-    const data = await response.clone().json();
-    if (data?.err === 'not_invited') {
-      // 注意：这里绝不能用 window.location.href 做整页跳转！
-      // 在 Tauri 静态导出环境下，整页导航会重载 WebView、清空所有内存状态
-      // （zustand store 归零、localStorage origin 切换），导致 serverUrl 丢失。
-      // not_invited 的跳转应由各页面用 router.push 处理，这里仅记录。
-      debugLog('warn', 'request', 'not_invited：服务器要求访问码（由页面自行处理跳转）');
-    }
-  } catch {
-    // ignore parse errors
-  }
 }
 
 export async function request(url: string | URL, options?: RequestInit): Promise<Response> {
@@ -122,8 +108,9 @@ export async function request(url: string | URL, options?: RequestInit): Promise
     contentType: response.headers.get('content-type'),
   });
 
-  interceptNotInvited(response);
-  return response;
+  // 历史调用点仍有直接使用 response.json() 的情况。统一改为单次文本读取，
+  // 使所有 JSON 入口都不再暴露底层流关闭/解析异常，且可保留纯文本网关原因。
+  return attachSafeJsonReader(response);
 }
 
 /**
@@ -182,7 +169,7 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
     body: code ? body : undefined,
     credentials: 'include',
   });
-  return response.json();
+  return readJsonResponse(response);
 }
 
 export async function fetchCurrentUser(): Promise<{ err: string; msg?: string; user: ReaderInfo | null; isLogin: boolean }> {
@@ -190,7 +177,7 @@ export async function fetchCurrentUser(): Promise<{ err: string; msg?: string; u
   const response = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
-  const data: UserInfoResponse = await response.json();
+  const data = await readJsonResponse<UserInfoResponse>(response);
   const info = data.user || {};
   const isLogin = Boolean(info.is_login);
 
@@ -228,7 +215,7 @@ export async function fetchServerInfo(): Promise<{ err: string; msg?: string; ti
   const response = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
-  const data: UserInfoResponse = await response.json();
+  const data = await readJsonResponse<UserInfoResponse>(response);
 
   return {
     err: data.err,
@@ -249,7 +236,7 @@ async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boole
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) return response.ok;
 
-    const data = await response.json().catch(() => null);
+    const data = await readJsonResponse<any>(response).catch(() => null);
     const err = typeof data?.err === 'string' ? data.err : '';
 
     if (!err) return response.ok;
@@ -269,7 +256,7 @@ async function findSampleBookId(serverUrl: string): Promise<string | null> {
       const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
       if (!response.ok) continue;
 
-      const data = await response.json().catch(() => null);
+      const data = await readJsonResponse<any>(response).catch(() => null);
       const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
       if (Array.isArray(books) && books.length > 0 && books[0]?.id != null) {
         return String(books[0].id);
@@ -286,7 +273,7 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
   const infoResponse = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
-  const info = await infoResponse.json().catch(() => ({} as UserInfoResponse)) as UserInfoResponse;
+  const info = await readJsonResponse<UserInfoResponse>(infoResponse).catch(() => ({} as UserInfoResponse));
   const sampleBookId = await findSampleBookId(serverUrl);
 
   const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi] = await Promise.all([
@@ -336,23 +323,15 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
 
     console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
 
-    const rawText = await response.text();
-    if (isDev) {
-      console.log('[validateServerConnection] raw (first 500):', rawText.substring(0, 500));
-      debugLog('info', 'validate', `服务器返回正文 (${rawText.length} 字节)`, rawText.substring(0, 800));
-    } else {
-      debugLog('info', 'validate', `服务器返回正文 (${rawText.length} 字节)`);
-    }
-
     let data: UserInfoResponse;
     try {
-      data = JSON.parse(rawText);
+      data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
     } catch (e) {
-      console.error('[validateServerConnection] not JSON, attempt=%d', attempt, e);
+      console.error('[validateServerConnection] invalid response, attempt=%d', attempt, e);
       if (attempt < maxRetries) continue;
       return {
-        err: 'server.invalid_response',
-        msg: '服务器返回内容无效，不像是可用的 Talebook 服务',
+        err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
+        msg: getErrorMessage(e, '服务器返回内容无效，不像是可用的 Talebook 服务。'),
       };
     }
 
@@ -400,12 +379,12 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   let data: { err?: string; msg?: string; welcome?: string };
 
   try {
-    data = await response.json();
+    data = await readJsonResponse(response, '服务器返回内容无效，无法确认访问码状态。');
   } catch (e) {
-    console.error('[checkWelcomeRequirement] JSON parse error:', e);
+    console.error('[checkWelcomeRequirement] invalid response:', e);
     return {
-      err: 'server.invalid_response',
-      msg: '服务器返回内容无效，无法确认访问码状态',
+      err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
+      msg: getErrorMessage(e, '服务器返回内容无效，无法确认访问码状态。'),
       needsAccessCode: false,
     };
   }
@@ -459,7 +438,7 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
     credentials: 'include',
   });
 
-  const result = await response.json();
+  const result = await readJsonResponse<{ err: string; msg?: string }>(response);
   if (isDev) console.log('[submitWelcomeCode]', result);
   else console.log('[submitWelcomeCode] err=%s', result.err);
   return result;
