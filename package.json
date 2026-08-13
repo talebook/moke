@@ -18,6 +18,7 @@
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "build:reader": "cd readest && pnpm --filter @readest/readest-app build",
+    "build:talebook-embed": "cd readest && pnpm --filter @readest/talebook-embed build",
     "dev:reader": "cd readest && pnpm --filter @readest/readest-app dev",
     "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\""
   },
