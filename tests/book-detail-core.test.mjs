@@ -17,6 +17,14 @@ test('书籍简介会清除脚本和样式内容', () => {
   );
 });
 
+test('书籍简介不会让嵌套或编码的输入重新组成 HTML 标签', () => {
+  const nested = '<scr<script>alert(1)</script>ipt>正文</scr</script>ipt>';
+  const encoded = '&lt;script&gt;alert(2)&lt;/script&gt;';
+
+  assert.doesNotMatch(bookSummaryText(nested), /[<>]/);
+  assert.equal(bookSummaryText(encoded), 'scriptalert(2)/script');
+});
+
 test('书籍简介兼容普通文本与空值', () => {
   assert.equal(bookSummaryText('  普通简介  '), '普通简介');
   assert.equal(bookSummaryText(undefined), '');

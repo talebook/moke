@@ -18,6 +18,7 @@ import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime,
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { bookSummaryText } from '@/lib/book-detail-core';
+import { openAndRecordBookRead, recordBookRead } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
   startOfflineDownload,
@@ -66,6 +67,7 @@ function DetailContent() {
   const [downloaded, setDownloaded] = useState(false);
   const [deletingDownload, setDeletingDownload] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [openingReader, setOpeningReader] = useState(false);
   const [inShelf, setInShelf] = useState(false);
   const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
@@ -74,6 +76,7 @@ function DetailContent() {
   // 防止 A 的慢响应把 B 的书显示在页面上。
   const loadBookSeqRef = useRef(0);
   const loadBookControllerRef = useRef<AbortController | null>(null);
+  const openingReaderRef = useRef(false);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -300,7 +303,11 @@ function DetailContent() {
   };
 
   const handleOfflineRead = async () => {
-    if (!book) return;
+    if (!book || openingReaderRef.current) return;
+
+    openingReaderRef.current = true;
+    setOpeningReader(true);
+    setMessage('');
 
     try {
       const record = await getOfflineBook(serverUrl, id!);
@@ -313,24 +320,33 @@ function DetailContent() {
 
         // Mobile Tauri and OHOS have one WebView, so desktop's reader-window
         // command is unavailable. Navigate that WebView to the bundled reader.
-        if (isSingleWebviewRuntime(currentPlatform)) {
-          const href = buildEmbeddedReaderUrl({
-            filePath: record.filePath,
-            eink: useSettingsStore.getState().eink,
-            mokeBookId: String(book.id),
-            restoreProgress,
-            serverUrl: useServerStore.getState().serverUrl,
-          });
-          await openEmbeddedReaderBook(href, router.push, currentPlatform);
-          return;
-        }
+        await openAndRecordBookRead({
+          open: async () => {
+            if (isSingleWebviewRuntime(currentPlatform)) {
+              const href = buildEmbeddedReaderUrl({
+                filePath: record.filePath!,
+                eink: useSettingsStore.getState().eink,
+                mokeBookId: String(book.id),
+                restoreProgress,
+                serverUrl: useServerStore.getState().serverUrl,
+              });
+              await openEmbeddedReaderBook(href, router.push, currentPlatform);
+              return;
+            }
 
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('open_reader', {
-          filePath: record.filePath,
-          eink: useSettingsStore.getState().eink,
-          mokeBookId: String(book.id),
-          restoreProgress,
+            const { invoke } = await import('@tauri-apps/api/core');
+            await invoke('open_reader', {
+              filePath: record.filePath,
+              eink: useSettingsStore.getState().eink,
+              mokeBookId: String(book.id),
+              restoreProgress,
+            });
+          },
+          record: () => recordBookRead(request, serverUrl, book.id),
+          onRecordError: (error) => {
+            console.warn('Reader opened, but the read record could not be saved:', error);
+            setMessage('书籍已打开，但阅读记录同步失败。');
+          },
         });
       } else {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
@@ -338,6 +354,9 @@ function DetailContent() {
     } catch (e) {
       console.error('Failed to open book:', e);
       setMessage('打开书籍失败。');
+    } finally {
+      openingReaderRef.current = false;
+      setOpeningReader(false);
     }
   };
 
@@ -414,7 +433,7 @@ function DetailContent() {
               <>
                 <button
                   onClick={downloaded ? handleOfflineRead : handleDownload}
-                  disabled={downloading}
+                  disabled={downloading || openingReader}
                   className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
                 >
                   {downloading && <span className="absolute inset-0 bg-primary/15" />}
@@ -426,7 +445,7 @@ function DetailContent() {
                   )}
                   <span className="relative z-10 flex items-center justify-center gap-2 text-primary-foreground">
                     {downloaded && <BookOpen className="w-4 h-4" />}
-                    {downloading ? `下载中 ${downloadProgress}%` : downloaded ? '阅读' : '下载'}
+                    {downloading ? `下载中 ${downloadProgress}%` : openingReader ? '打开中' : downloaded ? '阅读' : '下载'}
                   </span>
                 </button>
                 {book.files && book.files.length > 1 && !downloaded && (

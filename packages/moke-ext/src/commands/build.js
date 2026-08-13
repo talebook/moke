@@ -1,6 +1,6 @@
 // moke-ext build — prepare dist/ for packaging
 
-import { existsSync, mkdirSync, cpSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, cpSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -63,7 +63,6 @@ export default function build() {
         console.log(`  [copy] ${binName}.exe (from ${altPath})`);
       } else {
         // List all .exe files
-        const { readdirSync } = await import('node:fs');
         const files = readdirSync(targetDir).filter(f => f.endsWith('.exe'));
         if (files.length === 1) {
           cpSync(join(targetDir, files[0]), join(dist, `${binName}.exe`));

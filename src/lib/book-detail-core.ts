@@ -18,17 +18,58 @@ function decodeHtmlEntities(value: string): string {
   });
 }
 
+const BLOCK_TAGS = new Set(['blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p']);
+
+function htmlToPlainText(value: string): string {
+  let output = '';
+  let hiddenTag: 'script' | 'style' | null = null;
+
+  for (let index = 0; index < value.length;) {
+    if (value[index] !== '<') {
+      if (!hiddenTag) output += value[index];
+      index += 1;
+      continue;
+    }
+
+    const tagEnd = value.indexOf('>', index + 1);
+    if (tagEnd === -1) {
+      if (!hiddenTag) output += value.slice(index);
+      break;
+    }
+
+    const rawTag = value.slice(index + 1, tagEnd).trim();
+    const closing = rawTag.startsWith('/');
+    const tagName = rawTag
+      .slice(closing ? 1 : 0)
+      .match(/^[a-z][a-z0-9-]*/i)?.[0]
+      ?.toLowerCase();
+
+    if (hiddenTag) {
+      if (closing && tagName === hiddenTag) hiddenTag = null;
+    } else if (!closing && (tagName === 'script' || tagName === 'style')) {
+      hiddenTag = tagName;
+    } else if (tagName === 'br' || (closing && tagName && BLOCK_TAGS.has(tagName))) {
+      output += '\n';
+    } else if (!closing && tagName === 'li') {
+      output += '• ';
+    }
+
+    index = tagEnd + 1;
+  }
+
+  return output;
+}
+
 /** Convert Talebook's HTML-formatted comments into safe, readable plain text. */
 export function bookSummaryText(value: string | null | undefined): string {
   if (!value) return '';
-  const text = value
-    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|li|h[1-6]|blockquote)>/gi, '\n')
-    .replace(/<li\b[^>]*>/gi, '• ')
-    .replace(/<[^>]+>/g, '');
+  const text = htmlToPlainText(value);
 
   return decodeHtmlEntities(text)
+    // Entity decoding happens after markup parsing. Remove the two markup
+    // delimiters individually so encoded or malformed input cannot recreate a
+    // tag in the final plain-text value.
+    .replace(/[<>]/g, '')
     .replace(/[\t\f\v ]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
