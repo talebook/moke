@@ -3,7 +3,11 @@
 import { useEffect } from 'react';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
 import { installConsoleCapture, uninstallConsoleCapture } from '@/lib/debug-log';
-import { getMokeRuntimePlatform, shouldApplyTopSafeArea } from '@/lib/moke-reader';
+import {
+  getMokeRuntimePlatform,
+  getNativeTopSafeAreaInset,
+  shouldApplyTopSafeArea,
+} from '@/lib/moke-reader';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
@@ -60,26 +64,85 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Android/iOS use edge-to-edge WebViews, while OHOS already lays the WebView
   // out below its status bar. Mark only the runtimes that need the CSS top
-  // inset; the inset is applied to each page shell so its background still
-  // paints behind the status bar and only the page content moves down.
+  // inset. Native values avoid Android WebView cold-start bugs where the CSS
+  // safe-area env remains 0; a bounded retry covers the native bridge/window
+  // insets not being ready during the first frames of app startup.
   useEffect(() => {
     const el = document.documentElement;
     let cancelled = false;
+    let runtimePlatform: string | null = null;
+    let retryTimer: number | undefined;
+    const maxAttempts = 12;
 
-    void getMokeRuntimePlatform()
-      .then((platform) => {
+    const clearRetry = () => {
+      if (retryTimer !== undefined) {
+        window.clearTimeout(retryTimer);
+        retryTimer = undefined;
+      }
+    };
+
+    const detectSafeArea = async (attempt = 0): Promise<void> => {
+      clearRetry();
+      try {
+        const platform = runtimePlatform ?? await getMokeRuntimePlatform();
         if (cancelled) return;
+        runtimePlatform = platform;
+        const enabled = shouldApplyTopSafeArea(platform);
         el.dataset.mokeRuntimePlatform = platform;
-        el.toggleAttribute('data-moke-top-safe-area', shouldApplyTopSafeArea(platform));
-      })
-      .catch((error) => {
-        console.warn('Unable to detect runtime platform for the top safe area:', error);
-      });
+        el.toggleAttribute('data-moke-top-safe-area', enabled);
+
+        if (!enabled) {
+          el.style.removeProperty('--moke-top-safe-area');
+          return;
+        }
+
+        const top = await getNativeTopSafeAreaInset(platform, window.devicePixelRatio);
+        if (cancelled) return;
+        if (top > 0) {
+          el.style.setProperty('--moke-top-safe-area', `${top}px`);
+          return;
+        }
+
+        // Keep CSS env(...) as the fallback while native insets initialize.
+        el.style.removeProperty('--moke-top-safe-area');
+        if (attempt + 1 < maxAttempts) {
+          retryTimer = window.setTimeout(() => {
+            void detectSafeArea(attempt + 1);
+          }, 250);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        if (attempt + 1 < maxAttempts) {
+          retryTimer = window.setTimeout(() => {
+            void detectSafeArea(attempt + 1);
+          }, 250);
+        } else {
+          console.warn('Unable to initialize the top safe area:', error);
+        }
+      }
+    };
+
+    const refreshSafeArea = () => {
+      if (!cancelled) void detectSafeArea();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshSafeArea();
+    };
+
+    void detectSafeArea();
+    window.addEventListener('pageshow', refreshSafeArea);
+    window.addEventListener('orientationchange', refreshSafeArea);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       cancelled = true;
+      clearRetry();
+      window.removeEventListener('pageshow', refreshSafeArea);
+      window.removeEventListener('orientationchange', refreshSafeArea);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       delete el.dataset.mokeRuntimePlatform;
       el.removeAttribute('data-moke-top-safe-area');
+      el.style.removeProperty('--moke-top-safe-area');
     };
   }, []);
 
