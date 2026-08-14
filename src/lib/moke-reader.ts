@@ -4,6 +4,14 @@ export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
 /**
+ * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
+ * the top safe-area inset. OHOS already keeps the WebView below its status bar
+ * and must not receive a second offset.
+ */
+export const shouldApplyTopSafeArea = (platform: string): boolean =>
+  platform === 'android' || platform === 'ios';
+
+/**
  * Whether the reader itself must save progress to the server (and therefore the
  * embedded reader URL should carry `mokeServerUrl`).
  *

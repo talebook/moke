@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
@@ -10,7 +10,10 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
 import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
+
+const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -18,6 +21,7 @@ export default function WelcomePage() {
   const [serverUrl, setServerUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [demoLinkCopied, setDemoLinkCopied] = useState(false);
 
   // 主页版本号连点 8 次：解锁并直接进入开发者选项（无任何提示）
   const versionClicksRef = useRef(0);
@@ -116,6 +120,17 @@ export default function WelcomePage() {
     }
   };
 
+  const handleCopyDemoLink = async () => {
+    setError('');
+    setDemoLinkCopied(false);
+    const copied = await copyTextToClipboard(DEMO_LIBRARY_URL);
+    if (copied) {
+      setDemoLinkCopied(true);
+      return;
+    }
+    setError(`复制链接失败，请手动复制：${DEMO_LIBRARY_URL}`);
+  };
+
   return (
     <main className="min-h-screen flex flex-col md:flex-row app-warm-bg">
         <div className="hidden flex-1 items-center justify-center bg-primary px-8 py-12 md:flex md:p-16">
@@ -173,12 +188,15 @@ export default function WelcomePage() {
             </div>
 
             <button
-              data-dom-id="btn-browse-demo"
-              onClick={() => handleConnect('https://demo.talebook.org')}
+              data-dom-id="btn-copy-demo-link"
+              onClick={() => void handleCopyDemoLink()}
               disabled={loading}
-              className="inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/50 text-foreground cursor-pointer transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/50 text-foreground cursor-pointer transition hover:opacity-80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              浏览演示书库
+              {demoLinkCopied
+                ? <Check className="h-4 w-4" />
+                : <Copy className="h-4 w-4" />}
+              {demoLinkCopied ? '已复制' : '复制链接'}
             </button>
 
             <button
