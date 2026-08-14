@@ -83,6 +83,21 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  .moke-app-root {
+    min-height: 100dvh;
+  }
+
+  /* Keep the page background edge-to-edge, but move its actual contents below
+     the Android/iOS status bar. OHOS never receives the runtime attribute and
+     therefore keeps its native, already-inset layout unchanged. */
+  [data-moke-top-safe-area] {
+    --moke-top-safe-area: env(safe-area-inset-top, 0px);
+  }
+
+  [data-moke-top-safe-area] .moke-app-root > :first-child {
+    padding-top: var(--moke-top-safe-area);
+  }
+
   ::selection {
     background: rgba(184, 149, 106, 0.25);
   }

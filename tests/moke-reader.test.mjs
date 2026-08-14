@@ -8,6 +8,7 @@ import {
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
+  shouldApplyTopSafeArea,
   shouldIncludeServerUrl,
 } from '../src/lib/moke-reader.ts';
 
@@ -26,6 +27,15 @@ test('runtimeCategoryFromPlatform classifies each runtime', () => {
   assert.equal(runtimeCategoryFromPlatform('linux'), 'desktop');
   assert.equal(runtimeCategoryFromPlatform('windows'), 'desktop');
   assert.equal(runtimeCategoryFromPlatform('macos'), 'desktop');
+});
+
+test('top safe area applies to edge-to-edge mobile runtimes except OHOS', () => {
+  assert.equal(shouldApplyTopSafeArea('android'), true);
+  assert.equal(shouldApplyTopSafeArea('ios'), true);
+  assert.equal(shouldApplyTopSafeArea('ohos'), false);
+  assert.equal(shouldApplyTopSafeArea('linux'), false);
+  assert.equal(shouldApplyTopSafeArea('windows'), false);
+  assert.equal(shouldApplyTopSafeArea('web'), false);
 });
 
 test('resolveRuntimeCategory falls back to mobile when the probe is unavailable', async () => {
