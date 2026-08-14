@@ -21,8 +21,17 @@ test('书籍简介不会让嵌套或编码的输入重新组成 HTML 标签', ()
   const nested = '<scr<script>alert(1)</script>ipt>正文</scr</script>ipt>';
   const encoded = '&lt;script&gt;alert(2)&lt;/script&gt;';
 
-  assert.doesNotMatch(bookSummaryText(nested), /[<>]/);
-  assert.equal(bookSummaryText(encoded), 'scriptalert(2)/script');
+  assert.doesNotMatch(bookSummaryText(nested), /<\/?(?:script|style)\b/i);
+  assert.equal(bookSummaryText(encoded), '');
+});
+
+test('书籍简介保留正文中的比较符号和非标签尖括号内容', () => {
+  assert.equal(bookSummaryText('当 3 < 5 且 5 > 3 时'), '当 3 < 5 且 5 > 3 时');
+  assert.equal(bookSummaryText('当 3 &lt; 5 且 5 &gt; 3 时'), '当 3 < 5 且 5 > 3 时');
+});
+
+test('书籍简介不会因超范围数字实体崩溃', () => {
+  assert.equal(bookSummaryText('<p>&#1114112; 与 &#x110000;</p>'), '&#1114112; 与 &#x110000;');
 });
 
 test('书籍简介兼容普通文本与空值', () => {

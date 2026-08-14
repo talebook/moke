@@ -18,7 +18,7 @@ import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime,
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import { bookSummaryText } from '@/lib/book-detail-core';
-import { openAndRecordBookRead, recordBookRead } from '@/lib/book-read';
+import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
   startOfflineDownload,
@@ -309,6 +309,11 @@ function DetailContent() {
     setOpeningReader(true);
     setMessage('');
 
+    const finishOpening = () => {
+      openingReaderRef.current = false;
+      setOpeningReader(false);
+    };
+
     try {
       const record = await getOfflineBook(serverUrl, id!);
       if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
@@ -318,22 +323,29 @@ function DetailContent() {
         const restoreProgress = await fetchReadingProgress(book.id);
         const currentPlatform = await getMokeRuntimePlatform();
 
-        // Mobile Tauri and OHOS have one WebView, so desktop's reader-window
-        // command is unavailable. Navigate that WebView to the bundled reader.
+        if (isSingleWebviewRuntime(currentPlatform)) {
+          const href = buildEmbeddedReaderUrl({
+            filePath: record.filePath,
+            eink: useSettingsStore.getState().eink,
+            mokeBookId: String(book.id),
+            restoreProgress,
+            serverUrl: useServerStore.getState().serverUrl,
+          });
+
+          // Navigation replaces this WebView and destroys the current JS
+          // context, so dispatch and await the bounded record request first.
+          await recordAndOpenBookRead({
+            record: () => recordBookRead(request, serverUrl, book.id),
+            open: () => openEmbeddedReaderBook(href, router.push, currentPlatform),
+            onRecordError: (error) => {
+              console.warn('Read record could not be saved before navigation:', error);
+            },
+          });
+          return;
+        }
+
         await openAndRecordBookRead({
           open: async () => {
-            if (isSingleWebviewRuntime(currentPlatform)) {
-              const href = buildEmbeddedReaderUrl({
-                filePath: record.filePath!,
-                eink: useSettingsStore.getState().eink,
-                mokeBookId: String(book.id),
-                restoreProgress,
-                serverUrl: useServerStore.getState().serverUrl,
-              });
-              await openEmbeddedReaderBook(href, router.push, currentPlatform);
-              return;
-            }
-
             const { invoke } = await import('@tauri-apps/api/core');
             await invoke('open_reader', {
               filePath: record.filePath,
@@ -342,6 +354,9 @@ function DetailContent() {
               restoreProgress,
             });
           },
+          // Recording is best-effort and must not hold the desktop UI lock once
+          // the independent reader window has opened successfully.
+          onOpened: finishOpening,
           record: () => recordBookRead(request, serverUrl, book.id),
           onRecordError: (error) => {
             console.warn('Reader opened, but the read record could not be saved:', error);
@@ -355,8 +370,7 @@ function DetailContent() {
       console.error('Failed to open book:', e);
       setMessage('打开书籍失败。');
     } finally {
-      openingReaderRef.current = false;
-      setOpeningReader(false);
+      finishOpening();
     }
   };
 

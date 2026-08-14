@@ -12,7 +12,9 @@ function decodeHtmlEntities(value: string): string {
     if (code.startsWith('#')) {
       const hex = code[1]?.toLowerCase() === 'x';
       const point = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10);
-      return Number.isFinite(point) ? String.fromCodePoint(point) : entity;
+      return Number.isInteger(point) && point >= 0 && point <= 0x10ffff
+        ? String.fromCodePoint(point)
+        : entity;
     }
     return HTML_ENTITY_MAP[code.toLowerCase()] ?? entity;
   });
@@ -44,6 +46,12 @@ function htmlToPlainText(value: string): string {
       .match(/^[a-z][a-z0-9-]*/i)?.[0]
       ?.toLowerCase();
 
+    if (!tagName) {
+      if (!hiddenTag) output += '<';
+      index += 1;
+      continue;
+    }
+
     if (hiddenTag) {
       if (closing && tagName === hiddenTag) hiddenTag = null;
     } else if (!closing && (tagName === 'script' || tagName === 'style')) {
@@ -65,11 +73,9 @@ export function bookSummaryText(value: string | null | undefined): string {
   if (!value) return '';
   const text = htmlToPlainText(value);
 
-  return decodeHtmlEntities(text)
-    // Entity decoding happens after markup parsing. Remove the two markup
-    // delimiters individually so encoded or malformed input cannot recreate a
-    // tag in the final plain-text value.
-    .replace(/[<>]/g, '')
+  // Decode once, then parse once more so encoded markup is treated exactly like
+  // literal markup without deleting comparison operators from ordinary text.
+  return htmlToPlainText(decodeHtmlEntities(text))
     .replace(/[\t\f\v ]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
