@@ -5,6 +5,7 @@ import {
   buildEmbeddedReaderHomeUrl,
   buildEmbeddedReaderUrl,
   buildReaderHomeWindowLabel,
+  getNativeTopSafeAreaInset,
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
@@ -36,6 +37,40 @@ test('top safe area applies to edge-to-edge mobile runtimes except OHOS', () => 
   assert.equal(shouldApplyTopSafeArea('linux'), false);
   assert.equal(shouldApplyTopSafeArea('windows'), false);
   assert.equal(shouldApplyTopSafeArea('web'), false);
+});
+
+test('native top safe area uses status-bar pixels on Android and safe insets on iOS', async () => {
+  const commands = [];
+  const invoke = async (command) => {
+    commands.push(command);
+    if (command === 'plugin:native-bridge|get_status_bar_height') {
+      return { height: 72 };
+    }
+    return { top: 47 };
+  };
+
+  assert.equal(await getNativeTopSafeAreaInset('android', 3, invoke), 24);
+  assert.equal(await getNativeTopSafeAreaInset('ios', 2, invoke), 47);
+  assert.equal(await getNativeTopSafeAreaInset('ohos', 3, invoke), 0);
+  assert.deepEqual(commands, [
+    'plugin:native-bridge|get_status_bar_height',
+    'plugin:native-bridge|get_safe_area_insets',
+  ]);
+});
+
+test('native top safe area rejects errors and normalizes invalid values', async () => {
+  await assert.rejects(
+    getNativeTopSafeAreaInset('android', 3, async () => ({ height: -1, error: 'not ready' })),
+    /not ready/,
+  );
+  assert.equal(
+    await getNativeTopSafeAreaInset('android', 0, async () => ({ height: -1 })),
+    0,
+  );
+  assert.equal(
+    await getNativeTopSafeAreaInset('ios', 2, async () => ({ top: Number.NaN })),
+    0,
+  );
 });
 
 test('resolveRuntimeCategory falls back to mobile when the probe is unavailable', async () => {

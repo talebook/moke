@@ -11,6 +11,51 @@ export const isSingleWebviewRuntime = (platform: string): boolean =>
 export const shouldApplyTopSafeArea = (platform: string): boolean =>
   platform === 'android' || platform === 'ios';
 
+type RuntimeInvoke = <T>(command: string) => Promise<T>;
+
+interface StatusBarHeightResponse {
+  height: number;
+  error?: string;
+}
+
+interface SafeAreaInsetsResponse {
+  top: number;
+  error?: string;
+}
+
+/**
+ * Read the top inset from the native bridge instead of relying only on CSS
+ * env(safe-area-inset-top). Some Android WebView versions report that CSS env
+ * value as 0 during a cold start. Android returns physical pixels, while the
+ * iOS safe-area command already returns logical pixels.
+ */
+export async function getNativeTopSafeAreaInset(
+  platform: string,
+  devicePixelRatio = 1,
+  invokeOverride?: RuntimeInvoke,
+): Promise<number> {
+  if (!shouldApplyTopSafeArea(platform)) return 0;
+
+  const invoke = invokeOverride ?? (await import('@tauri-apps/api/core')).invoke;
+  if (platform === 'android') {
+    const response = await invoke<StatusBarHeightResponse>(
+      'plugin:native-bridge|get_status_bar_height',
+    );
+    if (response.error) throw new Error(response.error);
+    const ratio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+    const height = response.height / ratio;
+    return Number.isFinite(height) && height > 0 ? height : 0;
+  }
+
+  const response = await invoke<SafeAreaInsetsResponse>(
+    'plugin:native-bridge|get_safe_area_insets',
+  );
+  if (response.error) throw new Error(response.error);
+  return Number.isFinite(response.top) && response.top > 0 ? response.top : 0;
+}
+
 /**
  * Whether the reader itself must save progress to the server (and therefore the
  * embedded reader URL should carry `mokeServerUrl`).
