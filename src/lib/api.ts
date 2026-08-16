@@ -276,12 +276,13 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
   const info = await readJsonResponse<UserInfoResponse>(infoResponse).catch(() => ({} as UserInfoResponse));
   const sampleBookId = await findSampleBookId(serverUrl);
 
-  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi] = await Promise.all([
+  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi, annotationApi] = await Promise.all([
     probeJsonEndpoint(serverUrl, '/api/shelf'),
     probeJsonEndpoint(serverUrl, '/api/reading/stats'),
     probeJsonEndpoint(serverUrl, '/api/network/sources'),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
+    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`) : Promise.resolve(false),
   ]);
 
   return {
@@ -290,6 +291,7 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
     readingProgressApi,
     readingStatsApi,
     networkSourcesApi,
+    annotationApi,
     checkedAt: Date.now(),
     version: info.sys?.version || '',
   };
