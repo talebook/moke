@@ -153,6 +153,46 @@ test('重复 upsert 复用 client_id，且来源字段使用 v2 source_ 前缀',
   assert.equal('external_id' in bodies[2], false);
 });
 
+test('写入不重试服务端 5xx，但响应丢失时可按相同幂等键重试', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    () => upsertBookAnnotation(
+      async () => {
+        attempts += 1;
+        return jsonResponse({ err: 'server.error', msg: '配置错误' }, 500);
+      },
+      'http://talebook',
+      42,
+      { annotation_type: 'note', client_id: 'no-5xx-retry' },
+      { retryDelayMs: 0, sleep: async () => {} },
+    ),
+    (error) => error.status === 500,
+  );
+  assert.equal(attempts, 1);
+
+  attempts = 0;
+  const result = await upsertBookAnnotation(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('Failed to fetch');
+      return jsonResponse({
+        err: 'ok',
+        created: false,
+        stale_ignored: false,
+        conflict_protected: false,
+        sync_enqueued: false,
+        annotation: annotation({ client_id: 'safe-network-retry' }),
+      });
+    },
+    'http://talebook',
+    42,
+    { annotation_type: 'note', client_id: 'safe-network-retry' },
+    { retryDelayMs: 0, sleep: async () => {} },
+  );
+  assert.equal(attempts, 2);
+  assert.equal(result.annotation.client_id, 'safe-network-retry');
+});
+
 test('批量 upsert 报告部分成功并保留失败项供恢复', async () => {
   const result = await upsertBookAnnotations(
     async (_url, init) => {
@@ -183,7 +223,39 @@ test('批量 upsert 报告部分成功并保留失败项供恢复', async () => 
   assert.equal(result.failed[0].retryable, false);
 });
 
-test('旧服务器或畸形响应明确标记为 contract 不兼容', async () => {
+test('批量 upsert 按配置限制并发请求数', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const inputs = Array.from({ length: 17 }, (_, index) => ({
+    annotation_type: 'note',
+    client_id: `batch-${index}`,
+  }));
+  const result = await upsertBookAnnotations(
+    async (_url, init) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const body = JSON.parse(init.body);
+      return jsonResponse({
+        err: 'ok',
+        created: true,
+        stale_ignored: false,
+        conflict_protected: false,
+        sync_enqueued: false,
+        annotation: annotation({ id: Number(body.client_id.replace('batch-', '')) + 1, client_id: body.client_id }),
+      });
+    },
+    'http://talebook',
+    42,
+    inputs,
+    { maxRetries: 0, concurrency: 4 },
+  );
+  assert.equal(result.succeeded.length, inputs.length);
+  assert.ok(maxActive <= 4, `并发峰值 ${maxActive} 应 <= 4`);
+});
+
+test('旧服务器或非数组响应明确标记为 contract 不兼容', async () => {
   await assert.rejects(
     () => fetchBookAnnotations(
       async () => jsonResponse({ err: 'page.not_found' }, 404),
@@ -197,11 +269,29 @@ test('旧服务器或畸形响应明确标记为 contract 不兼容', async () =
 
   await assert.rejects(
     () => fetchBookAnnotations(
-      async () => jsonResponse({ err: 'ok', annotations: [{ id: 1 }] }),
+      async () => jsonResponse({ err: 'ok', annotations: { id: 1 } }),
       'http://talebook',
       42,
       { maxRetries: 0 },
     ),
     isAnnotationApiUnsupported,
   );
+});
+
+test('单条畸形记录不会隐藏同一响应中的合法笔记', async () => {
+  const items = await fetchBookAnnotations(
+    async () => jsonResponse({
+      err: 'ok',
+      annotations: [
+        annotation({ id: 1 }),
+        { id: 'broken', content: '不完整记录' },
+        annotation({ id: 2, sources: [{ source_name: 'missing-required-fields' }] }),
+        annotation({ id: 3, content: '仍可展示' }),
+      ],
+    }),
+    'http://talebook',
+    42,
+    { maxRetries: 0 },
+  );
+  assert.deepEqual(items.map((item) => item.id), [1, 3]);
 });

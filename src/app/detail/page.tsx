@@ -618,6 +618,7 @@ function DetailContent() {
         </div>
 
         <AnnotationPanel
+          key={String(book.id)}
           bookId={String(book.id)}
           serverUrl={serverUrl}
           downloaded={downloaded}

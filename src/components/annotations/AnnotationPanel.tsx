@@ -22,7 +22,7 @@ interface AnnotationPanelProps {
   onAuthRequired: () => void;
 }
 
-type LoadState = 'loading' | 'ready' | 'error' | 'unsupported';
+type LoadState = 'loading' | 'ready' | 'error' | 'unsupported' | 'auth-required';
 
 const TYPE_META: Record<AnnotationType, { label: string; icon: typeof StickyNote }> = {
   highlight: { label: '高亮', icon: Highlighter },
@@ -72,6 +72,7 @@ export function AnnotationPanel({
     } catch (error) {
       if (sequence !== loadSequenceRef.current) return;
       if (error instanceof MokeApiError && error.code === 'user.need_login') {
+        setLoadState('auth-required');
         onAuthRequired();
         return;
       }
@@ -96,10 +97,16 @@ export function AnnotationPanel({
     return Array.from(new Set(names)).sort((left, right) => left.localeCompare(right));
   }, [annotations]);
 
+  useEffect(() => {
+    if (sourceFilter !== 'all' && !sources.includes(sourceFilter)) {
+      setSourceFilter('all');
+    }
+  }, [sourceFilter, sources]);
+
   const visibleAnnotations = useMemo(() => {
-    if (sourceFilter === 'all') return annotations;
+    if (sourceFilter === 'all' || !sources.includes(sourceFilter)) return annotations;
     return annotations.filter((annotation) => annotationSourceNames(annotation).includes(sourceFilter));
-  }, [annotations, sourceFilter]);
+  }, [annotations, sourceFilter, sources]);
 
   const saveNote = async () => {
     const trimmedContent = content.trim();
@@ -116,6 +123,9 @@ export function AnnotationPanel({
         content: trimmedContent,
         is_private: isPrivate,
       });
+      // Invalidate a GET that started before this POST. Otherwise its stale
+      // snapshot could arrive last and erase the newly saved note from the UI.
+      loadSequenceRef.current += 1;
       setAnnotations((current) => {
         const remaining = current.filter((item) => item.id !== result.annotation.id);
         return [...remaining, result.annotation];
@@ -127,6 +137,7 @@ export function AnnotationPanel({
       draftClientIdRef.current = '';
     } catch (error) {
       if (error instanceof MokeApiError && error.code === 'user.need_login') {
+        setLoadState('auth-required');
         onAuthRequired();
         return;
       }
@@ -211,6 +222,12 @@ export function AnnotationPanel({
       {loadState === 'unsupported' && (
         <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-foreground">
           当前 Talebook 版本不支持 Moke 笔记联动，需要服务端契约 <code className="text-xs">{TALEBOOK_ANNOTATION_CONTRACT}</code>。
+        </div>
+      )}
+
+      {loadState === 'auth-required' && (
+        <div className="mt-4 rounded-2xl border border-border bg-background p-4 text-sm text-foreground" role="status">
+          登录状态已失效，正在前往登录页…
         </div>
       )}
 

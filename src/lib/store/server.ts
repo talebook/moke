@@ -33,7 +33,6 @@ export interface ServerCapabilities {
   readingProgressApi: boolean;
   readingStatsApi: boolean;
   networkSourcesApi: boolean;
-  annotationApi: boolean;
   checkedAt: number | null;
   version: string;
 }
@@ -44,7 +43,6 @@ export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
   readingProgressApi: false,
   readingStatsApi: false,
   networkSourcesApi: false,
-  annotationApi: false,
   checkedAt: null,
   version: '',
 };

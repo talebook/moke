@@ -83,6 +83,10 @@ export interface AnnotationRetryOptions {
   sleep?: (delayMs: number) => Promise<void>;
 }
 
+export interface AnnotationBatchOptions extends AnnotationRetryOptions {
+  concurrency?: number;
+}
+
 const DEFAULT_RETRY_OPTIONS: Required<AnnotationRetryOptions> = {
   maxRetries: 2,
   retryDelayMs: 300,
@@ -90,6 +94,8 @@ const DEFAULT_RETRY_OPTIONS: Required<AnnotationRetryOptions> = {
 };
 
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const SAFE_WRITE_RETRY_STATUS = new Set([408, 425, 429]);
+const DEFAULT_BATCH_CONCURRENCY = 6;
 
 export function isAnnotationRetryable(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return false;
@@ -97,6 +103,16 @@ export function isAnnotationRetryable(error: unknown): boolean {
     if (error.code === 'user.need_login' || error.code === 'permission.denied') return false;
     return error.status !== undefined && TRANSIENT_STATUS.has(error.status);
   }
+  return error instanceof TypeError || error instanceof Error && /network|fetch|timeout|offline/i.test(error.message);
+}
+
+function isAnnotationWriteRetryable(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return false;
+  if (error instanceof MokeApiError) {
+    return error.status !== undefined && SAFE_WRITE_RETRY_STATUS.has(error.status);
+  }
+  // A transport error can mean the idempotent upsert committed but its response
+  // was lost. Reusing the same client/source identity makes this retry safe.
   return error instanceof TypeError || error instanceof Error && /network|fetch|timeout|offline/i.test(error.message);
 }
 
@@ -111,6 +127,7 @@ export function isAnnotationApiUnsupported(error: unknown): boolean {
 export async function withAnnotationRetry<T>(
   operation: () => Promise<T>,
   options: AnnotationRetryOptions = {},
+  shouldRetry: (error: unknown) => boolean = isAnnotationRetryable,
 ): Promise<T> {
   const retry = { ...DEFAULT_RETRY_OPTIONS, ...options };
   let attempt = 0;
@@ -119,7 +136,7 @@ export async function withAnnotationRetry<T>(
     try {
       return await operation();
     } catch (error) {
-      if (attempt >= retry.maxRetries || !isAnnotationRetryable(error)) throw error;
+      if (attempt >= retry.maxRetries || !shouldRetry(error)) throw error;
       await retry.sleep(retry.retryDelayMs * 2 ** attempt);
       attempt += 1;
     }
@@ -148,7 +165,16 @@ export async function fetchBookAnnotations(
     if (!Array.isArray(data.annotations)) {
       throw unsupportedContractError();
     }
-    return data.annotations.map(normalizeAnnotation);
+    const annotations: BookAnnotation[] = [];
+    for (const value of data.annotations) {
+      try {
+        annotations.push(normalizeAnnotation(value));
+      } catch {
+        // One corrupt/older record must not turn a supported endpoint into an
+        // "unsupported contract" error or hide all other valid annotations.
+      }
+    }
+    return annotations;
   }, options);
 }
 
@@ -187,7 +213,7 @@ export async function upsertBookAnnotation(
       conflict_protected: Boolean(data.conflict_protected),
       sync_enqueued: Boolean(data.sync_enqueued),
     };
-  }, options);
+  }, options, isAnnotationWriteRetryable);
 }
 
 export async function upsertBookAnnotations(
@@ -195,11 +221,18 @@ export async function upsertBookAnnotations(
   serverUrl: string,
   bookId: string | number,
   inputs: AnnotationUpsertInput[],
-  options?: AnnotationRetryOptions,
+  options: AnnotationBatchOptions = {},
 ): Promise<AnnotationBatchResult> {
-  const settled = await Promise.allSettled(
-    inputs.map((input) => upsertBookAnnotation(requestLike, serverUrl, bookId, input, options)),
-  );
+  const { concurrency = DEFAULT_BATCH_CONCURRENCY, ...retryOptions } = options;
+  const limit = Math.max(1, Math.min(20, Math.floor(concurrency) || DEFAULT_BATCH_CONCURRENCY));
+  const settled: PromiseSettledResult<AnnotationUpsertResult>[] = [];
+
+  for (let index = 0; index < inputs.length; index += limit) {
+    const batch = inputs.slice(index, index + limit);
+    settled.push(...await Promise.allSettled(
+      batch.map((input) => upsertBookAnnotation(requestLike, serverUrl, bookId, input, retryOptions)),
+    ));
+  }
   const result: AnnotationBatchResult = { succeeded: [], failed: [] };
 
   settled.forEach((item, index) => {
@@ -209,7 +242,7 @@ export async function upsertBookAnnotations(
       result.failed.push({
         input: inputs[index],
         error: item.reason,
-        retryable: isAnnotationRetryable(item.reason),
+        retryable: isAnnotationWriteRetryable(item.reason),
       });
     }
   });
