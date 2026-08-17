@@ -6,6 +6,7 @@ import { getErrorMessage, MokeApiError, request } from '@/lib/api';
 import {
   annotationSourceNames,
   fetchBookAnnotations,
+  hasReadestAnnotationLocation,
   isAnnotationApiUnsupported,
   newMokeAnnotationClientId,
   TALEBOOK_ANNOTATION_CONTRACT,
@@ -13,11 +14,13 @@ import {
   type AnnotationType,
   type BookAnnotation,
 } from '@/lib/annotations';
+import { useServerStore } from '@/lib/store/server';
 
 interface AnnotationPanelProps {
   bookId: string;
   serverUrl: string;
   downloaded: boolean;
+  openingReader: boolean;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
   onAuthRequired: () => void;
 }
@@ -44,6 +47,7 @@ export function AnnotationPanel({
   bookId,
   serverUrl,
   downloaded,
+  openingReader,
   onLocate,
   onAuthRequired,
 }: AnnotationPanelProps) {
@@ -77,6 +81,12 @@ export function AnnotationPanel({
         return;
       }
       if (isAnnotationApiUnsupported(error)) {
+        const { capabilities, setServerCapabilities } = useServerStore.getState();
+        setServerCapabilities({
+          ...capabilities,
+          annotationApi: false,
+          checkedAt: Date.now(),
+        });
         setLoadState('unsupported');
         return;
       }
@@ -127,8 +137,11 @@ export function AnnotationPanel({
       // snapshot could arrive last and erase the newly saved note from the UI.
       loadSequenceRef.current += 1;
       setAnnotations((current) => {
-        const remaining = current.filter((item) => item.id !== result.annotation.id);
-        return [...remaining, result.annotation];
+        const remaining = current.filter((item) => (
+          item.id !== result.annotation.id
+          && (!result.annotation.client_id || item.client_id !== result.annotation.client_id)
+        ));
+        return [result.annotation, ...remaining];
       });
       setChapter('');
       setContent('');
@@ -264,6 +277,7 @@ export function AnnotationPanel({
                 key={annotation.id}
                 annotation={annotation}
                 downloaded={downloaded}
+                openingReader={openingReader}
                 onLocate={onLocate}
               />
             ))}
@@ -277,10 +291,12 @@ export function AnnotationPanel({
 function AnnotationCard({
   annotation,
   downloaded,
+  openingReader,
   onLocate,
 }: {
   annotation: BookAnnotation;
   downloaded: boolean;
+  openingReader: boolean;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
 }) {
   const meta = TYPE_META[annotation.annotation_type];
@@ -289,6 +305,8 @@ function AnnotationCard({
   const sourcePositions = Array.from(new Set(
     annotation.sources.map((source) => source.source_position).filter((value): value is string => Boolean(value)),
   ));
+  const canLocate = hasReadestAnnotationLocation(annotation);
+  const locateDisabled = !downloaded || openingReader;
 
   return (
     <article className="rounded-2xl border border-border/60 bg-background/65 p-4">
@@ -317,15 +335,15 @@ function AnnotationCard({
       {annotation.content && <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{annotation.content}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-        {annotation.cfi ? (
+        {canLocate ? (
           <button
             type="button"
-            disabled={!downloaded}
+            disabled={locateDisabled}
             onClick={() => void onLocate(annotation)}
             className="inline-flex items-center gap-1 font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
-            title={downloaded ? '在阅读器中定位' : '请先下载书籍'}
+            title={!downloaded ? '请先下载书籍' : openingReader ? '阅读器正在打开' : '在阅读器中定位'}
           >
-            <MapPin className="h-3.5 w-3.5" /> {downloaded ? '精确定位' : '下载后可定位'}
+            <MapPin className="h-3.5 w-3.5" /> {!downloaded ? '下载后可定位' : openingReader ? '打开中' : '精确定位'}
           </button>
         ) : (
           <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">

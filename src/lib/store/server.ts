@@ -29,6 +29,7 @@ export interface ReaderInfo {
 
 export interface ServerCapabilities {
   shelfApi: boolean;
+  annotationApi: boolean;
   readingStateApi: boolean;
   readingProgressApi: boolean;
   readingStatsApi: boolean;
@@ -39,6 +40,7 @@ export interface ServerCapabilities {
 
 export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
   shelfApi: false,
+  annotationApi: false,
   readingStateApi: false,
   readingProgressApi: false,
   readingStatsApi: false,
@@ -130,11 +132,23 @@ export const useServerStore = create<ServerState>()(
       storage: createJSONStorage(() => safeLocalStorage),
       // 持久化数据里的 hasHydrated 可能被卡住时的旧状态污染（false），
       // merge 时强制为 true；其余字段仍按持久化值恢复。
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...(persistedState as object),
-        hasHydrated: true,
-      }),
+      merge: (persistedState, currentState) => {
+        const persisted = (persistedState ?? {}) as Partial<ServerState>;
+        const persistedCapabilities = persisted.capabilities as Partial<ServerCapabilities> | undefined;
+        const hasAnnotationCapability = typeof persistedCapabilities?.annotationApi === 'boolean';
+        return {
+          ...currentState,
+          ...persisted,
+          capabilities: {
+            ...currentState.capabilities,
+            ...persistedCapabilities,
+            // Older persisted stores predate annotationApi. Force one fresh
+            // discovery instead of treating a missing field as unsupported.
+            checkedAt: hasAnnotationCapability ? persistedCapabilities?.checkedAt ?? null : null,
+          },
+          hasHydrated: true,
+        };
+      },
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },

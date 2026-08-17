@@ -26,7 +26,12 @@ import {
 } from '@/lib/offline-download-manager';
 import { makeOfflineBookKey } from '@/lib/offline-book-core';
 import { AnnotationPanel } from '@/components/annotations/AnnotationPanel';
-import { annotationReaderProgress, type BookAnnotation } from '@/lib/annotations';
+import {
+  annotationReaderProgress,
+  clearAnnotationLocateProgressSuppression,
+  suppressAnnotationLocateProgress,
+  type BookAnnotation,
+} from '@/lib/annotations';
 
 interface BookDetail {
   id: string;
@@ -58,7 +63,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const { serverUrl, capabilities } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -334,7 +339,10 @@ function DetailContent() {
             eink: useSettingsStore.getState().eink,
             mokeBookId: String(book.id),
             restoreProgress,
-            serverUrl: useServerStore.getState().serverUrl,
+            // A single-WebView annotation locate session intentionally omits
+            // direct progress sync: otherwise the restored CFI would replace
+            // the user's ordinary continue-reading position.
+            serverUrl: targetAnnotation ? undefined : useServerStore.getState().serverUrl,
           });
 
           // Navigation replaces this WebView and destroys the current JS
@@ -349,6 +357,9 @@ function DetailContent() {
           return;
         }
 
+        if (targetAnnotation && restoreProgress?.location) {
+          suppressAnnotationLocateProgress(book.id, restoreProgress.location);
+        }
         await openAndRecordBookRead({
           open: async () => {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -372,6 +383,7 @@ function DetailContent() {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
     } catch (e) {
+      if (targetAnnotation) clearAnnotationLocateProgressSuppression(book.id);
       console.error('Failed to open book:', e);
       setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
@@ -617,14 +629,17 @@ function DetailContent() {
           </div>
         </div>
 
-        <AnnotationPanel
-          key={String(book.id)}
-          bookId={String(book.id)}
-          serverUrl={serverUrl}
-          downloaded={downloaded}
-          onLocate={handleOfflineRead}
-          onAuthRequired={handleAnnotationAuthRequired}
-        />
+        {capabilities.checkedAt != null && capabilities.annotationApi && (
+          <AnnotationPanel
+            key={String(book.id)}
+            bookId={String(book.id)}
+            serverUrl={serverUrl}
+            downloaded={downloaded}
+            openingReader={openingReader}
+            onLocate={handleOfflineRead}
+            onAuthRequired={handleAnnotationAuthRequired}
+          />
+        )}
       </div>
 
       {showDeleteConfirm && (

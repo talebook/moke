@@ -4,9 +4,13 @@ import assert from 'node:assert/strict';
 import {
   annotationReaderProgress,
   annotationSourceNames,
+  clearAnnotationLocateProgressSuppression,
   fetchBookAnnotations,
+  hasReadestAnnotationLocation,
   isAnnotationApiUnsupported,
+  shouldSuppressAnnotationReaderProgress,
   stableMokeAnnotationClientId,
+  suppressAnnotationLocateProgress,
   TALEBOOK_ANNOTATION_CONTRACT,
   upsertBookAnnotation,
   upsertBookAnnotations,
@@ -78,10 +82,33 @@ test('读取 contract v2 笔记并保留来源与无 CFI 的章节降级数据',
 });
 
 test('CFI 标注转换为 Readest 精确定位进度', () => {
-  const progress = annotationReaderProgress(annotation({ cfi: 'epubcfi(/6/4!/4/2/8)' }), 42);
+  const item = annotation({ cfi: '  epubcfi(/6/4!/4/2/8)  ' });
+  const progress = annotationReaderProgress(item, 42);
+  assert.equal(hasReadestAnnotationLocation(item), true);
   assert.equal(progress.schema, 'moke.readest.progress.v1');
   assert.equal(progress.location, 'epubcfi(/6/4!/4/2/8)');
   assert.equal(progress.chapter, '第二章');
+
+  const external = annotation({ cfi: 'calibre-position:chapter-2' });
+  assert.equal(hasReadestAnnotationLocation(external), false);
+  assert.equal(annotationReaderProgress(external, 42), null);
+});
+
+test('标注定位恢复位置不会覆盖普通阅读进度，用户翻页后恢复同步', () => {
+  const target = 'epubcfi(/6/4!/4/2/8)';
+  suppressAnnotationLocateProgress(42, target);
+  const restored = {
+    schema: 'moke.readest.progress.v1',
+    reader: 'readest',
+    moke_book_id: '42',
+    location: target,
+    updated_at: new Date().toISOString(),
+  };
+  assert.equal(shouldSuppressAnnotationReaderProgress(restored), true);
+  assert.equal(shouldSuppressAnnotationReaderProgress(restored), true);
+  assert.equal(shouldSuppressAnnotationReaderProgress({ ...restored, location: 'epubcfi(/6/6)' }), false);
+  assert.equal(shouldSuppressAnnotationReaderProgress(restored), false);
+  clearAnnotationLocateProgressSuppression(42);
 });
 
 test('429/5xx/网络错误有限重试，登录失效不会重试', async () => {
@@ -113,6 +140,20 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
     (error) => error.code === 'user.need_login',
   );
   assert.equal(attempts, 1);
+
+  attempts = 0;
+  await fetchBookAnnotations(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('error sending request for url: connection refused');
+      if (attempts === 2) throw new Error('operation timed out');
+      return jsonResponse({ err: 'ok', annotations: [] });
+    },
+    'http://talebook',
+    42,
+    { retryDelayMs: 0, sleep: async () => {} },
+  );
+  assert.equal(attempts, 3);
 });
 
 test('重复 upsert 复用 client_id，且来源字段使用 v2 source_ 前缀', async () => {
@@ -191,6 +232,70 @@ test('写入不重试服务端 5xx，但响应丢失时可按相同幂等键重�
   );
   assert.equal(attempts, 2);
   assert.equal(result.annotation.client_id, 'safe-network-retry');
+
+  attempts = 0;
+  await upsertBookAnnotation(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('error sending request for url: operation timed out');
+      return jsonResponse({
+        err: 'ok',
+        annotation: annotation({ client_id: 'tauri-network-retry' }),
+      });
+    },
+    'http://talebook',
+    42,
+    { annotation_type: 'note', client_id: 'tauri-network-retry' },
+    { retryDelayMs: 0, sleep: async () => {} },
+  );
+  assert.equal(attempts, 2);
+});
+
+test('POST 精简响应按提交内容补全，不把已成功写入误报为契约失败', async () => {
+  const result = await upsertBookAnnotation(
+    async () => jsonResponse({
+      err: 'ok',
+      created: true,
+      annotation: { id: '19', annotation_type: 'note', content: '服务端正文' },
+    }),
+    'http://talebook',
+    42,
+    {
+      annotation_type: 'note',
+      client_id: 'compact-response',
+      chapter: '第三章',
+      content: '提交正文',
+      is_private: false,
+    },
+  );
+  assert.equal(result.annotation.id, 19);
+  assert.equal(result.annotation.book_id, 42);
+  assert.equal(result.annotation.client_id, 'compact-response');
+  assert.equal(result.annotation.chapter, '第三章');
+  assert.equal(result.annotation.content, '服务端正文');
+  assert.equal(result.annotation.is_private, false);
+  assert.deepEqual(result.annotation.sources, []);
+});
+
+test('空来源字段不触发伪部分来源错误，talebook 来源身份可合法回写', async () => {
+  const bodies = [];
+  const requestLike = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    return jsonResponse({ err: 'ok', annotation: annotation({ client_id: body.client_id ?? null }) });
+  };
+  await upsertBookAnnotation(requestLike, 'http://talebook', 42, {
+    annotation_type: 'note',
+    client_id: 'nullable-source-fields',
+    source_name: null,
+    source_connection_id: '   ',
+  });
+  await upsertBookAnnotation(requestLike, 'http://talebook', 42, {
+    annotation_type: 'highlight',
+    source_name: 'talebook',
+    source_annotation_id: 'native-9',
+  });
+  assert.equal(bodies.length, 2);
 });
 
 test('批量 upsert 报告部分成功并保留失败项供恢复', async () => {
@@ -253,6 +358,24 @@ test('批量 upsert 按配置限制并发请求数', async () => {
   );
   assert.equal(result.succeeded.length, inputs.length);
   assert.ok(maxActive <= 4, `并发峰值 ${maxActive} 应 <= 4`);
+
+  active = 0;
+  maxActive = 0;
+  await upsertBookAnnotations(
+    async (_url, init) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const body = JSON.parse(init.body);
+      return jsonResponse({ err: 'ok', annotation: annotation({ client_id: body.client_id }) });
+    },
+    'http://talebook',
+    42,
+    inputs.slice(0, 3),
+    { maxRetries: 0, concurrency: 0 },
+  );
+  assert.equal(maxActive, 1);
 });
 
 test('旧服务器或非数组响应明确标记为 contract 不兼容', async () => {
@@ -294,4 +417,26 @@ test('单条畸形记录不会隐藏同一响应中的合法笔记', async () =>
     { maxRetries: 0 },
   );
   assert.deepEqual(items.map((item) => item.id), [1, 3]);
+});
+
+test('非空响应全部畸形时报告契约不兼容，书籍 404 不误报接口缺失', async () => {
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => jsonResponse({ err: 'ok', annotations: [{ id: 'broken' }, { content: 'bad' }] }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    isAnnotationApiUnsupported,
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => jsonResponse({ err: 'book.not_found', msg: '书籍不存在' }, 404),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    (error) => error.code === 'book.not_found' && !isAnnotationApiUnsupported(error),
+  );
 });

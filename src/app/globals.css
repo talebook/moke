@@ -559,6 +559,9 @@
 [data-eink='true'] [class~='text-destructive'] {
   color: #000000 !important;
 }
+[data-eink='true'] [class~='text-primary-foreground'] {
+  color: #000000 !important;
+}
 [data-eink='true'] [class~='bg-destructive/10'] {
   background-color: #FFFFFF !important;
 }

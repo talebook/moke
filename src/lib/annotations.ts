@@ -48,13 +48,13 @@ export interface AnnotationUpsertInput {
   content?: string;
   color?: string;
   author_name?: string;
-  source_name?: string;
-  source_connection_id?: string;
-  source_annotation_id?: string;
-  source_run_id?: string;
-  source_position?: string;
-  source_raw_hash?: string;
-  source_updated_at?: string;
+  source_name?: string | null;
+  source_connection_id?: string | null;
+  source_annotation_id?: string | null;
+  source_run_id?: string | null;
+  source_position?: string | null;
+  source_raw_hash?: string | null;
+  source_updated_at?: string | null;
 }
 
 export interface AnnotationUpsertResult {
@@ -96,6 +96,9 @@ const DEFAULT_RETRY_OPTIONS: Required<AnnotationRetryOptions> = {
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const SAFE_WRITE_RETRY_STATUS = new Set([408, 425, 429]);
 const DEFAULT_BATCH_CONCURRENCY = 6;
+const TRANSPORT_ERROR_PATTERN = /network|fetch|offline|timed?\s*out|connection (?:refused|reset|closed)|failed to connect|error sending request|dns|socket/i;
+const ANNOTATION_LOCATE_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
+const annotationLocateSuppressions = new Map<string, { location: string; expiresAt: number }>();
 
 export function isAnnotationRetryable(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return false;
@@ -103,7 +106,7 @@ export function isAnnotationRetryable(error: unknown): boolean {
     if (error.code === 'user.need_login' || error.code === 'permission.denied') return false;
     return error.status !== undefined && TRANSIENT_STATUS.has(error.status);
   }
-  return error instanceof TypeError || error instanceof Error && /network|fetch|timeout|offline/i.test(error.message);
+  return isTransportError(error);
 }
 
 function isAnnotationWriteRetryable(error: unknown): boolean {
@@ -111,15 +114,16 @@ function isAnnotationWriteRetryable(error: unknown): boolean {
   if (error instanceof MokeApiError) {
     return error.status !== undefined && SAFE_WRITE_RETRY_STATUS.has(error.status);
   }
-  // A transport error can mean the idempotent upsert committed but its response
-  // was lost. Reusing the same client/source identity makes this retry safe.
-  return error instanceof TypeError || error instanceof Error && /network|fetch|timeout|offline/i.test(error.message);
+  // Retry only when no HTTP response was received (or the server explicitly
+  // asks the client to retry via 408/425/429). An arbitrary 5xx can represent a
+  // deterministic application failure, so it is surfaced instead of looped.
+  // Reusing the same client/source identity keeps transport recovery idempotent.
+  return isTransportError(error);
 }
 
 export function isAnnotationApiUnsupported(error: unknown): boolean {
   return error instanceof MokeApiError && (
     error.code === 'annotation.api.unsupported'
-    || error.status === 404
     || ['page.not_found', 'handler.not_found', 'api.not_found'].includes(error.code)
   );
 }
@@ -174,6 +178,9 @@ export async function fetchBookAnnotations(
         // "unsupported contract" error or hide all other valid annotations.
       }
     }
+    if (data.annotations.length > 0 && annotations.length === 0) {
+      throw unsupportedContractError();
+    }
     return annotations;
   }, options);
 }
@@ -207,7 +214,7 @@ export async function upsertBookAnnotation(
 
     if (!data.annotation) throw unsupportedContractError();
     return {
-      annotation: normalizeAnnotation(data.annotation),
+      annotation: normalizeUpsertAnnotation(data.annotation, input, bookId),
       created: Boolean(data.created),
       stale_ignored: Boolean(data.stale_ignored),
       conflict_protected: Boolean(data.conflict_protected),
@@ -224,7 +231,10 @@ export async function upsertBookAnnotations(
   options: AnnotationBatchOptions = {},
 ): Promise<AnnotationBatchResult> {
   const { concurrency = DEFAULT_BATCH_CONCURRENCY, ...retryOptions } = options;
-  const limit = Math.max(1, Math.min(20, Math.floor(concurrency) || DEFAULT_BATCH_CONCURRENCY));
+  const requestedConcurrency = Number.isFinite(concurrency)
+    ? Math.max(1, Math.floor(concurrency))
+    : DEFAULT_BATCH_CONCURRENCY;
+  const limit = Math.min(20, requestedConcurrency);
   const settled: PromiseSettledResult<AnnotationUpsertResult>[] = [];
 
   for (let index = 0; index < inputs.length; index += limit) {
@@ -278,15 +288,49 @@ export function annotationReaderProgress(
   annotation: BookAnnotation,
   bookId: string | number,
 ): ReadingProgressPayload | null {
-  if (!annotation.cfi) return null;
+  const cfi = readestAnnotationCfi(annotation.cfi);
+  if (!cfi) return null;
   return {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
     moke_book_id: String(bookId),
-    location: annotation.cfi,
+    location: cfi,
     chapter: annotation.chapter || undefined,
     updated_at: new Date().toISOString(),
   };
+}
+
+export function hasReadestAnnotationLocation(annotation: BookAnnotation): boolean {
+  return readestAnnotationCfi(annotation.cfi) !== null;
+}
+
+/**
+ * Desktop Readest emits its restored location as a page-change event. Suppress
+ * that exact location until the user actually moves elsewhere so opening an
+ * annotation cannot overwrite the user's ordinary continue-reading position.
+ */
+export function suppressAnnotationLocateProgress(bookId: string | number, location: string): void {
+  annotationLocateSuppressions.set(String(bookId), {
+    location,
+    expiresAt: Date.now() + ANNOTATION_LOCATE_SUPPRESSION_TTL_MS,
+  });
+}
+
+export function clearAnnotationLocateProgressSuppression(bookId: string | number): void {
+  annotationLocateSuppressions.delete(String(bookId));
+}
+
+export function shouldSuppressAnnotationReaderProgress(progress: ReadingProgressPayload): boolean {
+  const key = String(progress.moke_book_id);
+  const suppression = annotationLocateSuppressions.get(key);
+  if (!suppression) return false;
+  if (Date.now() >= suppression.expiresAt) {
+    annotationLocateSuppressions.delete(key);
+    return false;
+  }
+  if (progress.location === suppression.location) return true;
+  annotationLocateSuppressions.delete(key);
+  return false;
 }
 
 function hash32(value: string, seed: number): number {
@@ -299,9 +343,9 @@ function hash32(value: string, seed: number): number {
 }
 
 function validateUpsertInput(input: AnnotationUpsertInput): void {
-  const hasClientId = Boolean(input.client_id?.trim());
-  const hasSourceName = Boolean(input.source_name?.trim());
-  const hasSourceId = Boolean(input.source_annotation_id?.trim());
+  const hasClientId = hasMeaningfulString(input.client_id);
+  const hasSourceName = hasMeaningfulString(input.source_name);
+  const hasSourceId = hasMeaningfulString(input.source_annotation_id);
   const hasAnySourceField = [
     input.source_name,
     input.source_connection_id,
@@ -310,19 +354,74 @@ function validateUpsertInput(input: AnnotationUpsertInput): void {
     input.source_position,
     input.source_raw_hash,
     input.source_updated_at,
-  ].some((value) => value !== undefined);
+  ].some(hasMeaningfulString);
   if (!ANNOTATION_TYPES.includes(input.annotation_type)) {
     throw new MokeApiError('不支持的笔记类型。', 'annotation.type.invalid');
   }
   if (!hasClientId && !hasSourceId) {
     throw new MokeApiError('笔记缺少稳定的幂等标识。', 'annotation.identity.missing');
   }
-  if (hasSourceName !== hasSourceId || hasAnySourceField !== hasSourceName || input.source_name?.trim() === 'talebook') {
+  if (hasSourceName !== hasSourceId || hasAnySourceField !== hasSourceName) {
     throw new MokeApiError('笔记来源标识不完整。', 'annotation.source.invalid');
   }
   if (input.client_id && input.client_id.length > 64) {
     throw new MokeApiError('笔记客户端标识过长。', 'annotation.identity.invalid');
   }
+}
+
+function normalizeUpsertAnnotation(
+  value: unknown,
+  input: AnnotationUpsertInput,
+  requestedBookId: string | number,
+): BookAnnotation {
+  try {
+    return normalizeAnnotation(value);
+  } catch {
+    // A successful idempotent POST may return a compact representation even
+    // when the GET endpoint uses the full v2 shape. Preserve the committed
+    // result by filling optional display fields from the submitted payload.
+  }
+
+  if (!isRecord(value)) throw unsupportedContractError();
+  const id = finiteNumber(value.id);
+  const bookId = finiteNumber(value.book_id) ?? finiteNumber(requestedBookId);
+  const annotationType = typeof value.annotation_type === 'string'
+    && ANNOTATION_TYPES.includes(value.annotation_type as AnnotationType)
+    ? value.annotation_type as AnnotationType
+    : input.annotation_type;
+  if (id === null || bookId === null || !ANNOTATION_TYPES.includes(annotationType)) {
+    throw unsupportedContractError();
+  }
+
+  const sources: AnnotationSource[] = [];
+  if (Array.isArray(value.sources)) {
+    for (const source of value.sources) {
+      try {
+        sources.push(normalizeSource(source));
+      } catch {
+        // A malformed optional source must not turn a committed POST into a
+        // visible save failure. The next GET can recover the canonical shape.
+      }
+    }
+  }
+
+  return {
+    id,
+    book_id: bookId,
+    client_id: nullableString(value.client_id) ?? nullableString(input.client_id),
+    annotation_type: annotationType,
+    is_private: typeof value.is_private === 'boolean' ? value.is_private : input.is_private ?? true,
+    cfi: fallbackNullableString(value.cfi, input.cfi),
+    chapter: fallbackString(value.chapter, input.chapter),
+    quote_text: fallbackString(value.quote_text, input.quote_text),
+    content: fallbackString(value.content, input.content),
+    color: fallbackString(value.color, input.color),
+    author_name: fallbackString(value.author_name, input.author_name),
+    user_modified_at: nullableString(value.user_modified_at),
+    created_at: nullableString(value.created_at),
+    updated_at: nullableString(value.updated_at),
+    sources,
+  };
 }
 
 function normalizeAnnotation(value: unknown): BookAnnotation {
@@ -390,6 +489,39 @@ function nullableString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
 }
 
+function fallbackString(value: unknown, fallback: unknown): string {
+  return typeof value === 'string' ? value : stringValue(fallback);
+}
+
+function fallbackNullableString(value: unknown, fallback: unknown): string | null {
+  if (value === null) return null;
+  return nullableString(value) ?? nullableString(fallback);
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function hasMeaningfulString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isTransportError(error: unknown): boolean {
+  return error instanceof TypeError
+    || error instanceof Error && TRANSPORT_ERROR_PATTERN.test(error.message);
+}
+
+function readestAnnotationCfi(value: string | null): string | null {
+  if (!value) return null;
+  const cfi = value.trim();
+  return /^epubcfi\(.+\)$/.test(cfi) ? cfi : null;
+}
+
 function unsupportedContractError(): MokeApiError {
   return new MokeApiError(
     `当前 Talebook 服务器未提供兼容的笔记契约（需要 ${TALEBOOK_ANNOTATION_CONTRACT}）。`,
@@ -399,8 +531,7 @@ function unsupportedContractError(): MokeApiError {
 
 function asCompatibilityError(error: unknown): unknown {
   if (error instanceof MokeApiError && (
-    error.status === 404
-    || ['page.not_found', 'handler.not_found', 'api.not_found'].includes(error.code)
+    ['page.not_found', 'handler.not_found', 'api.not_found'].includes(error.code)
   )) {
     return unsupportedContractError();
   }
