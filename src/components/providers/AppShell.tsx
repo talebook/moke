@@ -12,6 +12,8 @@ import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
 import { ServerProvider } from './ServerProvider';
+import { NativeBackNavigation } from './NativeBackNavigation';
+import { PrivacyConsentGate } from './PrivacyConsentGate';
 
 // 开发环境尽早 patch console，使 console.error/warn/log 也进入调试面板。
 // 生产环境默认不启用（见下方 useEffect 的开发者解锁门控），避免为所有用户
@@ -149,9 +151,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <div className="moke-app-root">
-        <ServerProvider>
-          <ReaderProgressProvider>{children}</ReaderProgressProvider>
-        </ServerProvider>
+        <NativeBackNavigation />
+        <PrivacyConsentGate>
+          <ServerProvider>
+            <ReaderProgressProvider>{children}</ReaderProgressProvider>
+          </ServerProvider>
+        </PrivacyConsentGate>
       </div>
       <DebugLogPanel />
     </>

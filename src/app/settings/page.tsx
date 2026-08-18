@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Copy, Download, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, Sun, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -144,6 +144,12 @@ export default function SettingsPage() {
               label="关于应用"
               description="查看应用介绍、版本说明与贡献者信息"
               href="/about"
+            />
+            <SettingsLinkRow
+              icon={ShieldCheck}
+              label="隐私政策"
+              description="查看 Moke 如何处理和保护相关信息"
+              href="/privacy"
             />
             <ToggleRow
               icon={Settings2}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
@@ -14,6 +14,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
+const COPY_FEEDBACK_DURATION_MS = 2000;
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -22,6 +23,11 @@ export default function WelcomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+  }, []);
 
   // 主页版本号连点 8 次：解锁并直接进入开发者选项（无任何提示）
   const versionClicksRef = useRef(0);
@@ -123,9 +129,17 @@ export default function WelcomePage() {
   const handleCopyDemoLink = async () => {
     setError('');
     setDemoLinkCopied(false);
+    if (copyFeedbackTimerRef.current) {
+      clearTimeout(copyFeedbackTimerRef.current);
+      copyFeedbackTimerRef.current = null;
+    }
     const copied = await copyTextToClipboard(DEMO_LIBRARY_URL);
     if (copied) {
       setDemoLinkCopied(true);
+      copyFeedbackTimerRef.current = setTimeout(() => {
+        setDemoLinkCopied(false);
+        copyFeedbackTimerRef.current = null;
+      }, COPY_FEEDBACK_DURATION_MS);
       return;
     }
     setError(`复制链接失败，请手动复制：${DEMO_LIBRARY_URL}`);
