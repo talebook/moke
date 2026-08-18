@@ -7,6 +7,8 @@ import {
   acceptCurrentPrivacyPolicy,
   hasAcceptedCurrentPrivacyPolicy,
 } from '@/lib/privacy-consent';
+import { ReaderProgressProvider } from './ReaderProgressProvider';
+import { ServerProvider } from './ServerProvider';
 
 type ConsentState = 'loading' | 'pending' | 'accepted' | 'declined';
 
@@ -15,16 +17,24 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   const router = useRouter();
   const [state, setState] = useState<ConsentState>('loading');
   const [isExiting, setIsExiting] = useState(false);
+  const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   useEffect(() => {
     setState(hasAcceptedCurrentPrivacyPolicy() ? 'accepted' : 'pending');
   }, []);
 
-  // The local policy page must remain readable before consent. ServerProvider
-  // also treats this path as public, so opening it cannot start server sync.
+  // Keep the policy readable before consent without mounting ServerProvider.
+  // This makes the "no server sync before consent" boundary structural rather
+  // than dependent on ServerProvider's public-path list.
   if (pathname === '/privacy') return <>{children}</>;
 
-  if (state === 'accepted') return <>{children}</>;
+  if (state === 'accepted') {
+    return (
+      <ServerProvider>
+        <ReaderProgressProvider>{children}</ReaderProgressProvider>
+      </ServerProvider>
+    );
+  }
 
   const handleAccept = () => {
     acceptCurrentPrivacyPolicy();
@@ -33,7 +43,7 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
 
   const handleDecline = async () => {
     setIsExiting(true);
-    if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+    if (isTauriApp) {
       try {
         const { exit } = await import('@tauri-apps/plugin-process');
         await exit(0);
@@ -41,8 +51,6 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
       } catch (error) {
         console.warn('Unable to exit after privacy policy refusal:', error);
       }
-    } else {
-      window.close();
     }
     setIsExiting(false);
     setState('declined');
@@ -75,7 +83,9 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
         {state === 'declined' ? (
           <div className="space-y-5">
             <p className="text-sm leading-7 text-foreground/90">
-              你已拒绝隐私政策，Moke 不会连接书库或处理相关数据。你可以退出应用，或重新阅读后作出选择。
+              {isTauriApp
+                ? '你已拒绝隐私政策，Moke 不会连接书库或处理相关数据。你可以退出应用，或重新阅读后作出选择。'
+                : '你已拒绝隐私政策，Moke 不会连接书库或处理相关数据。你可以重新阅读后作出选择，或手动关闭此页面。'}
             </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
@@ -85,14 +95,16 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
               >
                 重新选择
               </button>
-              <button
-                type="button"
-                onClick={() => void handleDecline()}
-                disabled={isExiting}
-                className="h-11 flex-1 rounded-2xl bg-primary text-sm font-medium text-primary-foreground disabled:opacity-50"
-              >
-                {isExiting ? '正在退出…' : '退出应用'}
-              </button>
+              {isTauriApp && (
+                <button
+                  type="button"
+                  onClick={() => void handleDecline()}
+                  disabled={isExiting}
+                  className="h-11 flex-1 rounded-2xl bg-primary text-sm font-medium text-primary-foreground disabled:opacity-50"
+                >
+                  {isExiting ? '正在退出…' : '退出应用'}
+                </button>
+              )}
             </div>
           </div>
         ) : (

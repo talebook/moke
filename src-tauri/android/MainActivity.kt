@@ -33,6 +33,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
+        private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf")
     }
 
     // DOWN 已被本 Activity 消费（并转发到 webview）的按键集合。被拦截的按键
@@ -83,18 +84,20 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         return true
     }
 
-    private fun isAppExitRoute(): Boolean {
-        val path = wv?.url?.let { Uri.parse(it).path }?.trimEnd('/') ?: return true
-        return path in setOf(
-            "",
-            "/",
-            "/index.html",
-            "/welcome",
-            "/welcome/index.html",
-            "/shelf",
-            "/shelf/index.html",
-        )
+    private fun currentAppPath(): String {
+        val rawPath = wv?.url?.let { Uri.parse(it).path }.orEmpty()
+        val withoutDocument = when {
+            rawPath.endsWith("/index.html") -> rawPath.removeSuffix("/index.html")
+            rawPath.endsWith(".html") -> rawPath.removeSuffix(".html")
+            else -> rawPath
+        }
+        return withoutDocument.trimEnd('/').ifEmpty { "/" }
     }
+
+    private fun isAppExitRoute(): Boolean = currentAppPath() in APP_EXIT_ROUTES
+
+    private fun isEmbeddedReaderRoute(): Boolean =
+        currentAppPath() == "/readest" || currentAppPath().startsWith("/readest/")
 
     private fun handleExitBack(): Boolean {
         val now = SystemClock.elapsedRealtime()
@@ -155,6 +158,13 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
                 // native and route nested pages through Next's client router.
                 if (event.keyCode == KeyEvent.KEYCODE_BACK && !interceptBackKeyEnabled) {
                     if (event.repeatCount > 0) return true
+                    // Android uses an in-place Readest WebView. During its
+                    // startup there is a short interval before Readest enables
+                    // interception; never interpret BACK in that interval as a
+                    // Moke root-page exit.
+                    if (isEmbeddedReaderRoute()) {
+                        return super.dispatchKeyEvent(event)
+                    }
                     val handled = if (isAppExitRoute()) {
                         handleExitBack()
                     } else {

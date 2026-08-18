@@ -13,9 +13,11 @@ test('Android 应用根页返回键提供二次确认并退出任务', () => {
   assert.match(activitySource, /finishAndRemoveTask\(\)/);
   assert.match(activitySource, /\/welcome/);
   assert.match(activitySource, /\/shelf/);
+  assert.match(activitySource, /removeSuffix\("\.html"\)/);
 });
 
 test('Android 非根页返回键交给 Next 路由且不覆盖阅读器拦截', () => {
   assert.match(activitySource, /moke:native-back/);
   assert.match(activitySource, /!interceptBackKeyEnabled/);
+  assert.match(activitySource, /isEmbeddedReaderRoute\(\)/);
 });

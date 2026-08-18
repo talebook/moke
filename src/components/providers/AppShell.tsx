@@ -10,8 +10,6 @@ import {
 } from '@/lib/moke-reader';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
-import { ReaderProgressProvider } from './ReaderProgressProvider';
-import { ServerProvider } from './ServerProvider';
 import { NativeBackNavigation } from './NativeBackNavigation';
 import { PrivacyConsentGate } from './PrivacyConsentGate';
 
@@ -152,11 +150,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <div className="moke-app-root">
         <NativeBackNavigation />
-        <PrivacyConsentGate>
-          <ServerProvider>
-            <ReaderProgressProvider>{children}</ReaderProgressProvider>
-          </ServerProvider>
-        </PrivacyConsentGate>
+        <PrivacyConsentGate>{children}</PrivacyConsentGate>
       </div>
       <DebugLogPanel />
     </>

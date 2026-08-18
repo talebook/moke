@@ -39,10 +39,9 @@ test('当前版本隐私政策只有明确同意后才会放行', () => {
 });
 
 test('隐私确认门在服务器同步组件之外，且提供同意与拒绝操作', () => {
-  assert.match(
-    appShellSource,
-    /<PrivacyConsentGate>[\s\S]*<ServerProvider>[\s\S]*<\/ServerProvider>[\s\S]*<\/PrivacyConsentGate>/,
-  );
+  assert.match(appShellSource, /<PrivacyConsentGate>\{children\}<\/PrivacyConsentGate>/);
+  assert.match(consentGateSource, /pathname === '\/privacy'[\s\S]*return <>\{children\}<\/>/);
+  assert.match(consentGateSource, /state === 'accepted'[\s\S]*<ServerProvider>/);
   assert.match(consentGateSource, /同意并继续/);
   assert.match(consentGateSource, /拒绝并退出/);
   assert.match(consentGateSource, /@tauri-apps\/plugin-process/);
