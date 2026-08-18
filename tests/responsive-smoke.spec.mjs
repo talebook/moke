@@ -37,3 +37,16 @@ test('responsive navigation remains usable across device sizes', async ({ page }
     });
   }
 });
+
+test('privacy consent can be revoked from the policy page', async ({ page }) => {
+  await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: '同意并继续' }).click();
+
+  await page.goto('http://127.0.0.1:3000/privacy', { waitUntil: 'domcontentloaded' });
+  const revokeButton = page.getByRole('button', { name: '撤回同意' });
+  await expect(revokeButton).toBeVisible();
+  await revokeButton.click();
+
+  await expect(page.getByRole('heading', { name: '隐私政策提示' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '同意并继续' })).toBeVisible();
+});

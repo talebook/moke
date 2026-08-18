@@ -6,6 +6,7 @@ import { ShieldCheck } from 'lucide-react';
 import {
   acceptCurrentPrivacyPolicy,
   hasAcceptedCurrentPrivacyPolicy,
+  PRIVACY_CONSENT_CHANGED_EVENT,
 } from '@/lib/privacy-consent';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
 import { ServerProvider } from './ServerProvider';
@@ -20,7 +21,12 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   useEffect(() => {
-    setState(hasAcceptedCurrentPrivacyPolicy() ? 'accepted' : 'pending');
+    const syncConsent = () => {
+      setState(hasAcceptedCurrentPrivacyPolicy() ? 'accepted' : 'pending');
+    };
+    syncConsent();
+    window.addEventListener(PRIVACY_CONSENT_CHANGED_EVENT, syncConsent);
+    return () => window.removeEventListener(PRIVACY_CONSENT_CHANGED_EVENT, syncConsent);
   }, []);
 
   // Keep the policy readable before consent without mounting ServerProvider.
@@ -87,11 +93,11 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
                 ? '你已拒绝隐私政策，Moke 不会连接书库或处理相关数据。你可以退出应用，或重新阅读后作出选择。'
                 : '你已拒绝隐私政策，Moke 不会连接书库或处理相关数据。你可以重新阅读后作出选择，或手动关闭此页面。'}
             </p>
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col items-center gap-2">
               <button
                 type="button"
                 onClick={() => setState('pending')}
-                className="h-11 flex-1 rounded-2xl border border-amber-950/10 bg-white/60 text-sm font-medium text-foreground"
+                className="h-11 w-full rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/15 transition hover:opacity-90 active:opacity-80"
               >
                 重新选择
               </button>
@@ -100,7 +106,7 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
                   type="button"
                   onClick={() => void handleDecline()}
                   disabled={isExiting}
-                  className="h-11 flex-1 rounded-2xl bg-primary text-sm font-medium text-primary-foreground disabled:opacity-50"
+                  className="min-h-10 w-full text-center text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
                 >
                   {isExiting ? '正在退出…' : '退出应用'}
                 </button>
@@ -137,21 +143,21 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
               点击“同意并继续”表示你已阅读并同意隐私政策。点击“拒绝并退出”后，应用不会进入书库或发起服务器同步。
             </p>
 
-            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
+            <div className="mt-6 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAccept}
+                className="h-11 w-full rounded-2xl bg-primary text-base font-semibold text-primary-foreground shadow-lg shadow-primary/15 transition hover:opacity-90 active:opacity-80"
+              >
+                同意并继续
+              </button>
               <button
                 type="button"
                 onClick={() => void handleDecline()}
                 disabled={isExiting}
-                className="h-11 flex-1 rounded-2xl border border-amber-950/10 bg-white/60 text-sm font-medium text-foreground disabled:opacity-50"
+                className="min-h-10 w-full text-center text-xs text-muted-foreground transition hover:text-foreground disabled:opacity-50"
               >
                 {isExiting ? '正在退出…' : '拒绝并退出'}
-              </button>
-              <button
-                type="button"
-                onClick={handleAccept}
-                className="h-11 flex-1 rounded-2xl bg-primary text-sm font-medium text-primary-foreground shadow-lg shadow-primary/15"
-              >
-                同意并继续
               </button>
             </div>
           </>
