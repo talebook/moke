@@ -9,6 +9,12 @@ const states = [
 test('responsive navigation remains usable across device sizes', async ({ page }, testInfo) => {
   await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
 
+  // First launch is intentionally blocked by the privacy consent gate. Verify
+  // that the prompt appears, then explicitly accept before testing app chrome.
+  const consentButton = page.getByRole('button', { name: '同意并继续' });
+  await expect(consentButton).toBeVisible();
+  await consentButton.click();
+
   for (const state of states) {
     await page.setViewportSize({ width: state.width, height: state.height });
     await page.reload({ waitUntil: 'domcontentloaded' });

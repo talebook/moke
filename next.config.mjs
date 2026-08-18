@@ -5,6 +5,11 @@ const exportOutput = appPlatform !== 'web' && !isDev;
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: exportOutput ? 'export' : undefined,
+  // CI and local device smoke tests access the dev server through the
+  // loopback IP. Next 16 blocks dev assets from that origin unless it is
+  // explicitly trusted, which would leave client-only startup gates stuck at
+  // their server-rendered loading state.
+  allowedDevOrigins: ['127.0.0.1'],
   images: {
     unoptimized: true,
   },

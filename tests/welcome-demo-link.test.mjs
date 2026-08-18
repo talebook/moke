@@ -17,3 +17,9 @@ test('连接页只复制演示书库链接，不再直接连接或打开站点',
     /handleConnect\(['"]https:\/\/demo\.talebook\.org['"]\)/,
   );
 });
+
+test('复制成功提示会在短暂展示后自动复位', () => {
+  assert.match(welcomeSource, /COPY_FEEDBACK_DURATION_MS\s*=\s*2000/);
+  assert.match(welcomeSource, /setDemoLinkCopied\(false\)/);
+  assert.match(welcomeSource, /copyFeedbackTimerRef\.current\s*=\s*setTimeout/);
+});
