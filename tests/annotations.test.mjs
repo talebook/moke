@@ -81,6 +81,19 @@ test('读取 contract v2 笔记并保留来源与无 CFI 的章节降级数据',
   assert.equal(annotationReaderProgress(items[0], 42), null);
 });
 
+test('GET 与 POST 一致兼容数字字符串形式的 annotation/book id', async () => {
+  const items = await fetchBookAnnotations(
+    async () => jsonResponse({
+      err: 'ok',
+      annotations: [annotation({ id: '7', book_id: '42' })],
+    }),
+    'http://talebook',
+    42,
+  );
+  assert.equal(items[0].id, 7);
+  assert.equal(items[0].book_id, 42);
+});
+
 test('CFI 标注转换为 Readest 精确定位进度', () => {
   const item = annotation({ cfi: '  epubcfi(/6/4!/4/2/8)  ' });
   const progress = annotationReaderProgress(item, 42);
@@ -96,7 +109,8 @@ test('CFI 标注转换为 Readest 精确定位进度', () => {
 
 test('标注定位恢复位置不会覆盖普通阅读进度，用户翻页后恢复同步', () => {
   const target = 'epubcfi(/6/4!/4/2/8)';
-  suppressAnnotationLocateProgress(42, target);
+  const serverUrl = 'http://talebook-a';
+  suppressAnnotationLocateProgress(serverUrl, 42, target);
   const restored = {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
@@ -104,11 +118,31 @@ test('标注定位恢复位置不会覆盖普通阅读进度，用户翻页后�
     location: target,
     updated_at: new Date().toISOString(),
   };
-  assert.equal(shouldSuppressAnnotationReaderProgress(restored), true);
-  assert.equal(shouldSuppressAnnotationReaderProgress(restored), true);
-  assert.equal(shouldSuppressAnnotationReaderProgress({ ...restored, location: 'epubcfi(/6/6)' }), false);
-  assert.equal(shouldSuppressAnnotationReaderProgress(restored), false);
-  clearAnnotationLocateProgressSuppression(42);
+  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), true);
+  assert.equal(
+    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'reader-normalized-default' }),
+    true,
+  );
+  assert.equal(
+    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'epubcfi(/6/6)' }, Date.now() + 11_000),
+    false,
+  );
+  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), false);
+  clearAnnotationLocateProgressSuppression(serverUrl, 42);
+});
+
+test('标注定位进度抑制按 serverUrl 隔离', () => {
+  const progress = {
+    schema: 'moke.readest.progress.v1',
+    reader: 'readest',
+    moke_book_id: '42',
+    location: 'epubcfi(/6/4)',
+    updated_at: new Date().toISOString(),
+  };
+  suppressAnnotationLocateProgress('http://talebook-a/', 42, progress.location);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-b', progress), false);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), true);
+  clearAnnotationLocateProgressSuppression('http://talebook-a', 42);
 });
 
 test('429/5xx/网络错误有限重试，登录失效不会重试', async () => {
@@ -376,6 +410,28 @@ test('批量 upsert 按配置限制并发请求数', async () => {
     { maxRetries: 0, concurrency: 0 },
   );
   assert.equal(maxActive, 1);
+
+  active = 0;
+  maxActive = 0;
+  const oversizedBatch = Array.from({ length: 25 }, (_, index) => ({
+    annotation_type: 'note',
+    client_id: `oversized-${index}`,
+  }));
+  await upsertBookAnnotations(
+    async (_url, init) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      const body = JSON.parse(init.body);
+      return jsonResponse({ err: 'ok', annotation: annotation({ client_id: body.client_id }) });
+    },
+    'http://talebook',
+    42,
+    oversizedBatch,
+    { maxRetries: 0, concurrency: 100 },
+  );
+  assert.ok(maxActive <= 20, `保护上限要求并发峰值 ${maxActive} <= 20`);
 });
 
 test('旧服务器或非数组响应明确标记为 contract 不兼容', async () => {

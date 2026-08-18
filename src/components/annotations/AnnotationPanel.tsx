@@ -19,6 +19,7 @@ import { useServerStore } from '@/lib/store/server';
 interface AnnotationPanelProps {
   bookId: string;
   serverUrl: string;
+  supported: boolean;
   downloaded: boolean;
   openingReader: boolean;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
@@ -46,13 +47,14 @@ const SOURCE_LABELS: Record<string, string> = {
 export function AnnotationPanel({
   bookId,
   serverUrl,
+  supported,
   downloaded,
   openingReader,
   onLocate,
   onAuthRequired,
 }: AnnotationPanelProps) {
   const [annotations, setAnnotations] = useState<BookAnnotation[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [loadState, setLoadState] = useState<LoadState>(supported ? 'loading' : 'unsupported');
   const [errorMessage, setErrorMessage] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [showComposer, setShowComposer] = useState(false);
@@ -66,6 +68,11 @@ export function AnnotationPanel({
 
   const load = useCallback(async () => {
     const sequence = ++loadSequenceRef.current;
+    if (!supported) {
+      setLoadState('unsupported');
+      setErrorMessage('');
+      return;
+    }
     setLoadState('loading');
     setErrorMessage('');
     try {
@@ -93,7 +100,7 @@ export function AnnotationPanel({
       setErrorMessage(getErrorMessage(error, '暂时无法读取笔记，请检查网络后重试。'));
       setLoadState('error');
     }
-  }, [bookId, onAuthRequired, serverUrl]);
+  }, [bookId, onAuthRequired, serverUrl, supported]);
 
   useEffect(() => {
     void load();

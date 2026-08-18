@@ -25,7 +25,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
       .then(({ listen }) => listen<Record<string, unknown>>('reader:page:changed', (event) => {
         const progress = normalizeReaderProgressEvent(event.payload);
         if (!progress) return;
-        if (shouldSuppressAnnotationReaderProgress(progress)) return;
+        if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
 
         const bookId = progress.moke_book_id;
         pendingRef.current.set(bookId, progress);

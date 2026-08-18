@@ -96,9 +96,18 @@ const DEFAULT_RETRY_OPTIONS: Required<AnnotationRetryOptions> = {
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const SAFE_WRITE_RETRY_STATUS = new Set([408, 425, 429]);
 const DEFAULT_BATCH_CONCURRENCY = 6;
+// A hard guardrail for future bulk import/sync callers so one batch cannot
+// overwhelm a single-process Talebook server even if configured incorrectly.
+const MAX_BATCH_CONCURRENCY = 20;
 const TRANSPORT_ERROR_PATTERN = /network|fetch|offline|timed?\s*out|connection (?:refused|reset|closed)|failed to connect|error sending request|dns|socket/i;
 const ANNOTATION_LOCATE_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
-const annotationLocateSuppressions = new Map<string, { location: string; expiresAt: number }>();
+const ANNOTATION_LOCATE_GRACE_MS = 10 * 1000;
+const annotationLocateSuppressions = new Map<string, {
+  location: string;
+  graceUntil: number;
+  expiresAt: number;
+  cleanupTimer: ReturnType<typeof setTimeout>;
+}>();
 
 export function isAnnotationRetryable(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return false;
@@ -223,6 +232,11 @@ export async function upsertBookAnnotation(
   }, options, isAnnotationWriteRetryable);
 }
 
+/**
+ * Reserved bulk-sync primitive for future local annotation importers. The UI
+ * currently saves one note at a time, but sync jobs need partial-failure
+ * reporting and bounded concurrency without reimplementing the v2 contract.
+ */
 export async function upsertBookAnnotations(
   requestLike: RequestLike,
   serverUrl: string,
@@ -234,7 +248,7 @@ export async function upsertBookAnnotations(
   const requestedConcurrency = Number.isFinite(concurrency)
     ? Math.max(1, Math.floor(concurrency))
     : DEFAULT_BATCH_CONCURRENCY;
-  const limit = Math.min(20, requestedConcurrency);
+  const limit = Math.min(MAX_BATCH_CONCURRENCY, requestedConcurrency);
   const settled: PromiseSettledResult<AnnotationUpsertResult>[] = [];
 
   for (let index = 0; index < inputs.length; index += limit) {
@@ -260,7 +274,7 @@ export async function upsertBookAnnotations(
 }
 
 /**
- * Produce a deterministic, contract-safe client id for a local annotation.
+ * Produce a deterministic, contract-safe client id for future local sync jobs.
  * Callers should use an immutable local record id as `localId`; repeated syncs
  * of the same record then hit Talebook's `(owner, book, client_id)` upsert key.
  */
@@ -305,30 +319,57 @@ export function hasReadestAnnotationLocation(annotation: BookAnnotation): boolea
 }
 
 /**
- * Desktop Readest emits its restored location as a page-change event. Suppress
- * that exact location until the user actually moves elsewhere so opening an
- * annotation cannot overwrite the user's ordinary continue-reading position.
+ * Desktop Readest emits startup and restored locations as page-change events.
+ * Suppress a short startup window, scoped by server and book, then keep exact
+ * restore suppression until the user moves elsewhere. A timer bounds cleanup.
  */
-export function suppressAnnotationLocateProgress(bookId: string | number, location: string): void {
-  annotationLocateSuppressions.set(String(bookId), {
+export function suppressAnnotationLocateProgress(
+  serverUrl: string,
+  bookId: string | number,
+  location: string,
+): void {
+  const key = annotationProgressKey(serverUrl, bookId);
+  const existing = annotationLocateSuppressions.get(key);
+  if (existing) clearTimeout(existing.cleanupTimer);
+  const startedAt = Date.now();
+  const cleanupTimer = setTimeout(() => {
+    annotationLocateSuppressions.delete(key);
+  }, ANNOTATION_LOCATE_SUPPRESSION_TTL_MS);
+  if (typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) cleanupTimer.unref();
+  annotationLocateSuppressions.set(key, {
     location,
-    expiresAt: Date.now() + ANNOTATION_LOCATE_SUPPRESSION_TTL_MS,
+    graceUntil: startedAt + ANNOTATION_LOCATE_GRACE_MS,
+    expiresAt: startedAt + ANNOTATION_LOCATE_SUPPRESSION_TTL_MS,
+    cleanupTimer,
   });
 }
 
-export function clearAnnotationLocateProgressSuppression(bookId: string | number): void {
-  annotationLocateSuppressions.delete(String(bookId));
+export function clearAnnotationLocateProgressSuppression(serverUrl: string, bookId: string | number): void {
+  const key = annotationProgressKey(serverUrl, bookId);
+  const suppression = annotationLocateSuppressions.get(key);
+  if (suppression) clearTimeout(suppression.cleanupTimer);
+  annotationLocateSuppressions.delete(key);
 }
 
-export function shouldSuppressAnnotationReaderProgress(progress: ReadingProgressPayload): boolean {
-  const key = String(progress.moke_book_id);
+export function shouldSuppressAnnotationReaderProgress(
+  serverUrl: string,
+  progress: ReadingProgressPayload,
+  now = Date.now(),
+): boolean {
+  const key = annotationProgressKey(serverUrl, progress.moke_book_id);
   const suppression = annotationLocateSuppressions.get(key);
   if (!suppression) return false;
-  if (Date.now() >= suppression.expiresAt) {
+  if (now >= suppression.expiresAt) {
+    clearTimeout(suppression.cleanupTimer);
     annotationLocateSuppressions.delete(key);
     return false;
   }
+  // Readest may first emit its default page and may normalize the supplied CFI
+  // before emitting the restored page. Suppress every startup event during a
+  // short grace period rather than relying on byte-for-byte CFI equality.
+  if (now < suppression.graceUntil) return true;
   if (progress.location === suppression.location) return true;
+  clearTimeout(suppression.cleanupTimer);
   annotationLocateSuppressions.delete(key);
   return false;
 }
@@ -426,18 +467,19 @@ function normalizeUpsertAnnotation(
 
 function normalizeAnnotation(value: unknown): BookAnnotation {
   if (!isRecord(value)
-    || typeof value.id !== 'number'
-    || typeof value.book_id !== 'number'
     || typeof value.annotation_type !== 'string'
     || !ANNOTATION_TYPES.includes(value.annotation_type as AnnotationType)
     || typeof value.is_private !== 'boolean'
     || !Array.isArray(value.sources)) {
     throw unsupportedContractError();
   }
+  const id = finiteNumber(value.id);
+  const bookId = finiteNumber(value.book_id);
+  if (id === null || bookId === null) throw unsupportedContractError();
 
   return {
-    id: value.id,
-    book_id: value.book_id,
+    id,
+    book_id: bookId,
     client_id: nullableString(value.client_id),
     annotation_type: value.annotation_type as AnnotationType,
     is_private: value.is_private,
@@ -520,6 +562,10 @@ function readestAnnotationCfi(value: string | null): string | null {
   if (!value) return null;
   const cfi = value.trim();
   return /^epubcfi\(.+\)$/.test(cfi) ? cfi : null;
+}
+
+function annotationProgressKey(serverUrl: string, bookId: string | number): string {
+  return `${serverUrl.replace(/\/+$/, '')}\u0000${String(bookId)}`;
 }
 
 function unsupportedContractError(): MokeApiError {

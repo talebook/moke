@@ -559,7 +559,8 @@
 [data-eink='true'] [class~='text-destructive'] {
   color: #000000 !important;
 }
-[data-eink='true'] [class~='text-primary-foreground'] {
+[data-eink='true'] .bg-primary [class~='text-primary-foreground'],
+[data-eink='true'] [class~='bg-primary/15'] [class~='text-primary-foreground'] {
   color: #000000 !important;
 }
 [data-eink='true'] [class~='bg-destructive/10'] {

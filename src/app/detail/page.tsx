@@ -358,7 +358,7 @@ function DetailContent() {
         }
 
         if (targetAnnotation && restoreProgress?.location) {
-          suppressAnnotationLocateProgress(book.id, restoreProgress.location);
+          suppressAnnotationLocateProgress(serverUrl, book.id, restoreProgress.location);
         }
         await openAndRecordBookRead({
           open: async () => {
@@ -383,7 +383,7 @@ function DetailContent() {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
     } catch (e) {
-      if (targetAnnotation) clearAnnotationLocateProgressSuppression(book.id);
+      if (targetAnnotation) clearAnnotationLocateProgressSuppression(serverUrl, book.id);
       console.error('Failed to open book:', e);
       setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
@@ -629,11 +629,12 @@ function DetailContent() {
           </div>
         </div>
 
-        {capabilities.checkedAt != null && capabilities.annotationApi && (
+        {capabilities.checkedAt != null && (
           <AnnotationPanel
             key={String(book.id)}
             bookId={String(book.id)}
             serverUrl={serverUrl}
+            supported={capabilities.annotationApi}
             downloaded={downloaded}
             openingReader={openingReader}
             onLocate={handleOfflineRead}
