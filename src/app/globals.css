@@ -452,6 +452,41 @@
   }
 }
 
+/* Android BACK is handled inside the single Tauri WebView, so it does not get
+   the Activity transition that a native multi-screen app would receive. The
+   View Transition snapshots put the already-rendered parent page underneath
+   the current page, then animate only the current page out to the right. */
+html.moke-native-back-transition::view-transition-old(root) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  animation-fill-mode: both;
+  mix-blend-mode: normal;
+  z-index: 2;
+  animation-name: moke-native-back-exit;
+  box-shadow: -12px 0 32px rgba(37, 30, 20, 0.16);
+}
+
+html.moke-native-back-transition::view-transition-new(root) {
+  z-index: 1;
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@keyframes moke-native-back-exit {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce), (update: slow), (max-color: 1) {
+  html.moke-native-back-transition::view-transition-old(root) {
+    animation-duration: 0.01ms !important;
+  }
+}
+
+html[data-eink='true'].moke-native-back-transition::view-transition-old(root) {
+  animation-duration: 0.01ms !important;
+}
+
 /* Manual override: force ink mode on any device via the Settings toggle.
    Uses the same [data-eink='true'] signal as the readest reader so the Moke
    bridge (window.__MOKE_EINK) and the reader share one convention. */
