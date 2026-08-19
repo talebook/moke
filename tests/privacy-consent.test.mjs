@@ -8,6 +8,7 @@ import {
   hasAcceptedCurrentPrivacyPolicy,
   PRIVACY_CONSENT_STORAGE_KEY,
   PRIVACY_POLICY_VERSION,
+  revokeCurrentPrivacyPolicy,
 } from '../src/lib/privacy-consent.ts';
 
 const appShellSource = readFileSync(
@@ -36,6 +37,10 @@ test('当前版本隐私政策只有明确同意后才会放行', () => {
   acceptCurrentPrivacyPolicy();
   assert.equal(values.get(PRIVACY_CONSENT_STORAGE_KEY), PRIVACY_POLICY_VERSION);
   assert.equal(hasAcceptedCurrentPrivacyPolicy(), true);
+
+  revokeCurrentPrivacyPolicy();
+  assert.equal(values.has(PRIVACY_CONSENT_STORAGE_KEY), false);
+  assert.equal(hasAcceptedCurrentPrivacyPolicy(), false);
 });
 
 test('隐私确认门在服务器同步组件之外，且提供同意与拒绝操作', () => {
