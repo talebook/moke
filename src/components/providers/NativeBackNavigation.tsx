@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { resolveNativeBackTarget } from '@/lib/native-back';
+import { APP_BACK_EVENT, resolveNativeBackTarget } from '@/lib/native-back';
 
 const BACK_TRANSITION_CLASS = 'moke-native-back-transition';
 const BACK_TRANSITION_TIMEOUT_MS = 1_000;
@@ -41,10 +41,12 @@ export function NativeBackNavigation() {
   }, [pathname]);
 
   useEffect(() => {
-    const handleNativeBack = () => {
+    const handleNativeBack = (event: Event) => {
       if (transitionRunningRef.current) return;
 
-      const { target, nextStack } = resolveNativeBackTarget(pathname, routeStackRef.current);
+      const requestedTarget = (event as CustomEvent<{ target?: string }>).detail?.target;
+      const { target: stackTarget, nextStack } = resolveNativeBackTarget(pathname, routeStackRef.current);
+      const target = requestedTarget ?? stackTarget;
       routeStackRef.current = nextStack;
 
       // Use a known app route instead of WebView/browser history. The latter
@@ -80,8 +82,8 @@ export function NativeBackNavigation() {
           document.documentElement.classList.remove(BACK_TRANSITION_CLASS);
         });
     };
-    window.addEventListener('moke:native-back', handleNativeBack);
-    return () => window.removeEventListener('moke:native-back', handleNativeBack);
+    window.addEventListener(APP_BACK_EVENT, handleNativeBack);
+    return () => window.removeEventListener(APP_BACK_EVENT, handleNativeBack);
   }, [pathname, router]);
 
   useEffect(() => () => {

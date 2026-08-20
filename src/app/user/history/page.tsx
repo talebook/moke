@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, BookOpen, Download, History, Send, Upload } from 'lucide-react';
+import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -142,7 +143,7 @@ export default function UserHistoryPage() {
         <div className="mx-auto" style={{ maxWidth: '1200px' }}>
         <div className="flex items-center gap-3 mb-8">
           <button
-            onClick={() => router.back()}
+            onClick={() => requestAnimatedBack()}
             className="flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm text-muted-foreground transition hover:text-foreground hover:bg-muted"
             aria-label="返回"
             title="返回"

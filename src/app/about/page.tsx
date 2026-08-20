@@ -1,11 +1,11 @@
 'use client';
 
-import Link from 'next/link';
 import { useState, useRef } from 'react';
 import { ArrowLeft, BookOpen, Coffee, ExternalLink, HeartHandshake, Info, Sparkles, X } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { APP_VERSION } from '@/lib/app-version';
+import { requestAnimatedBack } from '@/lib/native-back';
 
 interface Contributor {
   id: string;
@@ -120,13 +120,14 @@ export default function AboutPage() {
             <h1 className="text-2xl font-semibold text-foreground">关于应用</h1>
             <p className="mt-1 text-sm text-muted-foreground">了解应用定位与项目贡献者</p>
           </div>
-          <Link
-            href="/settings"
+          <button
+            type="button"
+            onClick={() => requestAnimatedBack('/settings')}
             className="inline-flex items-center gap-2 h-10 rounded-2xl border border-amber-950/10 bg-white/60 shadow-sm px-4 text-sm text-foreground transition hover:bg-muted"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>返回设置</span>
-          </Link>
+          </button>
         </div>
 
         <div className="space-y-6">

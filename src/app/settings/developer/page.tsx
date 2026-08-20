@@ -1,16 +1,15 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ArrowLeft, Bug, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useUpdateStore } from '@/lib/store/update';
 import { useDebugLogStore, debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
+import { requestAnimatedBack } from '@/lib/native-back';
 
 export default function DeveloperSettingsPage() {
-  const router = useRouter();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const enabled = useDeveloperStore((s) => s.enabled);
   const setEnabled = useDeveloperStore((s) => s.setEnabled);
@@ -28,7 +27,7 @@ export default function DeveloperSettingsPage() {
           <Lock className="w-10 h-10 text-muted-foreground mb-4" />
           <p className="text-sm text-muted-foreground">开发者选项尚未解锁。</p>
           <button
-            onClick={() => router.push('/settings')}
+            onClick={() => requestAnimatedBack('/settings')}
             className="mt-4 text-sm text-primary hover:underline"
           >
             返回设置
@@ -61,7 +60,7 @@ export default function DeveloperSettingsPage() {
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mx-auto" style={{ maxWidth: '860px' }}>
         <button
-          onClick={() => router.push('/settings')}
+          onClick={() => requestAnimatedBack('/settings')}
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
         >
           <ArrowLeft className="w-4 h-4" />

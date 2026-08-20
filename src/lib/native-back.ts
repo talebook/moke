@@ -17,6 +17,15 @@ const FALLBACK_ROUTES: Record<string, string> = {
   '/user/history': '/user',
 };
 
+export const APP_BACK_EVENT = 'moke:native-back';
+
+/** Routes page-level back controls through the same animated path as Android BACK. */
+export function requestAnimatedBack(target?: string): void {
+  window.dispatchEvent(new CustomEvent(APP_BACK_EVENT, {
+    detail: { target },
+  }));
+}
+
 export function nativeBackFallback(pathname: string): string {
   return FALLBACK_ROUTES[pathname] ?? '/shelf';
 }

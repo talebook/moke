@@ -7,6 +7,7 @@ import {
   hasAcceptedCurrentPrivacyPolicy,
   revokeCurrentPrivacyPolicy,
 } from '@/lib/privacy-consent';
+import { requestAnimatedBack } from '@/lib/native-back';
 
 export function PrivacyBackButton() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function PrivacyBackButton() {
     <div className="flex flex-wrap items-center justify-between gap-3">
       <button
         type="button"
-        onClick={() => router.back()}
+        onClick={() => requestAnimatedBack()}
         className="inline-flex h-11 items-center gap-2 rounded-2xl border border-amber-950/10 bg-white/60 px-4 text-sm text-foreground"
       >
         <ArrowLeft className="h-4 w-4" />
