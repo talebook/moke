@@ -23,7 +23,7 @@ import {
   readStateShelfState,
   shouldLoadReadingStateFallback,
 } from '@/lib/book-detail-core';
-import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead } from '@/lib/book-read';
+import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
   startOfflineDownload,
@@ -312,7 +312,13 @@ function DetailContent() {
   };
 
   const handleOfflineRead = async () => {
-    if (!book || openingReaderRef.current) return;
+    if (!book) return;
+    // 打开/记录在途时拦截重复点击：按钮只在阅读器窗口已打开后恢复可点，
+    // 记录请求仍在途，此时放行会造成重复打开窗口和重复计数。
+    if (openingReaderRef.current) {
+      setMessage('正在打开书籍，请稍候。');
+      return;
+    }
 
     openingReaderRef.current = true;
     setOpeningReader(true);
@@ -343,8 +349,10 @@ function DetailContent() {
 
           // Navigation replaces this WebView and destroys the current JS
           // context, so dispatch and await the bounded record request first.
+          // Use a short timeout: the record is best-effort and must not hold
+          // up opening the reader for long.
           await recordAndOpenBookRead({
-            record: () => recordBookRead(request, serverUrl, book.id),
+            record: () => recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS),
             open: () => openEmbeddedReaderBook(href, router.push, currentPlatform),
             onRecordError: (error) => {
               console.warn('Read record could not be saved before navigation:', error);
@@ -363,9 +371,10 @@ function DetailContent() {
               restoreProgress,
             });
           },
-          // Recording is best-effort and must not hold the desktop UI lock once
-          // the independent reader window has opened successfully.
-          onOpened: finishOpening,
+          // The independent reader window is open now, so unlock the button
+          // right away; the re-entry ref stays held until the record settles
+          // so a second click cannot duplicate the open or the count.
+          onOpened: () => setOpeningReader(false),
           record: () => recordBookRead(request, serverUrl, book.id),
           onRecordError: (error) => {
             console.warn('Reader opened, but the read record could not be saved:', error);

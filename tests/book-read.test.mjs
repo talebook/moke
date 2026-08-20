@@ -82,3 +82,60 @@ test('单 WebView 在导航前记录，记录失败仍继续打开阅读器', as
   assert.equal(errors.length, 1);
   assert.match(errors[0].message, /network failed/);
 });
+
+test('会话失效被重定向到登录页时不误报记录成功', async () => {
+  const fake = {
+    ok: true,
+    status: 200,
+    url: 'https://books.example/login',
+    arrayBuffer: async () => new ArrayBuffer(0),
+  };
+
+  await assert.rejects(
+    recordBookRead(async () => fake, 'https://books.example', 'a'),
+    /book\.read_record\.redirect/,
+  );
+});
+
+test('仍落在阅读路由上的重定向视为记录成功', async () => {
+  const fake = {
+    ok: true,
+    status: 200,
+    url: 'https://books.example/read/a/',
+    arrayBuffer: async () => new ArrayBuffer(0),
+  };
+
+  await recordBookRead(async () => fake, 'https://books.example', 'a');
+});
+
+test('记录请求会排空响应体以尽早释放连接', async () => {
+  let drained = false;
+
+  await recordBookRead(async () => ({
+    ok: true,
+    status: 200,
+    url: 'https://books.example/read/1',
+    arrayBuffer: async () => {
+      drained = true;
+      return new ArrayBuffer(0);
+    },
+  }), 'https://books.example', '1');
+
+  assert.equal(drained, true);
+});
+
+test('WebView 缺少 AbortSignal.timeout 时仍会携带超时信号', async () => {
+  const original = AbortSignal.timeout;
+  delete AbortSignal.timeout;
+  try {
+    let capturedSignal;
+    await recordBookRead(async (url, init) => {
+      capturedSignal = init.signal;
+      return new Response('', { status: 200 });
+    }, 'https://books.example', 'a', 100);
+
+    assert.ok(capturedSignal instanceof AbortSignal);
+  } finally {
+    AbortSignal.timeout = original;
+  }
+});

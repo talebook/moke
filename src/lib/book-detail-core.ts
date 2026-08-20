@@ -58,21 +58,53 @@ export function readStateShelfState(response: {
 function htmlToPlainText(value: string): string {
   let output = '';
   let hiddenTag: 'script' | 'style' | null = null;
+  const lower = value.toLowerCase();
 
   for (let index = 0; index < value.length;) {
+    if (hiddenTag) {
+      // Inside script/style, `<` may be plain code (`if (a < b)`); scanning for
+      // the next `>` would misread the closing tag and hide the rest of the
+      // description. Locate the real closing tag instead.
+      const closeStart = lower.indexOf(`</${hiddenTag}`, index);
+      if (closeStart === -1) break;
+      const closeEnd = value.indexOf('>', closeStart + 2);
+      index = closeEnd === -1 ? value.length : closeEnd + 1;
+      hiddenTag = null;
+      continue;
+    }
+
     if (value[index] !== '<') {
-      if (!hiddenTag) output += value[index];
+      output += value[index];
       index += 1;
+      continue;
+    }
+
+    // HTML comments (and other `<!...>` declarations) are not content.
+    if (value.startsWith('<!--', index)) {
+      const commentEnd = value.indexOf('-->', index + 4);
+      if (commentEnd === -1) break;
+      index = commentEnd + 3;
+      continue;
+    }
+    if (value.startsWith('<!', index)) {
+      const declEnd = value.indexOf('>', index + 2);
+      index = declEnd === -1 ? value.length : declEnd + 1;
       continue;
     }
 
     const tagEnd = value.indexOf('>', index + 1);
     if (tagEnd === -1) {
-      if (!hiddenTag) output += value.slice(index);
+      output += value.slice(index);
       break;
     }
 
-    const rawTag = value.slice(index + 1, tagEnd).trim();
+    // A nested `<` inside the scanned span (e.g. `<scr<script>`) means the
+    // outer tag text was cut short; parse only up to that point so the inner
+    // tag gets its own pass instead of being folded into the outer name.
+    const rawTagFull = value.slice(index + 1, tagEnd);
+    const innerTagAt = rawTagFull.indexOf('<');
+    const rawTag = (innerTagAt === -1 ? rawTagFull : rawTagFull.slice(0, innerTagAt)).trim();
+    const scanEnd = innerTagAt === -1 ? tagEnd : index + 1 + innerTagAt;
     const closing = rawTag.startsWith('/');
     const tagName = rawTag
       .slice(closing ? 1 : 0)
@@ -80,22 +112,20 @@ function htmlToPlainText(value: string): string {
       ?.toLowerCase();
 
     if (!tagName) {
-      if (!hiddenTag) output += '<';
+      output += '<';
       index += 1;
       continue;
     }
 
-    if (hiddenTag) {
-      if (closing && tagName === hiddenTag) hiddenTag = null;
-    } else if (!closing && (tagName === 'script' || tagName === 'style')) {
+    if (!closing && (tagName === 'script' || tagName === 'style')) {
       hiddenTag = tagName;
-    } else if (tagName === 'br' || (closing && tagName && BLOCK_TAGS.has(tagName))) {
+    } else if (tagName === 'br' || (closing && BLOCK_TAGS.has(tagName))) {
       output += '\n';
     } else if (!closing && tagName === 'li') {
       output += '• ';
     }
 
-    index = tagEnd + 1;
+    index = scanEnd === tagEnd ? tagEnd + 1 : scanEnd;
   }
 
   return output;
@@ -108,6 +138,9 @@ export function bookSummaryText(value: string | null | undefined): string {
 
   // Decode once, then parse once more so encoded markup is treated exactly like
   // literal markup without deleting comparison operators from ordinary text.
+  // Trade-off: decoded text that merely resembles a tag (a tutorial writing
+  // "&lt;div&gt;") is stripped like real markup; this is the accepted cost of
+  // treating encoded hostile markup the same as literal hostile markup.
   return htmlToPlainText(decodeHtmlEntities(text))
     .replace(/[\t\f\v ]+/g, ' ')
     .replace(/ *\n */g, '\n')

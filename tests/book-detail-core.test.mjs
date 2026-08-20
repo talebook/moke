@@ -45,7 +45,21 @@ test('书籍简介不会让嵌套或编码的输入重新组成 HTML 标签', ()
   const encoded = '&lt;script&gt;alert(2)&lt;/script&gt;';
 
   assert.doesNotMatch(bookSummaryText(nested), /<\/?(?:script|style)\b/i);
+  // 脚本载荷不能以纯文本形式泄漏：即使输出只渲染为 React 文本节点，
+  // 也要防止未来被用于 dangerouslySetInnerHTML 之类的场景。
+  assert.doesNotMatch(bookSummaryText(nested), /alert/i);
   assert.equal(bookSummaryText(encoded), '');
+});
+
+test('书籍简介会跳过 HTML 注释内容', () => {
+  assert.equal(bookSummaryText('<!-- 隐藏注释 -->正文'), '正文');
+  assert.equal(bookSummaryText('前言<!-- 多行\n注释 -->正文'), '前言正文');
+});
+
+test('脚本或样式代码中的比较符号不会吞掉后续正文', () => {
+  assert.equal(bookSummaryText('<script>if (a < b) x()</script>正文'), '正文');
+  assert.equal(bookSummaryText('<style>a < b { color: red }</style>正文'), '正文');
+  assert.equal(bookSummaryText('<script>未闭合的脚本'), '');
 });
 
 test('书籍简介保留正文中的比较符号和非标签尖括号内容', () => {

@@ -6,6 +6,15 @@ const states = [
   { name: 'desktop', width: 1280, height: 900, tabBarVisible: false, sidebarVisible: true },
 ];
 
+test('低高度屏幕上的隐私确认保持极简可操作', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByRole('button', { name: '查看隐私政策' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '同意并继续' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '拒绝并退出' })).toBeVisible();
+});
+
 test('responsive navigation remains usable across device sizes', async ({ page }, testInfo) => {
   await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
 
