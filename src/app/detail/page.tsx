@@ -17,7 +17,7 @@ import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { bookSummaryText } from '@/lib/book-detail-core';
+import { bookDetailShelfState, bookSummaryText, readStateShelfState } from '@/lib/book-detail-core';
 import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
@@ -152,10 +152,16 @@ function DetailContent() {
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
-        setInShelf(Boolean(nextBook?.state?.wants));
+        const detailShelfState = bookDetailShelfState(nextBook);
+        setInShelf(detailShelfState ?? false);
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        loadReadingState(nextBook?.id || String(id), seq);
+        // Newer Talebook versions include personalized state in book details.
+        // Only use the authenticated readstate endpoint as a compatibility
+        // fallback; a guest response must not make the public detail require login.
+        if (detailShelfState === undefined) {
+          loadReadingState(nextBook?.id || String(id), seq);
+        }
       } else {
         throw new Error(data.msg || '书籍详情加载失败。');
       }
@@ -177,15 +183,14 @@ function DetailContent() {
       const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
         credentials: 'include',
       });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; wants?: boolean | number }>(
+        res,
+        '阅读状态解析失败。',
+        ['ok', 'user.need_login'],
+      );
       if (seq !== loadBookSeqRef.current) return;
-      if (data.err === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
-      if (data.err === 'ok') {
-        setInShelf(Boolean(data.wants));
-      }
+      const shelfState = readStateShelfState(data);
+      if (shelfState !== undefined) setInShelf(shelfState);
     } catch (error) {
       console.warn('Failed to load reading state:', error);
     }

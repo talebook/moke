@@ -22,6 +22,31 @@ function decodeHtmlEntities(value: string): string {
 
 const BLOCK_TAGS = new Set(['blockquote', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'p']);
 
+type ShelfStateValue = boolean | number | null;
+
+/** Read the optional shelf state embedded in Talebook's book-detail payload. */
+export function bookDetailShelfState(book: {
+  state?: { wants?: ShelfStateValue };
+} | null | undefined): boolean | undefined {
+  const wants = book?.state?.wants;
+  return wants == null ? undefined : Boolean(wants);
+}
+
+/**
+ * Read a shelf state from the authenticated readstate endpoint.
+ *
+ * Guests receive `user.need_login` from this optional personalization API.
+ * That does not make the public book detail unavailable, so callers should
+ * keep the detail page open when this function returns undefined.
+ */
+export function readStateShelfState(response: {
+  err?: string;
+  wants?: ShelfStateValue;
+} | null | undefined): boolean | undefined {
+  if (response?.err !== 'ok' || response.wants == null) return undefined;
+  return Boolean(response.wants);
+}
+
 function htmlToPlainText(value: string): string {
   let output = '';
   let hiddenTag: 'script' | 'style' | null = null;
