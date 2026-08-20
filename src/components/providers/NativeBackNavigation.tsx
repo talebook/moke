@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { APP_BACK_EVENT, resolveNativeBackTarget } from '@/lib/native-back';
+import { APP_BACK_EVENT, resolveNativeBackTarget, trackNativeRoute } from '@/lib/native-back';
 
 const BACK_TRANSITION_CLASS = 'moke-native-back-transition';
 const BACK_TRANSITION_TIMEOUT_MS = 1_000;
@@ -28,9 +28,7 @@ export function NativeBackNavigation() {
   const transitionRunningRef = useRef(false);
 
   useEffect(() => {
-    if (routeStackRef.current.at(-1) !== pathname) {
-      routeStackRef.current.push(pathname);
-    }
+    routeStackRef.current = trackNativeRoute(pathname, routeStackRef.current);
 
     const pending = pendingNavigationRef.current;
     if (pending && pending.target === pathname) {

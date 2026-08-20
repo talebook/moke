@@ -17,6 +17,8 @@ const FALLBACK_ROUTES: Record<string, string> = {
   '/user/history': '/user',
 };
 
+const APP_ROOT_ROUTES = new Set(['/shelf', '/library', '/user']);
+
 export const APP_BACK_EVENT = 'moke:native-back';
 
 /** Routes page-level back controls through the same animated path as Android BACK. */
@@ -28,6 +30,13 @@ export function requestAnimatedBack(target?: string): void {
 
 export function nativeBackFallback(pathname: string): string {
   return FALLBACK_ROUTES[pathname] ?? '/shelf';
+}
+
+/** Home tabs are peers, so switching tabs starts a fresh app-navigation stack. */
+export function trackNativeRoute(pathname: string, routeStack: readonly string[]): string[] {
+  if (APP_ROOT_ROUTES.has(pathname)) return [pathname];
+  if (routeStack.at(-1) === pathname) return [...routeStack];
+  return [...routeStack, pathname];
 }
 
 export function resolveNativeBackTarget(

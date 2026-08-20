@@ -33,7 +33,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
-        private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf")
+        private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf", "/library", "/user")
     }
 
     // DOWN 已被本 Activity 消费（并转发到 webview）的按键集合。被拦截的按键

@@ -6,6 +6,7 @@ import {
   nativeBackFallback,
   requestAnimatedBack,
   resolveNativeBackTarget,
+  trackNativeRoute,
 } from '../src/lib/native-back.ts';
 
 test('原生返回优先使用应用内路由栈，不依赖浏览器历史', () => {
@@ -45,4 +46,11 @@ test('页面返回按钮与 Android 系统返回触发同一个动画事件', ()
   } finally {
     delete globalThis.window;
   }
+});
+
+test('书架、书库、我的作为同级主页切换时重置应用内返回栈', () => {
+  assert.deepEqual(trackNativeRoute('/shelf', []), ['/shelf']);
+  assert.deepEqual(trackNativeRoute('/library', ['/shelf']), ['/library']);
+  assert.deepEqual(trackNativeRoute('/user', ['/library']), ['/user']);
+  assert.deepEqual(trackNativeRoute('/user/history', ['/user']), ['/user', '/user/history']);
 });

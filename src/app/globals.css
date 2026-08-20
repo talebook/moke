@@ -452,11 +452,19 @@
   }
 }
 
+/* Moke and the embedded Readest frontend are separate same-origin documents.
+   Opt in at the document level so every reader entry/exit path participates,
+   including native BACK and reader-owned close buttons. */
+@view-transition {
+  navigation: auto;
+}
+
 /* Android BACK is handled inside the single Tauri WebView, so it does not get
    the Activity transition that a native multi-screen app would receive. The
    View Transition snapshots put the already-rendered parent page underneath
    the current page, then animate only the current page out to the right. */
-html.moke-native-back-transition::view-transition-old(root) {
+html.moke-native-back-transition::view-transition-old(root),
+html[data-moke-reader-transition='exit']::view-transition-old(root) {
   animation-duration: 260ms;
   animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
   animation-fill-mode: both;
@@ -466,7 +474,8 @@ html.moke-native-back-transition::view-transition-old(root) {
   box-shadow: -12px 0 32px rgba(37, 30, 20, 0.16);
 }
 
-html.moke-native-back-transition::view-transition-new(root) {
+html.moke-native-back-transition::view-transition-new(root),
+html[data-moke-reader-transition='exit']::view-transition-new(root) {
   z-index: 1;
   animation: none;
   mix-blend-mode: normal;
@@ -478,12 +487,14 @@ html.moke-native-back-transition::view-transition-new(root) {
 }
 
 @media (prefers-reduced-motion: reduce), (update: slow), (max-color: 1) {
-  html.moke-native-back-transition::view-transition-old(root) {
+  html.moke-native-back-transition::view-transition-old(root),
+  html[data-moke-reader-transition='exit']::view-transition-old(root) {
     animation-duration: 0.01ms !important;
   }
 }
 
-html[data-eink='true'].moke-native-back-transition::view-transition-old(root) {
+html[data-eink='true'].moke-native-back-transition::view-transition-old(root),
+html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(root) {
   animation-duration: 0.01ms !important;
 }
 

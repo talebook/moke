@@ -2,6 +2,43 @@ import '@/app/globals.css';
 import type { Viewport } from 'next';
 import { AppShell } from '@/components/providers/AppShell';
 
+function installMokeReaderExitTransition() {
+  window.addEventListener(
+    'pagereveal',
+    (event) => {
+      try {
+        const navigationApi = (window as Window & {
+          navigation?: { activation?: { from?: { url?: string } | null } };
+        }).navigation;
+        const fromUrl = navigationApi?.activation?.from?.url;
+        if (!fromUrl) return;
+        const fromPath = new URL(fromUrl).pathname.replace(/\/$/, '') || '/';
+        if (fromPath !== '/readest' && !fromPath.startsWith('/readest/')) return;
+
+        const root = document.documentElement;
+        root.dataset.mokeReaderTransition = 'exit';
+        const clearMarker = () => {
+          delete root.dataset.mokeReaderTransition;
+        };
+        const transition = (event as Event & {
+          viewTransition?: { finished: Promise<unknown> };
+        }).viewTransition;
+        if (transition) {
+          void transition.finished.finally(clearMarker).catch(() => undefined);
+        } else {
+          clearMarker();
+        }
+        window.setTimeout(clearMarker, 1_000);
+      } catch {
+        // Ignore malformed activation URLs and keep the destination usable.
+      }
+    },
+    { once: true },
+  );
+}
+
+const mokeReaderExitTransitionScript = `(${installMokeReaderExitTransition.toString()})();`;
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -16,6 +53,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: mokeReaderExitTransitionScript }} />
         {/* Apply the persisted theme before hydration so the first paint is
             already dark when dark mode is on (no flash of white). Reads the
             zustand persist payload directly; falls back to the OS preference

@@ -23,6 +23,7 @@ export function TabBar() {
           return (
             <Link
               key={tab.href}
+              replace
               href={tab.href}
               className={cn(
                 'flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-0.5 px-1 transition-colors duration-150',
