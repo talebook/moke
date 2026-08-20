@@ -548,6 +548,29 @@
   color: #000000 !important;
 }
 
+/* Exact soft-fill and semantic-token variants used by annotation status UI.
+   Exact class-token matching avoids catching hover:bg-* variants and leaking a
+   persistent fill into their resting state. */
+[data-eink='true'] [class~='bg-primary/10'],
+[data-eink='true'] [class~='bg-primary/15'],
+[data-eink='true'] [class~='bg-amber-500/10'] {
+  background-color: #E5E5E5 !important;
+}
+[data-eink='true'] [class~='text-destructive'] {
+  color: #000000 !important;
+}
+[data-eink='true'] .bg-primary [class~='text-primary-foreground'],
+[data-eink='true'] [class~='bg-primary/15'] [class~='text-primary-foreground'] {
+  color: #000000 !important;
+}
+[data-eink='true'] [class~='bg-destructive/10'] {
+  background-color: #FFFFFF !important;
+}
+[data-eink='true'] [class~='border-destructive/30'],
+[data-eink='true'] [class~='border-amber-500/30'] {
+  border-color: #000000 !important;
+}
+
 /* text-primary / text-primary/N: warm brown accent text (used for captions
    like "共 13 本藏书", "探索书库", the small label above the page title).
    The 80/60 opacity variants are too low-contrast on white-on-white. Force
