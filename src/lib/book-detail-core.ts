@@ -32,6 +32,14 @@ export function bookDetailShelfState(book: {
   return wants == null ? undefined : Boolean(wants);
 }
 
+/** Guests must never call Talebook's authenticated readstate endpoint. */
+export function shouldLoadReadingStateFallback(
+  detailShelfState: boolean | undefined,
+  isLoggedIn: boolean,
+): boolean {
+  return isLoggedIn && detailShelfState === undefined;
+}
+
 /**
  * Read a shelf state from the authenticated readstate endpoint.
  *

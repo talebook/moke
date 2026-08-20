@@ -17,7 +17,12 @@ import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { bookDetailShelfState, bookSummaryText, readStateShelfState } from '@/lib/book-detail-core';
+import {
+  bookDetailShelfState,
+  bookSummaryText,
+  readStateShelfState,
+  shouldLoadReadingStateFallback,
+} from '@/lib/book-detail-core';
 import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
@@ -48,7 +53,7 @@ interface BookDetail {
     read_state?: number;
     online_read?: number;
     download?: number;
-    wants?: boolean;
+    wants?: boolean | number;
   };
 }
 
@@ -56,7 +61,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const { serverUrl, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -156,10 +161,9 @@ function DetailContent() {
         setInShelf(detailShelfState ?? false);
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        // Newer Talebook versions include personalized state in book details.
-        // Only use the authenticated readstate endpoint as a compatibility
-        // fallback; a guest response must not make the public detail require login.
-        if (detailShelfState === undefined) {
+        // 游客不访问需要登录的 readstate 接口。仅对已登录用户兼容旧版
+        // Talebook 未在详情响应中携带书架状态的情况。
+        if (shouldLoadReadingStateFallback(detailShelfState, Boolean(user))) {
           loadReadingState(nextBook?.id || String(id), seq);
         }
       } else {

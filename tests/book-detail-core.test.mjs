@@ -5,6 +5,7 @@ import {
   bookDetailShelfState,
   bookSummaryText,
   readStateShelfState,
+  shouldLoadReadingStateFallback,
 } from '../src/lib/book-detail-core.ts';
 
 test('详情页优先使用书籍详情中已有的书架状态', () => {
@@ -17,6 +18,12 @@ test('游客无法读取个性化状态时不要求详情页登录', () => {
   assert.equal(readStateShelfState({ err: 'user.need_login' }), undefined);
   assert.equal(readStateShelfState({ err: 'ok', wants: true }), true);
   assert.equal(readStateShelfState({ err: 'ok', wants: false }), false);
+});
+
+test('游客详情页不请求需要登录的 readstate 接口', () => {
+  assert.equal(shouldLoadReadingStateFallback(undefined, false), false);
+  assert.equal(shouldLoadReadingStateFallback(undefined, true), true);
+  assert.equal(shouldLoadReadingStateFallback(false, true), false);
 });
 
 test('书籍简介会把 Talebook HTML 转成可读纯文本', () => {
