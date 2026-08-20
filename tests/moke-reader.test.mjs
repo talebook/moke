@@ -30,9 +30,11 @@ test('runtimeCategoryFromPlatform classifies each runtime', () => {
   assert.equal(runtimeCategoryFromPlatform('macos'), 'desktop');
 });
 
-test('top safe area applies to edge-to-edge mobile runtimes except OHOS', () => {
+test('top safe area applies to edge-to-edge mobile runtimes except Android multi-window', () => {
   assert.equal(shouldApplyTopSafeArea('android'), true);
+  assert.equal(shouldApplyTopSafeArea('android', true), false);
   assert.equal(shouldApplyTopSafeArea('ios'), true);
+  assert.equal(shouldApplyTopSafeArea('ios', true), true);
   assert.equal(shouldApplyTopSafeArea('ohos'), false);
   assert.equal(shouldApplyTopSafeArea('linux'), false);
   assert.equal(shouldApplyTopSafeArea('windows'), false);

@@ -5,11 +5,14 @@ export const isSingleWebviewRuntime = (platform: string): boolean =>
 
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
- * the top safe-area inset. OHOS already keeps the WebView below its status bar
- * and must not receive a second offset.
+ * the top safe-area inset. Android multi-window and OHOS already keep the
+ * WebView below the status bar and must not receive a second offset.
  */
-export const shouldApplyTopSafeArea = (platform: string): boolean =>
-  platform === 'android' || platform === 'ios';
+export const shouldApplyTopSafeArea = (
+  platform: string,
+  isMultiWindow = false,
+): boolean =>
+  (platform === 'android' && !isMultiWindow) || platform === 'ios';
 
 type RuntimeInvoke = <T>(command: string) => Promise<T>;
 

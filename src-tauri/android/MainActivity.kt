@@ -18,6 +18,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -30,6 +31,11 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var interceptPageTurnerKeysEnabled = false
     private var keyLearnModeEnabled = false
     private var lastExitBackPressedAt = 0L
+
+    private inner class WindowModeBridge {
+        @JavascriptInterface
+        fun isInMultiWindowMode(): Boolean = this@MainActivity.isInMultiWindowMode
+    }
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
@@ -112,6 +118,21 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
 
     override fun onWebViewCreate(webView: WebView) {
         wv = webView
+        // Android multi-window changes resize the existing WebView without a
+        // navigation. AppShell queries this synchronous bridge on each resize
+        // so it can avoid applying a second status-bar inset in split screen.
+        webView.addJavascriptInterface(WindowModeBridge(), "MokeWindowMode")
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode)
+        wv?.post {
+            it.evaluateJavascript(
+                """window.dispatchEvent(new Event("moke:window-mode-change"));""",
+                null,
+            )
+        }
     }
 
     override fun interceptVolumeKeys(enabled: Boolean) {
