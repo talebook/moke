@@ -14,9 +14,12 @@
 
 package org.houheya.moke
 
+import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import com.readest.native_bridge.KeyDownInterceptor
 
@@ -26,6 +29,12 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var interceptBackKeyEnabled = false
     private var interceptPageTurnerKeysEnabled = false
     private var keyLearnModeEnabled = false
+    private var lastExitBackPressedAt = 0L
+
+    companion object {
+        private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
+        private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf")
+    }
 
     // DOWN 已被本 Activity 消费（并转发到 webview）的按键集合。被拦截的按键
     // 必须把配套的 ACTION_UP 也一并消费，否则按键组合会泄漏到
@@ -57,6 +66,47 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
             """try { window.onNativeKeyDown("$keyName", $keyCode); } catch (_) {}""",
             null,
         )
+        return true
+    }
+
+    /**
+     * Tauri's default Android BACK handling delegates to WebView history. In a
+     * statically-exported Next app that can perform a document reload instead
+     * of a client-side route transition. Non-root Moke pages therefore send a
+     * dedicated event to AppShell, which calls Next's router.back().
+     */
+    private fun forwardAppBackToWebView(): Boolean {
+        val webView = wv ?: return false
+        webView.evaluateJavascript(
+            """window.dispatchEvent(new Event("moke:native-back"));""",
+            null,
+        )
+        return true
+    }
+
+    private fun currentAppPath(): String {
+        val rawPath = wv?.url?.let { Uri.parse(it).path }.orEmpty()
+        val withoutDocument = when {
+            rawPath.endsWith("/index.html") -> rawPath.removeSuffix("/index.html")
+            rawPath.endsWith(".html") -> rawPath.removeSuffix(".html")
+            else -> rawPath
+        }
+        return withoutDocument.trimEnd('/').ifEmpty { "/" }
+    }
+
+    private fun isAppExitRoute(): Boolean = currentAppPath() in APP_EXIT_ROUTES
+
+    private fun isEmbeddedReaderRoute(): Boolean =
+        currentAppPath() == "/readest" || currentAppPath().startsWith("/readest/")
+
+    private fun handleExitBack(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (lastExitBackPressedAt != 0L && now - lastExitBackPressedAt <= EXIT_CONFIRM_WINDOW_MS) {
+            finishAndRemoveTask()
+        } else {
+            lastExitBackPressedAt = now
+            Toast.makeText(this, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+        }
         return true
     }
 
@@ -103,6 +153,28 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
+                // The embedded reader owns BACK while its interception flag is
+                // enabled. Everywhere else, keep root-page exit behavior
+                // native and route nested pages through Next's client router.
+                if (event.keyCode == KeyEvent.KEYCODE_BACK && !interceptBackKeyEnabled) {
+                    if (event.repeatCount > 0) return true
+                    // Android uses an in-place Readest WebView. During its
+                    // startup there is a short interval before Readest enables
+                    // interception; never interpret BACK in that interval as a
+                    // Moke root-page exit.
+                    if (isEmbeddedReaderRoute()) {
+                        return super.dispatchKeyEvent(event)
+                    }
+                    val handled = if (isAppExitRoute()) {
+                        handleExitBack()
+                    } else {
+                        lastExitBackPressedAt = 0L
+                        forwardAppBackToWebView()
+                    }
+                    if (!handled) return super.dispatchKeyEvent(event)
+                    interceptedKeyCodes.add(event.keyCode)
+                    return true
+                }
                 if (!shouldIntercept(event.keyCode)) {
                     return super.dispatchKeyEvent(event)
                 }

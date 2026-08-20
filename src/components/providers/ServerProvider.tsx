@@ -14,7 +14,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { serverUrl, hasHydrated, capabilities, setServerTitle, setUser, setServerCapabilities } = useServerStore();
 
-  const publicPaths = ['/welcome', '/login', '/register', '/access', '/settings/developer'];
+  const publicPaths = ['/welcome', '/login', '/register', '/access', '/privacy', '/settings/developer'];
 
   // 拓展管理页面是本地功能，不需要连接服务器
   const isExtensionPath = pathname.startsWith('/extensions');

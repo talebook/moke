@@ -6,8 +6,23 @@ const states = [
   { name: 'desktop', width: 1280, height: 900, tabBarVisible: false, sidebarVisible: true },
 ];
 
+test('低高度屏幕上的隐私确认保持极简可操作', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByRole('button', { name: '查看隐私政策' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '同意并继续' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '拒绝并退出' })).toBeVisible();
+});
+
 test('responsive navigation remains usable across device sizes', async ({ page }, testInfo) => {
   await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+
+  // First launch is intentionally blocked by the privacy consent gate. Verify
+  // that the prompt appears, then explicitly accept before testing app chrome.
+  const consentButton = page.getByRole('button', { name: '同意并继续' });
+  await expect(consentButton).toBeVisible();
+  await consentButton.click();
 
   for (const state of states) {
     await page.setViewportSize({ width: state.width, height: state.height });
@@ -30,4 +45,17 @@ test('responsive navigation remains usable across device sizes', async ({ page }
       fullPage: true,
     });
   }
+});
+
+test('privacy consent can be revoked from the policy page', async ({ page }) => {
+  await page.goto('http://127.0.0.1:3000/settings/developer', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: '同意并继续' }).click();
+
+  await page.goto('http://127.0.0.1:3000/privacy', { waitUntil: 'domcontentloaded' });
+  const revokeButton = page.getByRole('button', { name: '撤回同意' });
+  await expect(revokeButton).toBeVisible();
+  await revokeButton.click();
+
+  await expect(page.getByRole('heading', { name: '隐私政策提示' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '同意并继续' })).toBeVisible();
 });
