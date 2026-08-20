@@ -52,6 +52,7 @@ test('native top safe area uses status-bar pixels on Android and safe insets on 
   };
 
   assert.equal(await getNativeTopSafeAreaInset('android', 3, invoke), 24);
+  assert.equal(await getNativeTopSafeAreaInset('android', 3, invoke, true), 0);
   assert.equal(await getNativeTopSafeAreaInset('ios', 2, invoke), 47);
   assert.equal(await getNativeTopSafeAreaInset('ohos', 3, invoke), 0);
   assert.deepEqual(commands, [

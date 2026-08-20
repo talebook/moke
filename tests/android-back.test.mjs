@@ -28,12 +28,18 @@ test('Android 非根页返回键交给 Next 路由且不覆盖阅读器拦截', 
 
 test('Android 分屏时通过原生窗口状态移除重复的顶部安全区', () => {
   assert.match(activitySource, /@JavascriptInterface/);
-  assert.match(activitySource, /this@MainActivity\.isInMultiWindowMode/);
-  assert.match(activitySource, /addJavascriptInterface\(WindowModeBridge\(\), "MokeWindowMode"\)/);
+  assert.match(activitySource, /WeakReference<MainActivity>/);
+  assert.match(activitySource, /addJavascriptInterface\(WindowModeBridge\(this\), "MokeWindowMode"\)/);
+  assert.match(activitySource, /removeJavascriptInterface\("MokeWindowMode"\)/);
   assert.match(activitySource, /onMultiWindowModeChanged\(isInMultiWindowMode: Boolean\)/);
   assert.match(activitySource, /moke:window-mode-change/);
+  assert.match(activitySource, /catch \(_: IllegalStateException\)/);
   assert.match(appShellSource, /MokeWindowMode\?\.isInMultiWindowMode\(\)/);
   assert.match(appShellSource, /shouldApplyTopSafeArea\(platform, isMultiWindow\)/);
-  assert.match(appShellSource, /addEventListener\('resize', refreshSafeArea\)/);
-  assert.match(appShellSource, /addEventListener\('moke:window-mode-change', refreshSafeArea\)/);
+  assert.match(appShellSource, /requestAnimationFrame/);
+  assert.match(appShellSource, /addEventListener\('resize', scheduleSafeAreaRefresh\)/);
+  assert.match(
+    appShellSource,
+    /addEventListener\('moke:window-mode-change', scheduleSafeAreaRefresh\)/,
+  );
 });

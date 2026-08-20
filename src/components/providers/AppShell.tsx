@@ -82,6 +82,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     let runtimePlatform: string | null = null;
     let retryTimer: number | undefined;
+    let refreshFrame: number | undefined;
     let detectionId = 0;
     const maxAttempts = 12;
 
@@ -116,7 +117,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const top = await getNativeTopSafeAreaInset(platform, window.devicePixelRatio);
+        const top = await getNativeTopSafeAreaInset(
+          platform,
+          window.devicePixelRatio,
+          undefined,
+          isMultiWindow,
+        );
         if (cancelled || currentDetectionId !== detectionId) return;
         if (top > 0) {
           el.style.setProperty('--moke-top-safe-area', `${top}px`);
@@ -145,23 +151,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const refreshSafeArea = () => {
       if (!cancelled) void detectSafeArea();
     };
+    const scheduleSafeAreaRefresh = () => {
+      if (cancelled || refreshFrame !== undefined) return;
+      refreshFrame = window.requestAnimationFrame(() => {
+        refreshFrame = undefined;
+        refreshSafeArea();
+      });
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') refreshSafeArea();
     };
 
     void detectSafeArea();
     window.addEventListener('pageshow', refreshSafeArea);
-    window.addEventListener('resize', refreshSafeArea);
-    window.addEventListener('moke:window-mode-change', refreshSafeArea);
+    window.addEventListener('resize', scheduleSafeAreaRefresh);
+    window.addEventListener('moke:window-mode-change', scheduleSafeAreaRefresh);
     window.addEventListener('orientationchange', refreshSafeArea);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       cancelled = true;
       clearRetry();
+      if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
       window.removeEventListener('pageshow', refreshSafeArea);
-      window.removeEventListener('resize', refreshSafeArea);
-      window.removeEventListener('moke:window-mode-change', refreshSafeArea);
+      window.removeEventListener('resize', scheduleSafeAreaRefresh);
+      window.removeEventListener('moke:window-mode-change', scheduleSafeAreaRefresh);
       window.removeEventListener('orientationchange', refreshSafeArea);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       delete el.dataset.mokeRuntimePlatform;

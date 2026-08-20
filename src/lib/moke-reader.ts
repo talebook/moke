@@ -36,8 +36,9 @@ export async function getNativeTopSafeAreaInset(
   platform: string,
   devicePixelRatio = 1,
   invokeOverride?: RuntimeInvoke,
+  isMultiWindow = false,
 ): Promise<number> {
-  if (!shouldApplyTopSafeArea(platform)) return 0;
+  if (!shouldApplyTopSafeArea(platform, isMultiWindow)) return 0;
 
   const invoke = invokeOverride ?? (await import('@tauri-apps/api/core')).invoke;
   if (platform === 'android') {
