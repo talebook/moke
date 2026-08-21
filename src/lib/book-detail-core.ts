@@ -92,19 +92,46 @@ function htmlToPlainText(value: string): string {
       continue;
     }
 
-    const tagEnd = value.indexOf('>', index + 1);
-    if (tagEnd === -1) {
+    // A comparison operator such as `3 < 5` is text, not the start of a tag.
+    // Requiring an HTML-style name here also prevents a later `>` from making
+    // us consume an arbitrary span of prose.
+    const tagStart = value.slice(index + 1).match(/^\/?([a-z][a-z0-9-]*)/i);
+    if (!tagStart) {
+      output += '<';
+      index += 1;
+      continue;
+    }
+
+    // Find the end of the tag without treating `<` or `>` inside a quoted
+    // attribute as markup. A `<` outside quotes is retained as a recovery
+    // point for malformed nested input such as `<scr<script>`.
+    let quote: '"' | "'" | null = null;
+    let tagEnd = -1;
+    let nestedTagAt = -1;
+    for (let cursor = index + 1; cursor < value.length; cursor += 1) {
+      const character = value[cursor];
+      if (quote) {
+        if (character === quote) quote = null;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '<') {
+        nestedTagAt = cursor;
+        break;
+      } else if (character === '>') {
+        tagEnd = cursor;
+        break;
+      }
+    }
+
+    if (tagEnd === -1 && nestedTagAt === -1) {
       output += value.slice(index);
       break;
     }
 
-    // A nested `<` inside the scanned span (e.g. `<scr<script>`) means the
-    // outer tag text was cut short; parse only up to that point so the inner
-    // tag gets its own pass instead of being folded into the outer name.
-    const rawTagFull = value.slice(index + 1, tagEnd);
-    const innerTagAt = rawTagFull.indexOf('<');
-    const rawTag = (innerTagAt === -1 ? rawTagFull : rawTagFull.slice(0, innerTagAt)).trim();
-    const scanEnd = innerTagAt === -1 ? tagEnd : index + 1 + innerTagAt;
+    const scanEnd = nestedTagAt === -1 ? tagEnd : nestedTagAt;
+    const rawTag = value.slice(index + 1, scanEnd).trim();
     const closing = rawTag.startsWith('/');
     const tagName = rawTag
       .slice(closing ? 1 : 0)
@@ -125,7 +152,7 @@ function htmlToPlainText(value: string): string {
       output += '• ';
     }
 
-    index = scanEnd === tagEnd ? tagEnd + 1 : scanEnd;
+    index = nestedTagAt === -1 ? tagEnd + 1 : nestedTagAt;
   }
 
   return output;
@@ -134,14 +161,10 @@ function htmlToPlainText(value: string): string {
 /** Convert Talebook's HTML-formatted comments into safe, readable plain text. */
 export function bookSummaryText(value: string | null | undefined): string {
   if (!value) return '';
-  const text = htmlToPlainText(value);
-
-  // Decode once, then parse once more so encoded markup is treated exactly like
-  // literal markup without deleting comparison operators from ordinary text.
-  // Trade-off: decoded text that merely resembles a tag (a tutorial writing
-  // "&lt;div&gt;") is stripped like real markup; this is the accepted cost of
-  // treating encoded hostile markup the same as literal hostile markup.
-  return htmlToPlainText(decodeHtmlEntities(text))
+  // Strip literal markup before decoding entities. Encoded tag examples such
+  // as `&lt;div&gt;` are authored text, so they must not be parsed a second time.
+  // The result is rendered as a React text node, never as executable HTML.
+  return decodeHtmlEntities(htmlToPlainText(value))
     .replace(/[\t\f\v ]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')

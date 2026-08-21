@@ -40,15 +40,27 @@ test('书籍简介会清除脚本和样式内容', () => {
   );
 });
 
-test('书籍简介不会让嵌套或编码的输入重新组成 HTML 标签', () => {
+test('书籍简介不会让嵌套输入泄漏脚本内容', () => {
   const nested = '<scr<script>alert(1)</script>ipt>正文</scr</script>ipt>';
-  const encoded = '&lt;script&gt;alert(2)&lt;/script&gt;';
 
   assert.doesNotMatch(bookSummaryText(nested), /<\/?(?:script|style)\b/i);
   // 脚本载荷不能以纯文本形式泄漏：即使输出只渲染为 React 文本节点，
   // 也要防止未来被用于 dangerouslySetInnerHTML 之类的场景。
   assert.doesNotMatch(bookSummaryText(nested), /alert/i);
-  assert.equal(bookSummaryText(encoded), '');
+  assert.equal(bookSummaryText('<script><script>alert(2)</script></script>正文'), '正文');
+});
+
+test('实体编码的标签字样会作为普通文本保留', () => {
+  assert.equal(bookSummaryText('使用 &lt;div&gt; 标签'), '使用 <div> 标签');
+  assert.equal(
+    bookSummaryText('示例：&lt;script&gt;alert(1)&lt;/script&gt;'),
+    '示例：<script>alert(1)</script>',
+  );
+});
+
+test('标签属性中的比较符不会泄漏属性内容或产生伪标签', () => {
+  assert.equal(bookSummaryText('<div title="x < y">段落</div>'), '段落');
+  assert.equal(bookSummaryText('<p title="使用 <br> 标签">正文</p>'), '正文');
 });
 
 test('书籍简介会跳过 HTML 注释内容', () => {
