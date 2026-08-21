@@ -114,7 +114,7 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 { "sent": true, "request_id": "ext-abc-123" }
 ```
 
-若需要**同步拿到执行结果**，可在 body 里加 `wait_ms`（毫秒）启用阻塞等待。服务端会在超时内等待 `reader:command:result` 回执并按 `request_id` 关联返回：
+若需要**同步拿到执行结果**，可在 body 里加 `wait_ms`（毫秒）启用阻塞等待。`wait_ms` 必须是 `0` 到 `30000` 的整数；大于 `0` 时 `request_id` 必须是非空字符串。服务端按「拓展身份 + 目标窗口 + `request_id`」隔离等待请求，并校验回执来自目标阅读器窗口：不同拓展可以复用同一个 ID，同一拓展对同一窗口并发复用 ID 则返回冲突。每次调用还会使用宿主内部唯一关联 ID，因此超时后的迟到回执不会满足后来复用同一 `request_id` 的请求。
 
 ```json
 {
@@ -124,15 +124,29 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 }
 ```
 
-成功时返回阅读器回执（含 `result` 或 `error`），超时返回 `timed_out: true`：
+命令执行成功或失败时，REST 会把阅读器回执摊平到响应顶层；超时返回 `timed_out: true`：
 
 ```json
-{ "sent": true, "request_id": "ext-abc-123", "result": { "view_key": "...", "progress": { "page": 42, "fraction": 0.42 } } }
+{ "sent": true, "request_id": "ext-abc-123", "success": true, "result": { "view_key": "...", "progress": { "page": 42, "fraction": 0.42 } } }
+```
+
+```json
+{ "sent": true, "request_id": "ext-abc-123", "success": false, "error": "No active reader view" }
 ```
 
 ```json
 { "sent": true, "request_id": "ext-abc-123", "timed_out": true }
 ```
+
+等待参数错误返回 JSON `{ "code": "...", "error": "..." }`。确定的 HTTP 状态与错误码如下：
+
+| 条件 | HTTP | `code` |
+|---|---:|---|
+| `request_id` 不是非空字符串 | 400 | `INVALID_REQUEST_ID` |
+| `wait_ms` 不是非负整数 | 400 | `INVALID_WAIT_MS` |
+| `wait_ms > 30000` | 400 | `WAIT_MS_TOO_LARGE` |
+| `wait_ms > 0` 但缺少 `request_id` | 400 | `MISSING_REQUEST_ID` |
+| 同一拓展、同一窗口已有相同 `request_id` 在等待 | 409 | `DUPLICATE_REQUEST_ID` |
 
 阅读器侧的命令回执示例（WS 事件 `reader:command:result`）：
 

@@ -5,9 +5,176 @@
 
 use super::EnabledExtension;
 use std::collections::HashMap;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tauri::Manager;
+
+/// 同步等待阅读器命令回执的最大时长。
+pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
+const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
+const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
+
+type ApiResult = Result<String, ApiError>;
+
+#[derive(Debug)]
+struct ApiError {
+    status: u16,
+    code: &'static str,
+    message: String,
+}
+
+impl ApiError {
+    fn bad_request(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: 400,
+            code,
+            message: message.into(),
+        }
+    }
+
+    fn conflict(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: 409,
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for ApiError {
+    fn from(message: String) -> Self {
+        Self::bad_request("BAD_REQUEST", message)
+    }
+}
+
+impl From<&str> for ApiError {
+    fn from(message: &str) -> Self {
+        Self::bad_request("BAD_REQUEST", message)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PendingCommandKey {
+    extension_name: String,
+    target_window: String,
+    request_id: String,
+}
+
+struct PendingCommand {
+    key: PendingCommandKey,
+    sender: Sender<serde_json::Value>,
+}
+
+struct RetiredCommand {
+    key: PendingCommandKey,
+    expires_at: Instant,
+}
+
+/// 同步命令等待表。
+///
+/// 外部 request_id 只用于同一拓展、同一窗口内的重复检测。发给阅读器的是每次
+/// 调用独有的 correlation_id，因此超时后的旧回执不会命中新一轮同名请求。
+#[derive(Default)]
+pub(crate) struct PendingCommands {
+    active_by_correlation: HashMap<String, PendingCommand>,
+    correlation_by_key: HashMap<PendingCommandKey, String>,
+    retired_by_correlation: HashMap<String, RetiredCommand>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ReceiptMatch {
+    Active { request_id: String },
+    Late { request_id: String },
+    SourceMismatch,
+    Unknown,
+}
+
+impl PendingCommands {
+    pub(crate) fn register(
+        &mut self,
+        key: PendingCommandKey,
+        sender: Sender<serde_json::Value>,
+    ) -> Result<String, ()> {
+        self.remove_expired();
+        if self.correlation_by_key.contains_key(&key) {
+            return Err(());
+        }
+
+        let correlation_id = format!("{INTERNAL_REQUEST_ID_PREFIX}{}", uuid::Uuid::new_v4());
+        self.correlation_by_key
+            .insert(key.clone(), correlation_id.clone());
+        self.active_by_correlation
+            .insert(correlation_id.clone(), PendingCommand { key, sender });
+        Ok(correlation_id)
+    }
+
+    pub(crate) fn cancel(&mut self, correlation_id: &str) {
+        if let Some(command) = self.active_by_correlation.remove(correlation_id) {
+            self.remove_key_if_current(&command.key, correlation_id);
+        }
+    }
+
+    pub(crate) fn retire(&mut self, correlation_id: &str) {
+        if let Some(command) = self.active_by_correlation.remove(correlation_id) {
+            self.remove_key_if_current(&command.key, correlation_id);
+            self.retired_by_correlation.insert(
+                correlation_id.to_string(),
+                RetiredCommand {
+                    key: command.key,
+                    expires_at: Instant::now() + RETIRED_COMMAND_TTL,
+                },
+            );
+        }
+    }
+
+    pub(crate) fn deliver(
+        &mut self,
+        correlation_id: &str,
+        source_window: &str,
+        data: serde_json::Value,
+    ) -> ReceiptMatch {
+        self.remove_expired();
+
+        if let Some(command) = self.active_by_correlation.get(correlation_id) {
+            if command.key.target_window != source_window {
+                return ReceiptMatch::SourceMismatch;
+            }
+        }
+        if let Some(command) = self.active_by_correlation.remove(correlation_id) {
+            self.remove_key_if_current(&command.key, correlation_id);
+            let request_id = command.key.request_id.clone();
+            let _ = command.sender.send(data);
+            return ReceiptMatch::Active { request_id };
+        }
+
+        if let Some(command) = self.retired_by_correlation.get(correlation_id) {
+            if command.key.target_window != source_window {
+                return ReceiptMatch::SourceMismatch;
+            }
+        }
+        if let Some(command) = self.retired_by_correlation.remove(correlation_id) {
+            return ReceiptMatch::Late {
+                request_id: command.key.request_id,
+            };
+        }
+
+        ReceiptMatch::Unknown
+    }
+
+    fn remove_key_if_current(&mut self, key: &PendingCommandKey, correlation_id: &str) {
+        if self.correlation_by_key.get(key).map(String::as_str) == Some(correlation_id) {
+            self.correlation_by_key.remove(key);
+        }
+    }
+
+    fn remove_expired(&mut self) {
+        let now = Instant::now();
+        self.retired_by_correlation
+            .retain(|_, command| command.expires_at > now);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 运行时形态
@@ -44,10 +211,9 @@ pub struct ServerContext {
     pub enabled: Arc<Mutex<HashMap<String, EnabledExtension>>>,
     pub extensions_dir: std::path::PathBuf,
     pub app_handle: tauri::AppHandle,
-    /// 阻塞等待命令回执的注册表：request_id → 回执发送端。
-    /// 由 `ext_reader_event`（收到 `command:result` 时）向对应发送端投递结果，
-    /// `/command` 的阻塞等待模式通过它做 request_id 关联。
-    pub pending_commands: Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>>,
+    /// 阻塞等待命令回执的注册表，按拓展、目标窗口、request_id 隔离，
+    /// 并通过每次调用独有的 correlation_id 匹配阅读器回执。
+    pub pending_commands: Arc<Mutex<PendingCommands>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +337,7 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
         }
 
         // ---- 404 ----
-        _ => Err("未找到".into()),
+        _ => Err(ApiError::bad_request("NOT_FOUND", "未找到")),
     };
 
     match result {
@@ -187,10 +353,14 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
                 );
             let _ = request.respond(response);
         }
-        Err(msg) => {
-            let body = serde_json::json!({"error": msg}).to_string();
+        Err(error) => {
+            let body = serde_json::json!({
+                "code": error.code,
+                "error": error.message,
+            })
+            .to_string();
             let response = tiny_http::Response::from_string(body)
-                .with_status_code(400)
+                .with_status_code(error.status)
                 .with_header(cors_header)
                 .with_header(
                     tiny_http::Header::from_bytes(
@@ -233,7 +403,7 @@ fn authenticate(
 // ---------------------------------------------------------------------------
 
 /// GET /api/v1/info
-fn handle_info(ctx: &ServerContext, _ext_name: &str) -> Result<String, String> {
+fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
     let all_windows: Vec<String> = ctx
         .app_handle
         .webview_windows()
@@ -256,14 +426,80 @@ fn handle_info(ctx: &ServerContext, _ext_name: &str) -> Result<String, String> {
     Ok(info.to_string())
 }
 
+fn parse_command_wait(payload: &serde_json::Value) -> Result<(Option<String>, u64), ApiError> {
+    let request_id = match payload.get("request_id") {
+        Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
+            Some(value.to_string())
+        }
+        Some(serde_json::Value::Null) | None => None,
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "INVALID_REQUEST_ID",
+                "request_id 必须是非空字符串",
+            ))
+        }
+    };
+
+    let wait_ms = match payload.get("wait_ms") {
+        Some(value) => value.as_u64().ok_or_else(|| {
+            ApiError::bad_request("INVALID_WAIT_MS", "wait_ms 必须是非负整数")
+        })?,
+        None => 0,
+    };
+
+    if wait_ms > MAX_COMMAND_WAIT_MS {
+        return Err(ApiError::bad_request(
+            "WAIT_MS_TOO_LARGE",
+            format!("wait_ms 不能超过 {MAX_COMMAND_WAIT_MS} 毫秒"),
+        ));
+    }
+    if wait_ms > 0 && request_id.is_none() {
+        return Err(ApiError::bad_request(
+            "MISSING_REQUEST_ID",
+            "wait_ms 大于 0 时必须提供非空 request_id",
+        ));
+    }
+
+    Ok((request_id, wait_ms))
+}
+
+fn build_command_result_response(request_id: &str, receipt: &serde_json::Value) -> String {
+    match receipt.get("success").and_then(serde_json::Value::as_bool) {
+        Some(true) => serde_json::json!({
+            "sent": true,
+            "request_id": request_id,
+            "success": true,
+            "result": receipt.get("result").cloned().unwrap_or(serde_json::Value::Null),
+        })
+        .to_string(),
+        Some(false) => serde_json::json!({
+            "sent": true,
+            "request_id": request_id,
+            "success": false,
+            "error": receipt
+                .get("error")
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::String("阅读器命令执行失败".into())),
+        })
+        .to_string(),
+        None => serde_json::json!({
+            "sent": true,
+            "request_id": request_id,
+            "success": false,
+            "error": "阅读器返回了无效的命令回执",
+        })
+        .to_string(),
+    }
+}
+
 /// /api/v1/reader/*
 fn handle_reader(
     ctx: &ServerContext,
-    _ext_name: &str,
+    ext_name: &str,
     method: &tiny_http::Method,
     url: &str,
     body: &str,
-) -> Result<String, String> {
+) -> ApiResult {
     // GET /api/v1/reader/windows
     if url == "/api/v1/reader/windows" && method == &tiny_http::Method::Get {
         let windows: Vec<String> = ctx
@@ -299,66 +535,80 @@ fn handle_reader(
         if method == &tiny_http::Method::Post && url.ends_with("/command") {
             let label = label.strip_suffix("/command").unwrap_or(label);
             if let Some(window) = ctx.app_handle.get_webview_window(label) {
-                // 将命令作为 Tauri event 转发给阅读器窗口
-                // 拓展发送: { "command": "jump_to_page", "page": 50 }
-                // 我们转发为: reader:command 事件
-                // 注：此处只是透传；阅读器前端需要监听此事件
-                let payload: serde_json::Value = serde_json::from_str(body)
-                    .unwrap_or(serde_json::Value::Null);
+                // 将命令作为 Tauri event 转发给阅读器窗口。同步等待时会暂时把
+                // request_id 替换为宿主生成的 correlation_id；回执投递和广播前
+                // 再恢复拓展传入的 request_id，隔离同名并发和迟到回执。
+                let mut payload: serde_json::Value = serde_json::from_str(body)
+                    .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
+                if !payload.is_object() {
+                    return Err(ApiError::bad_request(
+                        "INVALID_COMMAND",
+                        "命令 body 必须是 JSON 对象",
+                    ));
+                }
 
-                // request_id 关联：若调用方携带 request_id，回显到响应中，
-                // 并支持阻塞等待（wait_ms>0 时）直到 `reader:command:result`
-                // 回执到达或超时，供扩展做请求/响应匹配。
-                let request_id = payload
-                    .get("request_id")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                let wait_ms = payload
-                    .get("wait_ms")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-
-                // 阻塞等待模式：先注册一个 request_id → 结果通道，再转发命令，
-                // 由 ext_reader_event 在收到 command:result 时投递回执。
+                let (request_id, wait_ms) = parse_command_wait(&payload)?;
                 let result_rx = if wait_ms > 0 {
-                    if let Some(rid) = &request_id {
-                        let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
-                        ctx.pending_commands
-                            .lock()
-                            .unwrap()
-                            .insert(rid.clone(), tx);
-                        Some((rid.clone(), rx))
-                    } else {
-                        None
-                    }
+                    let rid = request_id.as_ref().expect("parse_command_wait 已校验 request_id");
+                    let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
+                    let key = PendingCommandKey {
+                        extension_name: ext_name.to_string(),
+                        target_window: label.to_string(),
+                        request_id: rid.clone(),
+                    };
+                    let correlation_id = ctx
+                        .pending_commands
+                        .lock()
+                        .unwrap()
+                        .register(key, tx)
+                        .map_err(|_| {
+                            ApiError::conflict(
+                                "DUPLICATE_REQUEST_ID",
+                                format!(
+                                    "拓展「{ext_name}」已有 request_id「{rid}」等待窗口「{label}」回执"
+                                ),
+                            )
+                        })?;
+                    payload["request_id"] = serde_json::Value::String(correlation_id.clone());
+                    Some((rid.clone(), correlation_id, rx))
                 } else {
                     None
                 };
 
                 if let Err(e) = window.emit("reader:command", &payload) {
-                    if let Some((rid, _)) = &result_rx {
-                        ctx.pending_commands.lock().unwrap().remove(rid);
+                    if let Some((_, correlation_id, _)) = &result_rx {
+                        ctx.pending_commands
+                            .lock()
+                            .unwrap()
+                            .cancel(correlation_id);
                     }
-                    return Err(format!("发送命令失败: {e}"));
+                    return Err(format!("发送命令失败: {e}").into());
                 }
 
-                if let Some((rid, rx)) = result_rx {
-                    let timeout = std::time::Duration::from_millis(wait_ms);
-                    return match rx.recv_timeout(timeout) {
-                        Ok(result) => Ok(serde_json::json!({
-                            "sent": true,
-                            "request_id": rid,
-                            "result": result,
-                        })
-                        .to_string()),
-                        Err(_) => {
-                            ctx.pending_commands.lock().unwrap().remove(&rid);
+                if let Some((rid, correlation_id, rx)) = result_rx {
+                    return match rx.recv_timeout(Duration::from_millis(wait_ms)) {
+                        Ok(result) => Ok(build_command_result_response(&rid, &result)),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            ctx.pending_commands
+                                .lock()
+                                .unwrap()
+                                .retire(&correlation_id);
                             Ok(serde_json::json!({
                                 "sent": true,
                                 "request_id": rid,
                                 "timed_out": true,
                             })
                             .to_string())
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            ctx.pending_commands
+                                .lock()
+                                .unwrap()
+                                .cancel(&correlation_id);
+                            Err(ApiError::bad_request(
+                                "COMMAND_WAIT_CANCELLED",
+                                "等待阅读器回执时通道已关闭",
+                            ))
                         }
                     };
                 }
@@ -369,7 +619,7 @@ fn handle_reader(
                 }
                 return Ok(response.to_string());
             } else {
-                return Err(format!("阅读器窗口「{label}」不存在"));
+                return Err(format!("阅读器窗口「{label}」不存在").into());
             }
         }
     }
@@ -382,7 +632,7 @@ fn handle_ext_sidebar_add(
     ctx: &ServerContext,
     _ext_name: &str,
     body: &str,
-) -> Result<String, String> {
+) -> ApiResult {
     let data: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
 
@@ -399,7 +649,7 @@ fn handle_ext_page_register(
     ctx: &ServerContext,
     _ext_name: &str,
     body: &str,
-) -> Result<String, String> {
+) -> ApiResult {
     let data: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
 
@@ -411,10 +661,7 @@ fn handle_ext_page_register(
 }
 
 /// GET /api/v1/extension/storage — 列出所有 key
-fn handle_ext_storage_list(
-    ctx: &ServerContext,
-    ext_name: &str,
-) -> Result<String, String> {
+fn handle_ext_storage_list(ctx: &ServerContext, ext_name: &str) -> ApiResult {
     super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
     let ext_dir = ctx.extensions_dir.join(ext_name);
     let keys = super::storage::list_keys(&ext_dir)?;
@@ -428,7 +675,7 @@ fn handle_ext_storage(
     method: &tiny_http::Method,
     url: &str,
     body: &str,
-) -> Result<String, String> {
+) -> ApiResult {
     // 安全：只有允许 storage 权限的拓展才能访问
     super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
 
@@ -460,5 +707,210 @@ fn handle_ext_storage(
             Ok(serde_json::json!({"deleted": true}).to_string())
         }
         _ => Err("不支持的方法".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{self, TryRecvError};
+
+    fn key(extension_name: &str, target_window: &str, request_id: &str) -> PendingCommandKey {
+        PendingCommandKey {
+            extension_name: extension_name.into(),
+            target_window: target_window.into(),
+            request_id: request_id.into(),
+        }
+    }
+
+    #[test]
+    fn concurrent_same_request_id_is_isolated_between_extensions() {
+        let mut pending = PendingCommands::default();
+        let (first_tx, first_rx) = mpsc::channel();
+        let (second_tx, second_rx) = mpsc::channel();
+        let first_id = pending
+            .register(key("extension-a", "reader-one", "same-id"), first_tx)
+            .unwrap();
+        let second_id = pending
+            .register(key("extension-b", "reader-one", "same-id"), second_tx)
+            .unwrap();
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(
+            pending.deliver(
+                &second_id,
+                "reader-one",
+                serde_json::json!({"success": true, "result": "second"}),
+            ),
+            ReceiptMatch::Active {
+                request_id: "same-id".into()
+            }
+        );
+        assert_eq!(second_rx.recv().unwrap()["result"], "second");
+        assert_eq!(first_rx.try_recv(), Err(TryRecvError::Empty));
+
+        assert_eq!(
+            pending.deliver(
+                &first_id,
+                "reader-one",
+                serde_json::json!({"success": true, "result": "first"}),
+            ),
+            ReceiptMatch::Active {
+                request_id: "same-id".into()
+            }
+        );
+        assert_eq!(first_rx.recv().unwrap()["result"], "first");
+    }
+
+    #[test]
+    fn duplicate_active_request_is_rejected() {
+        let mut pending = PendingCommands::default();
+        let (first_tx, _first_rx) = mpsc::channel();
+        let (duplicate_tx, _duplicate_rx) = mpsc::channel();
+        pending
+            .register(key("extension-a", "reader-one", "request-1"), first_tx)
+            .unwrap();
+
+        assert!(pending
+            .register(
+                key("extension-a", "reader-one", "request-1"),
+                duplicate_tx,
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn receipt_source_must_match_target_window() {
+        let mut pending = PendingCommands::default();
+        let (tx, rx) = mpsc::channel();
+        let correlation_id = pending
+            .register(key("extension-a", "reader-one", "request-1"), tx)
+            .unwrap();
+        let receipt = serde_json::json!({"success": true});
+
+        assert_eq!(
+            pending.deliver(&correlation_id, "reader-two", receipt.clone()),
+            ReceiptMatch::SourceMismatch
+        );
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(
+            pending.deliver(&correlation_id, "reader-one", receipt),
+            ReceiptMatch::Active {
+                request_id: "request-1".into()
+            }
+        );
+        assert!(rx.recv().is_ok());
+    }
+
+    #[test]
+    fn late_receipt_cannot_satisfy_reused_request_id() {
+        let mut pending = PendingCommands::default();
+        let (old_tx, old_rx) = mpsc::channel();
+        let old_id = pending
+            .register(key("extension-a", "reader-one", "request-1"), old_tx)
+            .unwrap();
+        assert_eq!(
+            old_rx.recv_timeout(Duration::from_millis(1)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        );
+        pending.retire(&old_id);
+
+        let (new_tx, new_rx) = mpsc::channel();
+        let new_id = pending
+            .register(key("extension-a", "reader-one", "request-1"), new_tx)
+            .unwrap();
+        assert_ne!(old_id, new_id);
+        assert_eq!(
+            pending.deliver(
+                &old_id,
+                "reader-one",
+                serde_json::json!({"success": true, "result": "old"}),
+            ),
+            ReceiptMatch::Late {
+                request_id: "request-1".into()
+            }
+        );
+        assert_eq!(new_rx.try_recv(), Err(TryRecvError::Empty));
+
+        assert_eq!(
+            pending.deliver(
+                &new_id,
+                "reader-one",
+                serde_json::json!({"success": true, "result": "new"}),
+            ),
+            ReceiptMatch::Active {
+                request_id: "request-1".into()
+            }
+        );
+        assert_eq!(new_rx.recv().unwrap()["result"], "new");
+    }
+
+    #[test]
+    fn wait_parameters_have_deterministic_errors_and_limit() {
+        let missing_id = parse_command_wait(&serde_json::json!({"wait_ms": 1})).unwrap_err();
+        assert_eq!(missing_id.status, 400);
+        assert_eq!(missing_id.code, "MISSING_REQUEST_ID");
+
+        let invalid_wait = parse_command_wait(&serde_json::json!({
+            "request_id": "r1",
+            "wait_ms": -1,
+        }))
+        .unwrap_err();
+        assert_eq!(invalid_wait.status, 400);
+        assert_eq!(invalid_wait.code, "INVALID_WAIT_MS");
+
+        let too_large = parse_command_wait(&serde_json::json!({
+            "request_id": "r1",
+            "wait_ms": MAX_COMMAND_WAIT_MS + 1,
+        }))
+        .unwrap_err();
+        assert_eq!(too_large.status, 400);
+        assert_eq!(too_large.code, "WAIT_MS_TOO_LARGE");
+        assert_eq!(
+            parse_command_wait(&serde_json::json!({
+                "request_id": "r1",
+                "wait_ms": MAX_COMMAND_WAIT_MS,
+            }))
+            .unwrap(),
+            (Some("r1".into()), MAX_COMMAND_WAIT_MS)
+        );
+    }
+
+    #[test]
+    fn command_receipt_is_flattened_for_success_and_failure() {
+        let success: serde_json::Value = serde_json::from_str(&build_command_result_response(
+            "r1",
+            &serde_json::json!({
+                "request_id": "internal",
+                "command": "get_position",
+                "success": true,
+                "result": {"view_key": "book-1"},
+            }),
+        ))
+        .unwrap();
+        assert_eq!(
+            success,
+            serde_json::json!({
+                "sent": true,
+                "request_id": "r1",
+                "success": true,
+                "result": {"view_key": "book-1"},
+            })
+        );
+
+        let failure: serde_json::Value = serde_json::from_str(&build_command_result_response(
+            "r2",
+            &serde_json::json!({"success": false, "error": "No active reader view"}),
+        ))
+        .unwrap();
+        assert_eq!(
+            failure,
+            serde_json::json!({
+                "sent": true,
+                "request_id": "r2",
+                "success": false,
+                "error": "No active reader view",
+            })
+        );
     }
 }
