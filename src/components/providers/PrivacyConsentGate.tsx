@@ -67,12 +67,12 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto app-warm-bg px-4 py-8">
+    <div className="fixed inset-0 z-[200] flex overflow-y-auto app-warm-bg px-4 py-8">
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="privacy-consent-title"
-        className="w-full max-w-lg rounded-[28px] border border-amber-950/10 bg-background p-6 shadow-2xl sm:p-8"
+        className="m-auto w-full max-w-lg rounded-[28px] border border-amber-950/10 bg-background p-6 shadow-2xl sm:p-8"
       >
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
