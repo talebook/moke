@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "Moke",
+  "productName": "墨客",
   "version": "../package.json",
   "identifier": "org.houheya.moke",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Moke",
+        "title": "墨客",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
@@ -50,7 +50,9 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "wix": null,
+      "wix": {
+        "upgradeCode": "d1dfe239-c6ec-5195-980b-2d6cd723458a"
+      },
       "nsis": {
         "installMode": "currentUser"
       }

@@ -2,7 +2,7 @@
   "app": {
     "windows": [
       {
-        "title": "Moke - Tablet Preview",
+        "title": "墨客 - Tablet Preview",
         "width": 768,
         "height": 1024,
         "minWidth": 360,

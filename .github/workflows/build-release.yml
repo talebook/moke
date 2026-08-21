@@ -234,6 +234,10 @@ jobs:
         if: matrix.platform == 'android'
         run: pnpm tauri android init
 
+      - name: Add localized Android app names
+        if: matrix.platform == 'android'
+        run: node scripts/prepare-mobile-app-names.mjs android
+
       # tauri android init scaffolds gen/android with Tauri's DEFAULT launcher icons.
       # Regenerate them from src-tauri/icons/icon.png: since gen/android already
       # exists, `tauri icon` writes straight into gen/android/app/src/main/res/
@@ -343,6 +347,10 @@ jobs:
         env:
           APPLE_DEVELOPMENT_TEAM: "6X9BLAS47C"
         run: pnpm tauri ios init
+
+      - name: Add localized iOS app names
+        if: matrix.platform == 'ios'
+        run: node scripts/prepare-mobile-app-names.mjs ios
 
       # Tauri forces Automatic signing + -allowProvisioningUpdates, which needs a
       # logged-in Xcode Apple ID (unavailable on CI) -> "No Accounts". Switch the
