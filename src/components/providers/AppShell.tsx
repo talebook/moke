@@ -199,6 +199,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }
         const enabled = shouldApplyTopSafeArea(platform, isMultiWindow);
         el.dataset.mokeRuntimePlatform = platform;
+        try {
+          window.sessionStorage.setItem('moke-runtime-platform', platform);
+        } catch {
+          // The dataset still gates same-document transitions when storage is unavailable.
+        }
         el.toggleAttribute('data-moke-top-safe-area', enabled);
 
         if (!enabled) {

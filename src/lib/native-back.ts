@@ -42,14 +42,23 @@ export function trackNativeRoute(pathname: string, routeStack: readonly string[]
 export function resolveNativeBackTarget(
   pathname: string,
   routeStack: readonly string[],
+  requestedTarget?: string,
 ): { target: string; nextStack: string[] } {
-  const nextStack = [...routeStack];
-  if (nextStack.at(-1) !== pathname) nextStack.push(pathname);
-  if (nextStack.at(-1) === pathname) nextStack.pop();
+  const currentStack = trackNativeRoute(pathname, routeStack);
+  if (requestedTarget === pathname) {
+    return { target: pathname, nextStack: currentStack };
+  }
 
-  const previous = nextStack.at(-1);
-  return {
-    target: previous && previous !== pathname ? previous : nativeBackFallback(pathname),
-    nextStack,
-  };
+  const parentStack = currentStack.at(-1) === pathname
+    ? currentStack.slice(0, -1)
+    : [...currentStack];
+  const previous = parentStack.at(-1);
+  const target = requestedTarget
+    ?? (previous && previous !== pathname ? previous : nativeBackFallback(pathname));
+  const existingTargetIndex = parentStack.lastIndexOf(target);
+  const nextStack = existingTargetIndex >= 0
+    ? parentStack.slice(0, existingTargetIndex + 1)
+    : trackNativeRoute(target, parentStack);
+
+  return { target, nextStack };
 }

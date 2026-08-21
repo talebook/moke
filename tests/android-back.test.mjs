@@ -11,10 +11,6 @@ const appShellSource = readFileSync(
   fileURLToPath(new URL('../src/components/providers/AppShell.tsx', import.meta.url)),
   'utf8',
 );
-const backNavigationSource = readFileSync(
-  fileURLToPath(new URL('../src/components/providers/NativeBackNavigation.tsx', import.meta.url)),
-  'utf8',
-);
 const globalStyles = readFileSync(
   fileURLToPath(new URL('../src/app/globals.css', import.meta.url)),
   'utf8',
@@ -74,17 +70,14 @@ test('Android Moke 主界面显式恢复顶部状态栏且不接管导航栏', (
   assert.match(appShellSource, /showMokeSystemStatusBar\(platform, dark, window\.MokeWindowMode\)/);
 });
 
-test('Android 返回先渲染上一页，再只把当前页向右划出', () => {
-  assert.match(backNavigationSource, /document\.startViewTransition/);
-  assert.match(backNavigationSource, /pending\.target === pathname/);
-  assert.match(globalStyles, /::view-transition-old\(root\)[\s\S]*animation-name: moke-native-back-exit/);
-  assert.match(globalStyles, /::view-transition-new\(root\)[\s\S]*animation: none/);
+test('Android 返回动画只把当前页向右划出', () => {
+  assert.match(globalStyles, /animation-name: moke-native-back-exit/);
   assert.match(globalStyles, /to \{ transform: translateX\(100%\); \}/);
 });
 
-test('任意 Readest 文档退出都会触发 Moke 返回动画', () => {
-  assert.match(rootLayoutSource, /pagereveal/);
-  assert.match(rootLayoutSource, /fromPath\.startsWith\('\/readest\/'\)/);
+test('跨文档动画跳过桌面、Web、启动重定向及无关导航', () => {
+  assert.match(rootLayoutSource, /installMokeDocumentTransitionGuard/);
+  assert.match(rootLayoutSource, /event\.viewTransition\?\.skipTransition\(\)/);
   assert.match(rootLayoutSource, /mokeReaderTransition = 'exit'/);
   assert.match(globalStyles, /@view-transition\s*\{\s*navigation: auto;/);
   assert.match(globalStyles, /data-moke-reader-transition='exit'/);

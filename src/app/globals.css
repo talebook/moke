@@ -462,10 +462,17 @@
 }
 
 /* Moke and the embedded Readest frontend are separate same-origin documents.
-   Opt in at the document level so every reader entry/exit path participates,
-   including native BACK and reader-owned close buttons. */
+   Cross-document opt-in is necessarily document-wide, so layout.tsx skips all
+   transitions except mobile Readest -> Moke exits. Suppress the browser's
+   default fade as a second guard for startup redirects and unrelated routes. */
 @view-transition {
   navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 /* Android BACK is handled inside the single Tauri WebView, so it does not get
@@ -496,15 +503,15 @@ html[data-moke-reader-transition='exit']::view-transition-new(root) {
 }
 
 @media (prefers-reduced-motion: reduce), (update: slow), (max-color: 1) {
-  html.moke-native-back-transition::view-transition-old(root),
   html[data-moke-reader-transition='exit']::view-transition-old(root) {
-    animation-duration: 0.01ms !important;
+    animation: none !important;
+    box-shadow: none !important;
   }
 }
 
-html[data-eink='true'].moke-native-back-transition::view-transition-old(root),
 html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(root) {
-  animation-duration: 0.01ms !important;
+  animation: none !important;
+  box-shadow: none !important;
 }
 
 /* Manual override: force ink mode on any device via the Settings toggle.
