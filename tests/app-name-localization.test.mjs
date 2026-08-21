@@ -8,13 +8,15 @@ import {
   prepareAndroidAppNames,
   prepareIosAppNames,
 } from '../scripts/prepare-mobile-app-names.mjs';
+import { normalizeArtifactNames } from '../scripts/normalize-artifact-names.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
-test('默认名称为墨客，Windows、macOS 与 OHOS 保持 Moke', () => {
+test('默认名称为墨客，Windows、macOS、Linux 与 OHOS 保持 Moke', () => {
   const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const windowsConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.windows.conf.json'), 'utf8'));
   const macosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.macos.conf.json'), 'utf8'));
+  const linuxConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.linux.conf.json'), 'utf8'));
   const ohosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.ohos.conf.json'), 'utf8'));
 
   assert.equal(config.productName, '墨客');
@@ -23,9 +25,25 @@ test('默认名称为墨客，Windows、macOS 与 OHOS 保持 Moke', () => {
   assert.equal(windowsConfig.app.windows[0].title, 'Moke');
   assert.equal(macosConfig.productName, 'Moke');
   assert.equal(macosConfig.app.windows[0].title, 'Moke');
+  assert.equal(linuxConfig.productName, 'Moke');
+  assert.equal(linuxConfig.app.windows[0].title, 'Moke');
   assert.equal(ohosConfig.productName, 'Moke');
   assert.equal(config.bundle.windows.wix.upgradeCode, 'd1dfe239-c6ec-5195-980b-2d6cd723458a');
   assert.equal(config.bundle.windows.wix.language, undefined);
+});
+
+test('上传前将产物文件名中的墨客替换为小写 moke', () => {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-artifact-name-'));
+  const bundleRoot = path.join(temporaryRoot, 'artifacts');
+  mkdirSync(bundleRoot, { recursive: true });
+  writeFileSync(path.join(bundleRoot, '墨客_1.0.2_x64.dmg'), 'artifact');
+  writeFileSync(path.join(bundleRoot, 'Moke_1.0.2_x64.AppImage'), 'artifact');
+
+  const renamed = normalizeArtifactNames(temporaryRoot, ['artifacts']);
+
+  assert.equal(renamed.length, 1);
+  assert.equal(readFileSync(path.join(bundleRoot, 'moke_1.0.2_x64.dmg'), 'utf8'), 'artifact');
+  assert.equal(readFileSync(path.join(bundleRoot, 'Moke_1.0.2_x64.AppImage'), 'utf8'), 'artifact');
 });
 
 test('移动端默认名称为墨客，英文系统名称为 Moke', () => {
