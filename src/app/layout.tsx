@@ -39,10 +39,13 @@ function installMokeReaderExitTransition() {
 
 const mokeReaderExitTransitionScript = `(${installMokeReaderExitTransition.toString()})();`;
 
+const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
+  ...(isNativeAppBuild ? { maximumScale: 1, userScalable: false } : {}),
 };
 
 export default function RootLayout({
@@ -51,7 +54,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html
+      lang="zh-CN"
+      data-moke-native-app={isNativeAppBuild ? '' : undefined}
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: mokeReaderExitTransitionScript }} />
         {/* Apply the persisted theme before hydration so the first paint is
