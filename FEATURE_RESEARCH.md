@@ -200,6 +200,8 @@ Readest 已经通过 [`readerStore`](readest/apps/readest-app/src/store/readerSt
 
 ### 4.4 离线下载管理中心
 
+**状态：已完成**
+
 **优先级：P1　工作量：M～L**
 
 当前 [`offline-books.ts`](src/lib/offline-books.ts) 只能按服务器和书籍查询单条记录，没有全量管理、任务队列、空间统计和恢复机制。
@@ -217,6 +219,8 @@ Readest 已经通过 [`readerStore`](readest/apps/readest-app/src/store/readerSt
 - 删除本地文件时同步更新 Talebook 的下载状态。
 - 检测服务端文件更新，提示重新下载。
 - 允许配置下载目录，支持打开所在文件夹。
+
+已实现下载管理页、持久化任务恢复、单项/批量控制、速度与空间统计、HTTP Range 安全续传、EPUB 完整性校验，以及按服务器/书籍/格式分层的多格式存储。桌面端下载目录必须由用户通过系统对话框显式授权；Web 与移动端会显示相应能力降级。删除会先完成本地清理，再独立同步 Talebook 状态并提供远端重试提示。
 
 ### 4.5 Web 模式离线阅读与能力对齐
 

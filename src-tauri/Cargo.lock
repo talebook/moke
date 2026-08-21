@@ -3808,6 +3808,7 @@ dependencies = [
  "openharmony-ability-derive",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

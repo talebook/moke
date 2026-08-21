@@ -10,7 +10,7 @@ import {
   readJsonResponse,
   resolveAppPlatform,
 } from '@/lib/api-core';
-import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
+import { hasEpubCentralDirectory, parseContentRange } from '@/lib/offline-book-core';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -532,64 +532,69 @@ export async function streamBookDownload(
   options: {
     write: (chunk: Uint8Array) => Promise<void>;
     onProgress?: (progress: number) => void;
+    onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
     signal?: AbortSignal;
+    resumeFrom?: number;
+    onRangeReset?: () => Promise<void>;
+    /** Tauri validates the completed on-disk tail, including bytes from an earlier range. */
+    validateEpub?: boolean;
   },
-): Promise<{ mimeType: string; size: number }> {
+): Promise<{ mimeType: string; size: number; sourceSignature?: string; resumed: boolean }> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
+  const requestedOffset = Math.max(0, options.resumeFrom || 0);
+  const headers = new Headers();
+  if (requestedOffset > 0) headers.set('Range', `bytes=${requestedOffset}-`);
 
   const response = await request(url, {
     ...(isTauriApp
-      ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
-      : { credentials: 'include', signal: options?.signal }),
+      ? ({ method: 'GET', connectTimeout: 30_000, signal: options.signal, headers } as any)
+      : { credentials: 'include', signal: options.signal, headers }),
   });
+  if (!response.ok) throw new Error(`http.${response.status}`);
 
-  if (!response.ok) {
-    throw new Error(`http.${response.status}`);
-  }
-
-  const total = Number(response.headers.get('content-length') || 0);
+  const contentRange = parseContentRange(response.headers.get('content-range'));
+  const resumed = requestedOffset > 0 && response.status === 206 && contentRange?.start === requestedOffset;
+  let received = resumed ? requestedOffset : 0;
+  if (requestedOffset > 0 && !resumed) await options.onRangeReset?.();
+  const responseLength = Number(response.headers.get('content-length') || 0);
+  const total = contentRange?.total ?? (responseLength > 0 ? received + responseLength : null);
+  const sourceSignature = response.headers.get('etag') || response.headers.get('last-modified') || undefined;
   const reader = response.body?.getReader();
 
   if (!reader) {
     const blob = await response.blob();
-    options.onProgress?.(99);
     await options.write(new Uint8Array(await blob.arrayBuffer()));
-    if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
+    received += blob.size;
+    options.onTransfer?.(received, total);
+    options.onProgress?.(99);
+    if (total != null && received !== total) throw new Error('book.download.incomplete');
+    if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
       throw new Error('book.epub.invalid');
     }
-    return {
-      mimeType: response.headers.get('content-type') || 'application/octet-stream',
-      size: blob.size,
-    };
+    return { mimeType: response.headers.get('content-type') || 'application/octet-stream', size: received, sourceSignature, resumed };
   }
 
   let tail: Uint8Array = new Uint8Array(0);
-  let received = 0;
-
   while (true) {
     const { done, value } = await reader.read();
-
     if (done) break;
     if (!value) continue;
-
     await options.write(value);
     received += value.length;
     tail = keepTailBytes(tail, value, BOOK_TAIL_WINDOW);
-
-    if (total > 0) {
-      options.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
-    }
+    options.onTransfer?.(received, total);
+    if (total && total > 0) options.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
   }
-
   options.onProgress?.(99);
-
-  if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
+  if (total != null && received !== total) throw new Error('book.download.incomplete');
+  if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
     throw new Error('book.epub.invalid');
   }
-
   return {
     mimeType: response.headers.get('content-type') || 'application/octet-stream',
     size: received,
+    sourceSignature,
+    resumed,
   };
 }

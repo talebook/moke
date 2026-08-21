@@ -11,6 +11,8 @@ import {
   endOfflineDownload,
   hasEpubCentralDirectory,
   makeOfflineBookKey,
+  makeOfflineRelativePath,
+  parseContentRange,
   sanitizeOfflineFileName,
 } from '../src/lib/offline-book-core.ts';
 
@@ -78,6 +80,9 @@ function createFakeIndexedDb() {
         return record.id;
       });
     },
+    getAll() {
+      return makeAsyncRequest(() => Array.from(records.values()));
+    },
     delete(key) {
       return makeAsyncRequest(() => records.delete(key));
     },
@@ -126,12 +131,22 @@ function installWebOfflineStore() {
   return indexedDB;
 }
 
-test('离线书籍键会隔离不同服务器和书籍', () => {
+test('离线书籍键会隔离服务器、书籍和格式', () => {
   assert.equal(makeOfflineBookKey('https://a.example', '12'), 'https://a.example::12');
-  assert.notEqual(
-    makeOfflineBookKey('https://a.example', '12'),
-    makeOfflineBookKey('https://b.example', '12'),
-  );
+  assert.equal(makeOfflineBookKey('https://a.example', '12', 'EPUB'), 'https://a.example::12::epub');
+  assert.notEqual(makeOfflineBookKey('https://a.example', '12', 'epub'), makeOfflineBookKey('https://a.example', '12', 'pdf'));
+  assert.notEqual(makeOfflineBookKey('https://a.example', '12'), makeOfflineBookKey('https://b.example', '12'));
+
+  const path = makeOfflineRelativePath('https://a.example:8080', '../12', 'EPUB', '三体:全集?.epub');
+  assert.match(path, /^books\/a\.example_8080-[0-9a-f]{8}\/_12\/epub\/三体_全集_\.epub$/);
+  assert.equal(path.includes('..'), false);
+});
+
+test('Range 响应只接受合法 Content-Range', () => {
+  assert.deepEqual(parseContentRange('bytes 100-199/300'), { start: 100, end: 199, total: 300 });
+  assert.deepEqual(parseContentRange('bytes 100-199/*'), { start: 100, end: 199, total: null });
+  assert.equal(parseContentRange('bytes 200-100/300'), null);
+  assert.equal(parseContentRange(null), null);
 });
 
 test('离线文件名会清理系统不允许的字符', () => {
@@ -178,12 +193,25 @@ test('网页版可以保存并重新读取离线书籍', async () => {
 
   const record = await getOfflineBook('https://a.example', '42');
   assert.ok(record);
-  assert.equal(record.id, 'https://a.example::42');
+  assert.equal(record.id, 'https://a.example::42::epub');
   assert.equal(record.fileName, '测试_书籍_.epub');
   assert.equal(record.title, '测试书籍');
   assert.equal(await record.blob.text(), 'book-data');
   assert.equal(record.filePath, undefined);
   assert.equal(typeof record.updatedAt, 'number');
+});
+
+test('同一本书多个格式可以并存且互不覆盖', async () => {
+  const indexedDB = installWebOfflineStore();
+  for (const format of ['epub', 'pdf']) {
+    await saveOfflineBook({
+      serverUrl: 'https://a.example', bookId: '8', title: '多格式', format,
+      fileName: `多格式.${format}`, mimeType: 'application/octet-stream', blob: new Blob([format]),
+    });
+  }
+  assert.equal(indexedDB.records.size, 2);
+  assert.equal(await (await getOfflineBook('https://a.example', '8', 'epub')).blob.text(), 'epub');
+  assert.equal(await (await getOfflineBook('https://a.example', '8', 'pdf')).blob.text(), 'pdf');
 });
 
 test('重复保存会更新原记录，多个服务器之间互不覆盖', async () => {

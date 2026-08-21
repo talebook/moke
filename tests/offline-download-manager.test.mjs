@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   getOfflineDownloadSnapshot,
+  listOfflineDownloadSnapshots,
+  pauseOfflineDownload,
   startOfflineDownload,
   subscribeOfflineDownload,
 } from '../src/lib/offline-download-manager.ts';
@@ -37,6 +39,45 @@ test('离线下载不依赖详情页订阅者生命周期', async () => {
   await download;
   assert.equal(getOfflineDownloadSnapshot(key)?.status, 'completed');
   assert.equal(updates.at(-1)?.progress, 25);
+});
+
+test('暂停会中止写入并保留已下载字节供继续', async () => {
+  const key = 'https://example.test::resume::epub';
+  let writes = 0;
+  const download = startOfflineDownload({
+    key,
+    metadata: { serverUrl: 'https://example.test', bookId: 'resume', title: '恢复', format: 'epub' },
+    run: async (_onProgress, signal, onTransfer) => {
+      onTransfer(128, 1024);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      });
+      writes += 1;
+    },
+  });
+  assert.equal(pauseOfflineDownload(key), true);
+  await download;
+  assert.equal(writes, 0);
+  assert.equal(getOfflineDownloadSnapshot(key)?.status, 'paused');
+  assert.equal(getOfflineDownloadSnapshot(key)?.downloadedBytes, 128);
+});
+
+test('异常退出后持久化中的任务恢复为可继续的暂停状态', () => {
+  const storage = new Map([['moke-offline-download-tasks-v1', JSON.stringify([{
+    key: 'https://recover.test::1::epub', serverUrl: 'https://recover.test', bookId: '1',
+    title: '恢复任务', format: 'epub', status: 'downloading', progress: 42, downloadedBytes: 420,
+  }])]]);
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+  const [restored] = listOfflineDownloadSnapshots('https://recover.test');
+  assert.equal(restored.status, 'paused');
+  assert.equal(restored.downloadedBytes, 420);
+  assert.match(String(restored.error), /异常退出/);
+  delete globalThis.window;
 });
 
 test('同一本书复用在途下载任务', async () => {

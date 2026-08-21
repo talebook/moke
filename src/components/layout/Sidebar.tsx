@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Bookmark, Library, LogIn, Package, Puzzle, Settings } from 'lucide-react';
+import { BookOpen, Bookmark, Download, Library, LogIn, Package, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useServerStore } from '@/lib/store/server';
 import { useExtensionStore } from '@/lib/store/extensions';
@@ -26,6 +26,7 @@ export function Sidebar() {
     { href: '/shelf', icon: Bookmark, label: '书架' },
     { href: '/library', icon: Library, label: '书库' },
     { href: '/search', icon: null, label: null, hidden: true },
+    { href: '/downloads', icon: Download, label: '下载管理' },
     { href: '/settings', icon: Settings, label: '设置' },
   ];
 
