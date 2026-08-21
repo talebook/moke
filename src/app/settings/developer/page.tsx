@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, Bug, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
+import { ArrowLeft, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useUpdateStore } from '@/lib/store/update';
@@ -88,9 +88,19 @@ export default function DeveloperSettingsPage() {
 
           <DevSection title="调试面板" description="控制屏幕上的调试日志面板入口">
             <ToggleRow
-              icon={Bug}
+              icon={DebugIcon}
               label="显示调试面板按钮"
-              description={`在所有页面右下角显示 🐞 浮动按钮，可查看实时日志（当前 ${logCount} 条）`}
+              description={
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <span>在所有页面右下角显示</span>
+                  <img
+                    src="/debug.avif"
+                    alt="自定义调试图标"
+                    className="h-4 w-4 object-contain"
+                  />
+                  <span>浮动按钮，可查看实时日志（当前 {logCount} 条）</span>
+                </span>
+              }
               checked={showDebugPanel}
               onChange={setShowDebugPanel}
             />
@@ -145,7 +155,30 @@ function DevSection({ title, description, children }: { title: string; descripti
   );
 }
 
-function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon: typeof Bug; label: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
+function DebugIcon({ className }: { className?: string }) {
+  return (
+    <img
+      src="/debug.avif"
+      alt=""
+      aria-hidden="true"
+      className={`object-contain ${className ?? ''}`}
+    />
+  );
+}
+
+function ToggleRow({
+  icon: Icon,
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  description: React.ReactNode;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
       <div className="flex items-start gap-3.5 min-w-0">
@@ -263,7 +296,7 @@ function DevRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActionRow({ icon: Icon, label, description, tone = 'default', onClick }: { icon: typeof Bug; label: string; description: string; tone?: 'default' | 'danger'; onClick: () => void }) {
+function ActionRow({ icon: Icon, label, description, tone = 'default', onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; description: string; tone?: 'default' | 'danger'; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
