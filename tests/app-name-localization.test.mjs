@@ -19,6 +19,47 @@ import { normalizeArtifactNames } from '../scripts/normalize-artifact-names.mjs'
 
 const root = path.resolve(import.meta.dirname, '..');
 
+function createIosFixture() {
+  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
+  const appleRoot = path.join(temporaryRoot, 'src-tauri', 'gen', 'apple');
+  const appRoot = path.join(appleRoot, 'moke_iOS');
+  mkdirSync(appRoot, { recursive: true });
+  writeFileSync(
+    path.join(appRoot, 'Info.plist'),
+    '<plist><dict><key>CFBundleName</key><string>$(PRODUCT_NAME)</string></dict></plist>',
+  );
+  writeFileSync(path.join(appleRoot, 'project.yml'), 'name: moke\n');
+
+  for (const locale of ['zh-Hans.lproj', 'zh-Hant.lproj']) {
+    const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'ios', locale);
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      path.join(sourceDir, 'InfoPlist.strings'),
+      '"CFBundleDisplayName" = "墨客";\n"CFBundleName" = "墨客";\n',
+    );
+  }
+
+  return { temporaryRoot, appleRoot };
+}
+
+function writeGeneratedXcodeProject(appleRoot, { includeResources = true } = {}) {
+  const projectDir = path.join(appleRoot, 'moke.xcodeproj');
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(path.join(projectDir, 'project.pbxproj'), `
+PRODUCT_NAME = Moke;
+/* Begin PBXBuildFile section */
+${includeResources ? 'A1 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A2 /* InfoPlist.strings */; };' : ''}
+/* End PBXBuildFile section */
+/* Begin PBXFileReference section */
+A3 /* zh-Hans */ = {isa = PBXFileReference; path = "zh-Hans.lproj/InfoPlist.strings"; };
+A4 /* zh-Hant */ = {isa = PBXFileReference; path = "zh-Hant.lproj/InfoPlist.strings"; };
+/* End PBXFileReference section */
+/* Begin PBXVariantGroup section */
+A2 /* InfoPlist.strings */ = {isa = PBXVariantGroup; children = (A3, A4); };
+/* End PBXVariantGroup section */
+`);
+}
+
 test('默认软件包名称与桌面平台产品名保持 Moke', () => {
   const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const windowsConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.windows.conf.json'), 'utf8'));
@@ -76,7 +117,6 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
     path.join(root, 'src-tauri', 'linux', 'moke.desktop.hbs'),
     'utf8',
   );
-  const iosDefault = readFileSync(path.join(root, 'src-tauri', 'Info.ios.plist'), 'utf8');
   const iosChinese = readFileSync(
     path.join(root, 'src-tauri', 'mobile', 'ios', 'zh-Hans.lproj', 'InfoPlist.strings'),
     'utf8',
@@ -100,7 +140,7 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
   assert.match(linuxDesktop, /^Name\[zh\]=墨客$/m);
   assert.match(linuxDesktop, /^Name\[zh_CN\]=墨客$/m);
   assert.match(linuxDesktop, /^Name\[zh_TW\]=墨客$/m);
-  assert.match(iosDefault, /<string>Moke<\/string>/);
+  assert.equal(existsSync(path.join(root, 'src-tauri', 'Info.ios.plist')), false);
   assert.match(iosChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(iosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(androidDefault, /<string name="app_name">Moke<\/string>/);
@@ -152,26 +192,56 @@ test('Android 默认与中文名称资源会复制到生成项目', () => {
   assert.match(generatedChinese, />墨客</);
 });
 
-test('iOS 中文名称资源会复制并重新生成 Xcode 项目', () => {
-  const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
-  const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'ios', 'zh-Hans.lproj');
-  const appleRoot = path.join(temporaryRoot, 'src-tauri', 'gen', 'apple');
-  mkdirSync(sourceDir, { recursive: true });
-  mkdirSync(path.join(appleRoot, 'moke_iOS'), { recursive: true });
-  writeFileSync(path.join(sourceDir, 'InfoPlist.strings'), '"CFBundleDisplayName" = "墨客";\n');
-  writeFileSync(path.join(appleRoot, 'project.yml'), 'name: moke\n');
-
+test('iOS 名称资源会进入实际生成的 Xcode Resources', () => {
+  const { temporaryRoot, appleRoot } = createIosFixture();
   let command;
+
   prepareIosAppNames(temporaryRoot, (...args) => {
     command = args;
+    writeGeneratedXcodeProject(appleRoot);
     return { status: 0 };
   });
 
-  const generated = readFileSync(
-    path.join(appleRoot, 'moke_iOS', 'zh-Hans.lproj', 'InfoPlist.strings'),
-    'utf8',
-  );
-  assert.match(generated, /墨客/);
+  for (const locale of ['zh-Hans.lproj', 'zh-Hant.lproj']) {
+    const generated = readFileSync(
+      path.join(appleRoot, 'Sources', locale, 'InfoPlist.strings'),
+      'utf8',
+    );
+    assert.match(generated, /"CFBundleDisplayName" = "墨客";/);
+    assert.match(generated, /"CFBundleName" = "墨客";/);
+  }
   assert.equal(command[0], 'xcodegen');
-  assert.deepEqual(command[1], ['generate', '--spec', path.join(appleRoot, 'project.yml')]);
+  assert.deepEqual(command[1], ['generate', '--no-env', '--spec', path.join(appleRoot, 'project.yml')]);
+});
+
+test('iOS prepare 在 XcodeGen 不可用时失败', () => {
+  const { temporaryRoot } = createIosFixture();
+  const error = Object.assign(new Error('spawn xcodegen ENOENT'), { code: 'ENOENT' });
+
+  assert.throws(
+    () => prepareIosAppNames(temporaryRoot, () => ({ error, status: null })),
+    /XcodeGen is required/,
+  );
+});
+
+test('iOS prepare 在本地化资源未进入 Xcode Resources 时失败', () => {
+  const { temporaryRoot, appleRoot } = createIosFixture();
+
+  assert.throws(
+    () => prepareIosAppNames(temporaryRoot, () => {
+      writeGeneratedXcodeProject(appleRoot, { includeResources: false });
+      return { status: 0 };
+    }),
+    /does not add InfoPlist\.strings to a Resources build phase/,
+  );
+});
+
+test('iOS 发布构建安装仓库固定版本的 XcodeGen', () => {
+  const workflow = readFileSync(path.join(root, '.github', 'workflows', 'build-release.yml'), 'utf8');
+  const installStep = workflow.indexOf('Install pinned XcodeGen');
+  const prepareStep = workflow.indexOf('Add localized iOS app names');
+
+  assert.ok(installStep >= 0 && installStep < prepareStep);
+  assert.match(workflow, /XCODEGEN_VERSION: 2\.46\.0/);
+  assert.match(workflow, /XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806/);
 });
