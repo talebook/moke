@@ -6,6 +6,7 @@ import { installConsoleCapture, uninstallConsoleCapture } from '@/lib/debug-log'
 import {
   getMokeRuntimePlatform,
   getNativeTopSafeAreaInset,
+  showMokeSystemStatusBar,
   shouldApplyTopSafeArea,
 } from '@/lib/moke-reader';
 import { useDeveloperStore } from '@/lib/store/developer';
@@ -17,6 +18,7 @@ declare global {
   interface Window {
     MokeWindowMode?: {
       isInMultiWindowMode: () => boolean;
+      showStatusBar?: (darkMode: boolean) => void;
     };
   }
 }
@@ -47,19 +49,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
     const autoEinkMq = window.matchMedia('(update: slow), (max-color: 1)');
+    let cancelled = false;
+    let platformPromise: Promise<string> | undefined;
+
+    const restoreStatusBar = (dark: boolean) => {
+      platformPromise ??= getMokeRuntimePlatform();
+      void platformPromise
+        .then(async (platform) => {
+          if (cancelled) return;
+          await showMokeSystemStatusBar(platform, dark, window.MokeWindowMode);
+        })
+        .catch((error) => {
+          if (!cancelled) console.warn('Unable to restore the Moke status bar:', error);
+        });
+    };
+
     const apply = () => {
       const resolved = resolveTheme(theme, darkMq.matches);
       const dark = !eink && !autoEinkMq.matches && resolved === 'dark';
       const el = document.documentElement;
       el.classList.toggle('dark', dark);
       el.style.colorScheme = dark ? 'dark' : 'light';
+      restoreStatusBar(dark);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') apply();
     };
     apply();
     darkMq.addEventListener('change', apply);
     autoEinkMq.addEventListener('change', apply);
+    window.addEventListener('pageshow', apply);
+    window.addEventListener('orientationchange', apply);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
+      cancelled = true;
       darkMq.removeEventListener('change', apply);
       autoEinkMq.removeEventListener('change', apply);
+      window.removeEventListener('pageshow', apply);
+      window.removeEventListener('orientationchange', apply);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [theme, eink]);
 

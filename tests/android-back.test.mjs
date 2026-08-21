@@ -66,6 +66,14 @@ test('Android 分屏时通过原生窗口状态移除重复的顶部安全区', 
   );
 });
 
+test('Android Moke 主界面显式恢复顶部状态栏且不接管导航栏', () => {
+  assert.match(activitySource, /fun showStatusBar\(darkMode: Boolean\)/);
+  assert.match(activitySource, /show\(WindowInsetsCompat\.Type\.statusBars\(\)\)/);
+  assert.match(activitySource, /isAppearanceLightStatusBars = !darkMode/);
+  assert.doesNotMatch(activitySource, /showMokeStatusBar[\s\S]*?navigationBars\(\)/);
+  assert.match(appShellSource, /showMokeSystemStatusBar\(platform, dark, window\.MokeWindowMode\)/);
+});
+
 test('Android 返回先渲染上一页，再只把当前页向右划出', () => {
   assert.match(backNavigationSource, /document\.startViewTransition/);
   assert.match(backNavigationSource, /pending\.target === pathname/);
