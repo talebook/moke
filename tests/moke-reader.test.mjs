@@ -9,6 +9,7 @@ import {
   isSingleWebviewRuntime,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
+  showMokeSystemStatusBar,
   shouldApplyTopSafeArea,
   shouldIncludeServerUrl,
 } from '../src/lib/moke-reader.ts';
@@ -73,6 +74,43 @@ test('native top safe area rejects errors and normalizes invalid values', async 
   assert.equal(
     await getNativeTopSafeAreaInset('ios', 2, async () => ({ top: Number.NaN })),
     0,
+  );
+});
+
+test('Moke restores the mobile status bar without changing Android navigation UI', async () => {
+  const androidCalls = [];
+  const androidBridge = {
+    showStatusBar: (darkMode) => androidCalls.push(darkMode),
+  };
+  const invokeCalls = [];
+  const invoke = async (command, args) => {
+    invokeCalls.push([command, args]);
+    return { success: true };
+  };
+
+  assert.equal(await showMokeSystemStatusBar('android', true, androidBridge, invoke), true);
+  assert.deepEqual(androidCalls, [true]);
+  assert.deepEqual(invokeCalls, []);
+
+  assert.equal(await showMokeSystemStatusBar('ios', false, undefined, invoke), true);
+  assert.deepEqual(invokeCalls, [[
+    'plugin:native-bridge|set_system_ui_visibility',
+    { payload: { visible: true, darkMode: false } },
+  ]]);
+
+  assert.equal(await showMokeSystemStatusBar('ohos', false, androidBridge, invoke), false);
+  assert.equal(await showMokeSystemStatusBar('windows', false, androidBridge, invoke), false);
+  assert.deepEqual(androidCalls, [true]);
+  assert.equal(invokeCalls.length, 1);
+});
+
+test('Moke surfaces iOS status-bar restoration failures', async () => {
+  await assert.rejects(
+    showMokeSystemStatusBar('ios', false, undefined, async () => ({
+      success: false,
+      error: 'status bar unavailable',
+    })),
+    /status bar unavailable/,
   );
 });
 

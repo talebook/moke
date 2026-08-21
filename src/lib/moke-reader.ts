@@ -14,7 +14,46 @@ export const shouldApplyTopSafeArea = (
 ): boolean =>
   (platform === 'android' && !isMultiWindow) || platform === 'ios';
 
-type RuntimeInvoke = <T>(command: string) => Promise<T>;
+type RuntimeInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
+interface AndroidSystemUIBridge {
+  showStatusBar?: (darkMode: boolean) => void;
+}
+
+interface SystemUIVisibilityResponse {
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Restore the system status bar while the Moke shell is active. Android uses
+ * a Moke-owned bridge so restoring the top bar does not also change the
+ * navigation bar; iOS uses the existing native-bridge command. Readest has a
+ * separate frontend and keeps ownership of its own immersive/fullscreen UI.
+ */
+export async function showMokeSystemStatusBar(
+  platform: string,
+  darkMode: boolean,
+  androidBridge?: AndroidSystemUIBridge,
+  invokeOverride?: RuntimeInvoke,
+): Promise<boolean> {
+  if (platform === 'android') {
+    if (!androidBridge?.showStatusBar) return false;
+    androidBridge.showStatusBar(darkMode);
+    return true;
+  }
+  if (platform !== 'ios') return false;
+
+  const invoke = invokeOverride ?? (await import('@tauri-apps/api/core')).invoke;
+  const response = await invoke<SystemUIVisibilityResponse>(
+    'plugin:native-bridge|set_system_ui_visibility',
+    { payload: { visible: true, darkMode } },
+  );
+  if (!response.success) {
+    throw new Error(response.error || 'Unable to show the iOS status bar');
+  }
+  return true;
+}
 
 interface StatusBarHeightResponse {
   height: number;

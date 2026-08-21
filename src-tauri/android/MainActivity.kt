@@ -22,6 +22,8 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.readest.native_bridge.KeyDownInterceptor
 import java.lang.ref.WeakReference
 
@@ -39,6 +41,11 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         @JavascriptInterface
         fun isInMultiWindowMode(): Boolean =
             activityRef.get()?.isInMultiWindowMode ?: false
+
+        @JavascriptInterface
+        fun showStatusBar(darkMode: Boolean) {
+            activityRef.get()?.showMokeStatusBar(darkMode)
+        }
     }
 
     companion object {
@@ -144,6 +151,21 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         }
     }
 
+    /**
+     * Readest and Moke share this Activity on Android. The reader may enter an
+     * immersive mode that hides the system bars, so every Moke document asks
+     * the Activity to restore the top status bar. Keep the navigation bar
+     * untouched: its visibility remains owned by the current system/reader
+     * policy.
+     */
+    private fun showMokeStatusBar(darkMode: Boolean) {
+        runOnUiThread {
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.show(WindowInsetsCompat.Type.statusBars())
+            controller.isAppearanceLightStatusBars = !darkMode
+        }
+    }
+
     @Suppress("DEPRECATION")
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
         super.onMultiWindowModeChanged(isInMultiWindowMode)
@@ -235,6 +257,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        showMokeStatusBar(darkMode = false)
     }
 
     override fun onDestroy() {
