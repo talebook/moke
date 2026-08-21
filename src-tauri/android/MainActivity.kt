@@ -18,10 +18,12 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import com.readest.native_bridge.KeyDownInterceptor
+import java.lang.ref.WeakReference
 
 class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var wv: WebView? = null
@@ -30,6 +32,14 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var interceptPageTurnerKeysEnabled = false
     private var keyLearnModeEnabled = false
     private var lastExitBackPressedAt = 0L
+
+    private class WindowModeBridge(activity: MainActivity) {
+        private val activityRef = WeakReference<MainActivity>(activity)
+
+        @JavascriptInterface
+        fun isInMultiWindowMode(): Boolean =
+            activityRef.get()?.isInMultiWindowMode ?: false
+    }
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
@@ -112,6 +122,32 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
 
     override fun onWebViewCreate(webView: WebView) {
         wv = webView
+        // Android multi-window changes resize the existing WebView without a
+        // navigation. AppShell queries this synchronous bridge on each resize
+        // so it can avoid applying a second status-bar inset in split screen.
+        webView.addJavascriptInterface(WindowModeBridge(this), "MokeWindowMode")
+    }
+
+    private fun notifyWindowModeChanged() {
+        val webView = wv ?: return
+        webView.post {
+            if (wv !== webView) return@post
+            try {
+                webView.evaluateJavascript(
+                    """window.dispatchEvent(new Event("moke:window-mode-change"));""",
+                    null,
+                )
+            } catch (_: IllegalStateException) {
+                // The Activity may be destroyed after post() but before this
+                // runnable reaches the WebView thread.
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
+        super.onMultiWindowModeChanged(isInMultiWindowMode)
+        notifyWindowModeChanged()
     }
 
     override fun interceptVolumeKeys(enabled: Boolean) {
@@ -199,5 +235,12 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+    }
+
+    override fun onDestroy() {
+        val webView = wv
+        wv = null
+        webView?.removeJavascriptInterface("MokeWindowMode")
+        super.onDestroy()
     }
 }

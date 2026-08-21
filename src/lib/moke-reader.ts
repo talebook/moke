@@ -5,11 +5,14 @@ export const isSingleWebviewRuntime = (platform: string): boolean =>
 
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
- * the top safe-area inset. OHOS already keeps the WebView below its status bar
- * and must not receive a second offset.
+ * the top safe-area inset. Android multi-window and OHOS already keep the
+ * WebView below the status bar and must not receive a second offset.
  */
-export const shouldApplyTopSafeArea = (platform: string): boolean =>
-  platform === 'android' || platform === 'ios';
+export const shouldApplyTopSafeArea = (
+  platform: string,
+  isMultiWindow = false,
+): boolean =>
+  (platform === 'android' && !isMultiWindow) || platform === 'ios';
 
 type RuntimeInvoke = <T>(command: string) => Promise<T>;
 
@@ -33,8 +36,9 @@ export async function getNativeTopSafeAreaInset(
   platform: string,
   devicePixelRatio = 1,
   invokeOverride?: RuntimeInvoke,
+  isMultiWindow = false,
 ): Promise<number> {
-  if (!shouldApplyTopSafeArea(platform)) return 0;
+  if (!shouldApplyTopSafeArea(platform, isMultiWindow)) return 0;
 
   const invoke = invokeOverride ?? (await import('@tauri-apps/api/core')).invoke;
   if (platform === 'android') {

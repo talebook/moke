@@ -13,6 +13,14 @@ import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { NativeBackNavigation } from './NativeBackNavigation';
 import { PrivacyConsentGate } from './PrivacyConsentGate';
 
+declare global {
+  interface Window {
+    MokeWindowMode?: {
+      isInMultiWindowMode: () => boolean;
+    };
+  }
+}
+
 // 开发环境尽早 patch console，使 console.error/warn/log 也进入调试面板。
 // 生产环境默认不启用（见下方 useEffect 的开发者解锁门控），避免为所有用户
 // 全局 patch console 并缓存日志（内存/性能与敏感信息暴露考量）。
@@ -66,12 +74,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // out below its status bar. Mark only the runtimes that need the CSS top
   // inset. Native values avoid Android WebView cold-start bugs where the CSS
   // safe-area env remains 0; a bounded retry covers the native bridge/window
-  // insets not being ready during the first frames of app startup.
+  // insets not being ready during the first frames of app startup. Android
+  // multi-window already places the WebView below the system status bar, so it
+  // must not receive the full-screen inset again.
   useEffect(() => {
     const el = document.documentElement;
     let cancelled = false;
     let runtimePlatform: string | null = null;
     let retryTimer: number | undefined;
+    let refreshFrame: number | undefined;
+    let detectionId = 0;
     const maxAttempts = 12;
 
     const clearRetry = () => {
@@ -82,12 +94,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
 
     const detectSafeArea = async (attempt = 0): Promise<void> => {
+      const currentDetectionId = ++detectionId;
       clearRetry();
       try {
         const platform = runtimePlatform ?? await getMokeRuntimePlatform();
-        if (cancelled) return;
+        if (cancelled || currentDetectionId !== detectionId) return;
         runtimePlatform = platform;
-        const enabled = shouldApplyTopSafeArea(platform);
+        let isMultiWindow = false;
+        if (platform === 'android') {
+          try {
+            isMultiWindow = window.MokeWindowMode?.isInMultiWindowMode() === true;
+          } catch {
+            // Older Android builds do not expose the window-mode bridge.
+          }
+        }
+        const enabled = shouldApplyTopSafeArea(platform, isMultiWindow);
         el.dataset.mokeRuntimePlatform = platform;
         el.toggleAttribute('data-moke-top-safe-area', enabled);
 
@@ -96,8 +117,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const top = await getNativeTopSafeAreaInset(platform, window.devicePixelRatio);
-        if (cancelled) return;
+        const top = await getNativeTopSafeAreaInset(
+          platform,
+          window.devicePixelRatio,
+          undefined,
+          isMultiWindow,
+        );
+        if (cancelled || currentDetectionId !== detectionId) return;
         if (top > 0) {
           el.style.setProperty('--moke-top-safe-area', `${top}px`);
           return;
@@ -111,7 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           }, 250);
         }
       } catch (error) {
-        if (cancelled) return;
+        if (cancelled || currentDetectionId !== detectionId) return;
         if (attempt + 1 < maxAttempts) {
           retryTimer = window.setTimeout(() => {
             void detectSafeArea(attempt + 1);
@@ -125,19 +151,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const refreshSafeArea = () => {
       if (!cancelled) void detectSafeArea();
     };
+    const scheduleSafeAreaRefresh = () => {
+      if (cancelled || refreshFrame !== undefined) return;
+      refreshFrame = window.requestAnimationFrame(() => {
+        refreshFrame = undefined;
+        refreshSafeArea();
+      });
+    };
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') refreshSafeArea();
     };
 
     void detectSafeArea();
     window.addEventListener('pageshow', refreshSafeArea);
+    window.addEventListener('resize', scheduleSafeAreaRefresh);
+    window.addEventListener('moke:window-mode-change', scheduleSafeAreaRefresh);
     window.addEventListener('orientationchange', refreshSafeArea);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       cancelled = true;
       clearRetry();
+      if (refreshFrame !== undefined) window.cancelAnimationFrame(refreshFrame);
       window.removeEventListener('pageshow', refreshSafeArea);
+      window.removeEventListener('resize', scheduleSafeAreaRefresh);
+      window.removeEventListener('moke:window-mode-change', scheduleSafeAreaRefresh);
       window.removeEventListener('orientationchange', refreshSafeArea);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       delete el.dataset.mokeRuntimePlatform;

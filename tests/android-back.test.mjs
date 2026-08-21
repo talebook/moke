@@ -7,6 +7,10 @@ const activitySource = readFileSync(
   fileURLToPath(new URL('../src-tauri/android/MainActivity.kt', import.meta.url)),
   'utf8',
 );
+const appShellSource = readFileSync(
+  fileURLToPath(new URL('../src/components/providers/AppShell.tsx', import.meta.url)),
+  'utf8',
+);
 const backNavigationSource = readFileSync(
   fileURLToPath(new URL('../src/components/providers/NativeBackNavigation.tsx', import.meta.url)),
   'utf8',
@@ -42,6 +46,24 @@ test('Android 非根页返回键交给 Next 路由且不覆盖阅读器拦截', 
   assert.match(activitySource, /moke:native-back/);
   assert.match(activitySource, /!interceptBackKeyEnabled/);
   assert.match(activitySource, /isEmbeddedReaderRoute\(\)/);
+});
+
+test('Android 分屏时通过原生窗口状态移除重复的顶部安全区', () => {
+  assert.match(activitySource, /@JavascriptInterface/);
+  assert.match(activitySource, /WeakReference<MainActivity>/);
+  assert.match(activitySource, /addJavascriptInterface\(WindowModeBridge\(this\), "MokeWindowMode"\)/);
+  assert.match(activitySource, /removeJavascriptInterface\("MokeWindowMode"\)/);
+  assert.match(activitySource, /onMultiWindowModeChanged\(isInMultiWindowMode: Boolean\)/);
+  assert.match(activitySource, /moke:window-mode-change/);
+  assert.match(activitySource, /catch \(_: IllegalStateException\)/);
+  assert.match(appShellSource, /MokeWindowMode\?\.isInMultiWindowMode\(\)/);
+  assert.match(appShellSource, /shouldApplyTopSafeArea\(platform, isMultiWindow\)/);
+  assert.match(appShellSource, /requestAnimationFrame/);
+  assert.match(appShellSource, /addEventListener\('resize', scheduleSafeAreaRefresh\)/);
+  assert.match(
+    appShellSource,
+    /addEventListener\('moke:window-mode-change', scheduleSafeAreaRefresh\)/,
+  );
 });
 
 test('Android 返回先渲染上一页，再只把当前页向右划出', () => {
