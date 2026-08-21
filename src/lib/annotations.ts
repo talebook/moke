@@ -295,7 +295,8 @@ export function newMokeAnnotationClientId(): string {
 
 export function annotationSourceNames(annotation: BookAnnotation): string[] {
   const names = annotation.sources.map((source) => source.source_name).filter(Boolean);
-  return names.length > 0 ? Array.from(new Set(names)) : ['talebook'];
+  if (names.length > 0) return Array.from(new Set(names));
+  return annotation.client_id?.startsWith('moke-') ? ['moke'] : ['talebook'];
 }
 
 export function annotationReaderProgress(
@@ -434,17 +435,9 @@ function normalizeUpsertAnnotation(
     throw unsupportedContractError();
   }
 
-  const sources: AnnotationSource[] = [];
-  if (Array.isArray(value.sources)) {
-    for (const source of value.sources) {
-      try {
-        sources.push(normalizeSource(source));
-      } catch {
-        // A malformed optional source must not turn a committed POST into a
-        // visible save failure. The next GET can recover the canonical shape.
-      }
-    }
-  }
+  const sources = Array.isArray(value.sources)
+    ? normalizeSources(value.sources, value.id)
+    : [];
 
   return {
     id,
@@ -492,20 +485,39 @@ function normalizeAnnotation(value: unknown): BookAnnotation {
     user_modified_at: nullableString(value.user_modified_at),
     created_at: nullableString(value.created_at),
     updated_at: nullableString(value.updated_at),
-    sources: value.sources.map(normalizeSource),
+    sources: normalizeSources(value.sources, value.id),
   };
+}
+
+function normalizeSources(values: unknown[], annotationId: unknown): AnnotationSource[] {
+  const sources: AnnotationSource[] = [];
+  values.forEach((value, sourceIndex) => {
+    try {
+      sources.push(normalizeSource(value));
+    } catch (error) {
+      // Source rows are optional provenance. Keep the annotation's readable
+      // body while leaving a warning in Moke's captured debug console.
+      console.warn('[annotations] 已跳过畸形来源记录', {
+        annotation_id: finiteNumber(annotationId),
+        source_index: sourceIndex,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+  return sources;
 }
 
 function normalizeSource(value: unknown): AnnotationSource {
   if (!isRecord(value)
-    || typeof value.id !== 'number'
     || typeof value.source_name !== 'string'
     || typeof value.source_connection_id !== 'string'
     || typeof value.source_sync_status !== 'string') {
     throw unsupportedContractError();
   }
+  const id = finiteNumber(value.id);
+  if (id === null) throw unsupportedContractError();
   return {
-    id: value.id,
+    id,
     source_name: value.source_name,
     source_connection_id: value.source_connection_id,
     source_annotation_id: nullableString(value.source_annotation_id),

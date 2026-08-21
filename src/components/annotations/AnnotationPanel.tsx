@@ -37,7 +37,7 @@ const TYPE_META: Record<AnnotationType, { label: string; icon: typeof StickyNote
 
 const SOURCE_LABELS: Record<string, string> = {
   talebook: 'Talebook',
-  moke: 'Moke',
+  moke: 'Moke（本机）',
   calibre: 'Calibre',
   weread: '微信读书',
   readwise: 'Readwise',
