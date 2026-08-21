@@ -323,10 +323,10 @@ function DetailContent() {
 
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (!book) return;
-    // 打开/记录在途时拦截重复点击：按钮只在阅读器窗口已打开后恢复可点，
-    // 记录请求仍在途，此时放行会造成重复打开窗口和重复计数。
+    const openingMessage = '正在打开书籍，请稍候。';
+    // 打开/记录在途时拦截重复点击，避免重复开窗和重复计数。
     if (openingReaderRef.current) {
-      setMessage('正在打开书籍，请稍候。');
+      setMessage(openingMessage);
       return;
     }
 
@@ -337,6 +337,7 @@ function DetailContent() {
     const finishOpening = () => {
       openingReaderRef.current = false;
       setOpeningReader(false);
+      setMessage((current) => current === openingMessage ? '' : current);
     };
 
     try {
@@ -391,10 +392,6 @@ function DetailContent() {
               restoreProgress,
             });
           },
-          // The independent reader window is open now, so unlock the button
-          // right away; the re-entry ref stays held until the record settles
-          // so a second click cannot duplicate the open or the count.
-          onOpened: () => setOpeningReader(false),
           record: () => recordBookRead(request, serverUrl, book.id),
           onRecordError: (error) => {
             console.warn('Reader opened, but the read record could not be saved:', error);
