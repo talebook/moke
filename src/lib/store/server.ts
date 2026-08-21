@@ -5,6 +5,11 @@ import {
   safeRemoveLocalStorageItem,
   safeSetLocalStorageItem,
 } from '@/lib/browser-storage';
+import {
+  createUncheckedAnnotationCapability,
+  isAnnotationCapabilityStatus,
+  type AnnotationCapabilityStatus,
+} from '@/lib/annotation-capability';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -29,7 +34,8 @@ export interface ReaderInfo {
 
 export interface ServerCapabilities {
   shelfApi: boolean;
-  annotationApi: boolean;
+  annotationApiStatus: AnnotationCapabilityStatus;
+  annotationApiCheckedAt: number | null;
   readingStateApi: boolean;
   readingProgressApi: boolean;
   readingStatsApi: boolean;
@@ -38,9 +44,12 @@ export interface ServerCapabilities {
   version: string;
 }
 
+const uncheckedAnnotationCapability = createUncheckedAnnotationCapability();
+
 export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
   shelfApi: false,
-  annotationApi: false,
+  annotationApiStatus: uncheckedAnnotationCapability.status,
+  annotationApiCheckedAt: uncheckedAnnotationCapability.checkedAt,
   readingStateApi: false,
   readingProgressApi: false,
   readingStatsApi: false,
@@ -134,17 +143,30 @@ export const useServerStore = create<ServerState>()(
       // merge 时强制为 true；其余字段仍按持久化值恢复。
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<ServerState>;
-        const persistedCapabilities = persisted.capabilities as Partial<ServerCapabilities> | undefined;
-        const hasAnnotationCapability = typeof persistedCapabilities?.annotationApi === 'boolean';
+        const persistedCapabilities = persisted.capabilities as (
+          Partial<ServerCapabilities> & { annotationApi?: unknown }
+        ) | undefined;
+        const persistedStatus = persistedCapabilities?.annotationApiStatus;
+        // A legacy `false` may have come from a network failure, so it must be
+        // rechecked rather than migrated to a durable "unsupported" result.
+        const annotationApiStatus = isAnnotationCapabilityStatus(persistedStatus)
+          ? persistedStatus
+          : persistedCapabilities?.annotationApi === true
+            ? 'supported'
+            : 'unchecked';
+        const annotationApiCheckedAt = annotationApiStatus === 'unchecked'
+          ? null
+          : typeof persistedCapabilities?.annotationApiCheckedAt === 'number'
+            ? persistedCapabilities.annotationApiCheckedAt
+            : persistedCapabilities?.checkedAt ?? null;
         return {
           ...currentState,
           ...persisted,
           capabilities: {
             ...currentState.capabilities,
             ...persistedCapabilities,
-            // Older persisted stores predate annotationApi. Force one fresh
-            // discovery instead of treating a missing field as unsupported.
-            checkedAt: hasAnnotationCapability ? persistedCapabilities?.checkedAt ?? null : null,
+            annotationApiStatus,
+            annotationApiCheckedAt,
           },
           hasHydrated: true,
         };

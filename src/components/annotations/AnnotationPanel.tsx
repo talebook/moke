@@ -14,12 +14,18 @@ import {
   type AnnotationType,
   type BookAnnotation,
 } from '@/lib/annotations';
+import {
+  ANNOTATION_CAPABILITY_PROBE_MAX_REQUESTS,
+  shouldAutomaticallyLoadAnnotations,
+  type AnnotationCapabilityStatus,
+} from '@/lib/annotation-capability';
 import { useServerStore } from '@/lib/store/server';
 
 interface AnnotationPanelProps {
   bookId: string;
   serverUrl: string;
-  supported: boolean;
+  capabilityStatus: AnnotationCapabilityStatus;
+  capabilityCheckedAt: number | null;
   downloaded: boolean;
   openingReader: boolean;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
@@ -47,15 +53,22 @@ const SOURCE_LABELS: Record<string, string> = {
 export function AnnotationPanel({
   bookId,
   serverUrl,
-  supported,
+  capabilityStatus,
+  capabilityCheckedAt,
   downloaded,
   openingReader,
   onLocate,
   onAuthRequired,
 }: AnnotationPanelProps) {
   const [annotations, setAnnotations] = useState<BookAnnotation[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>(supported ? 'loading' : 'unsupported');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [loadState, setLoadState] = useState<LoadState>(() => {
+    if (capabilityStatus === 'unsupported') return 'unsupported';
+    if (capabilityStatus === 'transient-error') return 'error';
+    return 'loading';
+  });
+  const [errorMessage, setErrorMessage] = useState(() => (
+    capabilityStatus === 'transient-error' ? '上次探测遇到网络异常，请检查网络后重试。' : ''
+  ));
   const [sourceFilter, setSourceFilter] = useState('all');
   const [showComposer, setShowComposer] = useState(false);
   const [chapter, setChapter] = useState('');
@@ -65,20 +78,47 @@ export function AnnotationPanel({
   const [saveError, setSaveError] = useState('');
   const draftClientIdRef = useRef('');
   const loadSequenceRef = useRef(0);
+  const capabilityRef = useRef({ status: capabilityStatus, checkedAt: capabilityCheckedAt });
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    capabilityRef.current = { status: capabilityStatus, checkedAt: capabilityCheckedAt };
+  }, [capabilityCheckedAt, capabilityStatus]);
+
+  const setCapability = useCallback((status: AnnotationCapabilityStatus) => {
+    const checkedAt = Date.now();
+    capabilityRef.current = { status, checkedAt };
+    const state = useServerStore.getState();
+    if (state.serverUrl !== serverUrl) return;
+    state.setServerCapabilities({
+      ...state.capabilities,
+      annotationApiStatus: status,
+      annotationApiCheckedAt: checkedAt,
+    });
+  }, [serverUrl]);
+
+  const load = useCallback(async (force = false) => {
     const sequence = ++loadSequenceRef.current;
-    if (!supported) {
-      setLoadState('unsupported');
-      setErrorMessage('');
+    if (!force && !shouldAutomaticallyLoadAnnotations(capabilityRef.current)) {
+      if (capabilityRef.current.status === 'unsupported') {
+        setLoadState('unsupported');
+        setErrorMessage('');
+      } else {
+        setLoadState('error');
+        setErrorMessage('上次探测遇到网络异常，请检查网络后重试。');
+      }
       return;
     }
     setLoadState('loading');
     setErrorMessage('');
     try {
-      const items = await fetchBookAnnotations(request, serverUrl, bookId);
+      // This useful data load is also the capability probe. Disable hidden
+      // retries so one mount performs at most one annotation request.
+      const items = await fetchBookAnnotations(request, serverUrl, bookId, {
+        maxRetries: ANNOTATION_CAPABILITY_PROBE_MAX_REQUESTS - 1,
+      });
       if (sequence !== loadSequenceRef.current) return;
       setAnnotations(items);
+      setCapability('supported');
       setLoadState('ready');
     } catch (error) {
       if (sequence !== loadSequenceRef.current) return;
@@ -88,19 +128,15 @@ export function AnnotationPanel({
         return;
       }
       if (isAnnotationApiUnsupported(error)) {
-        const { capabilities, setServerCapabilities } = useServerStore.getState();
-        setServerCapabilities({
-          ...capabilities,
-          annotationApi: false,
-          checkedAt: Date.now(),
-        });
+        setCapability('unsupported');
         setLoadState('unsupported');
         return;
       }
+      setCapability('transient-error');
       setErrorMessage(getErrorMessage(error, '暂时无法读取笔记，请检查网络后重试。'));
       setLoadState('error');
     }
-  }, [bookId, onAuthRequired, serverUrl, supported]);
+  }, [bookId, onAuthRequired, serverUrl, setCapability]);
 
   useEffect(() => {
     void load();
@@ -241,7 +277,10 @@ export function AnnotationPanel({
 
       {loadState === 'unsupported' && (
         <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-foreground">
-          当前 Talebook 版本不支持 Moke 笔记联动，需要服务端契约 <code className="text-xs">{TALEBOOK_ANNOTATION_CONTRACT}</code>。
+          <p>当前 Talebook 版本不支持 Moke 笔记联动，需要服务端契约 <code className="text-xs">{TALEBOOK_ANNOTATION_CONTRACT}</code>。</p>
+          <button type="button" onClick={() => void load(true)} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+            <RefreshCw className="h-3.5 w-3.5" /> 重新探测
+          </button>
         </div>
       )}
 
@@ -255,7 +294,7 @@ export function AnnotationPanel({
         <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-4">
           <p className="text-sm text-foreground" role="alert">{errorMessage}</p>
           <p className="mt-1 text-xs text-muted-foreground">本次失败不会修改远端或本地笔记。</p>
-          <button type="button" onClick={() => void load()} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
+          <button type="button" onClick={() => void load(true)} className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline">
             <RefreshCw className="h-3.5 w-3.5" /> 重试
           </button>
         </div>

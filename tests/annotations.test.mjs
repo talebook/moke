@@ -190,6 +190,23 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
   assert.equal(attempts, 3);
 });
 
+test('能力探测关闭内部重试时每次 UI 操作至多发送一个请求', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => {
+        attempts += 1;
+        throw new TypeError('Failed to fetch');
+      },
+      'http://talebook-probe-limit',
+      42,
+      { maxRetries: 0 },
+    ),
+    TypeError,
+  );
+  assert.equal(attempts, 1);
+});
+
 test('重复 upsert 复用 client_id，且来源字段使用 v2 source_ 前缀', async () => {
   const ids = new Map();
   let nextId = 1;
@@ -449,6 +466,16 @@ test('旧服务器或非数组响应明确标记为 contract 不兼容', async (
   await assert.rejects(
     () => fetchBookAnnotations(
       async () => jsonResponse({ err: 'ok', annotations: { id: 1 } }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    isAnnotationApiUnsupported,
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } }),
       'http://talebook',
       42,
       { maxRetries: 0 },

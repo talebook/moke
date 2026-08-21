@@ -54,15 +54,24 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const [userData, serverData, capabilities] = await Promise.all([
+        const [userData, serverData, discoveredCapabilities] = await Promise.all([
           fetchCurrentUser(),
           fetchServerInfo(),
           discoverServerCapabilities(serverUrl),
         ]);
         if (!cancelled) {
+          const currentState = useServerStore.getState();
+          if (currentState.serverUrl !== serverUrl) return;
+          // Global discovery intentionally does not download annotation data.
+          // Preserve the panel-owned result across the general five-minute TTL.
+          const currentCapabilities = currentState.capabilities;
           setUser(userData.user);
           setServerTitle(serverData.title || '');
-          setServerCapabilities(capabilities);
+          setServerCapabilities({
+            ...discoveredCapabilities,
+            annotationApiStatus: currentCapabilities.annotationApiStatus,
+            annotationApiCheckedAt: currentCapabilities.annotationApiCheckedAt,
+          });
         }
       } catch (e) {
         console.error('[ServerProvider] sync error:', e);
