@@ -1,12 +1,12 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { requestAnimatedBack } from '@/lib/native-back';
 
 interface TalebookResetResponse {
   err: string;
@@ -80,9 +80,9 @@ export default function ResetPasswordPage() {
       <div className="relative w-full max-w-[410px] my-8 overflow-hidden rounded-[32px] app-glass p-10">
         <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
         <div className="relative">
-        <Link href="/" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => requestAnimatedBack('/')} aria-label="返回" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-        </Link>
+        </button>
         <div className="flex justify-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-primary shadow-lg shadow-primary/15 flex items-center justify-center">
             <BookOpen className="w-7 h-7 text-primary-foreground" />
@@ -142,12 +142,13 @@ export default function ResetPasswordPage() {
 
         <p className="text-sm text-center mt-6 text-muted-foreground">
           记起密码了？{' '}
-          <Link
-            href="/login"
+          <button
+            type="button"
+            onClick={() => requestAnimatedBack('/login')}
             className="font-medium text-primary hover:underline"
           >
             返回登录
-          </Link>
+          </button>
         </p>
 
         <CaptchaModal

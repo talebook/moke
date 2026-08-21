@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
+import { requestAnimatedBack } from '@/lib/native-back';
 import { useExtensionStore, type ExtensionInfo } from '@/lib/store/extensions';
 
 function DetailContent() {
@@ -78,7 +79,7 @@ function DetailContent() {
             <Puzzle className="w-10 h-10 text-muted-foreground/40 mb-4" />
             <p className="text-sm text-muted-foreground">未找到拓展「{name}」</p>
             <button
-              onClick={() => router.push('/extensions')}
+              onClick={() => requestAnimatedBack('/extensions')}
               className="mt-3 text-sm text-primary hover:underline"
             >
               返回拓展列表
@@ -100,7 +101,7 @@ function DetailContent() {
             </div>
           )}
           <button
-            onClick={() => router.push('/extensions')}
+            onClick={() => requestAnimatedBack('/extensions')}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
           >
             <ArrowLeft className="w-4 h-4" />
