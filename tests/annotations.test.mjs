@@ -4,13 +4,13 @@ import assert from 'node:assert/strict';
 import {
   annotationReaderProgress,
   annotationSourceNames,
+  beginAnnotationLocateNavigation,
   clearAnnotationLocateProgressSuppression,
   fetchBookAnnotations,
   hasReadestAnnotationLocation,
   isAnnotationApiUnsupported,
   shouldSuppressAnnotationReaderProgress,
   stableMokeAnnotationClientId,
-  suppressAnnotationLocateProgress,
   TALEBOOK_ANNOTATION_CONTRACT,
   upsertBookAnnotation,
   upsertBookAnnotations,
@@ -107,42 +107,65 @@ test('CFI 标注转换为 Readest 精确定位进度', () => {
   assert.equal(annotationReaderProgress(external, 42), null);
 });
 
-test('标注定位恢复位置不会覆盖普通阅读进度，用户翻页后恢复同步', () => {
-  const target = 'epubcfi(/6/4!/4/2/8)';
-  const serverUrl = 'http://talebook-a';
-  suppressAnnotationLocateProgress(serverUrl, 42, target);
-  const restored = {
-    schema: 'moke.readest.progress.v1',
-    reader: 'readest',
-    moke_book_id: '42',
-    location: target,
-    updated_at: new Date().toISOString(),
+test('显式定位导航协议不依赖时长或 CFI 字节相等', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a', 42);
+  const restored = annotationReaderProgress(
+    annotation({ cfi: 'epubcfi(/6/4!/4/2/8)' }),
+    42,
+    navigationId,
+  );
+
+  assert.equal(restored.moke_navigation_id, navigationId);
+  assert.equal(restored.moke_navigation_kind, 'annotation-locate');
+
+  const normalizedAfterSlowLoad = {
+    ...restored,
+    location: 'epubcfi(/6/4!/4/2/8:0)',
+    moke_navigation_phase: 'complete',
   };
-  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), true);
   assert.equal(
-    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'reader-normalized-default' }),
+    shouldSuppressAnnotationReaderProgress(
+      'http://talebook-a',
+      normalizedAfterSlowLoad,
+      Date.now() + 60_000,
+    ),
     true,
   );
+
+  // The terminal correlated event consumes the one-shot state. A real page
+  // turn has no navigation marker and resumes ordinary progress persistence.
   assert.equal(
-    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'epubcfi(/6/6)' }, Date.now() + 11_000),
+    shouldSuppressAnnotationReaderProgress('http://talebook-a', {
+      ...restored,
+      location: 'epubcfi(/6/6)',
+      moke_navigation_id: undefined,
+      moke_navigation_kind: undefined,
+      moke_navigation_phase: undefined,
+    }),
     false,
   );
-  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), false);
-  clearAnnotationLocateProgressSuppression(serverUrl, 42);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', restored), false);
 });
 
-test('标注定位进度抑制按 serverUrl 隔离', () => {
+test('定位导航只抑制匹配 server/book/session 的事件，并可在失败时回收', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a/', 42);
   const progress = {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
     moke_book_id: '42',
-    location: 'epubcfi(/6/4)',
+    location: 'reader-normalized-location',
+    moke_navigation_id: navigationId,
+    moke_navigation_kind: 'annotation-locate',
+    moke_navigation_phase: 'navigating',
     updated_at: new Date().toISOString(),
   };
-  suppressAnnotationLocateProgress('http://talebook-a/', 42, progress.location);
+
   assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-b', progress), false);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', { ...progress, moke_book_id: '43' }), false);
   assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), true);
-  clearAnnotationLocateProgressSuppression('http://talebook-a', 42);
+
+  clearAnnotationLocateProgressSuppression(navigationId);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), false);
 });
 
 test('429/5xx/网络错误有限重试，登录失效不会重试', async () => {

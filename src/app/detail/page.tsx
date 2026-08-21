@@ -35,8 +35,8 @@ import { makeOfflineBookKey } from '@/lib/offline-book-core';
 import { AnnotationPanel } from '@/components/annotations/AnnotationPanel';
 import {
   annotationReaderProgress,
+  beginAnnotationLocateNavigation,
   clearAnnotationLocateProgressSuppression,
-  suppressAnnotationLocateProgress,
   type BookAnnotation,
 } from '@/lib/annotations';
 
@@ -333,6 +333,7 @@ function DetailContent() {
     openingReaderRef.current = true;
     setOpeningReader(true);
     setMessage('');
+    let annotationNavigationId: string | undefined;
 
     const finishOpening = () => {
       openingReaderRef.current = false;
@@ -345,8 +346,11 @@ function DetailContent() {
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
+        if (targetAnnotation) {
+          annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
+        }
         const restoreProgress = targetAnnotation
-          ? annotationReaderProgress(targetAnnotation, book.id)
+          ? annotationReaderProgress(targetAnnotation, book.id, annotationNavigationId)
           : await fetchReadingProgress(book.id);
         const currentPlatform = await getMokeRuntimePlatform();
 
@@ -357,10 +361,9 @@ function DetailContent() {
             debugPanel: useDeveloperStore.getState().showDebugPanel,
             mokeBookId: String(book.id),
             restoreProgress,
-            // A single-WebView annotation locate session intentionally omits
-            // direct progress sync: otherwise the restored CFI would replace
-            // the user's ordinary continue-reading position.
-            serverUrl: targetAnnotation ? undefined : useServerStore.getState().serverUrl,
+            // The explicit navigation id lets the reader skip only startup and
+            // annotation relocations; genuine page turns still sync directly.
+            serverUrl: useServerStore.getState().serverUrl,
           });
 
           // Navigation replaces this WebView and destroys the current JS
@@ -377,9 +380,6 @@ function DetailContent() {
           return;
         }
 
-        if (targetAnnotation && restoreProgress?.location) {
-          suppressAnnotationLocateProgress(serverUrl, book.id, restoreProgress.location);
-        }
         await openAndRecordBookRead({
           open: async () => {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -405,7 +405,7 @@ function DetailContent() {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
     } catch (e) {
-      if (targetAnnotation) clearAnnotationLocateProgressSuppression(serverUrl, book.id);
+      if (annotationNavigationId) clearAnnotationLocateProgressSuppression(annotationNavigationId);
       console.error('Failed to open book:', e);
       setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {

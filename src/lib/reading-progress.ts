@@ -17,6 +17,9 @@ export interface ReadingProgressPayload {
   total_pages?: number;
   progress?: number;
   fraction?: number;
+  moke_navigation_id?: string;
+  moke_navigation_kind?: 'annotation-locate';
+  moke_navigation_phase?: 'pending' | 'navigating' | 'complete';
   updated_at: string;
 }
 
@@ -50,6 +53,13 @@ export function normalizeReaderProgressEvent(input: Record<string, unknown>): Re
     total_pages: totalPages,
     progress,
     fraction,
+    moke_navigation_id: toStringValue(input.moke_navigation_id),
+    moke_navigation_kind: input.moke_navigation_kind === 'annotation-locate'
+      ? 'annotation-locate'
+      : undefined,
+    moke_navigation_phase: isNavigationPhase(input.moke_navigation_phase)
+      ? input.moke_navigation_phase
+      : undefined,
     updated_at: new Date().toISOString(),
   };
 }
@@ -110,6 +120,10 @@ function toStringValue(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (typeof value === 'number') return String(value);
   return undefined;
+}
+
+function isNavigationPhase(value: unknown): value is NonNullable<ReadingProgressPayload['moke_navigation_phase']> {
+  return value === 'pending' || value === 'navigating' || value === 'complete';
 }
 
 function toNumber(value: unknown): number | undefined {
