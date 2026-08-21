@@ -46,7 +46,7 @@ const base = `https://github.com/talebook/moke/releases/download/v${version}`;
 function platformFromName(name) {
   const n = name.toLowerCase();
   if (n.includes('setup.exe.sig')) return 'windows-x86_64';
-  if (n.includes('en-us.msi.sig')) return 'windows-x86_64-msi'; // dedup below
+  if (n.endsWith('.msi.sig')) return 'windows-x86_64-msi'; // dedup below
   if (n.includes('aarch64.dmg.sig')) return 'darwin-aarch64';
   if (n.includes('x64.dmg.sig')) return 'darwin-x86_64';
   if (n.includes('amd64.appimage.sig')) return 'linux-x86_64';

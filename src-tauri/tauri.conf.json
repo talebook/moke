@@ -51,7 +51,8 @@
     ],
     "windows": {
       "wix": {
-        "upgradeCode": "d1dfe239-c6ec-5195-980b-2d6cd723458a"
+        "upgradeCode": "d1dfe239-c6ec-5195-980b-2d6cd723458a",
+        "language": "zh-CN"
       },
       "nsis": {
         "installMode": "currentUser"

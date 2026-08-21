@@ -19,6 +19,7 @@ test('桌面默认名称为墨客，OHOS 保持 Moke', () => {
   assert.equal(config.app.windows[0].title, '墨客');
   assert.equal(ohosConfig.productName, 'Moke');
   assert.equal(config.bundle.windows.wix.upgradeCode, 'd1dfe239-c6ec-5195-980b-2d6cd723458a');
+  assert.equal(config.bundle.windows.wix.language, 'zh-CN');
 });
 
 test('移动端默认名称为墨客，英文系统名称为 Moke', () => {
