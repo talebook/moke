@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress, type ReadingProgressPayload } from '@/lib/reading-progress';
+import { shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
 import { useServerStore } from '@/lib/store/server';
 
 const SAVE_DELAY_MS = 1200;
@@ -24,6 +25,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
       .then(({ listen }) => listen<Record<string, unknown>>('reader:page:changed', (event) => {
         const progress = normalizeReaderProgressEvent(event.payload);
         if (!progress) return;
+        if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
 
         const bookId = progress.moke_book_id;
         pendingRef.current.set(bookId, progress);

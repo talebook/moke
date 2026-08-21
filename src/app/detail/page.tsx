@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
 import { requestAnimatedBack } from '@/lib/native-back';
@@ -31,6 +31,13 @@ import {
   subscribeOfflineDownload,
 } from '@/lib/offline-download-manager';
 import { makeOfflineBookKey } from '@/lib/offline-book-core';
+import { AnnotationPanel } from '@/components/annotations/AnnotationPanel';
+import {
+  annotationReaderProgress,
+  clearAnnotationLocateProgressSuppression,
+  suppressAnnotationLocateProgress,
+  type BookAnnotation,
+} from '@/lib/annotations';
 
 interface BookDetail {
   id: string;
@@ -62,7 +69,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl, user } = useServerStore();
+  const { serverUrl, capabilities, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -93,6 +100,7 @@ function DetailContent() {
     book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
   ));
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
+  const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
 
   useEffect(() => {
     if (!id) return;
@@ -312,7 +320,7 @@ function DetailContent() {
     }
   };
 
-  const handleOfflineRead = async () => {
+  const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (!book) return;
     // 打开/记录在途时拦截重复点击：按钮只在阅读器窗口已打开后恢复可点，
     // 记录请求仍在途，此时放行会造成重复打开窗口和重复计数。
@@ -336,7 +344,9 @@ function DetailContent() {
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
-        const restoreProgress = await fetchReadingProgress(book.id);
+        const restoreProgress = targetAnnotation
+          ? annotationReaderProgress(targetAnnotation, book.id)
+          : await fetchReadingProgress(book.id);
         const currentPlatform = await getMokeRuntimePlatform();
 
         if (isSingleWebviewRuntime(currentPlatform)) {
@@ -345,7 +355,10 @@ function DetailContent() {
             eink: useSettingsStore.getState().eink,
             mokeBookId: String(book.id),
             restoreProgress,
-            serverUrl: useServerStore.getState().serverUrl,
+            // A single-WebView annotation locate session intentionally omits
+            // direct progress sync: otherwise the restored CFI would replace
+            // the user's ordinary continue-reading position.
+            serverUrl: targetAnnotation ? undefined : useServerStore.getState().serverUrl,
           });
 
           // Navigation replaces this WebView and destroys the current JS
@@ -362,6 +375,9 @@ function DetailContent() {
           return;
         }
 
+        if (targetAnnotation && restoreProgress?.location) {
+          suppressAnnotationLocateProgress(serverUrl, book.id, restoreProgress.location);
+        }
         await openAndRecordBookRead({
           open: async () => {
             const { invoke } = await import('@tauri-apps/api/core');
@@ -386,8 +402,9 @@ function DetailContent() {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
       }
     } catch (e) {
+      if (targetAnnotation) clearAnnotationLocateProgressSuppression(serverUrl, book.id);
       console.error('Failed to open book:', e);
-      setMessage('打开书籍失败。');
+      setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
       finishOpening();
     }
@@ -465,7 +482,7 @@ function DetailContent() {
             {isTauriApp ? (
               <>
                 <button
-                  onClick={downloaded ? handleOfflineRead : handleDownload}
+                  onClick={() => void (downloaded ? handleOfflineRead() : handleDownload())}
                   disabled={downloading || openingReader}
                   className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
                 >
@@ -630,6 +647,19 @@ function DetailContent() {
             )}
           </div>
         </div>
+
+        {capabilities.checkedAt != null && (
+          <AnnotationPanel
+            key={String(book.id)}
+            bookId={String(book.id)}
+            serverUrl={serverUrl}
+            supported={capabilities.annotationApi}
+            downloaded={downloaded}
+            openingReader={openingReader}
+            onLocate={handleOfflineRead}
+            onAuthRequired={handleAnnotationAuthRequired}
+          />
+        )}
       </div>
 
       {showDeleteConfirm && (
