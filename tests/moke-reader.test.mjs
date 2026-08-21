@@ -171,6 +171,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     buildEmbeddedReaderUrl({
       filePath: 'C:\\Users\\reader\\我的书.pdf',
       eink: true,
+      debugPanel: true,
       mokeBookId: '14',
       serverUrl: 'http://192.168.1.5:8080',
       restoreProgress: {
@@ -188,6 +189,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(url.searchParams.get('file'), 'C:\\Users\\reader\\我的书.pdf');
   assert.equal(url.searchParams.get('moke'), '1');
   assert.equal(url.searchParams.get('mokeEink'), '1');
+  assert.equal(url.searchParams.get('mokeDebug'), '1');
   assert.equal(url.searchParams.get('mokeBookId'), '14');
   assert.equal(url.searchParams.get('mokeReturnTo'), '/library');
   assert.equal(url.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
@@ -211,6 +213,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     'https://moke.invalid',
   );
   assert.equal(empty.searchParams.get('moke'), '1');
+  assert.equal(empty.searchParams.get('mokeDebug'), '0');
   assert.equal(empty.searchParams.get('mokeServerUrl'), null);
 });
 
@@ -219,6 +222,7 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   const mobile = new URL(
     buildEmbeddedReaderHomeUrl({
       eink: true,
+      debugPanel: true,
       serverUrl: 'http://192.168.1.5:8080',
     }),
     'https://moke.invalid',
@@ -226,6 +230,7 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   assert.equal(mobile.pathname, '/readest/');
   assert.equal(mobile.searchParams.get('moke'), '1');
   assert.equal(mobile.searchParams.get('mokeEink'), '1');
+  assert.equal(mobile.searchParams.get('mokeDebug'), '1');
   assert.equal(mobile.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
 
   // Desktop: callers omit serverUrl, so no mokeServerUrl is emitted and the
@@ -240,6 +245,7 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   assert.equal(desktop.pathname, '/readest/');
   assert.equal(desktop.searchParams.get('moke'), '1');
   assert.equal(desktop.searchParams.get('mokeEink'), '0');
+  assert.equal(desktop.searchParams.get('mokeDebug'), '0');
   assert.equal(desktop.searchParams.get('mokeServerUrl'), null);
 
   // Empty serverUrl must not produce a bare `mokeServerUrl=` param either.

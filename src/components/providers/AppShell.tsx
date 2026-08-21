@@ -2,7 +2,12 @@
 
 import { useEffect } from 'react';
 import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
-import { installConsoleCapture, uninstallConsoleCapture } from '@/lib/debug-log';
+import {
+  broadcastDebugPanelVisibility,
+  installConsoleCapture,
+  installDebugLogBridge,
+  uninstallConsoleCapture,
+} from '@/lib/debug-log';
 import {
   getMokeRuntimePlatform,
   getNativeTopSafeAreaInset,
@@ -37,6 +42,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const eink = useSettingsStore((s) => s.eink);
   const theme = useSettingsStore((s) => s.theme);
   const developerUnlocked = useDeveloperStore((s) => s.unlocked);
+  const showDebugPanel = useDeveloperStore((s) => s.showDebugPanel);
+
+  // Persist logs across document reloads and bridge them to every embedded
+  // Readest window. The visibility handshake lets an already-open reader
+  // follow the host toggle without being reopened.
+  useEffect(() => {
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
+    void installDebugLogBridge({
+      source: 'moke',
+      getPanelVisible: () => useDeveloperStore.getState().showDebugPanel,
+    }).then((uninstall) => {
+      if (disposed) uninstall();
+      else cleanup = uninstall;
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    broadcastDebugPanelVisibility(showDebugPanel);
+  }, [showDebugPanel]);
 
   // Manual override: set the [data-eink='true'] attribute (same signal readest
   // uses) so Moke + the embedded reader share one convention. Auto e-ink

@@ -218,14 +218,17 @@ function setServerUrlParam(params: URLSearchParams, serverUrl?: string): void {
 
 export function buildEmbeddedReaderHomeUrl({
   eink,
+  debugPanel = false,
   serverUrl,
 }: {
   eink: boolean;
+  debugPanel?: boolean;
   serverUrl?: string;
 }): string {
   const params = new URLSearchParams({
     moke: '1',
     mokeEink: eink ? '1' : '0',
+    mokeDebug: debugPanel ? '1' : '0',
   });
 
   setServerUrlParam(params, serverUrl);
@@ -235,10 +238,12 @@ export function buildEmbeddedReaderHomeUrl({
 
 export async function openEmbeddedReaderHome({
   eink,
+  debugPanel = false,
   serverUrl,
   navigate,
 }: {
   eink: boolean;
+  debugPanel?: boolean;
   serverUrl?: string;
   navigate: (href: string) => void;
 }): Promise<void> {
@@ -281,6 +286,7 @@ export async function openEmbeddedReaderHome({
 
   const href = buildEmbeddedReaderHomeUrl({
     eink,
+    debugPanel,
     serverUrl: includeServerUrl ? serverUrl : undefined,
   });
 
@@ -326,12 +332,14 @@ export async function openEmbeddedReaderHome({
 export function buildEmbeddedReaderUrl({
   filePath,
   eink,
+  debugPanel = false,
   mokeBookId,
   restoreProgress,
   serverUrl,
 }: {
   filePath: string;
   eink: boolean;
+  debugPanel?: boolean;
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
   serverUrl?: string;
@@ -340,6 +348,7 @@ export function buildEmbeddedReaderUrl({
     file: filePath,
     moke: '1',
     mokeEink: eink ? '1' : '0',
+    mokeDebug: debugPanel ? '1' : '0',
     mokeBookId,
     mokeReturnTo: '/library',
   });
