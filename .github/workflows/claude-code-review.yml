@@ -57,6 +57,8 @@ jobs:
           EOF
 
       - name: Start LiteLLM proxy
+        env:
+          LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES: "true"
         run: |
           litellm --config litellm_config.yaml --port 8080 > "$RUNNER_TEMP/litellm.log" 2>&1 &
           litellm_pid=$!
