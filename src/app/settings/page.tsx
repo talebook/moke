@@ -81,6 +81,7 @@ export default function SettingsPage() {
     try {
       await openEmbeddedReaderHome({
         eink: useSettingsStore.getState().eink,
+        debugPanel: useDeveloperStore.getState().showDebugPanel,
         serverUrl,
         navigate: (href) => router.push(href),
       });

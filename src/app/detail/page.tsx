@@ -13,6 +13,7 @@ import {
   endOfflineDownload,
 } from '@/lib/offline-download';
 import { useServerStore } from '@/lib/store/server';
+import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
@@ -353,6 +354,7 @@ function DetailContent() {
           const href = buildEmbeddedReaderUrl({
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
+            debugPanel: useDeveloperStore.getState().showDebugPanel,
             mokeBookId: String(book.id),
             restoreProgress,
             // A single-WebView annotation locate session intentionally omits
@@ -384,6 +386,7 @@ function DetailContent() {
             await invoke('open_reader', {
               filePath: record.filePath,
               eink: useSettingsStore.getState().eink,
+              debugPanel: useDeveloperStore.getState().showDebugPanel,
               mokeBookId: String(book.id),
               restoreProgress,
             });

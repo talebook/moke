@@ -8,7 +8,19 @@ import {
 } from '../src/lib/debug-log.ts';
 
 function mockWindow() {
-  Object.defineProperty(globalThis, 'window', { value: {}, configurable: true, writable: true });
+  const values = new Map();
+  const localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+    clear: () => values.clear(),
+  };
+  Object.defineProperty(globalThis, 'window', {
+    value: { localStorage },
+    configurable: true,
+    writable: true,
+  });
+  return localStorage;
 }
 function restoreWindow() {
   delete globalThis.window;
@@ -37,6 +49,7 @@ test('installConsoleCapture patch console 后日志进入面板，uninstall 后�
   assert.equal(logs[0].level, 'warn');
   assert.equal(logs[0].message, 'capture me');
   assert.equal(logs[0].type, 'console');
+  assert.equal(logs[0].source, 'moke');
 
   uninstallConsoleCapture();
   // 卸载后 console 恢复原生行为，不再写入调试面板
@@ -44,6 +57,25 @@ test('installConsoleCapture patch console 后日志进入面板，uninstall 后�
   logs = useDebugLogStore.getState().logs;
   assert.equal(logs.length, 1);
 
+  restoreWindow();
+});
+
+test('日志持久化，显式清空后不会被旧快照带回', () => {
+  const localStorage = mockWindow();
+  useDebugLogStore.getState().clear();
+  useDebugLogStore.getState().addLog('warn', 'connection', 'before disconnect');
+
+  let stored = JSON.parse(localStorage.getItem('moke-debug-logs-v1'));
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].message, 'before disconnect');
+
+  useDebugLogStore.getState().clear();
+  useDebugLogStore.getState().addLog('info', 'connection', 'after reconnect');
+
+  stored = JSON.parse(localStorage.getItem('moke-debug-logs-v1'));
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].message, 'after reconnect');
+  assert.ok(Number(localStorage.getItem('moke-debug-logs-cleared-at-v1')) > 0);
   restoreWindow();
 });
 

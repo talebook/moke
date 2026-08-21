@@ -50,7 +50,7 @@ const defaultFilter: LevelFilterState = {
 
 export function DebugLogPanel() {
   const [open, setOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DebugLogType>('console');
   const [filters, setFilters] = useState<Record<DebugLogType, LevelFilterState>>({
     console: { ...defaultFilter },
@@ -300,6 +300,17 @@ export function DebugLogPanel() {
                       }}
                     >
                       {levelLabel[log.level]}
+                    </span>
+                    <span
+                      style={{
+                        color: log.source === 'readest' ? levelColor.info : theme.muted,
+                        flexShrink: 0,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {log.source}
                     </span>
                     <span style={{ color: theme.muted, flexShrink: 0, fontSize: 11 }}>
                       [{log.tag}]
