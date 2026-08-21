@@ -19,14 +19,14 @@ import { normalizeArtifactNames } from '../scripts/normalize-artifact-names.mjs'
 
 const root = path.resolve(import.meta.dirname, '..');
 
-test('默认名称为墨客，Windows、macOS、Linux 与 OHOS 保持 Moke', () => {
+test('默认软件包名称与桌面平台产品名保持 Moke', () => {
   const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const windowsConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.windows.conf.json'), 'utf8'));
   const macosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.macos.conf.json'), 'utf8'));
   const linuxConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.linux.conf.json'), 'utf8'));
   const ohosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.ohos.conf.json'), 'utf8'));
 
-  assert.equal(config.productName, '墨客');
+  assert.equal(config.productName, 'Moke');
   assert.equal(config.app.windows[0].title, '墨客');
   assert.equal(windowsConfig.productName, 'Moke');
   assert.equal(windowsConfig.app.windows[0].title, 'Moke');
@@ -42,6 +42,8 @@ test('默认名称为墨客，Windows、macOS、Linux 与 OHOS 保持 Moke', () 
   );
   assert.equal(linuxConfig.productName, 'Moke');
   assert.equal(linuxConfig.app.windows[0].title, 'Moke');
+  assert.equal(linuxConfig.bundle.linux.deb.desktopTemplate, 'linux/moke.desktop.hbs');
+  assert.equal(linuxConfig.bundle.linux.rpm.desktopTemplate, 'linux/moke.desktop.hbs');
   assert.equal(ohosConfig.productName, 'Moke');
   assert.equal(config.bundle.windows.wix.upgradeCode, 'd1dfe239-c6ec-5195-980b-2d6cd723458a');
   assert.equal(config.bundle.windows.wix.language, undefined);
@@ -61,13 +63,17 @@ test('上传前将产物文件名中的墨客替换为小写 moke', () => {
   assert.equal(readFileSync(path.join(bundleRoot, 'Moke_1.0.2_x64.AppImage'), 'utf8'), 'artifact');
 });
 
-test('macOS 与移动端仅在中文系统显示墨客，其他语言回退为 Moke', () => {
+test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回退为 Moke', () => {
   const macosChinese = readFileSync(
     path.join(root, 'src-tauri', 'macos', 'zh-Hans.lproj', 'InfoPlist.strings'),
     'utf8',
   );
   const macosTraditionalChinese = readFileSync(
     path.join(root, 'src-tauri', 'macos', 'zh-Hant.lproj', 'InfoPlist.strings'),
+    'utf8',
+  );
+  const linuxDesktop = readFileSync(
+    path.join(root, 'src-tauri', 'linux', 'moke.desktop.hbs'),
     'utf8',
   );
   const iosDefault = readFileSync(path.join(root, 'src-tauri', 'Info.ios.plist'), 'utf8');
@@ -90,6 +96,10 @@ test('macOS 与移动端仅在中文系统显示墨客，其他语言回退为 M
 
   assert.match(macosChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(macosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
+  assert.match(linuxDesktop, /^Name=\{\{name\}\}$/m);
+  assert.match(linuxDesktop, /^Name\[zh\]=墨客$/m);
+  assert.match(linuxDesktop, /^Name\[zh_CN\]=墨客$/m);
+  assert.match(linuxDesktop, /^Name\[zh_TW\]=墨客$/m);
   assert.match(iosDefault, /<string>Moke<\/string>/);
   assert.match(iosChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(iosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
