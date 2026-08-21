@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
+import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { deleteOfflineBook, getOfflineBook } from '@/lib/offline-books';
@@ -17,8 +18,13 @@ import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { bookSummaryText } from '@/lib/book-detail-core';
-import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead } from '@/lib/book-read';
+import {
+  bookDetailShelfState,
+  bookSummaryText,
+  readStateShelfState,
+  shouldLoadReadingStateFallback,
+} from '@/lib/book-detail-core';
+import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
   startOfflineDownload,
@@ -48,7 +54,7 @@ interface BookDetail {
     read_state?: number;
     online_read?: number;
     download?: number;
-    wants?: boolean;
+    wants?: boolean | number;
   };
 }
 
@@ -56,7 +62,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const { serverUrl, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -152,10 +158,15 @@ function DetailContent() {
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
-        setInShelf(Boolean(nextBook?.state?.wants));
+        const detailShelfState = bookDetailShelfState(nextBook);
+        setInShelf(detailShelfState ?? false);
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        loadReadingState(nextBook?.id || String(id), seq);
+        // 游客不访问需要登录的 readstate 接口。仅对已登录用户兼容旧版
+        // Talebook 未在详情响应中携带书架状态的情况。
+        if (shouldLoadReadingStateFallback(detailShelfState, Boolean(user))) {
+          loadReadingState(nextBook?.id || String(id), seq);
+        }
       } else {
         throw new Error(data.msg || '书籍详情加载失败。');
       }
@@ -177,15 +188,14 @@ function DetailContent() {
       const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
         credentials: 'include',
       });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; wants?: boolean | number }>(
+        res,
+        '阅读状态解析失败。',
+        ['ok', 'user.need_login'],
+      );
       if (seq !== loadBookSeqRef.current) return;
-      if (data.err === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
-      if (data.err === 'ok') {
-        setInShelf(Boolean(data.wants));
-      }
+      const shelfState = readStateShelfState(data);
+      if (shelfState !== undefined) setInShelf(shelfState);
     } catch (error) {
       console.warn('Failed to load reading state:', error);
     }
@@ -303,7 +313,13 @@ function DetailContent() {
   };
 
   const handleOfflineRead = async () => {
-    if (!book || openingReaderRef.current) return;
+    if (!book) return;
+    // 打开/记录在途时拦截重复点击：按钮只在阅读器窗口已打开后恢复可点，
+    // 记录请求仍在途，此时放行会造成重复打开窗口和重复计数。
+    if (openingReaderRef.current) {
+      setMessage('正在打开书籍，请稍候。');
+      return;
+    }
 
     openingReaderRef.current = true;
     setOpeningReader(true);
@@ -334,8 +350,10 @@ function DetailContent() {
 
           // Navigation replaces this WebView and destroys the current JS
           // context, so dispatch and await the bounded record request first.
+          // Use a short timeout: the record is best-effort and must not hold
+          // up opening the reader for long.
           await recordAndOpenBookRead({
-            record: () => recordBookRead(request, serverUrl, book.id),
+            record: () => recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS),
             open: () => openEmbeddedReaderBook(href, router.push, currentPlatform),
             onRecordError: (error) => {
               console.warn('Read record could not be saved before navigation:', error);
@@ -354,9 +372,10 @@ function DetailContent() {
               restoreProgress,
             });
           },
-          // Recording is best-effort and must not hold the desktop UI lock once
-          // the independent reader window has opened successfully.
-          onOpened: finishOpening,
+          // The independent reader window is open now, so unlock the button
+          // right away; the re-entry ref stays held until the record settles
+          // so a second click cannot duplicate the open or the count.
+          onOpened: () => setOpeningReader(false),
           record: () => recordBookRead(request, serverUrl, book.id),
           onRecordError: (error) => {
             console.warn('Reader opened, but the read record could not be saved:', error);
@@ -415,7 +434,7 @@ function DetailContent() {
     <DesktopLayout>
       <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
         <div className="mb-6 rounded-[24px] app-card px-4 py-4 sm:mb-8 sm:rounded-[28px] sm:px-5">
-          <button onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
+          <button onClick={() => requestAnimatedBack()} className="inline-flex items-center gap-1.5 text-sm mb-2 text-muted-foreground transition-colors hover:text-foreground group">
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             <span>返回</span>
           </button>

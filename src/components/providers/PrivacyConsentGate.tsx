@@ -115,28 +115,12 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
           </div>
         ) : (
           <>
-            <div className="max-h-[45vh] space-y-3 overflow-y-auto rounded-2xl border border-border bg-muted/30 p-4 text-sm leading-6 text-foreground/90">
-              <p>
-                Moke 用于连接你自行选择的 Talebook 服务器。只有在你同意后，应用才会开始连接服务器并处理书库数据。
-              </p>
-              <ul className="list-disc space-y-2 pl-5">
-                <li>服务器地址、账号资料、书库内容和阅读进度仅用于连接及阅读功能。</li>
-                <li>离线书籍、阅读数据和应用设置主要保存在你的设备本地。</li>
-                <li>更新检查可能访问 GitHub；仅在服务器要求时加载验证码服务。</li>
-                <li>剪贴板、文件和系统语音等能力只在你主动使用对应功能时调用。</li>
-                <li>Moke 不集成广告、用户行为分析或跨应用追踪服务。</li>
-              </ul>
-              <p>
-                你可以在系统设置中撤回权限，或通过清除应用数据、卸载应用删除本地数据。服务器端数据由你所连接的服务器运营者管理。
-              </p>
-            </div>
-
             <button
               type="button"
               onClick={() => router.push('/privacy')}
-              className="mt-4 text-sm font-medium text-primary underline-offset-4 hover:underline"
+              className="text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
-              查看完整《Moke 隐私政策》
+              查看隐私政策
             </button>
 
             <p className="mt-4 text-xs leading-5 text-muted-foreground">
