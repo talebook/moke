@@ -18,7 +18,12 @@ import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
-import { bookSummaryText } from '@/lib/book-detail-core';
+import {
+  bookDetailShelfState,
+  bookSummaryText,
+  readStateShelfState,
+  shouldLoadReadingStateFallback,
+} from '@/lib/book-detail-core';
 import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
@@ -49,7 +54,7 @@ interface BookDetail {
     read_state?: number;
     online_read?: number;
     download?: number;
-    wants?: boolean;
+    wants?: boolean | number;
   };
 }
 
@@ -57,7 +62,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const { serverUrl, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
@@ -153,10 +158,15 @@ function DetailContent() {
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
-        setInShelf(Boolean(nextBook?.state?.wants));
+        const detailShelfState = bookDetailShelfState(nextBook);
+        setInShelf(detailShelfState ?? false);
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
         setSelectedFormat(format);
-        loadReadingState(nextBook?.id || String(id), seq);
+        // 游客不访问需要登录的 readstate 接口。仅对已登录用户兼容旧版
+        // Talebook 未在详情响应中携带书架状态的情况。
+        if (shouldLoadReadingStateFallback(detailShelfState, Boolean(user))) {
+          loadReadingState(nextBook?.id || String(id), seq);
+        }
       } else {
         throw new Error(data.msg || '书籍详情加载失败。');
       }
@@ -178,15 +188,14 @@ function DetailContent() {
       const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
         credentials: 'include',
       });
-      const data = await res.json();
+      const data = await readApiJson<{ err?: string; msg?: string; wants?: boolean | number }>(
+        res,
+        '阅读状态解析失败。',
+        ['ok', 'user.need_login'],
+      );
       if (seq !== loadBookSeqRef.current) return;
-      if (data.err === 'user.need_login') {
-        router.push('/login');
-        return;
-      }
-      if (data.err === 'ok') {
-        setInShelf(Boolean(data.wants));
-      }
+      const shelfState = readStateShelfState(data);
+      if (shelfState !== undefined) setInShelf(shelfState);
     } catch (error) {
       console.warn('Failed to load reading state:', error);
     }
