@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
-  "productName": "墨客",
+  "productName": "Moke",
   "version": "../package.json",
   "identifier": "org.houheya.moke",
   "build": {
