@@ -11,15 +11,18 @@ import {
 
 const root = path.resolve(import.meta.dirname, '..');
 
-test('默认名称为墨客，Windows 与 OHOS 保持 Moke', () => {
+test('默认名称为墨客，Windows、macOS 与 OHOS 保持 Moke', () => {
   const config = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'));
   const windowsConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.windows.conf.json'), 'utf8'));
+  const macosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.macos.conf.json'), 'utf8'));
   const ohosConfig = JSON.parse(readFileSync(path.join(root, 'src-tauri', 'tauri.ohos.conf.json'), 'utf8'));
 
   assert.equal(config.productName, '墨客');
   assert.equal(config.app.windows[0].title, '墨客');
   assert.equal(windowsConfig.productName, 'Moke');
   assert.equal(windowsConfig.app.windows[0].title, 'Moke');
+  assert.equal(macosConfig.productName, 'Moke');
+  assert.equal(macosConfig.app.windows[0].title, 'Moke');
   assert.equal(ohosConfig.productName, 'Moke');
   assert.equal(config.bundle.windows.wix.upgradeCode, 'd1dfe239-c6ec-5195-980b-2d6cd723458a');
   assert.equal(config.bundle.windows.wix.language, undefined);
