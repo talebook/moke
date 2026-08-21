@@ -37,7 +37,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install LiteLLM proxy
-        run: pip install 'litellm[proxy]'
+        run: python -m pip install 'litellm[proxy]==1.97.0' 'fastapi==0.139.2'
 
       - name: Create LiteLLM config
         run: |
@@ -58,8 +58,27 @@ jobs:
 
       - name: Start LiteLLM proxy
         run: |
-          litellm --config litellm_config.yaml --port 8080 &
-          sleep 5
+          litellm --config litellm_config.yaml --port 8080 > "$RUNNER_TEMP/litellm.log" 2>&1 &
+          litellm_pid=$!
+
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health/liveliness; then
+              echo "LiteLLM proxy is ready"
+              exit 0
+            fi
+
+            if ! kill -0 "$litellm_pid" 2>/dev/null; then
+              echo "LiteLLM proxy exited before becoming ready"
+              cat "$RUNNER_TEMP/litellm.log"
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          echo "LiteLLM proxy did not become ready within 30 seconds"
+          cat "$RUNNER_TEMP/litellm.log"
+          exit 1
 
       - name: Run Claude Review via DeepSeek
         id: claude-review
