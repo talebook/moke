@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -25,6 +32,14 @@ test('默认名称为墨客，Windows、macOS、Linux 与 OHOS 保持 Moke', () 
   assert.equal(windowsConfig.app.windows[0].title, 'Moke');
   assert.equal(macosConfig.productName, 'Moke');
   assert.equal(macosConfig.app.windows[0].title, 'Moke');
+  assert.equal(
+    macosConfig.bundle.resources['macos/zh-Hans.lproj/InfoPlist.strings'],
+    'zh-Hans.lproj/InfoPlist.strings',
+  );
+  assert.equal(
+    macosConfig.bundle.resources['macos/zh-Hant.lproj/InfoPlist.strings'],
+    'zh-Hant.lproj/InfoPlist.strings',
+  );
   assert.equal(linuxConfig.productName, 'Moke');
   assert.equal(linuxConfig.app.windows[0].title, 'Moke');
   assert.equal(ohosConfig.productName, 'Moke');
@@ -46,45 +61,94 @@ test('上传前将产物文件名中的墨客替换为小写 moke', () => {
   assert.equal(readFileSync(path.join(bundleRoot, 'Moke_1.0.2_x64.AppImage'), 'utf8'), 'artifact');
 });
 
-test('移动端默认名称为墨客，英文系统名称为 Moke', () => {
-  const iosDefault = readFileSync(path.join(root, 'src-tauri', 'Info.ios.plist'), 'utf8');
-  const iosEnglish = readFileSync(
-    path.join(root, 'src-tauri', 'mobile', 'ios', 'en.lproj', 'InfoPlist.strings'),
+test('macOS 与移动端仅在中文系统显示墨客，其他语言回退为 Moke', () => {
+  const macosChinese = readFileSync(
+    path.join(root, 'src-tauri', 'macos', 'zh-Hans.lproj', 'InfoPlist.strings'),
     'utf8',
   );
-  const androidEnglish = readFileSync(
-    path.join(root, 'src-tauri', 'mobile', 'android', 'values-en', 'strings.xml'),
+  const macosTraditionalChinese = readFileSync(
+    path.join(root, 'src-tauri', 'macos', 'zh-Hant.lproj', 'InfoPlist.strings'),
+    'utf8',
+  );
+  const iosDefault = readFileSync(path.join(root, 'src-tauri', 'Info.ios.plist'), 'utf8');
+  const iosChinese = readFileSync(
+    path.join(root, 'src-tauri', 'mobile', 'ios', 'zh-Hans.lproj', 'InfoPlist.strings'),
+    'utf8',
+  );
+  const iosTraditionalChinese = readFileSync(
+    path.join(root, 'src-tauri', 'mobile', 'ios', 'zh-Hant.lproj', 'InfoPlist.strings'),
+    'utf8',
+  );
+  const androidDefault = readFileSync(
+    path.join(root, 'src-tauri', 'mobile', 'android', 'values', 'strings.xml'),
+    'utf8',
+  );
+  const androidChinese = readFileSync(
+    path.join(root, 'src-tauri', 'mobile', 'android', 'values-zh', 'strings.xml'),
     'utf8',
   );
 
-  assert.match(iosDefault, /<string>墨客<\/string>/);
-  assert.match(iosEnglish, /"CFBundleDisplayName" = "Moke";/);
-  assert.match(androidEnglish, /<string name="app_name">Moke<\/string>/);
-  assert.match(androidEnglish, /<string name="main_activity_title">Moke<\/string>/);
+  assert.match(macosChinese, /"CFBundleDisplayName" = "墨客";/);
+  assert.match(macosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
+  assert.match(iosDefault, /<string>Moke<\/string>/);
+  assert.match(iosChinese, /"CFBundleDisplayName" = "墨客";/);
+  assert.match(iosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
+  assert.match(androidDefault, /<string name="app_name">Moke<\/string>/);
+  assert.match(androidDefault, /<string name="main_activity_title">Moke<\/string>/);
+  assert.match(androidChinese, /<string name="app_name">墨客<\/string>/);
+  assert.deepEqual(
+    readdirSync(path.join(root, 'src-tauri', 'mobile', 'android'))
+      .filter((locale) => existsSync(
+        path.join(root, 'src-tauri', 'mobile', 'android', locale, 'strings.xml'),
+      ))
+      .sort(),
+    ['values', 'values-zh'],
+  );
+  assert.deepEqual(
+    readdirSync(path.join(root, 'src-tauri', 'mobile', 'ios'))
+      .filter((locale) => existsSync(
+        path.join(root, 'src-tauri', 'mobile', 'ios', locale, 'InfoPlist.strings'),
+      ))
+      .sort(),
+    ['zh-Hans.lproj', 'zh-Hant.lproj'],
+  );
 });
 
-test('Android 英文名称资源会复制到生成项目', () => {
+test('Android 默认与中文名称资源会复制到生成项目', () => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
-  const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'android', 'values-en');
-  mkdirSync(sourceDir, { recursive: true });
-  writeFileSync(path.join(sourceDir, 'strings.xml'), '<resources><string name="app_name">Moke</string></resources>');
+  const sourceRoot = path.join(temporaryRoot, 'src-tauri', 'mobile', 'android');
+  mkdirSync(path.join(sourceRoot, 'values'), { recursive: true });
+  mkdirSync(path.join(sourceRoot, 'values-zh'), { recursive: true });
+  writeFileSync(
+    path.join(sourceRoot, 'values', 'strings.xml'),
+    '<resources><string name="app_name">Moke</string></resources>',
+  );
+  writeFileSync(
+    path.join(sourceRoot, 'values-zh', 'strings.xml'),
+    '<resources><string name="app_name">墨客</string></resources>',
+  );
 
   prepareAndroidAppNames(temporaryRoot);
 
-  const generated = readFileSync(
-    path.join(temporaryRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res', 'values-en', 'strings.xml'),
+  const generatedDefault = readFileSync(
+    path.join(temporaryRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res', 'values', 'strings.xml'),
     'utf8',
   );
-  assert.match(generated, />Moke</);
+  const generatedChinese = readFileSync(
+    path.join(temporaryRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res', 'values-zh', 'strings.xml'),
+    'utf8',
+  );
+  assert.match(generatedDefault, />Moke</);
+  assert.match(generatedChinese, />墨客</);
 });
 
-test('iOS 英文名称资源会复制并重新生成 Xcode 项目', () => {
+test('iOS 中文名称资源会复制并重新生成 Xcode 项目', () => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
-  const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'ios', 'en.lproj');
+  const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'ios', 'zh-Hans.lproj');
   const appleRoot = path.join(temporaryRoot, 'src-tauri', 'gen', 'apple');
   mkdirSync(sourceDir, { recursive: true });
   mkdirSync(path.join(appleRoot, 'moke_iOS'), { recursive: true });
-  writeFileSync(path.join(sourceDir, 'InfoPlist.strings'), '"CFBundleDisplayName" = "Moke";\n');
+  writeFileSync(path.join(sourceDir, 'InfoPlist.strings'), '"CFBundleDisplayName" = "墨客";\n');
   writeFileSync(path.join(appleRoot, 'project.yml'), 'name: moke\n');
 
   let command;
@@ -94,10 +158,10 @@ test('iOS 英文名称资源会复制并重新生成 Xcode 项目', () => {
   });
 
   const generated = readFileSync(
-    path.join(appleRoot, 'moke_iOS', 'en.lproj', 'InfoPlist.strings'),
+    path.join(appleRoot, 'moke_iOS', 'zh-Hans.lproj', 'InfoPlist.strings'),
     'utf8',
   );
-  assert.match(generated, /Moke/);
+  assert.match(generated, /墨客/);
   assert.equal(command[0], 'xcodegen');
   assert.deepEqual(command[1], ['generate', '--spec', path.join(appleRoot, 'project.yml')]);
 });

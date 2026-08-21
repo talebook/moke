@@ -6,20 +6,20 @@ import path from 'node:path';
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 
 export function prepareAndroidAppNames(root = projectRoot) {
-  const source = path.join(root, 'src-tauri', 'mobile', 'android', 'values-en', 'strings.xml');
-  const destinationDir = path.join(
-    root,
-    'src-tauri',
-    'gen',
-    'android',
-    'app',
-    'src',
-    'main',
-    'res',
-    'values-en',
+  const sourceRoot = path.join(root, 'src-tauri', 'mobile', 'android');
+  const generatedResources = path.join(
+    root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'res',
   );
-  mkdirSync(destinationDir, { recursive: true });
-  copyFileSync(source, path.join(destinationDir, 'strings.xml'));
+
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith('values')) continue;
+    const destinationDir = path.join(generatedResources, entry.name);
+    mkdirSync(destinationDir, { recursive: true });
+    copyFileSync(
+      path.join(sourceRoot, entry.name, 'strings.xml'),
+      path.join(destinationDir, 'strings.xml'),
+    );
+  }
 }
 
 export function prepareIosAppNames(root = projectRoot, run = spawnSync) {
@@ -31,10 +31,16 @@ export function prepareIosAppNames(root = projectRoot, run = spawnSync) {
     throw new Error(`Generated iOS app directory was not found under ${appleRoot}`);
   }
 
-  const source = path.join(root, 'src-tauri', 'mobile', 'ios', 'en.lproj', 'InfoPlist.strings');
-  const destinationDir = path.join(appleRoot, appDirectory, 'en.lproj');
-  mkdirSync(destinationDir, { recursive: true });
-  copyFileSync(source, path.join(destinationDir, 'InfoPlist.strings'));
+  const sourceRoot = path.join(root, 'src-tauri', 'mobile', 'ios');
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith('.lproj')) continue;
+    const destinationDir = path.join(appleRoot, appDirectory, entry.name);
+    mkdirSync(destinationDir, { recursive: true });
+    copyFileSync(
+      path.join(sourceRoot, entry.name, 'InfoPlist.strings'),
+      path.join(destinationDir, 'InfoPlist.strings'),
+    );
+  }
 
   // The generated Xcode project only knows about files that existed when
   // `tauri ios init` ran. Regenerate it now so InfoPlist.strings is bundled.
@@ -56,10 +62,10 @@ if (invokedDirectly) {
   const platform = process.argv[2];
   if (platform === 'android') {
     prepareAndroidAppNames();
-    console.log('[app-names] Added Android English app name: Moke');
+    console.log('[app-names] Added Android default and Chinese app names');
   } else if (platform === 'ios') {
     prepareIosAppNames();
-    console.log('[app-names] Added iOS English app name: Moke');
+    console.log('[app-names] Added iOS Chinese app names');
   } else {
     console.error('Usage: node scripts/prepare-mobile-app-names.mjs <android|ios>');
     process.exitCode = 1;
