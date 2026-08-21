@@ -83,6 +83,15 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* A native app shell should pan and scroll normally without exposing the
+     browser's pinch-to-zoom canvas. The web deployment keeps browser zoom for
+     accessibility, and Readest owns its separate document and zoom behavior. */
+  html[data-moke-native-app],
+  html[data-moke-native-app] body,
+  html[data-moke-native-app] .moke-app-root {
+    touch-action: pan-x pan-y;
+  }
+
   .moke-app-root {
     min-height: 100dvh;
   }

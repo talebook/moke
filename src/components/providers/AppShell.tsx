@@ -8,6 +8,7 @@ import {
   getNativeTopSafeAreaInset,
   shouldApplyTopSafeArea,
 } from '@/lib/moke-reader';
+import { shouldPreventNativeAppZoomShortcut } from '@/lib/native-app-zoom';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { NativeBackNavigation } from './NativeBackNavigation';
@@ -27,6 +28,8 @@ declare global {
 if (process.env.NODE_ENV !== 'production') {
   installConsoleCapture();
 }
+
+const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const eink = useSettingsStore((s) => s.eink);
@@ -69,6 +72,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (developerUnlocked) installConsoleCapture();
     else uninstallConsoleCapture();
   }, [developerUnlocked]);
+
+  // Keep the Tauri shell at its designed scale on desktop touchpads and
+  // keyboards. Mobile pinch is also declared unavailable in the viewport and
+  // touch-action rules. These listeners intentionally do not run in the web
+  // build, where browser zoom remains an accessibility feature.
+  useEffect(() => {
+    if (!isNativeAppBuild) return;
+
+    const preventGestureZoom = (event: Event) => event.preventDefault();
+    const preventWheelZoom = (event: WheelEvent) => {
+      if (event.ctrlKey) event.preventDefault();
+    };
+    const preventKeyboardZoom = (event: KeyboardEvent) => {
+      if (shouldPreventNativeAppZoomShortcut(event)) event.preventDefault();
+    };
+    const nonPassive = { passive: false } as const;
+
+    window.addEventListener('wheel', preventWheelZoom, nonPassive);
+    window.addEventListener('keydown', preventKeyboardZoom);
+    document.addEventListener('gesturestart', preventGestureZoom, nonPassive);
+    document.addEventListener('gesturechange', preventGestureZoom, nonPassive);
+
+    return () => {
+      window.removeEventListener('wheel', preventWheelZoom);
+      window.removeEventListener('keydown', preventKeyboardZoom);
+      document.removeEventListener('gesturestart', preventGestureZoom);
+      document.removeEventListener('gesturechange', preventGestureZoom);
+    };
+  }, []);
 
   // Android/iOS use edge-to-edge WebViews, while OHOS already lays the WebView
   // out below its status bar. Mark only the runtimes that need the CSS top
