@@ -213,14 +213,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Upload updater manifest
-        if: contains(fromJSON('["macos", "ubuntu", "windows"]'), matrix.platform)
-        uses: actions/upload-artifact@v4
-        with:
-          name: updater-manifest-${{ matrix.platform }}
-          path: src-tauri/target/release/bundle/**/*.sig
-          if-no-files-found: ignore
-
       # The stock tauri-cli renders the adaptive-icon foreground full-bleed,
       # which the Android system mask crops. Use the vendored tauri CLI
       # (with the safe-zone fix) so the APK ships a properly centered icon.
@@ -519,6 +511,17 @@ jobs:
         run: find src-tauri/gen/ohos -name '*.hap'
 
       # ==================================
+
+      - name: Normalize artifact filenames
+        run: node scripts/normalize-artifact-names.mjs
+
+      - name: Upload updater manifest
+        if: contains(fromJSON('["macos", "ubuntu", "windows"]'), matrix.platform)
+        uses: actions/upload-artifact@v4
+        with:
+          name: updater-manifest-${{ matrix.platform }}
+          path: src-tauri/target/release/bundle/**/*.sig
+          if-no-files-found: ignore
 
       - name: Create Android Release
         if: ${{ matrix.platform == 'android' && startsWith(github.ref, 'refs/tags/') }}
