@@ -23,7 +23,7 @@ export function createBoundedRetryCache<T>(
   const retryDelayMs = Math.max(0, options.retryDelayMs);
   let attempts = 0;
   let activePromise: Promise<T> | undefined;
-  let cachedValue: T;
+  let cachedValue!: T;
   let hasCachedValue = false;
   let lastError: unknown;
 
