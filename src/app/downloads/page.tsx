@@ -268,15 +268,23 @@ export default function DownloadsPage() {
                       {item.freshness === 'unknown' && <span className="text-xs text-muted-foreground">缺少可比较的版本标识，无法确认是否最新</span>}
                       {item.freshness === 'unavailable' && <span className="text-xs text-muted-foreground">暂无法检查服务器更新（离线或服务不可用）</span>}
                     </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${item.progress}%` }} />
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>{item.progress}%</span>
-                      <span>{formatBytes(item.downloadedBytes)} / {item.totalBytes ? formatBytes(item.totalBytes) : '未知大小'}</span>
-                      {item.status === 'downloading' && <><span>{formatBytes(item.speedBytesPerSecond)}/s</span><span>剩余 {formatEta(item.etaSeconds)}</span></>}
-                      {Boolean(item.error) && <span className="text-destructive">{String(item.error)}</span>}
-                    </div>
+                    {item.status !== 'completed' ? (
+                      <>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${item.progress}%` }} />
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span>{item.progress}%</span>
+                          <span>{formatBytes(item.downloadedBytes)} / {item.totalBytes ? formatBytes(item.totalBytes) : '未知大小'}</span>
+                          {item.status === 'downloading' && <><span>{formatBytes(item.speedBytesPerSecond)}/s</span><span>剩余 {formatEta(item.etaSeconds)}</span></>}
+                          {Boolean(item.error) && <span className="text-destructive">{String(item.error)}</span>}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        文件大小 {formatBytes(item.record?.size ?? item.downloadedBytes)}
+                      </div>
+                    )}
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
                     {item.status === 'downloading' && <button title="暂停" onClick={() => pauseOfflineDownload(item.key)} className="rounded-lg p-2 hover:bg-muted"><Pause className="h-4 w-4" /></button>}

@@ -41,3 +41,8 @@ test('磁盘空间统计使用慢速轮询而非跟随下载进度刷新', () =>
   assert.match(downloadsSource, /\}, \[downloadDirectory\]\);/);
   assert.doesNotMatch(downloadsSource, /\[downloadDirectory, records, tasks\]/);
 });
+
+test('已完成下载不再显示进度条和 100% 的传输明细', () => {
+  assert.match(downloadsSource, /item\.status !== 'completed' \? \(/);
+  assert.match(downloadsSource, /文件大小 \{formatBytes\(item\.record\?\.size \?\? item\.downloadedBytes\)\}/);
+});
