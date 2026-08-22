@@ -23,11 +23,22 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
     if (capabilityChecked && !progressSupported) return;
 
     let disposed = false;
-    let unlisten: Array<() => void> = [];
+    const unlisten: Array<() => void> = [];
 
     import('@tauri-apps/api/event')
-      .then(({ listen }) => Promise.all([
-        listen<Record<string, unknown>>('reader:page:changed', (event) => {
+      .then(({ listen }) => {
+        const register = (listener: Promise<() => void>) => {
+          void listener
+            .then((cleanup) => {
+              if (disposed) cleanup();
+              else unlisten.push(cleanup);
+            })
+            .catch((error) => {
+              console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
+            });
+        };
+
+        register(listen<Record<string, unknown>>('reader:page:changed', (event) => {
           const progress = normalizeReaderProgressEvent(event.payload);
           if (!progress) return;
           if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
@@ -46,17 +57,10 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
           }, SAVE_DELAY_MS);
 
           timersRef.current.set(bookId, timer);
-        }),
-        listen<unknown>('reader:annotation-locate:finished', (event) => {
+        }));
+        register(listen<unknown>('reader:annotation-locate:finished', (event) => {
           clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
-        }),
-      ]))
-      .then((cleanup) => {
-        if (disposed) {
-          for (const listener of cleanup) listener();
-        } else {
-          unlisten = cleanup;
-        }
+        }));
       })
       .catch((error) => {
         console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);

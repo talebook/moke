@@ -346,12 +346,17 @@ function DetailContent() {
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
-        if (targetAnnotation) {
-          annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
-        }
-        const restoreProgress = targetAnnotation
-          ? annotationReaderProgress(targetAnnotation, book.id, annotationNavigationId)
+        let restoreProgress = targetAnnotation
+          ? annotationReaderProgress(targetAnnotation, book.id)
           : await fetchReadingProgress(book.id);
+        if (targetAnnotation && restoreProgress) {
+          annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
+          restoreProgress = {
+            ...restoreProgress,
+            moke_navigation_id: annotationNavigationId,
+            moke_navigation_kind: 'annotation-locate',
+          };
+        }
         const currentPlatform = await getMokeRuntimePlatform();
 
         if (isSingleWebviewRuntime(currentPlatform)) {

@@ -133,8 +133,9 @@ test('显式定位导航协议不依赖时长或 CFI 字节相等', () => {
     true,
   );
 
-  // The terminal correlated event consumes the one-shot state. A real page
-  // turn has no navigation marker and resumes ordinary progress persistence.
+  // A real page turn has no navigation marker and resumes ordinary progress
+  // persistence, while late correlated events remain suppressed until the
+  // explicit finished receipt arrives.
   assert.equal(
     shouldSuppressAnnotationReaderProgress('http://talebook-a', {
       ...restored,
@@ -145,6 +146,8 @@ test('显式定位导航协议不依赖时长或 CFI 字节相等', () => {
     }),
     false,
   );
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', restored), true);
+  clearAnnotationLocateProgressSuppressionFromPayload({ moke_navigation_id: navigationId });
   assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', restored), false);
 });
 

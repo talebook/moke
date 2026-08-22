@@ -377,9 +377,9 @@ export function shouldSuppressAnnotationReaderProgress(
     || suppression.bookId !== progress.moke_book_id
   ) return false;
 
-  if (progress.moke_navigation_phase === 'complete') {
-    clearAnnotationLocateProgressSuppression(progress.moke_navigation_id);
-  }
+  // A terminal page event can still be followed by a coalesced correlated
+  // relocate. Keep suppressing this id until Readest confirms that every
+  // correlated event has been delivered (or the TTL reclaims the state).
   return true;
 }
 

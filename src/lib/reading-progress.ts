@@ -2,6 +2,7 @@
 
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { debugLog } from '@/lib/debug-log';
+import { readingProgressForPersistence } from '@/lib/reading-progress-payload';
 import { useServerStore } from '@/lib/store/server';
 
 export interface ReadingProgressPayload {
@@ -76,7 +77,7 @@ export async function fetchReadingProgress(bookId: string | number): Promise<Rea
     const progress = data.progress;
 
     if (!progress || progress.schema !== 'moke.readest.progress.v1') return null;
-    return progress as ReadingProgressPayload;
+    return readingProgressForPersistence(progress as ReadingProgressPayload);
   } catch (error) {
     markProgressUnsupported(error);
     debugLog('warn', 'reading-progress', `读取阅读进度失败: ${bookId}`, getErrorMessage(error));
@@ -93,7 +94,7 @@ export async function saveReadingProgress(bookId: string | number, progress: Rea
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ progress }),
+      body: JSON.stringify({ progress: readingProgressForPersistence(progress) }),
     });
     await readApiJson<ReadingProgressResponse>(response);
   } catch (error) {
