@@ -1,9 +1,18 @@
 export type SubscriptionCleanup = () => void;
 
+function runCleanupSafely(cleanup: SubscriptionCleanup): void {
+  try {
+    cleanup();
+  } catch {
+    // Cancellation is terminal, so cleanup failures have no active subscriber to report to.
+  }
+}
+
 /**
  * Starts an asynchronous subscription and returns a synchronous cancellation
- * function suitable for an effect cleanup. A subscription that finishes after
- * cancellation is cleaned up immediately.
+ * function suitable for an effect cleanup. Cancellation is terminal: late
+ * subscription errors and cleanup failures are ignored, while a subscription
+ * that finishes successfully after cancellation is cleaned up immediately.
  */
 export function startAsyncSubscription(
   subscribe: () => Promise<SubscriptionCleanup>,
@@ -15,16 +24,21 @@ export function startAsyncSubscription(
   void subscribe()
     .then((resolvedCleanup) => {
       if (cancelled) {
-        resolvedCleanup();
+        runCleanupSafely(resolvedCleanup);
         return;
       }
       cleanup = resolvedCleanup;
     })
-    .catch(onError);
+    .catch((error) => {
+      if (!cancelled) onError(error);
+    });
 
   return () => {
+    if (cancelled) return;
     cancelled = true;
-    cleanup?.();
+
+    const resolvedCleanup = cleanup;
     cleanup = undefined;
+    if (resolvedCleanup) runCleanupSafely(resolvedCleanup);
   };
 }
