@@ -6,6 +6,7 @@ import {
   clearAnnotationLocateProgressSuppressionFromPayload,
   shouldSuppressAnnotationReaderProgress,
 } from '@/lib/annotations';
+import { startAsyncSubscription } from '@/lib/async-subscription';
 import { useServerStore } from '@/lib/store/server';
 
 const SAVE_DELAY_MS = 1200;
@@ -22,23 +23,14 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
     if (!serverUrl) return;
     if (capabilityChecked && !progressSupported) return;
 
-    let disposed = false;
-    const unlisten: Array<() => void> = [];
-
-    import('@tauri-apps/api/event')
-      .then(({ listen }) => {
-        const register = (listener: Promise<() => void>) => {
-          void listener
-            .then((cleanup) => {
-              if (disposed) cleanup();
-              else unlisten.push(cleanup);
-            })
-            .catch((error) => {
-              console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
-            });
-        };
-
-        register(listen<Record<string, unknown>>('reader:page:changed', (event) => {
+    const eventApi = import('@tauri-apps/api/event');
+    const reportListenError = (error: unknown) => {
+      console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
+    };
+    const cancelListeners = [
+      startAsyncSubscription(async () => {
+        const { listen } = await eventApi;
+        return listen<Record<string, unknown>>('reader:page:changed', (event) => {
           const progress = normalizeReaderProgressEvent(event.payload);
           if (!progress) return;
           if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
@@ -57,18 +49,18 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
           }, SAVE_DELAY_MS);
 
           timersRef.current.set(bookId, timer);
-        }));
-        register(listen<unknown>('reader:annotation-locate:finished', (event) => {
+        });
+      }, reportListenError),
+      startAsyncSubscription(async () => {
+        const { listen } = await eventApi;
+        return listen<unknown>('reader:annotation-locate:finished', (event) => {
           clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
-        }));
-      })
-      .catch((error) => {
-        console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
-      });
+        });
+      }, reportListenError),
+    ];
 
     return () => {
-      disposed = true;
-      for (const cleanup of unlisten) cleanup();
+      for (const cancelListener of cancelListeners) cancelListener();
       for (const timer of timersRef.current.values()) clearTimeout(timer);
       for (const [bookId, progress] of pendingRef.current.entries()) {
         void saveReadingProgress(bookId, progress);
