@@ -292,6 +292,90 @@ mod fs_scope_tests {
         }
     }
 
+    // TB-85 F4 / TB-89 security regression: an unanchored pattern such as
+    // `**/Readest/**/*` lets the asset protocol serve any absolute path that
+    // happens to contain a `Readest` directory. Keep every static entry bound
+    // to a known application/system base directory. Readest's managed files
+    // live below `$APPDATA/Readest` and are already covered by `$APPDATA/**/*`;
+    // user-selected files receive an exact runtime grant from the picker flow.
+    #[test]
+    fn asset_protocol_allow_entries_are_anchored_to_known_roots() {
+        let opts = tauri_match_options();
+        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+        let text = std::fs::read_to_string(&config_path)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", config_path.display()));
+        let config: Value = serde_json::from_str(&text).unwrap();
+        let allow = config["app"]["security"]["assetProtocol"]["scope"]["allow"]
+            .as_array()
+            .expect("asset protocol allow scope must be an array");
+        let known_roots = [
+            ("$RESOURCE", "/resource"),
+            ("$APPDATA", "/appdata"),
+            ("$APPCACHE", "/appcache"),
+            ("$TEMP", "/temp"),
+        ];
+
+        let patterns: Vec<_> = allow
+            .iter()
+            .map(|entry| {
+                let path = entry
+                    .as_str()
+                    .expect("asset protocol allow entries must be strings");
+                assert!(
+                    !path
+                        .split(|c| c == '/' || c == '\\')
+                        .any(|part| part == ".."),
+                    "{} asset allow path {path} contains parent traversal",
+                    config_path.display()
+                );
+                let resolved = known_roots
+                    .iter()
+                    .find_map(|(variable, root)| {
+                        path.strip_prefix(*variable).and_then(|suffix| {
+                            suffix.starts_with('/').then(|| format!("{root}{suffix}"))
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{} asset allow path {path} is not anchored to a known root",
+                            config_path.display()
+                        )
+                    });
+                let pattern = Pattern::new(&resolved).unwrap_or_else(|e| {
+                    panic!(
+                        "bad asset glob {resolved} in {} ({path}): {e}",
+                        config_path.display()
+                    )
+                });
+                (path, pattern)
+            })
+            .collect();
+
+        for outside in [
+            "/home/u/Documents/Readest/x.pdf",
+            "C:/Users/u/Downloads/Readest/a.docx",
+        ] {
+            for (configured, pattern) in &patterns {
+                assert!(
+                    !pattern.matches_path_with(Path::new(outside), opts),
+                    "{} asset allow path {configured} exposes unrelated file {outside}",
+                    config_path.display()
+                );
+            }
+        }
+
+        // `nativeAppService.getURL()` sends this representative managed book
+        // path through `convertFileSrc`; removing the unanchored fallback must
+        // not break assets stored in Readest's real AppData subtree.
+        let managed_book = Path::new("/appdata/Readest/Books/hash/book.epub");
+        assert!(
+            patterns
+                .iter()
+                .any(|(_, pattern)| pattern.matches_path_with(managed_book, opts)),
+            "managed Readest AppData files must remain in the asset scope"
+        );
+    }
+
     // HOU-30 security regression: "removing bare roots" only holds if
     // `$APPDATA/**` does NOT match the bare `$APPDATA` directory itself.
     // `remove(appDataDir(), {recursive:true})` / `rename` / `mkdir(appDataDir())`
