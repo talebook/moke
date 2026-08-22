@@ -59,6 +59,7 @@ function htmlToPlainText(value: string): string {
   let output = '';
   let hiddenTag: 'script' | 'style' | null = null;
   const lower = value.toLowerCase();
+  const tagStartPattern = /(\s*)(\/?)(\s*)([a-z][a-z0-9-]*)/iy;
 
   for (let index = 0; index < value.length;) {
     if (hiddenTag) {
@@ -95,8 +96,19 @@ function htmlToPlainText(value: string): string {
     // A comparison operator such as `3 < 5` is text, not the start of a tag.
     // Requiring an HTML-style name here also prevents a later `>` from making
     // us consume an arbitrary span of prose.
-    const tagStart = value.slice(index + 1).match(/^\s*(\/?)\s*([a-z][a-z0-9-]*)/i);
-    if (!tagStart) {
+    tagStartPattern.lastIndex = index + 1;
+    const tagStart = tagStartPattern.exec(value);
+    const tagName = tagStart?.[4]?.toLowerCase();
+    const tagNameFollower = value[tagStartPattern.lastIndex];
+    const hasTagNameBoundary = tagNameFollower === undefined
+      || tagNameFollower === '>'
+      || tagNameFollower === '/'
+      || tagNameFollower === '<'
+      || /\s/.test(tagNameFollower);
+    // Keep the historical tolerance for `< div>`, but do not interpret a
+    // spaced single-letter operand in prose (`a < b ... > d`) as an HTML tag.
+    const isSpacedSingleLetter = Boolean(tagStart?.[1] && tagName?.length === 1);
+    if (!tagStart || !tagName || !hasTagNameBoundary || isSpacedSingleLetter) {
       output += '<';
       index += 1;
       continue;
@@ -108,10 +120,12 @@ function htmlToPlainText(value: string): string {
     let quote: '"' | "'" | null = null;
     let tagEnd = -1;
     let nestedTagAt = -1;
+    let quotedNestedTagAt = -1;
     for (let cursor = index + 1; cursor < value.length; cursor += 1) {
       const character = value[cursor];
       if (quote) {
         if (character === quote) quote = null;
+        else if (character === '<' && quotedNestedTagAt === -1) quotedNestedTagAt = cursor;
         continue;
       }
       if (character === '"' || character === "'") {
@@ -125,13 +139,20 @@ function htmlToPlainText(value: string): string {
       }
     }
 
-    if (tagEnd === -1 && nestedTagAt === -1) {
-      output += value.slice(index);
-      break;
+    // If a quote never closes, recover at the first nested `<` that was
+    // tentatively treated as attribute text. This lets a following script or
+    // real tag get its own parsing pass instead of dumping the remaining input.
+    if (tagEnd === -1 && nestedTagAt === -1 && quote && quotedNestedTagAt !== -1) {
+      nestedTagAt = quotedNestedTagAt;
     }
 
-    const closing = tagStart[1] === '/';
-    const tagName = tagStart[2].toLowerCase();
+    if (tagEnd === -1 && nestedTagAt === -1) {
+      output += '<';
+      index += 1;
+      continue;
+    }
+
+    const closing = tagStart[2] === '/';
 
     if (!closing && (tagName === 'script' || tagName === 'style')) {
       hiddenTag = tagName;
@@ -147,12 +168,19 @@ function htmlToPlainText(value: string): string {
   return output;
 }
 
-/** Convert Talebook's HTML-formatted comments into safe, readable plain text. */
+/**
+ * Convert Talebook's HTML-formatted comments into readable plain text.
+ *
+ * Decoded authored entities may intentionally produce literal angle brackets
+ * (for example `&lt;div&gt;`). Consumers must render this return value only as
+ * text (such as a JSX text node or `textContent`), never through `innerHTML` or
+ * `dangerouslySetInnerHTML`.
+ */
 export function bookSummaryText(value: string | null | undefined): string {
   if (!value) return '';
   // Strip literal markup before decoding entities. Encoded tag examples such
   // as `&lt;div&gt;` are authored text, so they must not be parsed a second time.
-  // The result is rendered as a React text node, never as executable HTML.
+  // The public contract above requires consumers to keep the result as text.
   return decodeHtmlEntities(htmlToPlainText(value))
     .replace(/[\t\f\v ]+/g, ' ')
     .replace(/ *\n */g, '\n')
