@@ -209,6 +209,10 @@ export function startOfflineDownload(options: StartOfflineDownloadOptions): Prom
   const previous = snapshots.get(options.key);
   const startedAt = Date.now();
   const initialBytes = options.metadata?.downloadedBytes ?? previous?.downloadedBytes ?? 0;
+  const initialTotal = options.metadata?.totalBytes ?? previous?.totalBytes ?? null;
+  const initialProgress = initialTotal && initialTotal > 0
+    ? Math.min(99, Math.round(initialBytes / initialTotal * 100))
+    : (initialBytes > 0 ? previous?.progress ?? 0 : 0);
   let sampleAt = startedAt;
   let sampleBytes = initialBytes;
   const controller = new AbortController();
@@ -224,7 +228,7 @@ export function startOfflineDownload(options: StartOfflineDownloadOptions): Prom
       ...options.metadata,
       key: options.key,
       status: 'downloading',
-      progress: previous?.progress ?? 0,
+      progress: initialProgress,
       downloadedBytes: initialBytes,
       error: undefined,
       speedBytesPerSecond: 0,
@@ -246,11 +250,17 @@ export function startOfflineDownload(options: StartOfflineDownloadOptions): Prom
       controller.signal,
       (downloadedBytes, totalBytes) => {
         const now = Date.now();
-        const elapsed = Math.max(1, now - sampleAt);
-        const instantaneous = Math.max(0, downloadedBytes - sampleBytes) * 1000 / elapsed;
+        const elapsed = now - sampleAt;
         const previousSpeed = task.snapshot.speedBytesPerSecond || 0;
-        const speedBytesPerSecond = previousSpeed ? previousSpeed * 0.7 + instantaneous * 0.3 : instantaneous;
-        if (elapsed >= 500) { sampleAt = now; sampleBytes = downloadedBytes; }
+        let speedBytesPerSecond = previousSpeed;
+        // Accumulate a meaningful sample window before estimating throughput.
+        // This avoids the first chunk turning a few milliseconds into a huge rate.
+        if (elapsed >= 250) {
+          const instantaneous = Math.max(0, downloadedBytes - sampleBytes) * 1000 / elapsed;
+          speedBytesPerSecond = previousSpeed ? previousSpeed * 0.7 + instantaneous * 0.3 : instantaneous;
+          sampleAt = now;
+          sampleBytes = downloadedBytes;
+        }
         const progress = totalBytes ? Math.min(99, Math.round(downloadedBytes / totalBytes * 100)) : task.snapshot.progress;
         queueProgress(task, {
           ...task.snapshot,
@@ -285,7 +295,7 @@ export function startOfflineDownload(options: StartOfflineDownloadOptions): Prom
     throw error;
   }).finally(() => {
     clearProgressTimer(task);
-    tasks.delete(options.key);
+    if (tasks.get(options.key) === task) tasks.delete(options.key);
   });
   void lifecycle.then(resolveTask, rejectTask);
   return task.promise;

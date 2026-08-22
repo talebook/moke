@@ -24,6 +24,7 @@ export type OfflineBookHeadRequest = (
 ) => Promise<OfflineBookHeadResponse>;
 
 export const OFFLINE_BOOK_STALE_DEBOUNCE_MS = 300;
+export const OFFLINE_BOOK_STALE_CONCURRENCY = 4;
 
 const inFlightByRequester = new WeakMap<
   OfflineBookHeadRequest,
@@ -87,10 +88,17 @@ export async function checkOfflineBooksFreshness(
   records: readonly OfflineBookStaleRecord[],
   requestHead: OfflineBookHeadRequest,
 ): Promise<Map<string, OfflineBookFreshnessResult>> {
-  const entries = await Promise.all(records.map(async (record) => (
-    [record.id, await checkOfflineBookFreshness(serverUrl, record, requestHead)] as const
-  )));
-  return new Map(entries);
+  const results = new Map<string, OfflineBookFreshnessResult>();
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < records.length) {
+      const record = records[nextIndex++];
+      results.set(record.id, await checkOfflineBookFreshness(serverUrl, record, requestHead));
+    }
+  };
+  const workerCount = Math.min(OFFLINE_BOOK_STALE_CONCURRENCY, records.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 /** Debounce record/terminal changes and ignore results superseded by a newer check. */

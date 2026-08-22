@@ -116,6 +116,20 @@ fn write_download_directory(app: &AppHandle, directory: Option<&Path>) -> Result
     .map_err(|error| error.to_string())
 }
 
+/// `std::fs::canonicalize` adds a verbatim prefix on Windows. Keep that form
+/// internally for comparisons, but never leak it into the settings UI or the
+/// frontend store, where users expect an ordinary drive/UNC path.
+fn download_directory_for_frontend(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", stripped);
+    }
+    value
+        .strip_prefix(r"\\?\")
+        .unwrap_or(value.as_ref())
+        .to_string()
+}
+
 fn safe_relative_path(value: &str) -> Option<&Path> {
     let path = Path::new(value);
     if path.is_absolute()
@@ -146,6 +160,10 @@ fn downloaded_book_path(app: &AppHandle, book: &MokeDownloadedBook) -> Result<Pa
         .map_err(|error| error.to_string())?
         .join("books")
         .join(&book.file_name))
+}
+
+fn should_prune_missing_download(book: &MokeDownloadedBook) -> bool {
+    book.storage_root.is_none()
 }
 
 fn read_moke_downloads(app: &AppHandle) -> Result<Vec<MokeDownloadedBook>, String> {
@@ -242,7 +260,7 @@ async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>
             .allow_directory(&directory, true)
             .map_err(|error| error.to_string())?;
         write_download_directory(&app, Some(&directory))?;
-        Ok(Some(directory.to_string_lossy().into_owned()))
+        Ok(Some(download_directory_for_frontend(&directory)))
     }
 }
 
@@ -253,7 +271,7 @@ fn moke_reset_download_directory(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn moke_get_download_directory(app: AppHandle) -> Result<Option<String>, String> {
-    Ok(read_download_directory(&app)?.map(|path| path.to_string_lossy().into_owned()))
+    Ok(read_download_directory(&app)?.map(|path| download_directory_for_frontend(&path)))
 }
 
 #[derive(Serialize)]
@@ -360,7 +378,8 @@ fn moke_download_storage_stats(
             configured
         }
         (Some(_), _) => return Err("download directory is not approved".into()),
-        (None, _) => app
+        (None, Some(configured)) => configured,
+        (None, None) => app
             .path()
             .app_data_dir()
             .map_err(|error| error.to_string())?,
@@ -385,21 +404,28 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
         .app_data_dir()
         .map_err(|error| error.to_string())?
         .join("books");
-    let mut indexed = read_moke_downloads(&app)?;
-    indexed.retain(|book| downloaded_book_path(&app, book).is_ok_and(|path| path.is_file()));
-    write_moke_downloads(&app, &indexed)?;
-
-    let mut result: Vec<_> = indexed
-        .into_iter()
-        .filter_map(|book| {
-            downloaded_book_path(&app, &book)
-                .ok()
-                .map(|path| MokeDownloadedBookResponse {
+    let indexed = read_moke_downloads(&app)?;
+    let mut retained = Vec::with_capacity(indexed.len());
+    let mut result = Vec::with_capacity(indexed.len());
+    let mut pruned_default_record = false;
+    for book in indexed {
+        match downloaded_book_path(&app, &book) {
+            Ok(path) if path.is_file() => {
+                result.push(MokeDownloadedBookResponse {
                     file_path: path.to_string_lossy().into_owned(),
-                    book,
-                })
-        })
-        .collect();
+                    book: book.clone(),
+                });
+                retained.push(book);
+            }
+            // A removable/network drive can be temporarily unavailable. Hide
+            // the book for this listing, but preserve its durable index entry.
+            _ if !should_prune_missing_download(&book) => retained.push(book),
+            _ => pruned_default_record = true,
+        }
+    }
+    if pruned_default_record {
+        write_moke_downloads(&app, &retained)?;
+    }
 
     if books_dir.is_dir() {
         for entry in fs::read_dir(&books_dir).map_err(|error| error.to_string())? {
@@ -563,7 +589,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod download_storage_tests {
-    use super::{mount_specificity, target_is_on_mount, MountPathStyle};
+    use super::{
+        download_directory_for_frontend, mount_specificity, should_prune_missing_download,
+        target_is_on_mount, MokeDownloadedBook, MountPathStyle,
+    };
     use std::path::Path;
 
     fn selected_mount<'a>(
@@ -614,6 +643,36 @@ mod download_storage_tests {
             ),
             Some(r"c:\users\moke"),
         );
+    }
+
+    #[test]
+    fn frontend_directory_strips_windows_verbatim_prefixes() {
+        assert_eq!(
+            download_directory_for_frontend(Path::new(r"\\?\C:\Users\Administrator\Downloads")),
+            r"C:\Users\Administrator\Downloads",
+        );
+        assert_eq!(
+            download_directory_for_frontend(Path::new(r"\\?\UNC\server\books")),
+            r"\\server\books",
+        );
+    }
+
+    #[test]
+    fn missing_custom_downloads_are_not_pruned_from_the_index() {
+        let mut book = MokeDownloadedBook {
+            id: "book".into(),
+            server_url: "https://books.test".into(),
+            book_id: "1".into(),
+            title: "Book".into(),
+            file_name: "book.epub".into(),
+            relative_path: Some("books/server/1/epub/book.epub".into()),
+            storage_root: Some(r"D:\Books".into()),
+            mime_type: "application/epub+zip".into(),
+            updated_at: 1,
+        };
+        assert!(!should_prune_missing_download(&book));
+        book.storage_root = None;
+        assert!(should_prune_missing_download(&book));
     }
 
     #[cfg(unix)]

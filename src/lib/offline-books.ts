@@ -12,6 +12,8 @@ const DB_NAME = 'moke-offline-books';
 const STORE_NAME = 'books';
 const DB_VERSION = 2;
 const EPUB_TAIL_WINDOW = 22 + 0xffff + 4096;
+let databaseOwner: IDBFactory | undefined;
+let databasePromise: Promise<IDBDatabase> | undefined;
 
 export interface OfflineBookRecord {
   id: string;
@@ -35,8 +37,11 @@ function formatFromRecord(record: Partial<OfflineBookRecord>): string {
 }
 
 function openDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+  const owner = window.indexedDB;
+  if (databaseOwner === owner && databasePromise) return databasePromise;
+  databaseOwner = owner;
+  const promise = new Promise<IDBDatabase>((resolve, reject) => {
+    const request = owner.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -68,9 +73,21 @@ function openDatabase(): Promise<IDBDatabase> {
         cursor.continue();
       };
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => {
+        database.close();
+        if (databaseOwner === owner && databasePromise === promise) databasePromise = undefined;
+      };
+      resolve(database);
+    };
+    request.onerror = () => {
+      if (databaseOwner === owner && databasePromise === promise) databasePromise = undefined;
+      reject(request.error);
+    };
   });
+  databasePromise = promise;
+  return promise;
 }
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
@@ -216,15 +233,24 @@ export interface OfflineFileWriter {
   close(): Promise<void>;
 }
 
+async function resolveOfflineBookFilePath(input: {
+  serverUrl: string; bookId: string; format: string; fileName: string;
+  downloadDirectory?: string | null;
+}): Promise<{ filePath: string; relativePath: string }> {
+  const { appDataDir, join } = await import('@tauri-apps/api/path');
+  const relativePath = makeOfflineRelativePath(input.serverUrl, input.bookId, input.format, input.fileName);
+  const custom = input.downloadDirectory || null;
+  const filePath = custom ? await join(custom, ...relativePath.split('/').slice(1)) : await join(await appDataDir(), ...relativePath.split('/'));
+  return { filePath, relativePath };
+}
+
 async function openOfflineBookFile(input: {
   serverUrl: string; bookId: string; format: string; fileName: string;
   downloadDirectory?: string | null; resume: boolean;
 }): Promise<{ writer: OfflineFileWriter; filePath: string; relativePath: string }> {
   const { open, mkdir, stat } = await import('@tauri-apps/plugin-fs');
-  const { appDataDir, dirname, join } = await import('@tauri-apps/api/path');
-  const relativePath = makeOfflineRelativePath(input.serverUrl, input.bookId, input.format, input.fileName);
-  const custom = input.downloadDirectory || null;
-  const filePath = custom ? await join(custom, ...relativePath.split('/').slice(1)) : await join(await appDataDir(), ...relativePath.split('/'));
+  const { dirname } = await import('@tauri-apps/api/path');
+  const { filePath, relativePath } = await resolveOfflineBookFilePath(input);
   const parent = await dirname(filePath);
   await mkdir(parent, { recursive: true });
 
@@ -263,13 +289,11 @@ export async function removeOfflinePartial(input: {
   serverUrl: string; bookId: string; format: string; title: string; downloadDirectory?: string | null;
 }): Promise<void> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
-  const handle = await openOfflineBookFile({
+  const { filePath } = await resolveOfflineBookFilePath({
     ...input,
     fileName: `${input.title}.${input.format}`,
-    resume: true,
   });
-  await handle.writer.close();
-  try { await removeDiskFile(handle.filePath); } catch { /* already absent */ }
+  try { await removeDiskFile(filePath); } catch { /* already absent */ }
 }
 
 export async function saveOfflineBookStream(input: {

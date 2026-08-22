@@ -10,7 +10,11 @@ import {
   readJsonResponse,
   resolveAppPlatform,
 } from '@/lib/api-core';
-import { hasEpubCentralDirectory, parseContentRange } from '@/lib/offline-book-core';
+import {
+  classifyOfflineRangeResponse,
+  hasEpubCentralDirectory,
+  parseContentRange,
+} from '@/lib/offline-book-core';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -546,17 +550,27 @@ export async function streamBookDownload(
   const headers = new Headers();
   if (requestedOffset > 0) headers.set('Range', `bytes=${requestedOffset}-`);
 
-  const response = await request(url, {
+  const fetchDownload = (requestHeaders: Headers) => request(url, {
     ...(isTauriApp
-      ? ({ method: 'GET', connectTimeout: 30_000, signal: options.signal, headers } as any)
-      : { credentials: 'include', signal: options.signal, headers }),
+      ? ({ method: 'GET', connectTimeout: 30_000, signal: options.signal, headers: requestHeaders } as any)
+      : { credentials: 'include', signal: options.signal, headers: requestHeaders }),
   });
+  let response = await fetchDownload(headers);
   if (!response.ok) throw new Error(`http.${response.status}`);
 
-  const contentRange = parseContentRange(response.headers.get('content-range'));
-  const resumed = requestedOffset > 0 && response.status === 206 && contentRange?.start === requestedOffset;
+  let contentRange = parseContentRange(response.headers.get('content-range'));
+  let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
+  if (rangeMode === 'retry-full') {
+    await options.onRangeReset?.();
+    response = await fetchDownload(new Headers());
+    if (!response.ok) throw new Error(`http.${response.status}`);
+    contentRange = parseContentRange(response.headers.get('content-range'));
+    rangeMode = classifyOfflineRangeResponse(0, response.status, contentRange);
+  }
+  if (rangeMode === 'invalid') throw new Error('book.download.range.invalid');
+  const resumed = rangeMode === 'resume';
   let received = resumed ? requestedOffset : 0;
-  if (requestedOffset > 0 && !resumed) await options.onRangeReset?.();
+  if (rangeMode === 'restart') await options.onRangeReset?.();
   const responseLength = Number(response.headers.get('content-length') || 0);
   const total = contentRange?.total ?? (responseLength > 0 ? received + responseLength : null);
   const sourceSignature = response.headers.get('etag') || response.headers.get('last-modified') || undefined;

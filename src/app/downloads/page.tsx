@@ -37,6 +37,7 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useToast } from '@/lib/toast';
 
 const EMPTY_STALE_KEYS: ReadonlySet<string> = new Set();
+const STORAGE_STATS_REFRESH_INTERVAL_MS = 30_000;
 
 const TABS: Array<{ value: 'all' | OfflineDownloadStatus; label: string }> = [
   { value: 'all', label: '全部' },
@@ -119,8 +120,12 @@ export default function DownloadsPage() {
       } catch { if (!cancelled) setAvailableBytes(null); }
     };
     void loadSpace();
-    return () => { cancelled = true; };
-  }, [downloadDirectory, records, tasks]);
+    const timer = window.setInterval(() => { void loadSpace(); }, STORAGE_STATS_REFRESH_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [downloadDirectory]);
 
   useEffect(() => {
     staleCheckScheduler.schedule(serverUrl, records, setFreshnessByKey);

@@ -194,3 +194,55 @@ test('删除运行中任务会等待取消清理且不会重新发布失败快�
   assert.equal(getOfflineDownloadSnapshot(key), undefined);
   assert.equal(listOfflineDownloadSnapshots().some((snapshot) => snapshot.key === key), false);
 });
+
+test('旧任务结束不会误删同 key 的新任务', async () => {
+  const key = 'https://example.test::replacement::epub';
+  let replacement;
+  const unsubscribe = subscribeOfflineDownloads((event) => {
+    if (event.key !== key || event.snapshot?.status !== 'paused' || replacement) return;
+    replacement = startOfflineDownload({
+      key,
+      run: async (_onProgress, signal) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      }),
+    });
+  });
+
+  const first = startOfflineDownload({
+    key,
+    run: async (_onProgress, signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+    }),
+  });
+  assert.equal(pauseOfflineDownload(key), true);
+  await first;
+  assert.ok(replacement);
+  assert.equal(pauseOfflineDownload(key), true, 'replacement task must remain controllable');
+  await replacement;
+  unsubscribe();
+});
+
+test('重下已完成书籍从 0% 开始且首个快速分片不产生速度尖峰', async () => {
+  const key = 'https://example.test::redownload::epub';
+  await startOfflineDownload({ key, run: async () => {} });
+  const transfer = deferred();
+
+  const next = startOfflineDownload({
+    key,
+    metadata: { downloadedBytes: 0, totalBytes: 1_000 },
+    run: async (_onProgress, signal, onTransfer) => {
+      await transfer.promise;
+      onTransfer(10, 1_000);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      });
+    },
+  });
+  assert.equal(getOfflineDownloadSnapshot(key)?.progress, 0);
+  transfer.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getOfflineDownloadSnapshot(key)?.progress, 1);
+  assert.equal(getOfflineDownloadSnapshot(key)?.speedBytesPerSecond, 0);
+  assert.equal(pauseOfflineDownload(key), true);
+  await next;
+});

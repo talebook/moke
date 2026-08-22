@@ -44,6 +44,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const developerUnlocked = useDeveloperStore((s) => s.unlocked);
   const showDebugPanel = useDeveloperStore((s) => s.showDebugPanel);
 
+  // The native backend owns the approved directory and restores its fs scope
+  // before the WebView starts. Mirror that durable value into the frontend so
+  // clearing localStorage cannot make the two sides silently diverge.
+  useEffect(() => {
+    if (!isNativeAppBuild) return;
+    let cancelled = false;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<string | null>('moke_get_download_directory'))
+      .then((directory) => {
+        if (!cancelled) useSettingsStore.getState().setDownloadDirectory(directory);
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn('Unable to restore the approved download directory:', error);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   // Persist logs across document reloads and bridge them to every embedded
   // Readest window. The visibility handshake lets an already-open reader
   // follow the host toggle without being reopened.

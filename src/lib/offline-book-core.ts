@@ -87,6 +87,26 @@ export function parseContentRange(value: string | null): { start: number; end: n
     : null;
 }
 
+export type OfflineRangeResponseMode = 'full' | 'resume' | 'restart' | 'retry-full' | 'invalid';
+
+/** Decide whether a ranged response is safe before any response bytes are written. */
+export function classifyOfflineRangeResponse(
+  requestedOffset: number,
+  status: number,
+  contentRange: ReturnType<typeof parseContentRange>,
+): OfflineRangeResponseMode {
+  if (requestedOffset > 0) {
+    if (status !== 206) return 'restart';
+    return contentRange?.start === requestedOffset ? 'resume' : 'retry-full';
+  }
+  if (status !== 206) return 'full';
+  return contentRange?.start === 0
+    && contentRange.total != null
+    && contentRange.end + 1 === contentRange.total
+    ? 'full'
+    : 'invalid';
+}
+
 export async function hasEpubCentralDirectory(blob: Blob): Promise<boolean> {
   const tail = new Uint8Array(
     await blob.slice(Math.max(0, blob.size - EOCD_LENGTH - MAX_COMMENT_LENGTH - MAX_TRAILING_BYTES)).arrayBuffer(),

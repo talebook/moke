@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  OFFLINE_BOOK_STALE_CONCURRENCY,
   OFFLINE_BOOK_STALE_DEBOUNCE_MS,
   OfflineBookStaleCheckScheduler,
   checkOfflineBookFreshness,
+  checkOfflineBooksFreshness,
 } from '../src/lib/offline-book-stale.ts';
 
 function headResponse(headers = {}, ok = true) {
@@ -133,4 +135,24 @@ test('频繁记录/终态变化只触发一轮去抖 HEAD 检测', async (t) => 
   assert.equal(results[0].get('unsigned')?.status, 'unknown');
   scheduler.cancel();
   t.mock.timers.reset();
+});
+
+test('批量 stale 检测限制 HEAD 并发数', async () => {
+  let active = 0;
+  let maximum = 0;
+  const records = Array.from({ length: 20 }, (_, index) => record({
+    id: `book-${index}`,
+    bookId: String(index),
+  }));
+  const results = await checkOfflineBooksFreshness('https://books.test', records, async () => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => setImmediate(resolve));
+    active -= 1;
+    return headResponse({ etag: 'etag-v1' });
+  });
+
+  assert.equal(results.size, records.length);
+  assert.ok(maximum <= OFFLINE_BOOK_STALE_CONCURRENCY);
+  assert.equal(maximum, OFFLINE_BOOK_STALE_CONCURRENCY);
 });
