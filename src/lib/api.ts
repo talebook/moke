@@ -241,8 +241,12 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
     probeJsonEndpoint(serverUrl, '/api/network/sources'),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
-    // The annotations endpoint is authenticated. Guests must not probe it;
-    // keep the optimistic capability value so it can be used after login.
+    // The annotations endpoint is authenticated. Guests must not probe it.
+    // The optimistic value is safe because every store session transition
+    // invalidates checkedAt and forces a logged-in re-probe. The user/info call
+    // here is independent from ServerProvider's user sync, so that invalidation
+    // also closes the small window where the two requests observe different
+    // cookie sessions. A later 404/405 still self-heals the optimistic value.
     shouldRequestBookAnnotations(Boolean(info.user?.is_login)) && sampleBookId
       ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`)
       : Promise.resolve(true),

@@ -652,7 +652,7 @@ function DetailContent() {
           </div>
         </div>
 
-        {capabilities.checkedAt != null && shouldRequestBookAnnotations(Boolean(user)) && (
+        {shouldRequestBookAnnotations(Boolean(user)) && (
           <AnnotationPanel
             key={String(book.id)}
             bookId={String(book.id)}

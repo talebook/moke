@@ -92,7 +92,6 @@ export function AnnotationPanel({
         setServerCapabilities({
           ...capabilities,
           annotationApi: false,
-          checkedAt: Date.now(),
         });
         setLoadState('unsupported');
         return;

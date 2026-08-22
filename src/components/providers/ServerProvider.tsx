@@ -42,6 +42,8 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const checkAccess = async () => {
+      const userAtSyncStart = useServerStore.getState().user;
+
       try {
         const welcome = await checkWelcomeRequirement(serverUrl);
         if (!cancelled && welcome.needsAccessCode) {
@@ -58,14 +60,8 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
 
         const currentUser = useServerStore.getState().user;
-        const syncedUser = resolveUserAfterSync(currentUser, userResult);
-        if (userResult.status === 'fulfilled') {
-          // Only a confirmed guest response may clear the cached user. A
-          // rejected request says nothing about whether the cookie is valid.
-          setUser(syncedUser);
-        } else {
-          console.warn('[ServerProvider] user sync failed:', userResult.reason);
-        }
+        const syncStillCurrent = currentUser === userAtSyncStart;
+        const syncedUser = resolveUserAfterSync(userAtSyncStart, currentUser, userResult);
 
         if (serverResult.status === 'fulfilled') {
           setServerTitle(serverResult.value.title || '');
@@ -73,12 +69,23 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           console.warn('[ServerProvider] server info sync failed:', serverResult.reason);
         }
 
-        if (capabilitiesResult.status === 'fulfilled' && userResult.status === 'fulfilled') {
-          // annotationApi is auth-dependent. Do not stamp a fresh cache while
-          // the matching user/session state is unknown.
+        if (capabilitiesResult.status === 'fulfilled' && userResult.status === 'fulfilled' && syncStillCurrent) {
+          // Store the snapshot before the matching user. If the confirmed
+          // session changed, setUser invalidates checkedAt again so a probe
+          // made under the old auth state cannot become a fresh cache.
           setServerCapabilities(capabilitiesResult.value);
         } else if (capabilitiesResult.status === 'rejected') {
           console.warn('[ServerProvider] capabilities sync failed:', capabilitiesResult.reason);
+        }
+
+        if (userResult.status === 'fulfilled' && syncStillCurrent) {
+          // Only a confirmed guest response may clear the cached user. A
+          // rejected request says nothing about whether the cookie is valid.
+          setUser(syncedUser);
+        } else if (userResult.status === 'fulfilled') {
+          console.warn('[ServerProvider] stale user sync ignored after session change');
+        } else {
+          console.warn('[ServerProvider] user sync failed:', userResult.reason);
         }
       } catch (e) {
         // Welcome/network failures are transient. Preserve the last confirmed

@@ -40,20 +40,45 @@ test('user/info 暂时失败时保留 cookie 会话对应的最后确认用户',
   assert.equal(result.status, 'rejected');
   assert.equal(result.reason.code, 'server.busy');
   assert.equal(result.reason.status, 503);
-  assert.strictEqual(resolveUserAfterSync(currentUser, result), currentUser);
+  assert.strictEqual(resolveUserAfterSync(currentUser, currentUser, result), currentUser);
 });
 
 test('只有明确未登录响应才清空已确认用户', async () => {
   const currentUser = reader();
   const [guestResult, authRequiredResult] = await Promise.allSettled([
     readCurrentUserResponse(jsonResponse({ err: 'ok', user: { is_login: false } })),
-    readCurrentUserResponse(jsonResponse({ err: 'user.need_login', msg: '请登录' })),
+    readCurrentUserResponse(jsonResponse({ err: 'user.need_login', msg: '请登录' }, 401)),
   ]);
 
   assert.equal(guestResult.status, 'fulfilled');
   assert.equal(authRequiredResult.status, 'fulfilled');
-  assert.equal(resolveUserAfterSync(currentUser, guestResult), null);
-  assert.equal(resolveUserAfterSync(currentUser, authRequiredResult), null);
+  assert.equal(resolveUserAfterSync(currentUser, currentUser, guestResult), null);
+  assert.equal(resolveUserAfterSync(currentUser, currentUser, authRequiredResult), null);
+});
+
+test('网关的裸 401 或非登录业务错误不会被当成确认退出', async () => {
+  await assert.rejects(
+    () => readCurrentUserResponse(new Response('<html>Unauthorized</html>', { status: 401 })),
+    (error) => error.code === 'http.401' && error.status === 401,
+  );
+  await assert.rejects(
+    () => readCurrentUserResponse(jsonResponse({ err: 'gateway.unauthorized' }, 401)),
+    (error) => error.code === 'gateway.unauthorized' && error.status === 401,
+  );
+});
+
+test('在途用户同步不会覆盖之后写入的新会话', async () => {
+  const userAtSyncStart = reader(1);
+  const currentUser = reader(1);
+  const staleGuestResult = {
+    status: 'fulfilled',
+    value: { user: null },
+  };
+
+  assert.strictEqual(
+    resolveUserAfterSync(userAtSyncStart, currentUser, staleGuestResult),
+    currentUser,
+  );
 });
 
 test('能力缓存严格遵守五分钟 TTL', () => {

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+// Relative `.ts` imports keep this store directly executable by the Node test
+// runner; it cannot resolve the application's `@/` alias.
 import {
   safeGetLocalStorageItem,
   safeRemoveLocalStorageItem,
