@@ -308,8 +308,10 @@ function DetailContent() {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
       } else if (reason === 'book.epub.invalid') {
         setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
-      } else if (reason === 'Failed to save book to file system') {
-        setMessage('下载失败：保存文件到本地时出错。');
+      } else if (reason === 'book.download.transfer_failed') {
+        setMessage('下载失败：接收文件内容时连接中断，请重试。');
+      } else if (reason === 'book.download.storage_failed' || reason === 'Failed to save book to file system') {
+        setMessage('下载失败：无法保存到本地，请检查存储空间或权限。');
       } else if (!isTauriApp) {
         setMessage('下载失败：当前浏览器模式下可能被跨域策略拦截。桌面版会走 Tauri 原生下载通道。');
       } else {

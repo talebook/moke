@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
+import { logErrorMetadata } from '@/lib/api-log';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -70,7 +71,7 @@ export default function WelcomePage() {
       const result = await validateServerConnection(parsed.origin);
 
       if (result.err !== 'ok') {
-        console.error('[WelcomePage] validateServerConnection failed:', result);
+        logErrorMetadata('WelcomePage validateServerConnection failed', result);
         setError(result.msg || '服务器校验失败');
         return;
       }
@@ -78,7 +79,7 @@ export default function WelcomePage() {
       const welcome = await checkWelcomeRequirement(parsed.origin);
 
       if (welcome.err !== 'ok') {
-        console.error('[WelcomePage] checkWelcomeRequirement failed:', welcome);
+        logErrorMetadata('WelcomePage checkWelcomeRequirement failed', welcome);
         setError(welcome.msg || '访问码状态检查失败');
         return;
       }

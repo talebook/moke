@@ -7,6 +7,7 @@ import {
   buildReaderHomeWindowLabel,
   getNativeTopSafeAreaInset,
   isSingleWebviewRuntime,
+  openEmbeddedReaderHome,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
   showMokeSystemStatusBar,
@@ -260,4 +261,74 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   assert.equal(empty.searchParams.get('moke'), '1');
   assert.equal(empty.searchParams.get('mokeEink'), '0');
   assert.equal(empty.searchParams.get('mokeServerUrl'), null);
+});
+
+test('desktop reader-home keeps exactly one progress saver across window outcomes', async () => {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+
+  const run = async (outcome) => {
+    const windowUrls = [];
+    const navigatedUrls = [];
+    const windowFactory = (_label, options) => {
+      if (outcome === 'sync-error') {
+        throw new Error('window constructor failed');
+      }
+
+      windowUrls.push(options.url);
+      const listeners = new Map();
+      queueMicrotask(() => {
+        if (outcome === 'created') {
+          listeners.get('tauri://created')?.({});
+        } else {
+          listeners.get('tauri://error')?.({ payload: 'window event failed' });
+        }
+      });
+      return {
+        once: (event, handler) => listeners.set(event, handler),
+      };
+    };
+
+    await openEmbeddedReaderHome({
+      eink: false,
+      debugPanel: true,
+      serverUrl: 'http://192.168.1.5:8080',
+      navigate: (href) => navigatedUrls.push(href),
+      platformOverride: 'windows',
+      windowFactory,
+    });
+
+    return { windowUrls, navigatedUrls };
+  };
+
+  try {
+    const success = await run('created');
+    assert.equal(success.windowUrls.length, 1);
+    assert.equal(success.navigatedUrls.length, 0);
+    assert.equal(
+      new URL(success.windowUrls[0], 'https://moke.invalid').searchParams.get('mokeServerUrl'),
+      null,
+    );
+
+    for (const outcome of ['sync-error', 'async-error']) {
+      const fallback = await run(outcome);
+      assert.equal(fallback.navigatedUrls.length, 1, outcome);
+      const fallbackUrl = new URL(fallback.navigatedUrls[0], 'https://moke.invalid');
+      assert.equal(fallbackUrl.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+      assert.equal(fallbackUrl.searchParams.get('mokeDebug'), '1');
+      if (outcome === 'async-error') {
+        assert.equal(fallback.windowUrls.length, 1);
+        assert.equal(
+          new URL(fallback.windowUrls[0], 'https://moke.invalid').searchParams.get('mokeServerUrl'),
+          null,
+        );
+      }
+    }
+  } finally {
+    if (previousPlatform === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    } else {
+      process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+    }
+  }
 });
