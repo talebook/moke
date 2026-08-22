@@ -237,6 +237,18 @@ test('main filesystem writes are limited to downloaded books', () => {
   assert.ok(paths.every((path) => path === '$APPDATA/books' || path.startsWith('$APPDATA/books/')));
 });
 
+test('main download lifecycle grants scoped stat and atomic rename operations', () => {
+  const main = readCapability('src-tauri/capabilities/default.json');
+  for (const identifier of ['fs:allow-stat', 'fs:allow-rename']) {
+    const paths = permissionPaths(findPermission(main, identifier));
+    assert.deepEqual(paths, ['$APPDATA/books/**']);
+  }
+  const identifiers = new Set(main.permissions.map(permissionIdentifier));
+  for (const identifier of ['fs:allow-read', 'fs:allow-seek', 'fs:allow-ftruncate']) {
+    assert.ok(identifiers.has(identifier), `main must grant handle operation ${identifier}`);
+  }
+});
+
 test('reader capabilities retain random-access file reads', () => {
   for (const file of [
     'src-tauri/capabilities/reader.json',

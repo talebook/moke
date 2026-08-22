@@ -27,14 +27,29 @@
         { "path": "$APPDATA/books/**" }
       ]
     },
+    "fs:allow-read",
+    "fs:allow-seek",
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [
+        { "path": "$APPDATA/books/**" }
+      ]
+    },
     {
       "identifier": "fs:allow-write",
       "allow": [
         { "path": "$APPDATA/books/**" }
       ]
     },
+    "fs:allow-ftruncate",
     {
       "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "$APPDATA/books/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-rename",
       "allow": [
         { "path": "$APPDATA/books/**" }
       ]

@@ -5,6 +5,7 @@ import {
   deleteOfflineBook,
   getOfflineBook,
   saveOfflineBook,
+  saveOfflineBookStream,
   shouldPreserveOfflinePartial,
 } from '../src/lib/offline-books.ts';
 import {
@@ -135,6 +136,66 @@ function installWebOfflineStore() {
   globalThis.window = { indexedDB };
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'web';
   return indexedDB;
+}
+
+function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') {
+  const indexedDB = createFakeIndexedDb();
+  const calls = [];
+  const recordedBooks = [];
+  let nextResourceId = 1;
+  const validEpubBytes = new Uint8Array([
+    0x50, 0x4b, 0x03, 0x04,
+    0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]);
+  const normalizePath = (parts) => {
+    const joined = parts.join('/').replaceAll(/\/{2,}/g, '/');
+    return parts[0].startsWith('/') ? `/${joined.replace(/^\/+/, '')}` : joined;
+  };
+
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = {
+    indexedDB,
+    __TAURI_INTERNALS__: {
+      invoke: async (command, args = {}) => {
+        calls.push({ command, args });
+        if (command === 'moke_list_downloaded_books') return [];
+        if (command === 'moke_record_downloaded_book') {
+          recordedBooks.push(args.book);
+          return null;
+        }
+        if (command === 'plugin:path|resolve_directory') return appDataDir;
+        if (command === 'plugin:path|join') return normalizePath(args.paths);
+        if (command === 'plugin:path|dirname') return args.path.slice(0, args.path.lastIndexOf('/'));
+        if (command === 'plugin:fs|open') return nextResourceId++;
+        if (command === 'plugin:fs|write') return args.data.length;
+        if (command === 'plugin:fs|stat') return {
+          isFile: true,
+          isDirectory: false,
+          isSymlink: false,
+          size: validEpubBytes.length,
+          mtime: null,
+          atime: null,
+          birthtime: null,
+          readonly: false,
+          fileAttributes: null,
+        };
+        if (command === 'plugin:fs|seek') return 0;
+        if (command === 'plugin:fs|read') {
+          const response = new Uint8Array(validEpubBytes.length + 8);
+          response.set(validEpubBytes);
+          response[response.length - 1] = validEpubBytes.length;
+          return response;
+        }
+        if (command === 'plugin:fs|exists') return false;
+        if (command === 'plugin:fs|mkdir'
+          || command === 'plugin:fs|rename'
+          || command === 'plugin:fs|remove'
+          || command === 'plugin:resources|close') return null;
+        throw new Error(`Unexpected Tauri command: ${command}`);
+      },
+    },
+  };
+  return { calls, indexedDB, recordedBooks };
 }
 
 test('离线书籍键会隔离服务器、书籍和格式', () => {
@@ -312,6 +373,87 @@ test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载
   assert.equal(recovered?.title, '西游记');
   assert.equal(recovered?.filePath, '/app-data/books/西游记.epub');
   assert.equal(indexedDB.records.get('https://a.example::42')?.title, '西游记');
+});
+
+test('Tauri 默认下载目录的所有文件操作都使用 AppData 相对路径', async () => {
+  const { calls, indexedDB, recordedBooks } = installTauriOfflineStore();
+
+  await saveOfflineBookStream({
+    serverUrl: 'https://beta.rexliao.cn',
+    bookId: '10',
+    title: '西游记',
+    fileName: '西游记.epub',
+    mimeType: 'application/epub+zip',
+    format: 'epub',
+    write: async (writer) => {
+      await writer.write(new Uint8Array([
+        0x50, 0x4b, 0x03, 0x04,
+        0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]));
+      return { size: 26 };
+    },
+  });
+
+  const pathCalls = calls.filter(({ command }) => [
+    'plugin:fs|mkdir',
+    'plugin:fs|open',
+    'plugin:fs|stat',
+    'plugin:fs|exists',
+    'plugin:fs|rename',
+    'plugin:fs|remove',
+  ].includes(command));
+  assert.ok(pathCalls.length > 0);
+  for (const { command, args } of pathCalls) {
+    if (command === 'plugin:fs|rename') {
+      assert.match(args.oldPath, /^books\//);
+      assert.match(args.newPath, /^books\//);
+      assert.deepEqual(args.options, { oldPathBaseDir: 14, newPathBaseDir: 14 });
+    } else {
+      assert.match(args.path, /^books\//);
+      assert.equal(args.options.baseDir, 14);
+    }
+  }
+  assert.equal(recordedBooks.length, 1);
+  assert.match(
+    indexedDB.records.get('https://beta.rexliao.cn::10::epub').filePath,
+    /^\/data\/user\/0\/org\.houheya\.moke\/books\//,
+  );
+  assert.match(recordedBooks[0].relativePath, /^books\//);
+});
+
+test('Tauri 自定义下载目录继续使用已授权的绝对路径', async () => {
+  const { calls, indexedDB, recordedBooks } = installTauriOfflineStore();
+
+  await saveOfflineBookStream({
+    serverUrl: 'https://beta.rexliao.cn',
+    bookId: '10',
+    title: '西游记',
+    fileName: '西游记.pdf',
+    mimeType: 'application/pdf',
+    format: 'pdf',
+    downloadDirectory: '/storage/emulated/0/Moke',
+    write: async (writer) => {
+      await writer.write(new Uint8Array([1]));
+      return { size: 1 };
+    },
+  });
+
+  for (const { command, args } of calls.filter(({ command }) => command.startsWith('plugin:fs|'))) {
+    if (command === 'plugin:fs|write') continue;
+    if (command === 'plugin:fs|rename') {
+      assert.match(args.oldPath, /^\/storage\/emulated\/0\/Moke\//);
+      assert.match(args.newPath, /^\/storage\/emulated\/0\/Moke\//);
+      assert.equal(args.options, undefined);
+    } else {
+      assert.match(args.path, /^\/storage\/emulated\/0\/Moke\//);
+      assert.equal(args.options?.baseDir, undefined);
+    }
+  }
+  assert.equal(recordedBooks[0].storageRoot, '/storage/emulated/0/Moke');
+  assert.match(
+    indexedDB.records.get('https://beta.rexliao.cn::10::pdf').filePath,
+    /^\/storage\/emulated\/0\/Moke\//,
+  );
 });
 
 test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别格式化 key', async () => {

@@ -199,13 +199,56 @@ async function deleteRecordOnly(id: string): Promise<void> {
   await requestResult(store.delete(id));
 }
 
-async function removeDiskFile(filePath: string): Promise<void> {
+type FsBaseDirectory = import('@tauri-apps/api/path').BaseDirectory;
+
+interface OfflineFsPath {
+  /** Path passed to plugin-fs. Default storage stays relative to AppData. */
+  operationPath: string;
+  /** Absolute path persisted for the native index and reader. */
+  filePath: string;
+  baseDir?: FsBaseDirectory;
+}
+
+function withFsSuffix(target: OfflineFsPath, suffix: string): OfflineFsPath {
+  return {
+    ...target,
+    operationPath: `${target.operationPath}${suffix}`,
+    filePath: `${target.filePath}${suffix}`,
+  };
+}
+
+function fsPathOptions(target: OfflineFsPath): { baseDir?: FsBaseDirectory } | undefined {
+  return target.baseDir === undefined ? undefined : { baseDir: target.baseDir };
+}
+
+function fsRenameOptions(
+  oldPath: OfflineFsPath,
+  newPath: OfflineFsPath,
+): { oldPathBaseDir?: FsBaseDirectory; newPathBaseDir?: FsBaseDirectory } | undefined {
+  if (oldPath.baseDir === undefined && newPath.baseDir === undefined) return undefined;
+  return { oldPathBaseDir: oldPath.baseDir, newPathBaseDir: newPath.baseDir };
+}
+
+async function storedOfflineFsPath(record: OfflineBookRecord): Promise<OfflineFsPath | null> {
+  if (!record.filePath) return null;
+  if (record.relativePath && !record.storageRoot) {
+    const { BaseDirectory } = await import('@tauri-apps/api/path');
+    return {
+      operationPath: record.relativePath,
+      filePath: record.filePath,
+      baseDir: BaseDirectory.AppData,
+    };
+  }
+  return { operationPath: record.filePath, filePath: record.filePath };
+}
+
+async function removeDiskFile(target: OfflineFsPath): Promise<void> {
   const { remove, exists } = await import('@tauri-apps/plugin-fs');
   try {
-    await remove(filePath);
+    await remove(target.operationPath, fsPathOptions(target));
   } catch {
     let stillThere = true;
-    try { stillThere = await exists(filePath); } catch { /* conservatively retain */ }
+    try { stillThere = await exists(target.operationPath, fsPathOptions(target)); } catch { /* conservatively retain */ }
     if (stillThere) throw new Error('Failed to delete book file');
   }
 }
@@ -231,7 +274,10 @@ export async function deleteOfflineBook(
     : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId);
 
   for (const record of records) {
-    if (record.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') await removeDiskFile(record.filePath);
+    if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+      const target = await storedOfflineFsPath(record);
+      if (target) await removeDiskFile(target);
+    }
     await deleteRecordOnly(record.id);
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
       try {
@@ -291,30 +337,43 @@ export interface OfflineFileWriter {
 async function resolveOfflineBookFilePath(input: {
   serverUrl: string; bookId: string; format: string; fileName: string;
   downloadDirectory?: string | null;
-}): Promise<{ filePath: string; relativePath: string }> {
-  const { appDataDir, join } = await import('@tauri-apps/api/path');
+}): Promise<{ target: OfflineFsPath; relativePath: string }> {
+  const { appDataDir, BaseDirectory, join } = await import('@tauri-apps/api/path');
   const relativePath = makeOfflineRelativePath(input.serverUrl, input.bookId, input.format, input.fileName);
   const custom = input.downloadDirectory || null;
   const filePath = custom ? await join(custom, ...relativePath.split('/').slice(1)) : await join(await appDataDir(), ...relativePath.split('/'));
-  return { filePath, relativePath };
+  return {
+    target: {
+      operationPath: custom ? filePath : relativePath,
+      filePath,
+      baseDir: custom ? undefined : BaseDirectory.AppData,
+    },
+    relativePath,
+  };
 }
 
 async function openOfflineBookFile(input: {
   serverUrl: string; bookId: string; format: string; fileName: string;
   downloadDirectory?: string | null; resume: boolean;
-}): Promise<{ writer: OfflineFileWriter; filePath: string; partialPath: string; relativePath: string }> {
+}): Promise<{ writer: OfflineFileWriter; target: OfflineFsPath; partialTarget: OfflineFsPath; relativePath: string }> {
   const { open, mkdir, stat } = await import('@tauri-apps/plugin-fs');
   const { dirname } = await import('@tauri-apps/api/path');
-  const { filePath, relativePath } = await resolveOfflineBookFilePath(input);
-  const partialPath = `${filePath}.part`;
-  const parent = await dirname(filePath);
-  await mkdir(parent, { recursive: true });
+  const { target, relativePath } = await resolveOfflineBookFilePath(input);
+  const partialTarget = withFsSuffix(target, '.part');
+  const parent = await dirname(target.operationPath);
+  await mkdir(parent, { recursive: true, ...fsPathOptions(target) });
 
   let position = 0;
   if (input.resume) {
-    try { position = Number((await stat(partialPath)).size); } catch { position = 0; }
+    try { position = Number((await stat(partialTarget.operationPath, fsPathOptions(partialTarget))).size); } catch { position = 0; }
   }
-  const file = await open(partialPath, { write: true, create: true, append: position > 0, truncate: position === 0 });
+  const file = await open(partialTarget.operationPath, {
+    write: true,
+    create: true,
+    append: position > 0,
+    truncate: position === 0,
+    ...fsPathOptions(partialTarget),
+  });
   const writer: OfflineFileWriter = {
     get position() { return position; },
     async write(data) { await file.write(data); position += data.length; },
@@ -325,14 +384,14 @@ async function openOfflineBookFile(input: {
     },
     async close() { await file.close(); },
   };
-  return { writer, filePath, partialPath, relativePath };
+  return { writer, target, partialTarget, relativePath };
 }
 
-async function validateDiskEpub(filePath: string): Promise<boolean> {
+async function validateDiskEpub(target: OfflineFsPath): Promise<boolean> {
   const { open, stat } = await import('@tauri-apps/plugin-fs');
-  const size = Number((await stat(filePath)).size);
+  const size = Number((await stat(target.operationPath, fsPathOptions(target))).size);
   const length = Math.min(size, EPUB_TAIL_WINDOW);
-  const file = await open(filePath, { read: true });
+  const file = await open(target.operationPath, { read: true, ...fsPathOptions(target) });
   try {
     await file.seek(Math.max(0, size - length), 0);
     const tail = new Uint8Array(length);
@@ -345,33 +404,46 @@ export async function removeOfflinePartial(input: {
   serverUrl: string; bookId: string; format: string; title: string; downloadDirectory?: string | null;
 }): Promise<void> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
-  const { filePath } = await resolveOfflineBookFilePath({
+  const { target } = await resolveOfflineBookFilePath({
     ...input,
     fileName: `${input.title}.${input.format}`,
   });
-  try { await removeDiskFile(`${filePath}.part`); } catch { /* already absent */ }
+  try { await removeDiskFile(withFsSuffix(target, '.part')); } catch { /* already absent */ }
 }
 
-async function replaceOfflineBookFile(partialPath: string, filePath: string): Promise<{
-  backupPath: string;
+async function replaceOfflineBookFile(partialTarget: OfflineFsPath, target: OfflineFsPath): Promise<{
+  backupTarget: OfflineFsPath;
   rollback: () => Promise<void>;
 }> {
   const { exists, remove, rename } = await import('@tauri-apps/plugin-fs');
-  const backupPath = `${partialPath}.backup`;
-  if (await exists(backupPath)) {
-    if (await exists(filePath)) await remove(backupPath);
-    else await rename(backupPath, filePath);
+  const backupTarget = withFsSuffix(partialTarget, '.backup');
+  if (await exists(backupTarget.operationPath, fsPathOptions(backupTarget))) {
+    if (await exists(target.operationPath, fsPathOptions(target))) {
+      await remove(backupTarget.operationPath, fsPathOptions(backupTarget));
+    } else {
+      await rename(
+        backupTarget.operationPath,
+        target.operationPath,
+        fsRenameOptions(backupTarget, target),
+      );
+    }
   }
-  const hadPreviousFile = await exists(filePath);
+  const hadPreviousFile = await exists(target.operationPath, fsPathOptions(target));
 
-  if (hadPreviousFile) await rename(filePath, backupPath);
+  if (hadPreviousFile) {
+    await rename(target.operationPath, backupTarget.operationPath, fsRenameOptions(target, backupTarget));
+  }
 
   try {
-    await rename(partialPath, filePath);
+    await rename(partialTarget.operationPath, target.operationPath, fsRenameOptions(partialTarget, target));
   } catch (error) {
     if (hadPreviousFile) {
       try {
-        await rename(backupPath, filePath);
+        await rename(
+          backupTarget.operationPath,
+          target.operationPath,
+          fsRenameOptions(backupTarget, target),
+        );
       } catch {
         // 交给外层记录原始安装失败；备份仍留在磁盘，避免静默丢失。
       }
@@ -380,10 +452,16 @@ async function replaceOfflineBookFile(partialPath: string, filePath: string): Pr
   }
 
   return {
-    backupPath,
+    backupTarget,
     rollback: async () => {
-      try { await remove(filePath); } catch { /* ignore */ }
-      if (hadPreviousFile) await rename(backupPath, filePath);
+      try { await remove(target.operationPath, fsPathOptions(target)); } catch { /* ignore */ }
+      if (hadPreviousFile) {
+        await rename(
+          backupTarget.operationPath,
+          target.operationPath,
+          fsRenameOptions(backupTarget, target),
+        );
+      }
     },
   };
 }
@@ -407,23 +485,23 @@ export async function saveOfflineBookStream(input: {
   const format = normalizeOfflineFormat(input.format || fileName.split('.').pop() || 'epub');
   const previous = await getOfflineBook(input.serverUrl, input.bookId, format);
   let writer: OfflineFileWriter | null = null;
-  let filePath: string | undefined;
-  let partialPath: string | undefined;
+  let target: OfflineFsPath | undefined;
+  let partialTarget: OfflineFsPath | undefined;
   let relativePath: string | undefined;
   let replacement: Awaited<ReturnType<typeof replaceOfflineBookFile>> | null = null;
   try {
     const handle = await openOfflineBookFile({ ...input, fileName, format, resume: Boolean(input.resume) });
     writer = handle.writer;
-    filePath = handle.filePath;
-    partialPath = handle.partialPath;
+    target = handle.target;
+    partialTarget = handle.partialTarget;
     relativePath = handle.relativePath;
     const result = await input.write(writer);
     const details = typeof result === 'string' ? { mimeType: result } : result || {};
     const size = details.size ?? writer.position;
     await writer.close();
     writer = null;
-    if (format === 'epub' && !(await validateDiskEpub(partialPath))) throw new Error('book.epub.invalid');
-    replacement = await replaceOfflineBookFile(partialPath, filePath);
+    if (format === 'epub' && !(await validateDiskEpub(partialTarget))) throw new Error('book.epub.invalid');
+    replacement = await replaceOfflineBookFile(partialTarget, target);
     await commitOfflineBookRecord({
       ...input,
       format,
@@ -431,20 +509,19 @@ export async function saveOfflineBookStream(input: {
       mimeType: details.mimeType || input.mimeType,
       size,
       sourceSignature: details.sourceSignature || input.sourceSignature,
-      filePath,
+      filePath: target.filePath,
       relativePath,
       storageRoot: input.downloadDirectory || undefined,
     });
     // 索引已经提交，旧文件备份不再需要。
-    const { remove } = await import('@tauri-apps/plugin-fs');
-    try { await remove(replacement.backupPath); } catch { /* no previous file or best-effort cleanup */ }
+    try { await removeDiskFile(replacement.backupTarget); } catch { /* no previous file or best-effort cleanup */ }
     replacement = null;
   } catch (error) {
     try { if (writer) await writer.close(); } catch { /* ignore */ }
     if (replacement) {
       try { await replacement.rollback(); } catch { /* preserve backup for manual recovery */ }
-    } else if (partialPath && !shouldPreserveOfflinePartial(error, input.preservePartialOnFailure)) {
-      try { await removeDiskFile(partialPath); } catch { /* best effort */ }
+    } else if (partialTarget && !shouldPreserveOfflinePartial(error, input.preservePartialOnFailure)) {
+      try { await removeDiskFile(partialTarget); } catch { /* best effort */ }
     }
     if (error instanceof DOMException || error instanceof TypeError) throw error;
     if (error instanceof Error && (error.message.startsWith('book.') || error.message.startsWith('http.'))) throw error;
@@ -456,8 +533,11 @@ export async function saveOfflineBookStream(input: {
     );
     throw new Error('book.download.storage_failed');
   }
-  if (previous?.filePath && filePath && previous.filePath !== filePath) {
-    try { await removeDiskFile(previous.filePath); } catch (error) { console.warn('Failed to remove stale offline book file:', error); }
+  if (previous?.filePath && target && previous.filePath !== target.filePath) {
+    try {
+      const previousTarget = await storedOfflineFsPath(previous);
+      if (previousTarget) await removeDiskFile(previousTarget);
+    } catch (error) { console.warn('Failed to remove stale offline book file:', error); }
   }
 }
 
