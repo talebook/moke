@@ -23,15 +23,14 @@ import {
   type OfflineDownloadStatus,
 } from '@/lib/offline-download-manager';
 import { makeOfflineBookKey } from '@/lib/offline-book-core';
+import {
+  calculateOfflineDownloadUsedBytes,
+  mergeOfflineDownloadItems,
+  type OfflineDownloadItem,
+} from '@/lib/offline-download-list';
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useToast } from '@/lib/toast';
-
-interface DownloadItem extends OfflineDownloadSnapshot {
-  key: string;
-  record?: OfflineBookRecord;
-  stale?: boolean;
-}
 
 const TABS: Array<{ value: 'all' | OfflineDownloadStatus; label: string }> = [
   { value: 'all', label: '全部' },
@@ -118,38 +117,15 @@ export default function DownloadsPage() {
     return () => { cancelled = true; };
   }, [records, serverUrl]);
 
-  const items = useMemo<DownloadItem[]>(() => {
-    const merged = new Map<string, DownloadItem>();
-    for (const task of tasks) {
-      if (!task.key) continue;
-      merged.set(task.key, { ...task, key: task.key });
-    }
-    for (const record of records) {
-      const task = merged.get(record.id);
-      merged.set(record.id, {
-        ...task,
-        key: record.id,
-        serverUrl: record.serverUrl,
-        bookId: record.bookId,
-        title: record.title,
-        format: record.format,
-        status: 'completed',
-        progress: 100,
-        downloadedBytes: record.size,
-        totalBytes: record.size,
-        updatedAt: record.updatedAt,
-        record,
-        stale: staleKeys.has(record.id),
-      });
-    }
-    return Array.from(merged.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [records, staleKeys, tasks]);
+  const items = useMemo(
+    () => mergeOfflineDownloadItems(records, tasks, staleKeys),
+    [records, staleKeys, tasks],
+  );
 
   const visible = tab === 'all' ? items : items.filter((item) => item.status === tab);
-  const usedBytes = records.reduce((sum, record) => sum + record.size, 0)
-    + tasks.filter((task) => task.status !== 'completed').reduce((sum, task) => sum + (task.downloadedBytes || 0), 0);
+  const usedBytes = calculateOfflineDownloadUsedBytes(items);
 
-  const start = useCallback((item: DownloadItem) => {
+  const start = useCallback((item: OfflineDownloadItem) => {
     if (!item.serverUrl || !item.bookId || !item.title || !item.format) return;
     const key = makeOfflineBookKey(item.serverUrl, item.bookId, item.format);
     void startOfflineDownload({
@@ -172,7 +148,7 @@ export default function DownloadsPage() {
     }).then(refresh).catch(() => refresh());
   }, [downloadDirectory, refresh]);
 
-  const cancel = useCallback(async (item: DownloadItem) => {
+  const cancel = useCallback(async (item: OfflineDownloadItem) => {
     if (item.status === 'downloading') {
       cancelOfflineDownload(item.key);
     } else {
@@ -182,23 +158,23 @@ export default function DownloadsPage() {
           serverUrl: item.serverUrl, bookId: item.bookId, title: item.title, format: item.format, downloadDirectory,
         });
       }
-      removeOfflineDownloadSnapshot(item.key);
+      await removeOfflineDownloadSnapshot(item.key);
     }
     await refresh();
   }, [downloadDirectory, refresh]);
 
-  const remove = useCallback(async (item: DownloadItem) => {
+  const remove = useCallback(async (item: OfflineDownloadItem) => {
     if (!item.serverUrl || !item.bookId || !item.format) return;
     try {
       const result = await deleteOfflineBook(item.serverUrl, item.bookId, item.format);
-      removeOfflineDownloadSnapshot(item.key);
+      await removeOfflineDownloadSnapshot(item.key);
       if (!result.remoteSynced) setRemoteRetry({ bookId: item.bookId, title: item.title || '书籍' });
       toast(result.remoteSynced ? '本地文件已删除' : '本地已删除，服务器状态同步失败', result.remoteSynced ? 'info' : 'error');
       await refresh();
     } catch { toast('删除本地文件失败，请重试', 'error'); }
   }, [refresh, toast]);
 
-  const openLocation = async (item: DownloadItem) => {
+  const openLocation = async (item: OfflineDownloadItem) => {
     if (!item.record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
     try {
       const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
@@ -287,7 +263,7 @@ export default function DownloadsPage() {
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
                     {item.status === 'downloading' && <button title="暂停" onClick={() => pauseOfflineDownload(item.key)} className="rounded-lg p-2 hover:bg-muted"><Pause className="h-4 w-4" /></button>}
-                    {(item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled' || item.stale) && <button title="继续或重试" onClick={() => start(item)} className="rounded-lg p-2 hover:bg-muted"><Play className="h-4 w-4" /></button>}
+                    {(item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled' || (item.status === 'completed' && item.stale)) && <button title="继续或重试" onClick={() => start(item)} className="rounded-lg p-2 hover:bg-muted"><Play className="h-4 w-4" /></button>}
                     {item.status !== 'completed' && <button title="取消" onClick={() => void cancel(item)} className="rounded-lg p-2 hover:bg-muted"><X className="h-4 w-4" /></button>}
                     {item.status === 'completed' && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' && <button title="打开所在位置" onClick={() => void openLocation(item)} className="rounded-lg p-2 hover:bg-muted"><FolderOpen className="h-4 w-4" /></button>}
                     {item.status === 'completed' && <button title="删除" onClick={() => void remove(item)} className="rounded-lg p-2 text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>}

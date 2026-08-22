@@ -5,6 +5,7 @@ import {
   getOfflineDownloadSnapshot,
   listOfflineDownloadSnapshots,
   pauseOfflineDownload,
+  removeOfflineDownloadSnapshot,
   startOfflineDownload,
   subscribeOfflineDownload,
 } from '../src/lib/offline-download-manager.ts';
@@ -99,4 +100,40 @@ test('同一本书复用在途下载任务', async () => {
 
   write.resolve();
   await first;
+});
+
+test('删除运行中任务会等待取消清理且不会重新发布失败快照', async () => {
+  const cleanup = deferred();
+  const key = 'https://example.test::remove-active::epub';
+  let cleanupCalls = 0;
+
+  startOfflineDownload({
+    key,
+    metadata: { serverUrl: 'https://example.test', bookId: 'remove-active', title: '删除中', format: 'epub' },
+    run: async (_onProgress, signal, onTransfer) => {
+      onTransfer(256, 1024);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true });
+      });
+    },
+    onCancel: async () => {
+      cleanupCalls += 1;
+      await cleanup.promise;
+    },
+  });
+
+  let removed = false;
+  const firstRemoval = removeOfflineDownloadSnapshot(key).then(() => { removed = true; });
+  const secondRemoval = removeOfflineDownloadSnapshot(key);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(cleanupCalls, 1);
+  assert.equal(removed, false);
+  cleanup.resolve();
+  await Promise.all([firstRemoval, secondRemoval]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(cleanupCalls, 1);
+  assert.equal(getOfflineDownloadSnapshot(key), undefined);
+  assert.equal(listOfflineDownloadSnapshots().some((snapshot) => snapshot.key === key), false);
 });
