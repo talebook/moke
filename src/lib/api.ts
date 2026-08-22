@@ -2,6 +2,7 @@ import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
 import {
   attachSafeJsonReader,
+  buildTauriBinaryHeaders,
   buildTauriRequestInit,
   getErrorMessage,
   isAbsoluteHttpUrl,
@@ -47,6 +48,33 @@ function isRequestCancelled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   const message = error instanceof Error ? error.message : String(error);
   return /request cancell?ed|aborted?/i.test(message);
+}
+
+function binaryTransferErrorDetail(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function logBinaryTransferFailure(
+  url: string,
+  response: Response,
+  error: unknown,
+  receivedBytes: number,
+): void {
+  debugLog('error', 'download', `✗ GET ${url} 响应正文读取失败`, {
+    status: response.status,
+    receivedBytes,
+    expectedBytes: Number(response.headers.get('content-length') || 0),
+    contentRange: response.headers.get('content-range'),
+    contentEncoding: response.headers.get('content-encoding'),
+    error: binaryTransferErrorDetail(error),
+  }, 'network');
+}
+
+function logOfflineWriteFailure(error: unknown, receivedBytes: number): void {
+  debugLog('error', 'download', '✗ 下载内容写入本地文件失败', {
+    receivedBytes,
+    error: binaryTransferErrorDetail(error),
+  });
 }
 
 async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob> {
@@ -457,7 +485,12 @@ export async function downloadBookBlob(
   try {
     const response = await request(url, {
       ...(isTauriApp
-        ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+        ? ({
+            method: 'GET',
+            headers: buildTauriBinaryHeaders(),
+            connectTimeout: 30_000,
+            signal: options?.signal,
+          } as any)
         : { credentials: 'include', signal: options?.signal }),
     });
 
@@ -540,7 +573,12 @@ export async function streamBookDownload(
 
   const response = await request(url, {
     ...(isTauriApp
-      ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+      ? ({
+          method: 'GET',
+          headers: buildTauriBinaryHeaders(),
+          connectTimeout: 30_000,
+          signal: options?.signal,
+        } as any)
       : { credentials: 'include', signal: options?.signal }),
   });
 
@@ -552,9 +590,21 @@ export async function streamBookDownload(
   const reader = response.body?.getReader();
 
   if (!reader) {
-    const blob = await response.blob();
+    let blob: Blob;
+    try {
+      blob = await response.blob();
+    } catch (error) {
+      logBinaryTransferFailure(url, response, error, 0);
+      throw new Error('book.download.transfer_failed');
+    }
+
     options.onProgress?.(99);
-    await options.write(new Uint8Array(await blob.arrayBuffer()));
+    try {
+      await options.write(new Uint8Array(await blob.arrayBuffer()));
+    } catch (error) {
+      logOfflineWriteFailure(error, blob.size);
+      throw new Error('book.download.storage_failed');
+    }
     if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
       throw new Error('book.epub.invalid');
     }
@@ -568,12 +618,30 @@ export async function streamBookDownload(
   let received = 0;
 
   while (true) {
-    const { done, value } = await reader.read();
+    let result: ReadableStreamReadResult<Uint8Array>;
+    try {
+      result = await reader.read();
+    } catch (error) {
+      if (isRequestCancelled(error)) throw error;
+      logBinaryTransferFailure(url, response, error, received);
+      throw new Error('book.download.transfer_failed');
+    }
 
+    const { done, value } = result;
     if (done) break;
     if (!value) continue;
 
-    await options.write(value);
+    try {
+      await options.write(value);
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        // 原始写入错误更有诊断价值，取消失败不覆盖它。
+      }
+      logOfflineWriteFailure(error, received);
+      throw new Error('book.download.storage_failed');
+    }
     received += value.length;
     tail = keepTailBytes(tail, value, BOOK_TAIL_WINDOW);
 
