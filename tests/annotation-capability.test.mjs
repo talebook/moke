@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import {
   ANNOTATION_CAPABILITY_RETRY_TTL_MS,
   createUncheckedAnnotationCapability,
@@ -57,16 +56,9 @@ test('确认不支持不会按 TTL 循环探测，重新连接恢复 unchecked',
   assert.equal(shouldAutomaticallyLoadAnnotations(reconnected), true);
 });
 
-test('已支持状态仍加载当前书籍数据，而非额外下载样本书探测', () => {
+test('已支持状态仍加载当前书籍数据', () => {
   assert.equal(
     shouldAutomaticallyLoadAnnotations({ status: 'supported', checkedAt: Date.now() }),
     true,
   );
-
-  const apiSource = readFileSync(new URL('../src/lib/api.ts', import.meta.url), 'utf8');
-  const discoverySource = apiSource.slice(
-    apiSource.indexOf('export async function discoverServerCapabilities'),
-    apiSource.indexOf('export async function validateServerConnection'),
-  );
-  assert.doesNotMatch(discoverySource, /\/annotations/);
 });

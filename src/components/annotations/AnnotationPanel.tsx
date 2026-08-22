@@ -62,14 +62,13 @@ export function AnnotationPanel({
   onAuthRequired,
 }: AnnotationPanelProps) {
   const [annotations, setAnnotations] = useState<BookAnnotation[]>([]);
-  const initialLoadState = getInitialAnnotationLoadState({
+  const [loadState, setLoadState] = useState<LoadState>(() => getInitialAnnotationLoadState({
     status: capabilityStatus,
     checkedAt: capabilityCheckedAt,
-  });
-  const [loadState, setLoadState] = useState<LoadState>(initialLoadState);
-  const [errorMessage, setErrorMessage] = useState(
-    initialLoadState === 'error' ? '上次探测遇到网络异常，请检查网络后重试。' : '',
-  );
+  }));
+  const [errorMessage, setErrorMessage] = useState(() => (
+    loadState === 'error' ? '上次同步笔记未成功，请重试。' : ''
+  ));
   const [sourceFilter, setSourceFilter] = useState('all');
   const [showComposer, setShowComposer] = useState(false);
   const [chapter, setChapter] = useState('');
@@ -105,7 +104,7 @@ export function AnnotationPanel({
         setErrorMessage('');
       } else {
         setLoadState('error');
-        setErrorMessage('上次探测遇到网络异常，请检查网络后重试。');
+        setErrorMessage('上次同步笔记未成功，请重试。');
       }
       return;
     }

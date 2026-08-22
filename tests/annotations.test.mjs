@@ -473,15 +473,6 @@ test('旧服务器或非数组响应明确标记为 contract 不兼容', async (
     isAnnotationApiUnsupported,
   );
 
-  await assert.rejects(
-    () => fetchBookAnnotations(
-      async () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } }),
-      'http://talebook',
-      42,
-      { maxRetries: 0 },
-    ),
-    isAnnotationApiUnsupported,
-  );
 });
 
 test('单条畸形记录不会隐藏同一响应中的合法笔记', async () => {
@@ -521,5 +512,25 @@ test('非空响应全部畸形时报告契约不兼容，书籍 404 不误报接
       { maxRetries: 0 },
     ),
     (error) => error.code === 'book.not_found' && !isAnnotationApiUnsupported(error),
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    (error) => error.code === 'http.404' && !isAnnotationApiUnsupported(error),
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => new Response('Method Not Allowed', { status: 405, headers: { 'content-type': 'text/plain' } }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    (error) => error.code === 'http.405' && !isAnnotationApiUnsupported(error),
   );
 });

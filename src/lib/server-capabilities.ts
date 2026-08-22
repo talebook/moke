@@ -20,6 +20,13 @@ export type PersistedServerCapabilities = Partial<ServerCapabilities> & {
   annotationApi?: unknown;
 };
 
+export interface ServerCapabilityDiscoveryDependencies {
+  version: string;
+  findSampleBookId: () => Promise<string | null>;
+  probeJsonEndpoint: (path: string) => Promise<boolean>;
+  now?: () => number;
+}
+
 const uncheckedAnnotationCapability = createUncheckedAnnotationCapability();
 
 export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
@@ -63,12 +70,51 @@ export function mergePersistedServerCapabilities(
       : typeof persistedGeneralCheckedAt === 'number'
         ? persistedGeneralCheckedAt
         : null;
+  const hasPersistedAnnotationCapability = isAnnotationCapabilityStatus(persistedStatus)
+    || typeof legacyAnnotationApi === 'boolean';
 
   return {
     ...currentCapabilities,
     ...capabilitiesWithoutLegacy,
     annotationApiStatus,
     annotationApiCheckedAt,
+    // Stores created before annotationApi existed need one fresh general
+    // discovery instead of temporarily trusting stale capability flags.
+    checkedAt: hasPersistedAnnotationCapability && typeof persistedGeneralCheckedAt === 'number'
+      ? persistedGeneralCheckedAt
+      : null,
+  };
+}
+
+/**
+ * Discover general server capabilities without probing annotation payloads.
+ * The detail panel performs the first useful annotation request separately.
+ */
+export async function discoverGeneralServerCapabilities({
+  version,
+  findSampleBookId,
+  probeJsonEndpoint,
+  now = Date.now,
+}: ServerCapabilityDiscoveryDependencies): Promise<ServerCapabilities> {
+  const sampleBookId = await findSampleBookId();
+  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi] = await Promise.all([
+    probeJsonEndpoint('/api/shelf'),
+    probeJsonEndpoint('/api/reading/stats'),
+    probeJsonEndpoint('/api/network/sources'),
+    sampleBookId ? probeJsonEndpoint(`/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
+    sampleBookId ? probeJsonEndpoint(`/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
+  ]);
+
+  return {
+    shelfApi,
+    annotationApiStatus: 'unchecked',
+    annotationApiCheckedAt: null,
+    readingStateApi,
+    readingProgressApi,
+    readingStatsApi,
+    networkSourcesApi,
+    checkedAt: now(),
+    version,
   };
 }
 

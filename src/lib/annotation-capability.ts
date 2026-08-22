@@ -33,9 +33,10 @@ export function isAnnotationCapabilityStatus(value: unknown): value is Annotatio
 
 /**
  * Supported endpoints are loaded to display their data. Unchecked endpoints
- * are checked once. Transient failures may be retried automatically only after
- * the TTL (or immediately by the retry button), while confirmed incompatibility
- * is stable until an explicit retry or a server reconnect resets the store.
+ * are checked once. On a later panel mount, transient failures may be retried
+ * automatically after the TTL (or immediately by the retry button); this helper
+ * does not schedule a timer while a panel remains mounted. Confirmed
+ * incompatibility is stable until an explicit retry or a server reconnect.
  */
 export function shouldAutomaticallyLoadAnnotations(
   capability: AnnotationCapabilitySnapshot,
