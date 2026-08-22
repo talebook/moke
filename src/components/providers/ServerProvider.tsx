@@ -6,9 +6,8 @@ import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverSer
 import { useServerStore } from '@/lib/store/server';
 import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
+import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
 
-/** 能力探测结果的有效期：期限内路由切换不再整轮重跑（约 7+ 个请求） */
-const SYNC_CAPABILITIES_TTL_MS = 5 * 60 * 1000;
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', '/settings/developer'];
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
@@ -40,13 +39,13 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     // + discoverServerCapabilities）较重，结果带 checkedAt 缓存：5 分钟内路由
     // 切换不再整轮重跑。serverUrl 变化时 setServer 会重置 capabilities
     // （checkedAt=null），因此会自然失效重探；user/title 同步随之节流。
-    const capabilitiesFresh = capabilitiesCheckedAt != null
-      && Date.now() - capabilitiesCheckedAt < SYNC_CAPABILITIES_TTL_MS;
-    if (capabilitiesFresh) return;
+    if (isServerCapabilitiesFresh(capabilitiesCheckedAt)) return;
 
     let cancelled = false;
 
     const checkAccess = async () => {
+      const userAtSyncStart = useServerStore.getState().user;
+
       try {
         const welcome = await checkWelcomeRequirement(discoveryServerUrl);
         if (!cancelled && welcome.needsAccessCode) {
@@ -55,31 +54,52 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const [userData, serverData, discoveredCapabilities] = await Promise.all([
+        const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
           fetchCurrentUser(),
           fetchServerInfo(),
           discoverServerCapabilities(discoveryServerUrl),
         ]);
-        if (!cancelled) {
-          const currentState = useServerStore.getState();
-          if (currentState.serverUrl !== discoveryServerUrl) return;
+        if (cancelled) return;
+
+        const currentState = useServerStore.getState();
+        if (currentState.serverUrl !== discoveryServerUrl) return;
+        const currentUser = currentState.user;
+        const syncStillCurrent = currentUser === userAtSyncStart;
+        const syncedUser = resolveUserAfterSync(userAtSyncStart, currentUser, userResult);
+
+        if (serverResult.status === 'fulfilled') {
+          setServerTitle(serverResult.value.title || '');
+        } else {
+          console.warn('[ServerProvider] server info sync failed:', serverResult.reason);
+        }
+
+        if (userResult.status === 'fulfilled' && syncStillCurrent) {
+          // Only a confirmed guest response may clear the cached user. A
+          // rejected request says nothing about whether the cookie is valid.
+          setUser(syncedUser);
+        } else if (userResult.status === 'fulfilled') {
+          console.warn('[ServerProvider] stale user sync ignored after session change');
+        } else {
+          console.warn('[ServerProvider] user sync failed:', userResult.reason);
+        }
+
+        if (capabilitiesResult.status === 'fulfilled' && userResult.status === 'fulfilled' && syncStillCurrent) {
           // Global discovery intentionally does not download annotation data.
-          // Preserve the panel-owned result across the general five-minute TTL.
-          const currentCapabilities = currentState.capabilities;
-          setUser(userData.user);
-          setServerTitle(serverData.title || '');
+          // Commit the matching user first so a real session transition clears
+          // the panel-owned result, then preserve that post-transition state.
+          const currentCapabilities = useServerStore.getState().capabilities;
           setServerCapabilities({
-            ...discoveredCapabilities,
+            ...capabilitiesResult.value,
             annotationApiStatus: currentCapabilities.annotationApiStatus,
             annotationApiCheckedAt: currentCapabilities.annotationApiCheckedAt,
           });
+        } else if (capabilitiesResult.status === 'rejected') {
+          console.warn('[ServerProvider] capabilities sync failed:', capabilitiesResult.reason);
         }
       } catch (e) {
+        // Welcome/network failures are transient. Preserve the last confirmed
+        // user, title, and capability snapshot for the next sync attempt.
         console.error('[ServerProvider] sync error:', e);
-        if (!cancelled) {
-          setUser(null);
-          setServerTitle('');
-        }
       }
     };
 

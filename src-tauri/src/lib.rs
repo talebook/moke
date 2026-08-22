@@ -14,6 +14,12 @@
 /// 拓展以独立进程方式运行，通过本地 HTTP + WebSocket 与主程序通信。
 mod extensions;
 
+// Keep build-script profile routing covered by the normal `cargo test --lib`
+// command used in CI without compiling it into production application code.
+#[cfg(test)]
+#[path = "../build_config.rs"]
+mod build_config;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -62,9 +68,12 @@ fn moke_runtime_platform() -> &'static str {
     std::env::consts::OS
 }
 
-/// Performs a full-document navigation inside the current Tauri WebView.
+/// Performs a full-document navigation inside the current OpenHarmony WebView.
 /// ArkWeb cannot reliably execute Next.js App Router's RSC navigation over
 /// the custom `tauri://` scheme, and Moke/Readest are separate Next apps.
+/// Other platforms use normal browser navigation and do not register this
+/// privileged command.
+#[cfg(target_env = "ohos")]
 #[tauri::command]
 fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
     if !path.starts_with('/') || path.starts_with("//") {
@@ -513,6 +522,7 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
+        #[cfg(target_env = "ohos")]
         moke_navigate,
         moke_record_downloaded_book,
         moke_remove_downloaded_book,
@@ -522,6 +532,22 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         moke_download_storage_stats,
         moke_list_downloaded_books,
     ]
+}
+
+/// Development reader pages can be served directly by the Readest server on
+/// port 3001. Clone the audited local reader capability at runtime instead of
+/// compiling that remote origin into release builds.
+#[cfg(debug_assertions)]
+fn reader_dev_remote_capability() -> Result<String, serde_json::Error> {
+    let mut capability: serde_json::Value =
+        serde_json::from_str(include_str!("../capabilities/reader.json"))?;
+    capability["identifier"] = "reader-dev-remote".into();
+    capability["description"] = "Development-only remote Readest capability".into();
+    capability["local"] = false.into();
+    capability["remote"] = serde_json::json!({
+        "urls": ["http://localhost:3001/**"]
+    });
+    serde_json::to_string(&capability)
 }
 
 /// KDE Plasma Wayland: WebKitGTK's DMA-BUF renderer fails to repaint the
@@ -613,6 +639,10 @@ pub fn run() {
                     .state::<tauri::scope::Scopes>()
                     .allow_directory(&directory, true);
             }
+
+            #[cfg(debug_assertions)]
+            _app.add_capability(reader_dev_remote_capability()?)?;
+
             // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
             // readestlib 只在桌面目标暴露 manage_reader_state（OHOS 上被 cfg 排除）。
             #[cfg(not(target_env = "ohos"))]
@@ -765,15 +795,18 @@ mod fs_scope_tests {
     }
 
     // Every `$VAR/**` entry in the committed capability files must keep the
-    // bare `$VAR` root out of scope. Parse the real default.json / ohos.json
-    // and exercise the same matching `is_allowed` performs.
+    // bare `$VAR` root out of scope. Parse the real production/dev files and
+    // exercise the same matching `is_allowed` performs.
     #[test]
     fn capability_fs_allow_entries_keep_bare_roots_out_of_scope() {
         let opts = tauri_match_options();
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let files = [
             manifest_dir.join("capabilities/default.json"),
+            manifest_dir.join("capabilities/reader.json"),
+            manifest_dir.join("capabilities/reader-mobile.json"),
             manifest_dir.join("capabilities/ohos.json"),
+            manifest_dir.join("capabilities-dev/ohos.json"),
         ];
         for file in &files {
             let text = std::fs::read_to_string(file)
@@ -821,5 +854,20 @@ mod fs_scope_tests {
                 }
             }
         }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn reader_remote_origin_is_added_only_as_a_debug_capability() {
+        let dev: Value =
+            serde_json::from_str(&super::reader_dev_remote_capability().unwrap()).unwrap();
+        let reader: Value =
+            serde_json::from_str(include_str!("../capabilities/reader.json")).unwrap();
+
+        assert_eq!(dev["identifier"], "reader-dev-remote");
+        assert_eq!(dev["local"], false);
+        assert_eq!(dev["remote"]["urls"][0], "http://localhost:3001/**");
+        assert_eq!(dev["windows"], reader["windows"]);
+        assert_eq!(dev["permissions"], reader["permissions"]);
     }
 }

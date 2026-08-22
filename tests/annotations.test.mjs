@@ -38,6 +38,23 @@ function annotation(overrides = {}) {
   };
 }
 
+function source(overrides = {}) {
+  return {
+    id: 10,
+    source_name: 'weread',
+    source_connection_id: 'conn-1',
+    source_annotation_id: 'remote-1',
+    source_run_id: 'run-2',
+    source_position: 'chapter:2',
+    source_raw_hash: 'hash',
+    source_updated_at: '2026-08-16T08:00:00',
+    source_sync_status: 'synced',
+    source_synced_at: '2026-08-16T08:01:00',
+    source_sync_error: null,
+    ...overrides,
+  };
+}
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -53,24 +70,12 @@ test('Moke client_id 对同一本书和本地记录保持稳定且满足长度�
 });
 
 test('读取 contract v2 笔记并保留来源与无 CFI 的章节降级数据', async () => {
-  const source = {
-    id: 10,
-    source_name: 'weread',
-    source_connection_id: 'conn-1',
-    source_annotation_id: 'remote-1',
-    source_run_id: 'run-2',
-    source_position: 'chapter:2',
-    source_raw_hash: 'hash',
-    source_updated_at: '2026-08-16T08:00:00',
-    source_sync_status: 'synced',
-    source_synced_at: '2026-08-16T08:01:00',
-    source_sync_error: null,
-  };
+  const annotationSource = source();
   const items = await fetchBookAnnotations(
     async (url, init) => {
       assert.equal(url, 'http://talebook/api/book/42/annotations');
       assert.equal(init.credentials, 'include');
-      return jsonResponse({ err: 'ok', annotations: [annotation({ sources: [source] })] });
+      return jsonResponse({ err: 'ok', annotations: [annotation({ sources: [annotationSource] })] });
     },
     'http://talebook',
     42,
@@ -82,17 +87,31 @@ test('读取 contract v2 笔记并保留来源与无 CFI 的章节降级数据',
   assert.equal(annotationReaderProgress(items[0], 42), null);
 });
 
-test('GET 与 POST 一致兼容数字字符串形式的 annotation/book id', async () => {
+test('GET 与 POST 一致兼容数字字符串形式的 annotation/book/source id', async () => {
   const items = await fetchBookAnnotations(
     async () => jsonResponse({
       err: 'ok',
-      annotations: [annotation({ id: '7', book_id: '42' })],
+      annotations: [annotation({ id: '7', book_id: '42', sources: [source({ id: '10' })] })],
     }),
     'http://talebook',
     42,
   );
   assert.equal(items[0].id, 7);
   assert.equal(items[0].book_id, 42);
+  assert.equal(items[0].sources[0].id, 10);
+
+  const result = await upsertBookAnnotation(
+    async () => jsonResponse({
+      err: 'ok',
+      annotation: annotation({ id: '8', book_id: '42', sources: [source({ id: '11' })] }),
+    }),
+    'http://talebook',
+    42,
+    { annotation_type: 'note', client_id: 'moke-string-ids' },
+  );
+  assert.equal(result.annotation.id, 8);
+  assert.equal(result.annotation.book_id, 42);
+  assert.equal(result.annotation.sources[0].id, 11);
 });
 
 test('CFI 标注转换为 Readest 精确定位进度', () => {
@@ -233,7 +252,7 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
       42,
       { retryDelayMs: 0, sleep: async () => {} },
     ),
-    (error) => error.code === 'user.need_login',
+    (error) => error.code === 'user.need_login' && !isAnnotationApiUnsupported(error),
   );
   assert.equal(attempts, 1);
 
@@ -390,6 +409,61 @@ test('POST 精简响应按提交内容补全，不把已成功写入误报为契
   assert.deepEqual(result.annotation.sources, []);
 });
 
+test('POST 完整结构含畸形 source 时仍从 input 回填缺失展示字段', async () => {
+  const responseAnnotation = annotation({
+    id: '20',
+    sources: [{ id: 'Infinity', source_name: 'weread', source_connection_id: 'conn-1', source_sync_status: 'failed' }],
+  });
+  for (const field of ['chapter', 'quote_text', 'content', 'color', 'author_name']) {
+    delete responseAnnotation[field];
+  }
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const result = await upsertBookAnnotation(
+      async () => jsonResponse({ err: 'ok', annotation: responseAnnotation }),
+      'http://talebook',
+      42,
+      {
+        annotation_type: 'note',
+        client_id: 'moke-full-response-fallback',
+        chapter: '提交章节',
+        quote_text: '提交引用',
+        content: '提交正文',
+        color: 'yellow',
+        author_name: '提交作者',
+      },
+    );
+    assert.equal(result.annotation.chapter, '提交章节');
+    assert.equal(result.annotation.quote_text, '提交引用');
+    assert.equal(result.annotation.content, '提交正文');
+    assert.equal(result.annotation.color, 'yellow');
+    assert.equal(result.annotation.author_name, '提交作者');
+    assert.deepEqual(result.annotation.sources, []);
+    assert.equal(warnings.length, 1);
+    assert.deepEqual(warnings[0][1].source_indices, [0]);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('POST 完整结构省略 client_id 时保留本机 Moke 来源身份', async () => {
+  const responseAnnotation = annotation({ sources: [] });
+  delete responseAnnotation.client_id;
+
+  const result = await upsertBookAnnotation(
+    async () => jsonResponse({ err: 'ok', annotation: responseAnnotation }),
+    'http://talebook',
+    42,
+    { annotation_type: 'note', client_id: 'moke-full-response-client-id' },
+  );
+
+  assert.equal(result.annotation.client_id, 'moke-full-response-client-id');
+  assert.deepEqual(annotationSourceNames(result.annotation), ['moke']);
+});
+
 test('空来源字段不触发伪部分来源错误，talebook 来源身份可合法回写', async () => {
   const bodies = [];
   const requestLike = async (_url, init) => {
@@ -537,22 +611,130 @@ test('旧服务器或非数组响应明确标记为 contract 不兼容', async (
 
 });
 
-test('单条畸形记录不会隐藏同一响应中的合法笔记', async () => {
-  const items = await fetchBookAnnotations(
-    async () => jsonResponse({
-      err: 'ok',
-      annotations: [
-        annotation({ id: 1 }),
-        { id: 'broken', content: '不完整记录' },
-        annotation({ id: 2, sources: [{ source_name: 'missing-required-fields' }] }),
-        annotation({ id: 3, content: '仍可展示' }),
-      ],
-    }),
-    'http://talebook',
-    42,
-    { maxRetries: 0 },
-  );
-  assert.deepEqual(items.map((item) => item.id), [1, 3]);
+test('GET 按条跳过畸形 source，保留正文、合法来源与可观察警告', async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const items = await fetchBookAnnotations(
+      async () => jsonResponse({
+        err: 'ok',
+        annotations: [
+          annotation({ id: 1 }),
+          { id: 'broken', content: '不完整记录' },
+          annotation({
+            id: 2,
+            content: '来源损坏也要显示',
+            sources: [source({ id: '10' }), source({ id: 'Infinity' }), { source_name: 'missing-required-fields' }],
+          }),
+          annotation({ id: 3, content: '仍可展示' }),
+        ],
+      }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    );
+    assert.deepEqual(items.map((item) => item.id), [1, 2, 3]);
+    assert.equal(items[1].content, '来源损坏也要显示');
+    assert.deepEqual(items[1].sources.map((item) => item.id), [10]);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0][0], /已跳过畸形来源记录/);
+    assert.equal(warnings[0][1].annotation_id, 2);
+    assert.deepEqual(warnings[0][1].source_indices, [1, 2]);
+    assert.deepEqual(
+      warnings[0][1].invalid_sources.map(({ source_index }) => source_index),
+      [1, 2],
+    );
+    assert.match(warnings[0][1].invalid_sources[0].reason, /id.*有限数字/);
+    assert.match(warnings[0][1].invalid_sources[1].reason, /source_connection_id.*source_sync_status/);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('POST 与 GET 一致隔离混合好坏 source', async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const result = await upsertBookAnnotation(
+      async () => jsonResponse({
+        err: 'ok',
+        annotation: annotation({
+          id: '19',
+          sources: [{ source_name: 'broken' }, source({ id: '12', source_name: 'readwise' })],
+        }),
+      }),
+      'http://talebook',
+      42,
+      { annotation_type: 'note', client_id: 'moke-source-isolation', content: '正文' },
+    );
+    assert.equal(result.annotation.id, 19);
+    assert.deepEqual(result.annotation.sources.map((item) => item.id), [12]);
+    assert.deepEqual(annotationSourceNames(result.annotation), ['readwise']);
+    assert.equal(warnings.length, 1);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('全坏与空 source 列表都保留标注，并准确区分本机 Moke 与 Talebook', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const items = await fetchBookAnnotations(
+      async () => jsonResponse({
+        err: 'ok',
+        annotations: [
+          annotation({ id: 1, client_id: 'moke-local-empty', sources: [] }),
+          annotation({ id: 2, client_id: 'moke-local-broken', sources: [{ id: 'NaN' }] }),
+          annotation({ id: 3, client_id: 'server-native', sources: [] }),
+        ],
+      }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    );
+    assert.deepEqual(items.map((item) => item.id), [1, 2, 3]);
+    assert.deepEqual(items.map(annotationSourceNames), [['moke'], ['moke'], ['talebook']]);
+    assert.deepEqual(items[1].sources, []);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('annotation 与 source id 都拒绝非有限数字字符串', async () => {
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const items = await fetchBookAnnotations(
+      async () => jsonResponse({
+        err: 'ok',
+        annotations: [
+          annotation({ id: 'Infinity' }),
+          annotation({ id: 2, sources: [source({ id: '1e309' })] }),
+        ],
+      }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    );
+    assert.deepEqual(items.map((item) => item.id), [2]);
+    assert.deepEqual(items[0].sources, []);
+
+    await assert.rejects(
+      () => upsertBookAnnotation(
+        async () => jsonResponse({ err: 'ok', annotation: { id: 'Infinity' } }),
+        'http://talebook',
+        42,
+        { annotation_type: 'note', client_id: 'moke-non-finite' },
+        { maxRetries: 0 },
+      ),
+      isAnnotationApiUnsupported,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test('非空响应全部畸形时报告契约不兼容，书籍 404 不误报接口缺失', async () => {
