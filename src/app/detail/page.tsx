@@ -658,18 +658,17 @@ function DetailContent() {
           </div>
         </div>
 
-        {capabilities.checkedAt != null && (
-          <AnnotationPanel
-            key={String(book.id)}
-            bookId={String(book.id)}
-            serverUrl={serverUrl}
-            supported={capabilities.annotationApi}
-            downloaded={downloaded}
-            openingReader={openingReader}
-            onLocate={handleOfflineRead}
-            onAuthRequired={handleAnnotationAuthRequired}
-          />
-        )}
+        <AnnotationPanel
+          key={String(book.id)}
+          bookId={String(book.id)}
+          serverUrl={serverUrl}
+          capabilityStatus={capabilities.annotationApiStatus}
+          capabilityCheckedAt={capabilities.annotationApiCheckedAt}
+          downloaded={downloaded}
+          openingReader={openingReader}
+          onLocate={handleOfflineRead}
+          onAuthRequired={handleAnnotationAuthRequired}
+        />
       </div>
 
       {showDeleteConfirm && (

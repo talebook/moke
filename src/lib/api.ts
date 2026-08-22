@@ -13,6 +13,7 @@ import {
   resolveAppPlatform,
 } from '@/lib/api-core';
 import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
+import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -297,27 +298,15 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
     credentials: 'include',
   });
   const info = await readJsonResponse<UserInfoResponse>(infoResponse).catch(() => ({} as UserInfoResponse));
-  const sampleBookId = await findSampleBookId(serverUrl);
 
-  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi, annotationApi] = await Promise.all([
-    probeJsonEndpoint(serverUrl, '/api/shelf'),
-    probeJsonEndpoint(serverUrl, '/api/reading/stats'),
-    probeJsonEndpoint(serverUrl, '/api/network/sources'),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`) : Promise.resolve(true),
-  ]);
-
-  return {
-    shelfApi,
-    annotationApi,
-    readingStateApi,
-    readingProgressApi,
-    readingStatsApi,
-    networkSourcesApi,
-    checkedAt: Date.now(),
+  return discoverGeneralServerCapabilities({
     version: info.sys?.version || '',
-  };
+    findSampleBookId: () => findSampleBookId(serverUrl),
+    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path),
+    // The current Talebook contract has no HEAD/limit endpoint for annotations.
+    // Do not download and discard a sample book's complete annotation list here.
+    // The detail panel's first useful data load doubles as its one-shot probe.
+  });
 }
 
 export async function validateServerConnection(serverUrl: string): Promise<{ err: string; msg?: string }> {
