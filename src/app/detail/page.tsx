@@ -39,6 +39,7 @@ import {
   clearAnnotationLocateProgressSuppression,
   type BookAnnotation,
 } from '@/lib/annotations';
+import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
 
 interface BookDetail {
   id: string;
@@ -658,17 +659,19 @@ function DetailContent() {
           </div>
         </div>
 
-        <AnnotationPanel
-          key={String(book.id)}
-          bookId={String(book.id)}
-          serverUrl={serverUrl}
-          capabilityStatus={capabilities.annotationApiStatus}
-          capabilityCheckedAt={capabilities.annotationApiCheckedAt}
-          downloaded={downloaded}
-          openingReader={openingReader}
-          onLocate={handleOfflineRead}
-          onAuthRequired={handleAnnotationAuthRequired}
-        />
+        {shouldRequestBookAnnotations(Boolean(user)) && (
+          <AnnotationPanel
+            key={String(book.id)}
+            bookId={String(book.id)}
+            serverUrl={serverUrl}
+            capabilityStatus={capabilities.annotationApiStatus}
+            capabilityCheckedAt={capabilities.annotationApiCheckedAt}
+            downloaded={downloaded}
+            openingReader={openingReader}
+            onLocate={handleOfflineRead}
+            onAuthRequired={handleAnnotationAuthRequired}
+          />
+        )}
       </div>
 
       {showDeleteConfirm && (

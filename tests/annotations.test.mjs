@@ -252,7 +252,7 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
       42,
       { retryDelayMs: 0, sleep: async () => {} },
     ),
-    (error) => error.code === 'user.need_login',
+    (error) => error.code === 'user.need_login' && !isAnnotationApiUnsupported(error),
   );
   assert.equal(attempts, 1);
 
