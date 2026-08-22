@@ -221,6 +221,37 @@ test('production capabilities contain no remote origin grants', () => {
   }
 });
 
+test('OHOS build grants remote origins only to explicit development profiles', () => {
+  const buildConfig = readFileSync(join(repoRoot, 'src-tauri/build_config.rs'), 'utf8');
+  const buildScript = readFileSync(join(repoRoot, 'src-tauri/build.rs'), 'utf8');
+
+  assert.match(
+    buildConfig,
+    /OHOS_DEVELOPMENT_PROFILES: &\[&str\] = &\["debug", "dev"\]/,
+  );
+  assert.match(buildConfig, /_ => OHOS_PRODUCTION_CAPABILITY/);
+  assert.match(
+    buildScript,
+    /ohos_capability_for_profile\(profile\.as_deref\(\)\)/,
+  );
+  for (const customProfile of ['release', 'staging', 'nightly']) {
+    assert.ok(
+      !buildConfig.match(/OHOS_DEVELOPMENT_PROFILES[^;]+;/s)?.[0].includes(`"${customProfile}"`),
+      `${customProfile} must fail closed to the production capability`,
+    );
+  }
+});
+
+test('OHOS capabilities use the generated OpenHarmony schema', () => {
+  for (const file of ['src-tauri/capabilities/ohos.json', DEV_OHOS_CAPABILITY]) {
+    const capability = readCapability(file);
+    assert.equal(capability.$schema, '../gen/schemas/open-harmony-schema.json');
+    assert.doesNotThrow(() => JSON.parse(
+      readFileSync(join(dirname(join(repoRoot, file)), capability.$schema), 'utf8'),
+    ));
+  }
+});
+
 test('OHOS dev capability differs only by its development server origins', () => {
   const production = readCapability('src-tauri/capabilities/ohos.json');
   const development = readCapability(DEV_OHOS_CAPABILITY);

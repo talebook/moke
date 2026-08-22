@@ -32,12 +32,31 @@ test('production CSP blocks unhashed inline scripts and lets Tauri hash emitted 
   // compile time instead of relying on stale hand-maintained hashes.
 });
 
-test('development CSP is isolated from the release inline-script policy', () => {
+test('development CSP grants scripts and styles only the two local dev ports', () => {
+  const localDevOrigins = [
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:3001',
+    'http://localhost:3000',
+    'http://localhost:3001',
+  ];
+  const localSource = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::|$)/;
+
+  for (const directive of ['script-src', 'style-src']) {
+    const productionSources = sources(security.csp, directive);
+    const developmentSources = sources(security.devCsp, directive);
+    assert.deepEqual(
+      [...developmentSources].filter((source) => localSource.test(source)).sort(),
+      localDevOrigins,
+    );
+    assert.deepEqual(
+      [...productionSources].filter((source) => localSource.test(source)),
+      [],
+    );
+  }
+
   const developmentScripts = sources(security.devCsp, 'script-src');
   assert.ok(developmentScripts.has("'unsafe-inline'"));
   assert.ok(developmentScripts.has("'unsafe-eval'"));
-  assert.ok(developmentScripts.has('http://localhost:*'));
-  assert.ok(!sources(security.csp, 'script-src').has('http://localhost:*'));
 });
 
 test('CSP covers Tauri IPC/assets and embedded reader resource types', () => {
@@ -65,15 +84,42 @@ test('CSP covers Tauri IPC/assets and embedded reader resource types', () => {
   assert.equal(security.csp['frame-ancestors'], "'none'");
 });
 
-test('known third-party hosts remain compatible without arbitrary inline scripts', () => {
+test('production script hosts are limited to shipped runtime loaders', () => {
   const scripts = sources(security.csp, 'script-src');
-  assert.ok(scripts.has('https://static.geetest.com'));
-  assert.ok(!scripts.has('https://*.geetest.com'));
-  assert.ok(scripts.has('https://*.stripe.com'));
+  assert.deepEqual([...scripts].sort(), [
+    "'self'",
+    "'unsafe-eval'",
+    'asset:',
+    'http://asset.localhost',
+    'https://static.geetest.com',
+    'https://us-assets.i.posthog.com',
+  ].sort());
 
+  const captcha = readFileSync(
+    join(repoRoot, 'src/components/auth/CaptchaModal.tsx'),
+    'utf8',
+  );
+  assert.match(captcha, /https:\/\/static\.geetest\.com\/v4\/gt4\.js/);
+  // The pinned Readest export bundles PostHog and constructs its US
+  // external-dependency asset endpoint at runtime. Its API stays under the
+  // broader connect-src policy. Stripe checkout is not in the Tauri static
+  // route graph, and the Sentry URL in that bundle is only an issue-link value,
+  // so neither receives script execution permission.
+});
+
+test('embedded reader stylesheet hosts remain available without extra hosts', () => {
   const styles = sources(security.csp, 'style-src');
-  assert.ok(styles.has("'unsafe-inline'"));
-  assert.ok(styles.has('https://fonts.googleapis.com'));
+  assert.deepEqual([...styles].sort(), [
+    "'self'",
+    "'unsafe-inline'",
+    'asset:',
+    'blob:',
+    'http://asset.localhost',
+    'https://cdn.jsdelivr.net',
+    'https://cdnjs.cloudflare.com',
+    'https://fonts.googleapis.com',
+    'https://storage.readest.com',
+  ].sort());
 });
 
 test('moke_navigate is compiled and registered only for OpenHarmony', () => {

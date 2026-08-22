@@ -1,5 +1,5 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../gen/schemas/open-harmony-schema.json",
   "identifier": "ohos",
   "description": "OpenHarmony capabilities: storage, network, sync and host IPC.",
   "windows": [

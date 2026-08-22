@@ -15,6 +15,12 @@
 
 mod extensions;
 
+// Keep build-script profile routing covered by the normal `cargo test --lib`
+// command used in CI without compiling it into production application code.
+#[cfg(test)]
+#[path = "../build_config.rs"]
+mod build_config;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::{AppHandle, Manager};

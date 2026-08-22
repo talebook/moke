@@ -1,14 +1,14 @@
+mod build_config;
+
 fn main() {
     // Desktop capabilities reference plugins that are unavailable on OHOS, so
     // only compile the platform-specific capability. Device dev servers run on
-    // ports 3000/3001 and need a remote origin, but release builds must never
-    // include that grant.
+    // ports 3000/3001 and need a remote origin. Only Cargo's explicit
+    // development profiles receive that grant; release, custom, and missing
+    // profiles fail closed to the production capability.
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("ohos") {
-        let capability = if std::env::var("PROFILE").as_deref() == Ok("release") {
-            "capabilities/ohos.json"
-        } else {
-            "capabilities-dev/ohos.json"
-        };
+        let profile = std::env::var("PROFILE").ok();
+        let capability = build_config::ohos_capability_for_profile(profile.as_deref());
         println!("cargo:rerun-if-changed=capabilities/ohos.json");
         println!("cargo:rerun-if-changed=capabilities-dev/ohos.json");
         tauri_build::try_build(
