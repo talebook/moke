@@ -13,6 +13,8 @@ use tauri::Manager;
 
 /// 同步等待阅读器命令回执的最大时长。
 pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
+/// 同时阻塞等待阅读器命令回执的请求上限，避免耗尽 API 请求线程。
+pub(crate) const MAX_CONCURRENT_COMMAND_WAITS: usize = 32;
 const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
 const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
 
@@ -34,9 +36,25 @@ impl ApiError {
         }
     }
 
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: 404,
+            code: "NOT_FOUND",
+            message: message.into(),
+        }
+    }
+
     fn conflict(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status: 409,
+            code,
+            message: message.into(),
+        }
+    }
+
+    fn too_many_requests(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: 429,
             code,
             message: message.into(),
         }
@@ -91,15 +109,24 @@ pub(crate) enum ReceiptMatch {
     Unknown,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RegisterPendingCommandError {
+    Duplicate,
+    AtCapacity,
+}
+
 impl PendingCommands {
     pub(crate) fn register(
         &mut self,
         key: PendingCommandKey,
         sender: Sender<serde_json::Value>,
-    ) -> Result<String, ()> {
+    ) -> Result<String, RegisterPendingCommandError> {
         self.remove_expired();
         if self.correlation_by_key.contains_key(&key) {
-            return Err(());
+            return Err(RegisterPendingCommandError::Duplicate);
+        }
+        if self.active_by_correlation.len() >= MAX_CONCURRENT_COMMAND_WAITS {
+            return Err(RegisterPendingCommandError::AtCapacity);
         }
 
         let correlation_id = format!("{INTERNAL_REQUEST_ID_PREFIX}{}", uuid::Uuid::new_v4());
@@ -337,7 +364,7 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
         }
 
         // ---- 404 ----
-        _ => Err(ApiError::bad_request("NOT_FOUND", "未找到")),
+        _ => Err(ApiError::not_found("未找到")),
     };
 
     match result {
@@ -463,6 +490,26 @@ fn parse_command_wait(payload: &serde_json::Value) -> Result<(Option<String>, u6
     Ok((request_id, wait_ms))
 }
 
+fn pending_command_registration_error(
+    error: RegisterPendingCommandError,
+    extension_name: &str,
+    target_window: &str,
+    request_id: &str,
+) -> ApiError {
+    match error {
+        RegisterPendingCommandError::Duplicate => ApiError::conflict(
+            "DUPLICATE_REQUEST_ID",
+            format!(
+                "拓展「{extension_name}」已有 request_id「{request_id}」等待窗口「{target_window}」回执"
+            ),
+        ),
+        RegisterPendingCommandError::AtCapacity => ApiError::too_many_requests(
+            "TOO_MANY_PENDING_COMMANDS",
+            format!("同步等待请求已达上限（{MAX_CONCURRENT_COMMAND_WAITS}）"),
+        ),
+    }
+}
+
 fn build_command_result_response(request_id: &str, receipt: &serde_json::Value) -> String {
     match receipt.get("success").and_then(serde_json::Value::as_bool) {
         Some(true) => serde_json::json!({
@@ -561,13 +608,8 @@ fn handle_reader(
                         .lock()
                         .unwrap()
                         .register(key, tx)
-                        .map_err(|_| {
-                            ApiError::conflict(
-                                "DUPLICATE_REQUEST_ID",
-                                format!(
-                                    "拓展「{ext_name}」已有 request_id「{rid}」等待窗口「{label}」回执"
-                                ),
-                            )
+                        .map_err(|error| {
+                            pending_command_registration_error(error, ext_name, label, rid)
                         })?;
                     payload["request_id"] = serde_json::Value::String(correlation_id.clone());
                     Some((rid.clone(), correlation_id, rx))
@@ -624,7 +666,7 @@ fn handle_reader(
         }
     }
 
-    Err("未知的阅读器 API 路径".into())
+    Err(ApiError::not_found("未知的阅读器 API 路径"))
 }
 
 /// POST /api/v1/extension/sidebar/add
@@ -771,12 +813,62 @@ mod tests {
             .register(key("extension-a", "reader-one", "request-1"), first_tx)
             .unwrap();
 
-        assert!(pending
-            .register(
+        assert_eq!(
+            pending.register(
                 key("extension-a", "reader-one", "request-1"),
                 duplicate_tx,
+            ),
+            Err(RegisterPendingCommandError::Duplicate)
+        );
+    }
+
+    #[test]
+    fn concurrent_wait_limit_rejects_excess_and_releases_capacity() {
+        let mut pending = PendingCommands::default();
+        let mut correlation_ids = Vec::new();
+        let mut receivers = Vec::new();
+
+        for index in 0..MAX_CONCURRENT_COMMAND_WAITS {
+            let (tx, rx) = mpsc::channel();
+            correlation_ids.push(
+                pending
+                    .register(
+                        key("extension-a", "reader-one", &format!("request-{index}")),
+                        tx,
+                    )
+                    .unwrap(),
+            );
+            receivers.push(rx);
+        }
+
+        let (excess_tx, _excess_rx) = mpsc::channel();
+        assert_eq!(
+            pending.register(
+                key("extension-b", "reader-two", "request-over-limit"),
+                excess_tx,
+            ),
+            Err(RegisterPendingCommandError::AtCapacity)
+        );
+
+        assert_eq!(
+            pending.deliver(
+                &correlation_ids[0],
+                "reader-one",
+                serde_json::json!({"success": true}),
+            ),
+            ReceiptMatch::Active {
+                request_id: "request-0".into()
+            }
+        );
+        assert!(receivers[0].recv().is_ok());
+
+        let (replacement_tx, _replacement_rx) = mpsc::channel();
+        assert!(pending
+            .register(
+                key("extension-b", "reader-two", "request-after-release"),
+                replacement_tx,
             )
-            .is_err());
+            .is_ok());
     }
 
     #[test]
@@ -847,6 +939,15 @@ mod tests {
 
     #[test]
     fn wait_parameters_have_deterministic_errors_and_limit() {
+        assert_eq!(
+            parse_command_wait(&serde_json::json!({"command": "ping"})).unwrap(),
+            (None, 0)
+        );
+        assert_eq!(
+            parse_command_wait(&serde_json::json!({"wait_ms": 0})).unwrap(),
+            (None, 0)
+        );
+
         let missing_id = parse_command_wait(&serde_json::json!({"wait_ms": 1})).unwrap_err();
         assert_eq!(missing_id.status, 400);
         assert_eq!(missing_id.code, "MISSING_REQUEST_ID");
@@ -874,6 +975,25 @@ mod tests {
             .unwrap(),
             (Some("r1".into()), MAX_COMMAND_WAIT_MS)
         );
+    }
+
+    #[test]
+    fn route_not_found_error_uses_http_404() {
+        let error = ApiError::not_found("未知路径");
+        assert_eq!(error.status, 404);
+        assert_eq!(error.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn wait_capacity_error_uses_http_429_and_stable_code() {
+        let error = pending_command_registration_error(
+            RegisterPendingCommandError::AtCapacity,
+            "extension-a",
+            "reader-one",
+            "request-1",
+        );
+        assert_eq!(error.status, 429);
+        assert_eq!(error.code, "TOO_MANY_PENDING_COMMANDS");
     }
 
     #[test]
