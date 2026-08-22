@@ -294,7 +294,8 @@ export function newMokeAnnotationClientId(): string {
 
 export function annotationSourceNames(annotation: BookAnnotation): string[] {
   const names = annotation.sources.map((source) => source.source_name).filter(Boolean);
-  return names.length > 0 ? Array.from(new Set(names)) : ['talebook'];
+  if (names.length > 0) return Array.from(new Set(names));
+  return annotation.client_id?.startsWith('moke-') ? ['moke'] : ['talebook'];
 }
 
 export function annotationReaderProgress(
@@ -431,15 +432,25 @@ function normalizeUpsertAnnotation(
   input: AnnotationUpsertInput,
   requestedBookId: string | number,
 ): BookAnnotation {
+  if (!isRecord(value)) throw unsupportedContractError();
+
   try {
-    return normalizeAnnotation(value);
+    const annotation = normalizeAnnotation(value);
+    return {
+      ...annotation,
+      client_id: nullableString(value.client_id) ?? nullableString(input.client_id),
+      cfi: fallbackNullableString(value.cfi, input.cfi),
+      chapter: fallbackString(value.chapter, input.chapter),
+      quote_text: fallbackString(value.quote_text, input.quote_text),
+      content: fallbackString(value.content, input.content),
+      color: fallbackString(value.color, input.color),
+      author_name: fallbackString(value.author_name, input.author_name),
+    };
   } catch {
     // A successful idempotent POST may return a compact representation even
     // when the GET endpoint uses the full v2 shape. Preserve the committed
     // result by filling optional display fields from the submitted payload.
   }
-
-  if (!isRecord(value)) throw unsupportedContractError();
   const id = finiteNumber(value.id);
   const bookId = finiteNumber(value.book_id) ?? finiteNumber(requestedBookId);
   const annotationType = typeof value.annotation_type === 'string'
@@ -450,17 +461,9 @@ function normalizeUpsertAnnotation(
     throw unsupportedContractError();
   }
 
-  const sources: AnnotationSource[] = [];
-  if (Array.isArray(value.sources)) {
-    for (const source of value.sources) {
-      try {
-        sources.push(normalizeSource(source));
-      } catch {
-        // A malformed optional source must not turn a committed POST into a
-        // visible save failure. The next GET can recover the canonical shape.
-      }
-    }
-  }
+  const sources = Array.isArray(value.sources)
+    ? normalizeSources(value.sources, value.id)
+    : [];
 
   return {
     id,
@@ -508,20 +511,54 @@ function normalizeAnnotation(value: unknown): BookAnnotation {
     user_modified_at: nullableString(value.user_modified_at),
     created_at: nullableString(value.created_at),
     updated_at: nullableString(value.updated_at),
-    sources: value.sources.map(normalizeSource),
+    sources: normalizeSources(value.sources, value.id),
   };
 }
 
+function normalizeSources(values: unknown[], annotationId: unknown): AnnotationSource[] {
+  const sources: AnnotationSource[] = [];
+  const invalidSources: Array<{ source_index: number; reason: string }> = [];
+  values.forEach((value, sourceIndex) => {
+    try {
+      sources.push(normalizeSource(value));
+    } catch (error) {
+      invalidSources.push({
+        source_index: sourceIndex,
+        reason: error instanceof Error ? error.message : '未知来源结构错误。',
+      });
+    }
+  });
+  if (invalidSources.length > 0) {
+    // Source rows are optional provenance. Keep the annotation's readable
+    // body and aggregate diagnostics so one annotation emits one warning.
+    console.warn('[annotations] 已跳过畸形来源记录', {
+      annotation_id: finiteNumber(annotationId),
+      source_indices: invalidSources.map(({ source_index }) => source_index),
+      invalid_sources: invalidSources,
+    });
+  }
+  return sources;
+}
+
 function normalizeSource(value: unknown): AnnotationSource {
-  if (!isRecord(value)
-    || typeof value.id !== 'number'
+  if (!isRecord(value)) {
+    throw new TypeError('来源记录必须是对象。');
+  }
+  const id = finiteNumber(value.id);
+  if (id === null
     || typeof value.source_name !== 'string'
     || typeof value.source_connection_id !== 'string'
     || typeof value.source_sync_status !== 'string') {
-    throw unsupportedContractError();
+    const invalidFields = [
+      id === null ? 'id（必须为有限数字）' : '',
+      typeof value.source_name !== 'string' ? 'source_name（必须为字符串）' : '',
+      typeof value.source_connection_id !== 'string' ? 'source_connection_id（必须为字符串）' : '',
+      typeof value.source_sync_status !== 'string' ? 'source_sync_status（必须为字符串）' : '',
+    ].filter(Boolean);
+    throw new TypeError(`来源必填字段无效：${invalidFields.join('、')}。`);
   }
   return {
-    id: value.id,
+    id,
     source_name: value.source_name,
     source_connection_id: value.source_connection_id,
     source_annotation_id: nullableString(value.source_annotation_id),
