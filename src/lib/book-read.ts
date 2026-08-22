@@ -6,39 +6,84 @@ const READ_RECORD_TIMEOUT_MS = 10_000;
  */
 export const READ_RECORD_NAV_TIMEOUT_MS = 3_000;
 
-/**
- * Build a timeout that can be disarmed after the response body is consumed.
- *
- * Do not use `AbortSignal.timeout` here: Tauri plugin-http keeps its abort
- * listeners after a completed body read. A later autonomous abort then tries
- * to cancel an already-released native response and surfaces an unhandled
- * `The resource id ... is invalid` rejection even though reading succeeded.
- */
-function buildRequestTimeout(timeoutMs: number): {
+interface TimeoutGuard {
   signal: AbortSignal | undefined;
-  clear: () => void;
-} {
-  if (typeof AbortController !== 'function') {
-    // Without an abort mechanism the request runs unbounded, which is still
-    // better than throwing and silently losing the read record.
-    return { signal: undefined, clear: () => {} };
-  }
+  expired: Promise<never>;
+  cleanup: () => void;
+}
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+/**
+ * Bound the whole request even on WebViews without `AbortSignal.timeout` or
+ * `AbortController`. The explicit timer can be cleared as soon as the request
+ * settles, unlike a fire-and-forget fallback signal.
+ */
+function buildTimeoutGuard(timeoutMs: number): TimeoutGuard {
+  const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
+  let timer: ReturnType<typeof setTimeout>;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('book.read_record.timeout'));
+      controller?.abort();
+    }, timeoutMs);
+  });
+
   return {
-    signal: controller.signal,
-    clear: () => clearTimeout(timer),
+    signal: controller?.signal,
+    expired,
+    cleanup: () => clearTimeout(timer),
   };
 }
 
-/** Pathname of an absolute URL with trailing slashes stripped; null if unparseable. */
-function pathnameOf(url: string): string | null {
+interface UrlTarget {
+  protocol: string;
+  hostname: string;
+  port: string;
+  pathname: string;
+}
+
+/** Network target and decoded pathname of an absolute URL; null if unsafe. */
+function urlTargetOf(url: string): UrlTarget | null {
   try {
-    return new URL(url).pathname.replace(/\/+$/, '');
+    const parsed = new URL(url);
+    return {
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      port: parsed.port,
+      pathname: decodeURIComponent(parsed.pathname).replace(/\/+$/, '') || '/',
+    };
   } catch {
     return null;
   }
+}
+
+function isAllowedTarget(expected: UrlTarget, actual: UrlTarget): boolean {
+  const allowedProtocol = actual.protocol === expected.protocol
+    || (expected.protocol === 'http:' && actual.protocol === 'https:');
+  return allowedProtocol
+    && actual.hostname === expected.hostname
+    && actual.port === expected.port
+    && actual.pathname === expected.pathname;
+}
+
+function isJsonResponse(response: Response): boolean {
+  const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() || '';
+  return contentType === 'application/json' || contentType.endsWith('+json');
+}
+
+function parseJsonBody(body: ArrayBuffer): unknown {
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    throw new Error('book.read_record.response.invalid');
+  }
+}
+
+function safeApiErrorCode(value: unknown): string {
+  return typeof value === 'string'
+    && value.length <= 64
+    && /^[a-z0-9_.-]+$/.test(value)
+    ? value
+    : 'invalid';
 }
 
 /**
@@ -53,39 +98,67 @@ export async function recordBookRead(
   timeoutMs = READ_RECORD_TIMEOUT_MS,
 ): Promise<void> {
   const readUrl = `${serverUrl}/read/${encodeURIComponent(String(bookId))}`;
-  const timeout = buildRequestTimeout(timeoutMs);
+  const expectedTarget = urlTargetOf(readUrl);
+  const timeout = buildTimeoutGuard(timeoutMs);
 
   try {
-    const response = await requestLike(readUrl, {
-      credentials: 'include',
-      signal: timeout.signal,
-    });
-
-    // Drain the body promptly so the underlying connection is released; the
-    // online-reader page can be hundreds of KB of HTML this client never uses.
-    try {
-      await response.arrayBuffer();
-    } catch {
-      // A body-read failure does not invalidate an otherwise successful record.
-    }
+    const response = await Promise.race([
+      requestLike(readUrl, {
+        credentials: 'include',
+        signal: timeout.signal,
+      }),
+      timeout.expired,
+    ]);
 
     if (!response.ok) {
       throw new Error(`book.read_record.http.${response.status}`);
     }
 
-    // A 200 from a login page means the session expired and the server
-    // redirected `/read/{id}` away — the record was never persisted.
-    const finalUrl = response.url || readUrl;
-    const finalPath = pathnameOf(finalUrl);
-    if (finalPath && finalPath !== pathnameOf(readUrl)) {
+    // A 200 from `/`, a login page, or another host means the server followed
+    // a redirect and the record was never persisted. Browser fetch and the
+    // pinned Tauri plugin-http expose the final URL; an empty value is therefore
+    // unverifiable and must fail closed instead of bypassing redirect checks.
+    const finalTarget = urlTargetOf(response.url);
+    if (
+      !expectedTarget
+      || !finalTarget
+      || !isAllowedTarget(expectedTarget, finalTarget)
+    ) {
       throw new Error('book.read_record.redirect');
     }
+
+    // Some Talebook-compatible servers answer this route with an API payload.
+    // In that case HTTP 200 is not enough: only the explicit success contract
+    // may count as a persisted read.
+    if (isJsonResponse(response)) {
+      let body: ArrayBuffer;
+      try {
+        body = await Promise.race([response.arrayBuffer(), timeout.expired]);
+      } catch (error) {
+        if (error instanceof Error && error.message === 'book.read_record.timeout') throw error;
+        throw new Error('book.read_record.response.invalid');
+      }
+      const payload = parseJsonBody(body);
+      const err = payload && typeof payload === 'object' && 'err' in payload
+        ? (payload as { err?: unknown }).err
+        : undefined;
+      if (err !== 'ok') {
+        throw new Error(`book.read_record.api.${safeApiErrorCode(err)}`);
+      }
+      return;
+    }
+
+    // Drain successful HTML only to release the native connection. Receiving
+    // the expected response headers already proves the record route completed,
+    // so a slow or failed drain must not turn a persisted record into an error.
+    try {
+      await Promise.race([response.arrayBuffer(), timeout.expired]);
+    } catch {
+      // The timeout still aborts/cancels the body resource, but remains a
+      // best-effort cleanup outcome for HTML responses.
+    }
   } finally {
-    // Prevent a successful plugin-http response from being aborted later,
-    // after its native body resource has already been released.
-    // This is a no-op after a real timeout has fired; do not abort the
-    // controller here, as that would recreate the late plugin-http failure.
-    timeout.clear();
+    timeout.cleanup();
   }
 }
 
