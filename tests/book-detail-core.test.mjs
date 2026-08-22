@@ -63,6 +63,13 @@ test('标签属性中的比较符不会泄漏属性内容或产生伪标签', ()
   assert.equal(bookSummaryText('<p title="使用 <br> 标签">正文</p>'), '正文');
 });
 
+test('书籍简介兼容标签起始处的空白', () => {
+  assert.equal(bookSummaryText('< div>内容</div>'), '内容');
+  assert.equal(bookSummaryText('<div>内容< /div>'), '内容');
+  assert.equal(bookSummaryText('< div>内容< / div>'), '内容');
+  assert.equal(bookSummaryText('<p>常规标签</p>'), '常规标签');
+});
+
 test('书籍简介会跳过 HTML 注释内容', () => {
   assert.equal(bookSummaryText('<!-- 隐藏注释 -->正文'), '正文');
   assert.equal(bookSummaryText('前言<!-- 多行\n注释 -->正文'), '前言正文');

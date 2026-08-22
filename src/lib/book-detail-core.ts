@@ -95,7 +95,7 @@ function htmlToPlainText(value: string): string {
     // A comparison operator such as `3 < 5` is text, not the start of a tag.
     // Requiring an HTML-style name here also prevents a later `>` from making
     // us consume an arbitrary span of prose.
-    const tagStart = value.slice(index + 1).match(/^\/?([a-z][a-z0-9-]*)/i);
+    const tagStart = value.slice(index + 1).match(/^\s*(\/?)\s*([a-z][a-z0-9-]*)/i);
     if (!tagStart) {
       output += '<';
       index += 1;
@@ -130,19 +130,8 @@ function htmlToPlainText(value: string): string {
       break;
     }
 
-    const scanEnd = nestedTagAt === -1 ? tagEnd : nestedTagAt;
-    const rawTag = value.slice(index + 1, scanEnd).trim();
-    const closing = rawTag.startsWith('/');
-    const tagName = rawTag
-      .slice(closing ? 1 : 0)
-      .match(/^[a-z][a-z0-9-]*/i)?.[0]
-      ?.toLowerCase();
-
-    if (!tagName) {
-      output += '<';
-      index += 1;
-      continue;
-    }
+    const closing = tagStart[1] === '/';
+    const tagName = tagStart[2].toLowerCase();
 
     if (!closing && (tagName === 'script' || tagName === 'style')) {
       hiddenTag = tagName;
