@@ -1,4 +1,4 @@
-import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
+import type { ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
 import {
   attachSafeJsonReader,
@@ -12,28 +12,12 @@ import {
 } from '@/lib/api-core';
 import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
 import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
+import {
+  readCurrentUserResponse,
+  type CurrentUserResult,
+  type UserInfoResponse,
+} from '@/lib/server-session';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
-
-interface UserInfoResponse {
-  err: string;
-  msg?: string;
-  sys?: {
-    title?: string;
-    version?: string;
-  };
-  user?: {
-    id?: string | number;
-    username?: string;
-    nickname?: string;
-    name?: string;
-    email?: string;
-    avatar?: string;
-    is_login?: boolean;
-    is_admin?: boolean;
-    admin?: boolean;
-    permission?: string;
-  };
-}
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
@@ -173,38 +157,12 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
   return readJsonResponse(response);
 }
 
-export async function fetchCurrentUser(): Promise<{ err: string; msg?: string; user: ReaderInfo | null; isLogin: boolean }> {
+export async function fetchCurrentUser(): Promise<CurrentUserResult> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const response = await request(`${serverUrl}/api/user/info`, {
     credentials: 'include',
   });
-  const data = await readJsonResponse<UserInfoResponse>(response);
-  const info = data.user || {};
-  const isLogin = Boolean(info.is_login);
-
-  if (data.err !== 'ok' || !isLogin) {
-    return {
-      err: data.err,
-      msg: data.msg,
-      user: null,
-      isLogin: false,
-    };
-  }
-
-  return {
-    err: data.err,
-    msg: data.msg,
-    isLogin: true,
-    user: {
-      id: info.id ?? info.username ?? '',
-      username: info.username ?? '',
-      name: info.nickname ?? info.name ?? info.username ?? '',
-      email: info.email ?? '',
-      avatar: info.avatar ?? '',
-      admin: Boolean(info.is_admin ?? info.admin),
-      permission: info.permission ?? '',
-    },
-  };
+  return readCurrentUserResponse(response);
 }
 
 export async function fetchServerInfo(): Promise<{ err: string; msg?: string; title: string; version: string }> {

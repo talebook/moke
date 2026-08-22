@@ -5,9 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverServerCapabilities } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { navigateFullDocument } from '@/lib/moke-reader';
-
-/** 能力探测结果的有效期：期限内路由切换不再整轮重跑（约 7+ 个请求） */
-const SYNC_CAPABILITIES_TTL_MS = 5 * 60 * 1000;
+import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -39,9 +37,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     // + discoverServerCapabilities）较重，结果带 checkedAt 缓存：5 分钟内路由
     // 切换不再整轮重跑。serverUrl 变化时 setServer 会重置 capabilities
     // （checkedAt=null），因此会自然失效重探；user/title 同步随之节流。
-    const capabilitiesFresh =
-      capabilities.checkedAt != null && Date.now() - capabilities.checkedAt < SYNC_CAPABILITIES_TTL_MS;
-    if (capabilitiesFresh) return;
+    if (isServerCapabilitiesFresh(capabilities.checkedAt)) return;
 
     let cancelled = false;
 
@@ -54,22 +50,40 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const [userData, serverData, capabilities] = await Promise.all([
+        const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
           fetchCurrentUser(),
           fetchServerInfo(),
           discoverServerCapabilities(serverUrl),
         ]);
-        if (!cancelled) {
-          setUser(userData.user);
-          setServerTitle(serverData.title || '');
-          setServerCapabilities(capabilities);
+        if (cancelled) return;
+
+        const currentUser = useServerStore.getState().user;
+        const syncedUser = resolveUserAfterSync(currentUser, userResult);
+        if (userResult.status === 'fulfilled') {
+          // Only a confirmed guest response may clear the cached user. A
+          // rejected request says nothing about whether the cookie is valid.
+          setUser(syncedUser);
+        } else {
+          console.warn('[ServerProvider] user sync failed:', userResult.reason);
+        }
+
+        if (serverResult.status === 'fulfilled') {
+          setServerTitle(serverResult.value.title || '');
+        } else {
+          console.warn('[ServerProvider] server info sync failed:', serverResult.reason);
+        }
+
+        if (capabilitiesResult.status === 'fulfilled' && userResult.status === 'fulfilled') {
+          // annotationApi is auth-dependent. Do not stamp a fresh cache while
+          // the matching user/session state is unknown.
+          setServerCapabilities(capabilitiesResult.value);
+        } else if (capabilitiesResult.status === 'rejected') {
+          console.warn('[ServerProvider] capabilities sync failed:', capabilitiesResult.reason);
         }
       } catch (e) {
+        // Welcome/network failures are transient. Preserve the last confirmed
+        // user, title, and capability snapshot for the next sync attempt.
         console.error('[ServerProvider] sync error:', e);
-        if (!cancelled) {
-          setUser(null);
-          setServerTitle('');
-        }
       }
     };
 

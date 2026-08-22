@@ -4,7 +4,14 @@ import {
   safeGetLocalStorageItem,
   safeRemoveLocalStorageItem,
   safeSetLocalStorageItem,
-} from '@/lib/browser-storage';
+} from '../browser-storage.ts';
+import {
+  didServerSessionChange,
+  invalidateServerCapabilities,
+  type ReaderInfo,
+} from '../server-session.ts';
+
+export type { ReaderInfo } from '../server-session.ts';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -16,16 +23,6 @@ const safeLocalStorage: StateStorage = {
   setItem: safeSetLocalStorageItem,
   removeItem: safeRemoveLocalStorageItem,
 };
-
-export interface ReaderInfo {
-  id: string | number;
-  username: string;
-  name: string;
-  email: string;
-  avatar: string;
-  admin: boolean;
-  permission: string;
-}
 
 export interface ServerCapabilities {
   shelfApi: boolean;
@@ -106,10 +103,24 @@ export const useServerStore = create<ServerState>()(
         set({ serverUrl: url, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
       },
       setConnected: (token, user) => {
-        set({ isConnected: true, token, user });
+        set((state) => ({
+          isConnected: true,
+          token,
+          user,
+          // A completed sign-in can replace the server cookie even when the
+          // same account was cached locally. Re-confirm auth-dependent APIs.
+          capabilities: invalidateServerCapabilities(state.capabilities),
+        }));
       },
       setUser: (user) => {
-        set((state) => ({ isConnected: Boolean(state.serverUrl), token: user ? state.token : '', user }));
+        set((state) => ({
+          isConnected: Boolean(state.serverUrl),
+          token: user ? state.token : '',
+          user,
+          capabilities: didServerSessionChange(state.user, user)
+            ? invalidateServerCapabilities(state.capabilities)
+            : state.capabilities,
+        }));
       },
       setServerTitle: (serverTitle) => {
         set({ serverTitle });
@@ -121,7 +132,12 @@ export const useServerStore = create<ServerState>()(
         set({ hasHydrated });
       },
       logout: () => {
-        set((state) => ({ isConnected: Boolean(state.serverUrl), token: '', user: null }));
+        set((state) => ({
+          isConnected: Boolean(state.serverUrl),
+          token: '',
+          user: null,
+          capabilities: invalidateServerCapabilities(state.capabilities),
+        }));
       },
       disconnect: () => {
         set({ serverUrl: '', serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });

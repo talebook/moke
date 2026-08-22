@@ -133,7 +133,13 @@ function isAnnotationWriteRetryable(error: unknown): boolean {
 export function isAnnotationApiUnsupported(error: unknown): boolean {
   return error instanceof MokeApiError && (
     error.code === 'annotation.api.unsupported'
-    || ['page.not_found', 'handler.not_found', 'api.not_found'].includes(error.code)
+    || [
+      'page.not_found',
+      'handler.not_found',
+      'api.not_found',
+      'http.404',
+      'http.405',
+    ].includes(error.code)
   );
 }
 
@@ -576,10 +582,6 @@ function unsupportedContractError(): MokeApiError {
 }
 
 function asCompatibilityError(error: unknown): unknown {
-  if (error instanceof MokeApiError && (
-    ['page.not_found', 'handler.not_found', 'api.not_found'].includes(error.code)
-  )) {
-    return unsupportedContractError();
-  }
+  if (isAnnotationApiUnsupported(error)) return unsupportedContractError();
   return error;
 }

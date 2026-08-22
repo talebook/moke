@@ -171,7 +171,7 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
       42,
       { retryDelayMs: 0, sleep: async () => {} },
     ),
-    (error) => error.code === 'user.need_login',
+    (error) => error.code === 'user.need_login' && !isAnnotationApiUnsupported(error),
   );
   assert.equal(attempts, 1);
 
@@ -455,6 +455,34 @@ test('旧服务器或非数组响应明确标记为 contract 不兼容', async (
     ),
     isAnnotationApiUnsupported,
   );
+});
+
+test('真实 HTTP 404/405 标记为接口缺失，其他 HTTP 错误继续上抛', async () => {
+  for (const status of [404, 405]) {
+    await assert.rejects(
+      () => fetchBookAnnotations(
+        async () => jsonResponse({}, status),
+        'http://talebook',
+        42,
+        { maxRetries: 0 },
+      ),
+      (error) => isAnnotationApiUnsupported(error)
+        && error.message.includes(TALEBOOK_ANNOTATION_CONTRACT),
+    );
+  }
+
+  for (const status of [401, 403, 500]) {
+    await assert.rejects(
+      () => fetchBookAnnotations(
+        async () => jsonResponse({}, status),
+        'http://talebook',
+        42,
+        { maxRetries: 0 },
+      ),
+      (error) => error.code === `http.${status}`
+        && !isAnnotationApiUnsupported(error),
+    );
+  }
 });
 
 test('单条畸形记录不会隐藏同一响应中的合法笔记', async () => {
