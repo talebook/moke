@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "dotenv -e .env.tauri -- next dev --turbo",
     "build": "dotenv -e .env.tauri -- next build --turbo",
@@ -48,8 +51,8 @@
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "dotenv-cli": "^7.4.4",
-    "eslint": "9.0.0",
-    "eslint-config-next": "16.2.6",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.2",
     "postcss": "^8.5.26",
     "tailwindcss": "^3.4.18",
     "typescript": "^5.7.2"
