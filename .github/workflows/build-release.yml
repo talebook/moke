@@ -116,6 +116,8 @@ jobs:
           ARCHIVE="$RUNNER_TEMP/xcodegen.zip"
           EXTRACT_DIR="$RUNNER_TEMP/xcodegen-download"
           PREFIX="$RUNNER_TEMP/xcodegen-$XCODEGEN_VERSION"
+          trap 'rm -f "$ARCHIVE"; rm -rf "$EXTRACT_DIR"' EXIT
+          rm -f "$ARCHIVE"
           rm -rf "$EXTRACT_DIR" "$PREFIX"
           curl --fail --location --retry 3 \
             --output "$ARCHIVE" \
@@ -123,7 +125,7 @@ jobs:
           echo "$XCODEGEN_SHA256  $ARCHIVE" | shasum -a 256 --check
           unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
           mkdir -p "$PREFIX"
-          "$EXTRACT_DIR/xcodegen/install.sh" "$PREFIX"
+          PREFIX="$PREFIX" "$EXTRACT_DIR/xcodegen/install.sh"
           echo "$PREFIX/bin" >> "$GITHUB_PATH"
           "$PREFIX/bin/xcodegen" --version
 

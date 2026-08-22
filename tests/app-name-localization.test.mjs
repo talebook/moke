@@ -14,49 +14,133 @@ import test from 'node:test';
 import {
   prepareAndroidAppNames,
   prepareIosAppNames,
+  verifyIosAppNames,
 } from '../scripts/prepare-mobile-app-names.mjs';
 import { normalizeArtifactNames } from '../scripts/normalize-artifact-names.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
+const iosFixtureLocales = new Map([
+  ['en.lproj', 'Moke'],
+  ['zh-Hans.lproj', '墨客'],
+  ['zh-Hant.lproj', '墨客'],
+]);
+
+function writeInfoPlist(appRoot, {
+  displayName,
+  bundleName = '$(PRODUCT_NAME)',
+} = {}) {
+  const entries = [];
+  if (displayName !== undefined) {
+    entries.push(`<key>CFBundleDisplayName</key><string>${displayName}</string>`);
+  }
+  if (bundleName !== undefined) {
+    entries.push(`<key>CFBundleName</key><string>${bundleName}</string>`);
+  }
+  writeFileSync(
+    path.join(appRoot, 'Info.plist'),
+    `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>${entries.join('')}</dict></plist>`,
+  );
+}
 
 function createIosFixture() {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
-  const appleRoot = path.join(temporaryRoot, 'src-tauri', 'gen', 'apple');
+  const tauriRoot = path.join(temporaryRoot, 'src-tauri');
+  const appleRoot = path.join(tauriRoot, 'gen', 'apple');
   const appRoot = path.join(appleRoot, 'moke_iOS');
   mkdirSync(appRoot, { recursive: true });
-  writeFileSync(
-    path.join(appRoot, 'Info.plist'),
-    '<plist><dict><key>CFBundleName</key><string>$(PRODUCT_NAME)</string></dict></plist>',
-  );
+  writeInfoPlist(appRoot);
+  writeFileSync(path.join(tauriRoot, 'tauri.conf.json'), '{"productName":"Moke"}\n');
   writeFileSync(path.join(appleRoot, 'project.yml'), 'name: moke\n');
 
-  for (const locale of ['zh-Hans.lproj', 'zh-Hant.lproj']) {
-    const sourceDir = path.join(temporaryRoot, 'src-tauri', 'mobile', 'ios', locale);
+  for (const [locale, appName] of iosFixtureLocales) {
+    const sourceDir = path.join(tauriRoot, 'mobile', 'ios', locale);
+    const staleDir = path.join(appRoot, locale);
     mkdirSync(sourceDir, { recursive: true });
+    mkdirSync(staleDir, { recursive: true });
     writeFileSync(
       path.join(sourceDir, 'InfoPlist.strings'),
-      '"CFBundleDisplayName" = "墨客";\n"CFBundleName" = "墨客";\n',
+      `"CFBundleDisplayName" = "${appName}";\n"CFBundleName" = "${appName}";\n`,
     );
+    writeFileSync(path.join(staleDir, 'InfoPlist.strings'), 'stale\n');
   }
 
-  return { temporaryRoot, appleRoot };
+  return {
+    temporaryRoot,
+    appleRoot,
+    appRoot,
+  };
 }
 
-function writeGeneratedXcodeProject(appleRoot, { includeResources = true } = {}) {
+// This excerpt follows XcodeGen 2.46.0's serialized project structure and
+// 24-character object IDs. The macOS CI job remains the integration test that
+// runs the pinned binary against Tauri's complete generated project.
+function writeXcodeGenProjectFixture(appleRoot, {
+  includeResources = true,
+  includeVariantGroup = true,
+  productName = 'Moke',
+} = {}) {
   const projectDir = path.join(appleRoot, 'moke.xcodeproj');
   mkdirSync(projectDir, { recursive: true });
-  writeFileSync(path.join(projectDir, 'project.pbxproj'), `
-PRODUCT_NAME = Moke;
+  const buildFile = includeResources
+    ? '\t\t111111111111111111111111 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 222222222222222222222222 /* InfoPlist.strings */; };'
+    : '';
+  const buildPhaseEntry = includeResources
+    ? '\t\t\t\t111111111111111111111111 /* InfoPlist.strings in Resources */,'
+    : '';
+  const variantGroup = includeVariantGroup
+    ? `\t\t222222222222222222222222 /* InfoPlist.strings */ = {
+\t\t\tisa = PBXVariantGroup;
+\t\t\tchildren = (
+\t\t\t\t333333333333333333333333 /* en */,
+\t\t\t\t444444444444444444444444 /* zh-Hans */,
+\t\t\t\t555555555555555555555555 /* zh-Hant */,
+\t\t\t);
+\t\t\tname = InfoPlist.strings;
+\t\t\tsourceTree = "<group>";
+\t\t};`
+    : '';
+
+  writeFileSync(path.join(projectDir, 'project.pbxproj'), `// !$*UTF8*$!
+{
+\tarchiveVersion = 1;
+\tobjects = {
+
 /* Begin PBXBuildFile section */
-${includeResources ? 'A1 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A2 /* InfoPlist.strings */; };' : ''}
+${buildFile}
 /* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
-A3 /* zh-Hans */ = {isa = PBXFileReference; path = "zh-Hans.lproj/InfoPlist.strings"; };
-A4 /* zh-Hant */ = {isa = PBXFileReference; path = "zh-Hant.lproj/InfoPlist.strings"; };
+\t\t333333333333333333333333 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+\t\t444444444444444444444444 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+\t\t555555555555555555555555 /* zh-Hant */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "zh-Hant.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXResourcesBuildPhase section */
+\t\t666666666666666666666666 /* Resources */ = {
+\t\t\tisa = PBXResourcesBuildPhase;
+\t\t\tbuildActionMask = 2147483647;
+\t\t\tfiles = (
+${buildPhaseEntry}
+\t\t\t);
+\t\t\trunOnlyForDeploymentPostprocessing = 0;
+\t\t};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXVariantGroup section */
-A2 /* InfoPlist.strings */ = {isa = PBXVariantGroup; children = (A3, A4); };
+${variantGroup}
 /* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+\t\t777777777777777777777777 /* release */ = {
+\t\t\tisa = XCBuildConfiguration;
+\t\t\tbuildSettings = {
+\t\t\t\tPRODUCT_NAME = "${productName}";
+\t\t\t};
+\t\t\tname = release;
+\t\t};
+/* End XCBuildConfiguration section */
+\t};
+}
 `);
 }
 
@@ -117,6 +201,10 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
     path.join(root, 'src-tauri', 'linux', 'moke.desktop.hbs'),
     'utf8',
   );
+  const iosEnglish = readFileSync(
+    path.join(root, 'src-tauri', 'mobile', 'ios', 'en.lproj', 'InfoPlist.strings'),
+    'utf8',
+  );
   const iosChinese = readFileSync(
     path.join(root, 'src-tauri', 'mobile', 'ios', 'zh-Hans.lproj', 'InfoPlist.strings'),
     'utf8',
@@ -141,6 +229,8 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
   assert.match(linuxDesktop, /^Name\[zh_CN\]=墨客$/m);
   assert.match(linuxDesktop, /^Name\[zh_TW\]=墨客$/m);
   assert.equal(existsSync(path.join(root, 'src-tauri', 'Info.ios.plist')), false);
+  assert.match(iosEnglish, /"CFBundleDisplayName" = "Moke";/);
+  assert.match(iosEnglish, /"CFBundleName" = "Moke";/);
   assert.match(iosChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(iosTraditionalChinese, /"CFBundleDisplayName" = "墨客";/);
   assert.match(androidDefault, /<string name="app_name">Moke<\/string>/);
@@ -160,7 +250,7 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
         path.join(root, 'src-tauri', 'mobile', 'ios', locale, 'InfoPlist.strings'),
       ))
       .sort(),
-    ['zh-Hans.lproj', 'zh-Hant.lproj'],
+    ['en.lproj', 'zh-Hans.lproj', 'zh-Hant.lproj'],
   );
 });
 
@@ -192,26 +282,53 @@ test('Android 默认与中文名称资源会复制到生成项目', () => {
   assert.match(generatedChinese, />墨客</);
 });
 
-test('iOS 名称资源会进入实际生成的 Xcode Resources', () => {
-  const { temporaryRoot, appleRoot } = createIosFixture();
+test('iOS 名称资源会复制并验证 XcodeGen Resources 接线', () => {
+  const { temporaryRoot, appleRoot, appRoot } = createIosFixture();
   let command;
 
   prepareIosAppNames(temporaryRoot, (...args) => {
     command = args;
-    writeGeneratedXcodeProject(appleRoot);
+    writeXcodeGenProjectFixture(appleRoot);
     return { status: 0 };
   });
 
-  for (const locale of ['zh-Hans.lproj', 'zh-Hant.lproj']) {
+  for (const [locale, appName] of iosFixtureLocales) {
     const generated = readFileSync(
       path.join(appleRoot, 'Sources', locale, 'InfoPlist.strings'),
       'utf8',
     );
-    assert.match(generated, /"CFBundleDisplayName" = "墨客";/);
-    assert.match(generated, /"CFBundleName" = "墨客";/);
+    assert.equal(
+      generated,
+      `"CFBundleDisplayName" = "${appName}";\n"CFBundleName" = "${appName}";\n`,
+    );
+    assert.equal(existsSync(path.join(appRoot, locale)), false);
   }
   assert.equal(command[0], 'xcodegen');
-  assert.deepEqual(command[1], ['generate', '--no-env', '--spec', path.join(appleRoot, 'project.yml')]);
+  assert.deepEqual(command[1], ['generate', '--spec', path.join(appleRoot, 'project.yml')]);
+  assert.deepEqual(command[2], { cwd: appleRoot, stdio: 'inherit' });
+});
+
+test('iOS 默认显示名优先使用 CFBundleDisplayName，缺失时回退 CFBundleName', () => {
+  const { temporaryRoot, appleRoot, appRoot } = createIosFixture();
+  prepareIosAppNames(temporaryRoot, () => {
+    writeXcodeGenProjectFixture(appleRoot);
+    return { status: 0 };
+  });
+
+  writeInfoPlist(appRoot, { displayName: 'Moke', bundleName: 'Wrong' });
+  assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot));
+
+  writeInfoPlist(appRoot, { displayName: '$(PRODUCT_NAME)', bundleName: 'Wrong' });
+  assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot));
+
+  writeInfoPlist(appRoot, { displayName: 'Wrong', bundleName: '$(PRODUCT_NAME)' });
+  assert.throws(
+    () => verifyIosAppNames(temporaryRoot),
+    /does not resolve CFBundleDisplayName to Moke/,
+  );
+
+  writeInfoPlist(appRoot);
+  assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot));
 });
 
 test('iOS prepare 在 XcodeGen 不可用时失败', () => {
@@ -229,10 +346,22 @@ test('iOS prepare 在本地化资源未进入 Xcode Resources 时失败', () => 
 
   assert.throws(
     () => prepareIosAppNames(temporaryRoot, () => {
-      writeGeneratedXcodeProject(appleRoot, { includeResources: false });
+      writeXcodeGenProjectFixture(appleRoot, { includeResources: false });
       return { status: 0 };
     }),
     /does not add InfoPlist\.strings to a Resources build phase/,
+  );
+});
+
+test('iOS prepare 在 XcodeGen 未生成本地化资源组时失败', () => {
+  const { temporaryRoot, appleRoot } = createIosFixture();
+
+  assert.throws(
+    () => prepareIosAppNames(temporaryRoot, () => {
+      writeXcodeGenProjectFixture(appleRoot, { includeVariantGroup: false });
+      return { status: 0 };
+    }),
+    /does not define InfoPlist\.strings as a localized variant group/,
   );
 });
 
@@ -244,4 +373,6 @@ test('iOS 发布构建安装仓库固定版本的 XcodeGen', () => {
   assert.ok(installStep >= 0 && installStep < prepareStep);
   assert.match(workflow, /XCODEGEN_VERSION: 2\.46\.0/);
   assert.match(workflow, /XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806/);
+  assert.match(workflow, /PREFIX="\$PREFIX" "\$EXTRACT_DIR\/xcodegen\/install\.sh"/);
+  assert.match(workflow, /trap 'rm -f "\$ARCHIVE"; rm -rf "\$EXTRACT_DIR"' EXIT/);
 });
