@@ -13,6 +13,98 @@ export type CaptchaSandboxMessage =
   | { type: 'success'; payload: unknown }
   | { type: 'error'; payload: unknown };
 
+export interface ImageCaptchaRequestCallbacks {
+  onImage: (image: string) => void;
+  onError: (message: string) => void;
+  onLoadingChange: (loading: boolean) => void;
+}
+
+export interface ImageCaptchaRequestLifecycle {
+  load: (
+    requestImage: (signal: AbortSignal) => Promise<unknown>,
+    callbacks: ImageCaptchaRequestCallbacks,
+  ) => Promise<void>;
+  cancel: () => void;
+}
+
+interface ActiveImageCaptchaRequest {
+  controller: AbortController;
+  callbacks: ImageCaptchaRequestCallbacks;
+}
+
+/**
+ * Keeps only the newest image-captcha request active. Aborting is best-effort
+ * because a platform fetch may still settle after cancellation, so callback
+ * delivery is also guarded by the active request identity.
+ */
+export function createImageCaptchaRequestLifecycle(): ImageCaptchaRequestLifecycle {
+  let activeRequest: ActiveImageCaptchaRequest | null = null;
+
+  const cancel = () => {
+    const request = activeRequest;
+    if (!request) return;
+
+    activeRequest = null;
+    request.controller.abort();
+    request.callbacks.onLoadingChange(false);
+  };
+
+  const load = async (
+    requestImage: (signal: AbortSignal) => Promise<unknown>,
+    callbacks: ImageCaptchaRequestCallbacks,
+  ) => {
+    cancel();
+
+    const request: ActiveImageCaptchaRequest = {
+      controller: new AbortController(),
+      callbacks,
+    };
+    activeRequest = request;
+    callbacks.onLoadingChange(true);
+
+    const isCurrent = () => (
+      activeRequest === request && !request.controller.signal.aborted
+    );
+    const finish = () => {
+      if (activeRequest !== request) return;
+      activeRequest = null;
+      callbacks.onLoadingChange(false);
+    };
+
+    let payload: unknown;
+    try {
+      payload = await requestImage(request.controller.signal);
+    } catch {
+      if (!isCurrent()) return;
+      try {
+        callbacks.onError('网络错误，无法加载验证码');
+      } finally {
+        finish();
+      }
+      return;
+    }
+
+    if (!isCurrent()) return;
+    const data = payload && typeof payload === 'object'
+      ? payload as Record<string, unknown>
+      : {};
+
+    try {
+      if (data.err === 'ok' && typeof data.image === 'string' && data.image) {
+        callbacks.onImage(data.image);
+      } else {
+        callbacks.onError(
+          typeof data.msg === 'string' && data.msg ? data.msg : '无法加载验证码',
+        );
+      }
+    } finally {
+      finish();
+    }
+  };
+
+  return { load, cancel };
+}
+
 interface CaptchaMessageEvent {
   origin: string;
   source: unknown;

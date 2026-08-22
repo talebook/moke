@@ -7,6 +7,7 @@ import {
   buildCaptchaSandboxDocument,
   buildGeetestSandboxDocument,
   createCaptchaSandboxChannel,
+  createImageCaptchaRequestLifecycle,
   parseCaptchaSandboxMessage,
   type GeetestCaptchaConfig,
 } from '@/lib/captcha-core';
@@ -40,6 +41,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   const [sandboxDocument, setSandboxDocument] = useState('');
   const configRequestIdRef = useRef(0);
   const successHandledRef = useRef(false);
+  const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle());
 
   const completeCaptcha = useCallback((data: any) => {
     if (successHandledRef.current) return;
@@ -95,22 +97,27 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     }
   }, [serverUrl]);
 
-  const fetchImageCaptcha = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await request(`${serverUrl}/api/captcha/image`, { credentials: 'include' });
-      const data = await res.json();
-      if (data.err === 'ok' && data.image) {
-        setImage(data.image);
-      } else {
-        setError(data.msg || '无法加载验证码');
-      }
-    } catch {
-      setError('网络错误，无法加载验证码');
-    } finally {
-      setLoading(false);
-    }
-  }, [serverUrl]);
+  const cancelImageCaptcha = useCallback(() => {
+    imageRequestLifecycle.cancel();
+  }, [imageRequestLifecycle]);
+
+  const fetchImageCaptcha = useCallback(() => {
+    setError('');
+    return imageRequestLifecycle.load(
+      async (signal) => {
+        const res = await request(`${serverUrl}/api/captcha/image`, {
+          credentials: 'include',
+          signal,
+        });
+        return res.json();
+      },
+      {
+        onImage: setImage,
+        onError: setError,
+        onLoadingChange: setLoading,
+      },
+    );
+  }, [imageRequestLifecycle, serverUrl]);
 
   useEffect(() => {
     if (!config) return;
@@ -129,9 +136,11 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     setSandboxDocument('');
     sandboxChannelRef.current = '';
 
+    if (!isOpen) return;
+
     if (mode === 'image') {
       void fetchImageCaptcha();
-      return;
+      return cancelImageCaptcha;
     }
 
     if (mode === 'geetest') {
@@ -198,10 +207,11 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       disposed = true;
       sandboxChannelRef.current = '';
     };
-  }, [config, fetchImageCaptcha, mode, serverUrl]);
+  }, [cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl]);
 
   useEffect(() => {
     if (!isOpen) {
+      cancelImageCaptcha();
       configRequestIdRef.current += 1;
       sandboxChannelRef.current = '';
       setSandboxDocument('');
@@ -217,7 +227,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     setMode('loading');
     setConfig(null);
     void loadCaptcha();
-  }, [isOpen, loadCaptcha]);
+  }, [cancelImageCaptcha, isOpen, loadCaptcha]);
 
   if (!isOpen) return null;
 

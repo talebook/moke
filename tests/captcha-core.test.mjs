@@ -8,6 +8,7 @@ import {
   buildGeetestOptions,
   buildGeetestSandboxDocument,
   CAPTCHA_SANDBOX_ORIGIN,
+  createImageCaptchaRequestLifecycle,
   DEFAULT_GEETEST_SDK_URL,
   parseCaptchaSandboxMessage,
   resolveGeetestSdkUrl,
@@ -17,6 +18,125 @@ const captchaModalSource = readFileSync(
   fileURLToPath(new URL('../src/components/auth/CaptchaModal.tsx', import.meta.url)),
   'utf8',
 );
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function createImageCaptchaState() {
+  const state = { image: '', error: '', loading: false };
+  const callbacks = {
+    onImage: (image) => { state.image = image; },
+    onError: (error) => { state.error = error; },
+    onLoadingChange: (loading) => { state.loading = loading; },
+  };
+  return { state, callbacks };
+}
+
+test('closing during an image request aborts it and ignores a late success', async () => {
+  const lifecycle = createImageCaptchaRequestLifecycle();
+  const pending = deferred();
+  const { state, callbacks } = createImageCaptchaState();
+  let signal;
+
+  const loading = lifecycle.load((requestSignal) => {
+    signal = requestSignal;
+    return pending.promise;
+  }, callbacks);
+
+  assert.equal(state.loading, true);
+  lifecycle.cancel();
+  assert.equal(signal.aborted, true);
+  assert.equal(state.loading, false);
+
+  pending.resolve({ err: 'ok', image: 'stale-image' });
+  await loading;
+  assert.deepEqual(state, { image: '', error: '', loading: false });
+});
+
+test('switching from image to webcode or GeeTest ignores a late failed response', async () => {
+  for (const nextMode of ['webcode', 'geetest']) {
+    const lifecycle = createImageCaptchaRequestLifecycle();
+    const pending = deferred();
+    const { state, callbacks } = createImageCaptchaState();
+    const loading = lifecycle.load(() => pending.promise, callbacks);
+
+    lifecycle.cancel();
+    pending.resolve({ err: 'captcha.failed', msg: `stale-${nextMode}-error` });
+    await loading;
+
+    assert.deepEqual(
+      state,
+      { image: '', error: '', loading: false },
+      `late image response must not affect ${nextMode} mode`,
+    );
+  }
+});
+
+test('reopening starts a new image request that cannot be overwritten by the old success', async () => {
+  const lifecycle = createImageCaptchaRequestLifecycle();
+  const oldPending = deferred();
+  const newPending = deferred();
+  const { state, callbacks } = createImageCaptchaState();
+
+  const oldLoading = lifecycle.load(() => oldPending.promise, callbacks);
+  lifecycle.cancel();
+  const newLoading = lifecycle.load(() => newPending.promise, callbacks);
+
+  oldPending.resolve({ err: 'ok', image: 'old-image' });
+  await oldLoading;
+  assert.deepEqual(state, { image: '', error: '', loading: true });
+
+  newPending.resolve({ err: 'ok', image: 'new-image' });
+  await newLoading;
+  assert.deepEqual(state, { image: 'new-image', error: '', loading: false });
+});
+
+test('a rejected old image request cannot replace state after reopening', async () => {
+  const lifecycle = createImageCaptchaRequestLifecycle();
+  const oldPending = deferred();
+  const newPending = deferred();
+  const { state, callbacks } = createImageCaptchaState();
+
+  const oldLoading = lifecycle.load(() => oldPending.promise, callbacks);
+  lifecycle.cancel();
+  const newLoading = lifecycle.load(() => newPending.promise, callbacks);
+  newPending.resolve({ err: 'ok', image: 'new-image' });
+  await newLoading;
+
+  oldPending.reject(new Error('late network failure'));
+  await oldLoading;
+  assert.deepEqual(state, { image: 'new-image', error: '', loading: false });
+});
+
+test('the current image request still reports server and network failures', async () => {
+  const lifecycle = createImageCaptchaRequestLifecycle();
+  const serverFailure = createImageCaptchaState();
+  await lifecycle.load(
+    async () => ({ err: 'captcha.failed', msg: 'current server failure' }),
+    serverFailure.callbacks,
+  );
+  assert.deepEqual(
+    serverFailure.state,
+    { image: '', error: 'current server failure', loading: false },
+  );
+
+  const networkFailure = createImageCaptchaState();
+  await lifecycle.load(
+    async () => { throw new Error('current network failure'); },
+    networkFailure.callbacks,
+  );
+  assert.deepEqual(
+    networkFailure.state,
+    { image: '', error: '网络错误，无法加载验证码', loading: false },
+  );
+});
 
 test('GeeTest forces HTTPS only when requested by its WebView context', () => {
   assert.deepEqual(buildGeetestOptions({ captchaId: 'captcha-id' }, true), {
@@ -123,6 +243,16 @@ test('captcha messages require opaque origin, exact frame source, channel, and m
       'captcha-channel',
     ),
     null,
+  );
+});
+
+test('CaptchaModal cancels image requests on close and provider lifecycle cleanup', () => {
+  assert.match(captchaModalSource, /signal,/);
+  assert.match(captchaModalSource, /return cancelImageCaptcha;/);
+  assert.match(captchaModalSource, /if \(!isOpen\) \{\s*cancelImageCaptcha\(\);/);
+  assert.match(
+    captchaModalSource,
+    /\[cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl\]/,
   );
 });
 
