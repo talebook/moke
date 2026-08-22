@@ -61,8 +61,7 @@
             "$RESOURCE/**",
             "$APPDATA/**/*",
             "$APPCACHE/**/*",
-            "$TEMP/**/*",
-            "**/Readest/**/*"
+            "$TEMP/**/*"
           ],
           "deny": []
         }
