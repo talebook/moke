@@ -116,7 +116,7 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 若需要**同步拿到执行结果**，可在 body 里加 `wait_ms`（毫秒）启用阻塞等待。`wait_ms` 必须是 `0` 到 `30000` 的整数；大于 `0` 时 `request_id` 必须是非空字符串。服务端按「拓展身份 + 目标窗口 + `request_id`」隔离等待请求，并校验回执来自目标阅读器窗口：不同拓展可以复用同一个 ID，同一拓展对同一窗口并发复用 ID 则返回冲突。每次调用还会使用宿主内部唯一关联 ID，因此超时后的迟到回执不会满足后来复用同一 `request_id` 的请求。
 
-宿主全局最多同时处理 32 个阻塞等待；达到上限时，新等待会立即返回 HTTP 429 + `TOO_MANY_PENDING_COMMANDS`。该上限仅计入 `wait_ms > 0` 的命令，不影响 `wait_ms` 为 0 的发送或其它 REST 请求。
+宿主全局最多同时处理 32 个阻塞等待；达到上限时，新等待会立即返回 HTTP 429 + `TOO_MANY_PENDING_COMMANDS`。该上限仅计入 `wait_ms > 0` 的命令，不影响 `wait_ms` 为 0 的发送或其它 REST 请求。超时后到达的回执仍会广播到 WS，但会带上 `data.late: true`；拓展复用同一 `request_id` 时应忽略这类迟到回执。
 
 ```json
 {
@@ -144,7 +144,7 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 | 条件 | HTTP | `code` |
 |---|---:|---|
-| `request_id` 不是非空字符串 | 400 | `INVALID_REQUEST_ID` |
+| `wait_ms > 0` 且 `request_id` 不是非空字符串 | 400 | `INVALID_REQUEST_ID` |
 | `wait_ms` 不是非负整数 | 400 | `INVALID_WAIT_MS` |
 | `wait_ms > 30000` | 400 | `WAIT_MS_TOO_LARGE` |
 | `wait_ms > 0` 但缺少 `request_id` | 400 | `MISSING_REQUEST_ID` |

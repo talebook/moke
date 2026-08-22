@@ -479,24 +479,25 @@ fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
 }
 
 fn parse_command_wait(payload: &serde_json::Value) -> Result<(Option<String>, u64), ApiError> {
+    let wait_ms = match payload.get("wait_ms") {
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| ApiError::bad_request("INVALID_WAIT_MS", "wait_ms 必须是非负整数"))?,
+        None => 0,
+    };
+
     let request_id = match payload.get("request_id") {
         Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
             Some(value.trim().to_string())
         }
         Some(serde_json::Value::Null) | None => None,
+        Some(_) if wait_ms == 0 => None,
         Some(_) => {
             return Err(ApiError::bad_request(
                 "INVALID_REQUEST_ID",
                 "request_id 必须是非空字符串",
             ))
         }
-    };
-
-    let wait_ms = match payload.get("wait_ms") {
-        Some(value) => value
-            .as_u64()
-            .ok_or_else(|| ApiError::bad_request("INVALID_WAIT_MS", "wait_ms 必须是非负整数"))?,
-        None => 0,
     };
 
     if wait_ms > MAX_COMMAND_WAIT_MS {
@@ -1013,10 +1014,26 @@ mod tests {
             parse_command_wait(&serde_json::json!({"wait_ms": 0})).unwrap(),
             (None, 0)
         );
+        assert_eq!(
+            parse_command_wait(&serde_json::json!({
+                "request_id": 42,
+                "wait_ms": 0,
+            }))
+            .unwrap(),
+            (None, 0)
+        );
 
         let missing_id = parse_command_wait(&serde_json::json!({"wait_ms": 1})).unwrap_err();
         assert_eq!(missing_id.status, 400);
         assert_eq!(missing_id.code, "MISSING_REQUEST_ID");
+
+        let invalid_id = parse_command_wait(&serde_json::json!({
+            "request_id": 42,
+            "wait_ms": 1,
+        }))
+        .unwrap_err();
+        assert_eq!(invalid_id.status, 400);
+        assert_eq!(invalid_id.code, "INVALID_REQUEST_ID");
 
         let invalid_wait = parse_command_wait(&serde_json::json!({
             "request_id": "r1",

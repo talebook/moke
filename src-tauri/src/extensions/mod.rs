@@ -480,9 +480,12 @@ fn ext_reader_event(
                 data.clone(),
             );
             match receipt_match {
-                api_server::ReceiptMatch::Active { request_id }
-                | api_server::ReceiptMatch::Late { request_id } => {
+                api_server::ReceiptMatch::Active { request_id } => {
                     data["request_id"] = serde_json::Value::String(request_id);
+                }
+                api_server::ReceiptMatch::Late { request_id } => {
+                    data["request_id"] = serde_json::Value::String(request_id);
+                    data["late"] = serde_json::Value::Bool(true);
                 }
                 api_server::ReceiptMatch::SourceMismatch { target_window } => {
                     log::warn!(
