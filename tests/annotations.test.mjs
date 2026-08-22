@@ -6,6 +6,7 @@ import {
   annotationSourceNames,
   beginAnnotationLocateNavigation,
   clearAnnotationLocateProgressSuppression,
+  clearAnnotationLocateProgressSuppressionFromPayload,
   fetchBookAnnotations,
   hasReadestAnnotationLocation,
   isAnnotationApiUnsupported,
@@ -165,6 +166,41 @@ test('定位导航只抑制匹配 server/book/session 的事件，并可在失�
   assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), true);
 
   clearAnnotationLocateProgressSuppression(navigationId);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), false);
+});
+
+test('定位完成事件只用合法对象 payload 中的导航 id 回收状态', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a', 42);
+  const progress = {
+    schema: 'moke.readest.progress.v1',
+    reader: 'readest',
+    moke_book_id: '42',
+    location: 'epubcfi(/6/4)',
+    moke_navigation_id: navigationId,
+    moke_navigation_kind: 'annotation-locate',
+    moke_navigation_phase: 'navigating',
+    updated_at: new Date().toISOString(),
+  };
+  const invalidPayloads = [
+    ['null', null],
+    ['array', [{ moke_navigation_id: navigationId }]],
+    ['string', navigationId],
+    ['missing id', {}],
+  ];
+
+  for (const [label, payload] of invalidPayloads) {
+    assert.doesNotThrow(
+      () => clearAnnotationLocateProgressSuppressionFromPayload(payload),
+      label,
+    );
+    assert.equal(
+      shouldSuppressAnnotationReaderProgress('http://talebook-a', progress),
+      true,
+      label,
+    );
+  }
+
+  clearAnnotationLocateProgressSuppressionFromPayload({ moke_navigation_id: navigationId });
   assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), false);
 });
 

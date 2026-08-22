@@ -350,6 +350,12 @@ export function clearAnnotationLocateProgressSuppression(navigationId: string): 
   annotationLocateSuppressions.delete(navigationId);
 }
 
+export function clearAnnotationLocateProgressSuppressionFromPayload(payload: unknown): void {
+  if (!isRecord(payload) || Array.isArray(payload)) return;
+  const navigationId = nullableString(payload.moke_navigation_id);
+  if (navigationId) clearAnnotationLocateProgressSuppression(navigationId);
+}
+
 export function shouldSuppressAnnotationReaderProgress(
   serverUrl: string,
   progress: ReadingProgressPayload,

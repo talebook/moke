@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress, type ReadingProgressPayload } from '@/lib/reading-progress';
 import {
-  clearAnnotationLocateProgressSuppression,
+  clearAnnotationLocateProgressSuppressionFromPayload,
   shouldSuppressAnnotationReaderProgress,
 } from '@/lib/annotations';
 import { useServerStore } from '@/lib/store/server';
@@ -47,11 +47,8 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
 
           timersRef.current.set(bookId, timer);
         }),
-        listen<Record<string, unknown>>('reader:annotation-locate:finished', (event) => {
-          const navigationId = event.payload.moke_navigation_id;
-          if (typeof navigationId === 'string') {
-            clearAnnotationLocateProgressSuppression(navigationId);
-          }
+        listen<unknown>('reader:annotation-locate:finished', (event) => {
+          clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
         }),
       ]))
       .then((cleanup) => {
