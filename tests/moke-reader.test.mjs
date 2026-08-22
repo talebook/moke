@@ -7,6 +7,8 @@ import {
   buildReaderHomeWindowLabel,
   getNativeTopSafeAreaInset,
   isSingleWebviewRuntime,
+  isSafeAppNavigationPath,
+  openEmbeddedReaderHome,
   requiresMokeNavigate,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
@@ -29,6 +31,14 @@ test('only OpenHarmony exposes the native full-document navigation command', () 
   assert.equal(requiresMokeNavigate('ios'), false);
   assert.equal(requiresMokeNavigate('linux'), false);
   assert.equal(requiresMokeNavigate('windows'), false);
+});
+
+test('full-document navigation accepts only same-origin absolute paths', () => {
+  assert.equal(isSafeAppNavigationPath('/readest/reader?book=1'), true);
+  assert.equal(isSafeAppNavigationPath('/library'), true);
+  assert.equal(isSafeAppNavigationPath('//evil.example/reader'), false);
+  assert.equal(isSafeAppNavigationPath('https://evil.example/reader'), false);
+  assert.equal(isSafeAppNavigationPath('readest/reader'), false);
 });
 
 test('runtimeCategoryFromPlatform classifies each runtime', () => {
@@ -188,6 +198,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
         reader: 'readest',
         moke_book_id: '14',
         location: 'page=142',
+        moke_navigation_id: 'annotation-locate-14',
+        moke_navigation_kind: 'annotation-locate',
         updated_at: '2026-07-24T00:00:00.000Z',
       },
     }),
@@ -207,6 +219,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     reader: 'readest',
     moke_book_id: '14',
     location: 'page=142',
+    moke_navigation_id: 'annotation-locate-14',
+    moke_navigation_kind: 'annotation-locate',
     updated_at: '2026-07-24T00:00:00.000Z',
   });
 
@@ -269,4 +283,74 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   assert.equal(empty.searchParams.get('moke'), '1');
   assert.equal(empty.searchParams.get('mokeEink'), '0');
   assert.equal(empty.searchParams.get('mokeServerUrl'), null);
+});
+
+test('desktop reader-home keeps exactly one progress saver across window outcomes', async () => {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+
+  const run = async (outcome) => {
+    const windowUrls = [];
+    const navigatedUrls = [];
+    const windowFactory = (_label, options) => {
+      if (outcome === 'sync-error') {
+        throw new Error('window constructor failed');
+      }
+
+      windowUrls.push(options.url);
+      const listeners = new Map();
+      queueMicrotask(() => {
+        if (outcome === 'created') {
+          listeners.get('tauri://created')?.({});
+        } else {
+          listeners.get('tauri://error')?.({ payload: 'window event failed' });
+        }
+      });
+      return {
+        once: (event, handler) => listeners.set(event, handler),
+      };
+    };
+
+    await openEmbeddedReaderHome({
+      eink: false,
+      debugPanel: true,
+      serverUrl: 'http://192.168.1.5:8080',
+      navigate: (href) => navigatedUrls.push(href),
+      platformOverride: 'windows',
+      windowFactory,
+    });
+
+    return { windowUrls, navigatedUrls };
+  };
+
+  try {
+    const success = await run('created');
+    assert.equal(success.windowUrls.length, 1);
+    assert.equal(success.navigatedUrls.length, 0);
+    assert.equal(
+      new URL(success.windowUrls[0], 'https://moke.invalid').searchParams.get('mokeServerUrl'),
+      null,
+    );
+
+    for (const outcome of ['sync-error', 'async-error']) {
+      const fallback = await run(outcome);
+      assert.equal(fallback.navigatedUrls.length, 1, outcome);
+      const fallbackUrl = new URL(fallback.navigatedUrls[0], 'https://moke.invalid');
+      assert.equal(fallbackUrl.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+      assert.equal(fallbackUrl.searchParams.get('mokeDebug'), '1');
+      if (outcome === 'async-error') {
+        assert.equal(fallback.windowUrls.length, 1);
+        assert.equal(
+          new URL(fallback.windowUrls[0], 'https://moke.invalid').searchParams.get('mokeServerUrl'),
+          null,
+        );
+      }
+    }
+  } finally {
+    if (previousPlatform === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    } else {
+      process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+    }
+  }
 });

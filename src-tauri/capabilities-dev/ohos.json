@@ -5,6 +5,9 @@
   "windows": [
     "main"
   ],
+  "platforms": [
+    "openHarmony"
+  ],
   "remote": {
     "urls": [
       "http://*:3000/**",

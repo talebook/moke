@@ -94,9 +94,31 @@ test('production capabilities are split by host, desktop reader, and mobile read
   assert.deepEqual(mobileReader.windows, ['main']);
   assert.deepEqual(mobileReader.platforms, ['android', 'iOS']);
   assert.deepEqual(ohos.windows, ['main']);
+  assert.deepEqual(ohos.platforms, ['openHarmony']);
 
   for (const capability of [main, reader, mobileReader, ohos]) {
     assert.ok(!capability.windows.includes('*'));
+  }
+});
+
+test('desktop fs write paths stay command-scoped instead of entering the plugin global scope', () => {
+  const manifests = JSON.parse(
+    readFileSync(join(repoRoot, 'src-tauri/gen/schemas/acl-manifests.json'), 'utf8'),
+  );
+  const fsPermissions = manifests.fs.permissions;
+
+  assert.ok(fsPermissions['write-all'].commands.allow.includes('write'));
+  assert.ok(fsPermissions['write-all'].commands.allow.includes('remove'));
+  assert.deepEqual(fsPermissions.scope.commands.allow, []);
+  assert.deepEqual(fsPermissions.scope.commands.deny, []);
+
+  for (const file of [
+    'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const identifiers = readCapability(file).permissions.map(permissionIdentifier);
+    assert.ok(!identifiers.includes('fs:scope'), `${file} must not broaden the fs global scope`);
   }
 });
 

@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
 import { submitWelcomeCode } from '@/lib/api';
-import { isHttpUrl } from '@/lib/server-url';
+import { isHttpUrl, parseHttpUrl } from '@/lib/server-url';
 import { useServerStore } from '@/lib/store/server';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { requestAnimatedBack } from '@/lib/native-back';
@@ -39,11 +39,11 @@ function AccessPageInner() {
 
     if (candidate) {
       try {
-        if (!isHttpUrl(candidate)) {
-          debugLog('warn', 'access', `server 值协议非法，已忽略: ${new URL(candidate).protocol}`);
+        const url = parseHttpUrl(candidate);
+        if (!url) {
+          debugLog('warn', 'access', 'server 值不是合法的 HTTP(S) URL，已忽略');
           return;
         }
-        const url = new URL(candidate);
         const current = useServerStore.getState().serverUrl;
         if (current !== url.origin) {
           useServerStore.setState({

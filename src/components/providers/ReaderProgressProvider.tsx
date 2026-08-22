@@ -2,7 +2,10 @@
 
 import { useEffect, useRef } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress, type ReadingProgressPayload } from '@/lib/reading-progress';
-import { shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
+import {
+  clearAnnotationLocateProgressSuppressionFromPayload,
+  shouldSuppressAnnotationReaderProgress,
+} from '@/lib/annotations';
 import { useServerStore } from '@/lib/store/server';
 
 const SAVE_DELAY_MS = 1200;
@@ -19,38 +22,53 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
     if (!serverUrl) return;
     if (capabilityChecked && !progressSupported) return;
 
-    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    const unlisten: Array<() => void> = [];
 
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<Record<string, unknown>>('reader:page:changed', (event) => {
-        const progress = normalizeReaderProgressEvent(event.payload);
-        if (!progress) return;
-        if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
+      .then(({ listen }) => {
+        const register = (listener: Promise<() => void>) => {
+          void listener
+            .then((cleanup) => {
+              if (disposed) cleanup();
+              else unlisten.push(cleanup);
+            })
+            .catch((error) => {
+              console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
+            });
+        };
 
-        const bookId = progress.moke_book_id;
-        pendingRef.current.set(bookId, progress);
+        register(listen<Record<string, unknown>>('reader:page:changed', (event) => {
+          const progress = normalizeReaderProgressEvent(event.payload);
+          if (!progress) return;
+          if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
 
-        const existingTimer = timersRef.current.get(bookId);
-        if (existingTimer) clearTimeout(existingTimer);
+          const bookId = progress.moke_book_id;
+          pendingRef.current.set(bookId, progress);
 
-        const timer = setTimeout(() => {
-          const latest = pendingRef.current.get(bookId);
-          pendingRef.current.delete(bookId);
-          timersRef.current.delete(bookId);
-          if (latest) void saveReadingProgress(bookId, latest);
-        }, SAVE_DELAY_MS);
+          const existingTimer = timersRef.current.get(bookId);
+          if (existingTimer) clearTimeout(existingTimer);
 
-        timersRef.current.set(bookId, timer);
-      }))
-      .then((cleanup) => {
-        unlisten = cleanup;
+          const timer = setTimeout(() => {
+            const latest = pendingRef.current.get(bookId);
+            pendingRef.current.delete(bookId);
+            timersRef.current.delete(bookId);
+            if (latest) void saveReadingProgress(bookId, latest);
+          }, SAVE_DELAY_MS);
+
+          timersRef.current.set(bookId, timer);
+        }));
+        register(listen<unknown>('reader:annotation-locate:finished', (event) => {
+          clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
+        }));
       })
       .catch((error) => {
         console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
       });
 
     return () => {
-      unlisten?.();
+      disposed = true;
+      for (const cleanup of unlisten) cleanup();
       for (const timer of timersRef.current.values()) clearTimeout(timer);
       for (const [bookId, progress] of pendingRef.current.entries()) {
         void saveReadingProgress(bookId, progress);

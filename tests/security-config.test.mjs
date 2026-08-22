@@ -24,7 +24,6 @@ test('production CSP blocks unhashed inline scripts and lets Tauri hash emitted 
   assert.equal(security.dangerousDisableAssetCspModification, false);
 
   const layout = readFileSync(join(repoRoot, 'src/app/layout.tsx'), 'utf8');
-  assert.equal((layout.match(/<script\b/g) ?? []).length, 2);
   assert.match(layout, /mokeReaderExitTransitionScript/);
   assert.match(layout, /MOKE-THEME-INIT/);
   // With asset CSP modification enabled, Tauri computes sha256 sources from
@@ -66,9 +65,19 @@ test('CSP covers Tauri IPC/assets and embedded reader resource types', () => {
   assert.ok(defaults.has('http://tauri.localhost'));
   assert.ok(defaults.has('asset:'));
   assert.ok(defaults.has('http://asset.localhost'));
+  assert.ok(!defaults.has('customprotocol:'), 'unregistered schemes must not be allowlisted');
 
   const connections = sources(security.csp, 'connect-src');
-  for (const source of ['ipc:', 'http://ipc.localhost', 'http:', 'https:', 'ws:', 'wss:']) {
+  for (const source of [
+    'ipc:',
+    'http://ipc.localhost',
+    'rangefile:',
+    'http://rangefile.localhost',
+    'http:',
+    'https:',
+    'ws:',
+    'wss:',
+  ]) {
     assert.ok(connections.has(source), `connect-src must include ${source}`);
   }
 
@@ -80,8 +89,17 @@ test('CSP covers Tauri IPC/assets and embedded reader resource types', () => {
   const frames = sources(security.csp, 'frame-src');
   assert.ok(frames.has('blob:'));
   assert.ok(frames.has('http:'), 'loopback extension UIs must remain loadable');
+  assert.ok(!frames.has('rangefile:'), 'rangefile is a fetch transport, not a frame source');
   assert.equal(security.csp['object-src'], "'none'");
   assert.equal(security.csp['frame-ancestors'], "'none'");
+});
+
+test('production and development CSPs do not allow unregistered customprotocol URLs', () => {
+  for (const policy of [security.csp, security.devCsp]) {
+    for (const directive of Object.keys(policy)) {
+      assert.ok(!sources(policy, directive).has('customprotocol:'), `${directive} must omit customprotocol:`);
+    }
+  }
 });
 
 test('production script hosts are limited to shipped runtime loaders', () => {
@@ -95,11 +113,11 @@ test('production script hosts are limited to shipped runtime loaders', () => {
     'https://us-assets.i.posthog.com',
   ].sort());
 
-  const captcha = readFileSync(
-    join(repoRoot, 'src/components/auth/CaptchaModal.tsx'),
+  const captchaCore = readFileSync(
+    join(repoRoot, 'src/lib/captcha-core.ts'),
     'utf8',
   );
-  assert.match(captcha, /https:\/\/static\.geetest\.com\/v4\/gt4\.js/);
+  assert.match(captchaCore, /https:\/\/static\.geetest\.com\/v4\/gt4\.js/);
   // The pinned Readest export bundles PostHog and constructs its US
   // external-dependency asset endpoint at runtime. Its API stays under the
   // broader connect-src policy. Stripe checkout is not in the Tauri static

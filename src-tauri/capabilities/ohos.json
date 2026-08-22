@@ -5,6 +5,9 @@
   "windows": [
     "main"
   ],
+  "platforms": [
+    "openHarmony"
+  ],
   "permissions": [
     "core:default",
     "fs:default",
