@@ -17,9 +17,11 @@
     "lint": "eslint src tests",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
-    "build:reader": "cd readest && pnpm --filter @readest/readest-app build",
+    "clean:build": "node scripts/clean-build-artifacts.mjs",
+    "clean:build:full": "node scripts/clean-build-artifacts.mjs --rust",
+    "build:reader": "cd readest && pnpm --filter @readest/readest-app build && cd .. && node scripts/strip-reader-sourcemaps.mjs readest/out/readest",
     "dev:reader": "cd readest && pnpm --filter @readest/readest-app dev",
-    "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\""
+    "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\" && node scripts/strip-reader-sourcemaps.mjs out/readest"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",

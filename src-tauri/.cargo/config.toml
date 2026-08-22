@@ -6,10 +6,11 @@ linker = "rust-lld"
 [target.aarch64-pc-windows-msvc]
 linker = "rust-lld"
 
-# Dev profile: max compilation speed, zero optimization.
+# Dev profile: keep line-table diagnostics without the multi-gigabyte
+# incremental cache produced by Moke + Readest's large dependency graph.
 [profile.dev]
-codegen-units = 256
-incremental = true
+codegen-units = 16
+incremental = false
 opt-level = 0
 debug = 1
 
