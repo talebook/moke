@@ -4,13 +4,14 @@ import assert from 'node:assert/strict';
 import {
   annotationReaderProgress,
   annotationSourceNames,
+  beginAnnotationLocateNavigation,
   clearAnnotationLocateProgressSuppression,
+  clearAnnotationLocateProgressSuppressionFromPayload,
   fetchBookAnnotations,
   hasReadestAnnotationLocation,
   isAnnotationApiUnsupported,
   shouldSuppressAnnotationReaderProgress,
   stableMokeAnnotationClientId,
-  suppressAnnotationLocateProgress,
   TALEBOOK_ANNOTATION_CONTRACT,
   upsertBookAnnotation,
   upsertBookAnnotations,
@@ -107,42 +108,103 @@ test('CFI 标注转换为 Readest 精确定位进度', () => {
   assert.equal(annotationReaderProgress(external, 42), null);
 });
 
-test('标注定位恢复位置不会覆盖普通阅读进度，用户翻页后恢复同步', () => {
-  const target = 'epubcfi(/6/4!/4/2/8)';
-  const serverUrl = 'http://talebook-a';
-  suppressAnnotationLocateProgress(serverUrl, 42, target);
-  const restored = {
+test('显式定位导航协议不依赖时长或 CFI 字节相等', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a', 42);
+  const restored = annotationReaderProgress(
+    annotation({ cfi: 'epubcfi(/6/4!/4/2/8)' }),
+    42,
+    navigationId,
+  );
+
+  assert.equal(restored.moke_navigation_id, navigationId);
+  assert.equal(restored.moke_navigation_kind, 'annotation-locate');
+
+  const normalizedAfterSlowLoad = {
+    ...restored,
+    location: 'epubcfi(/6/4!/4/2/8:0)',
+    moke_navigation_phase: 'complete',
+  };
+  assert.equal(
+    shouldSuppressAnnotationReaderProgress(
+      'http://talebook-a',
+      normalizedAfterSlowLoad,
+      Date.now() + 60_000,
+    ),
+    true,
+  );
+
+  // A real page turn has no navigation marker and resumes ordinary progress
+  // persistence, while late correlated events remain suppressed until the
+  // explicit finished receipt arrives.
+  assert.equal(
+    shouldSuppressAnnotationReaderProgress('http://talebook-a', {
+      ...restored,
+      location: 'epubcfi(/6/6)',
+      moke_navigation_id: undefined,
+      moke_navigation_kind: undefined,
+      moke_navigation_phase: undefined,
+    }),
+    false,
+  );
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', restored), true);
+  clearAnnotationLocateProgressSuppressionFromPayload({ moke_navigation_id: navigationId });
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', restored), false);
+});
+
+test('定位导航只抑制匹配 server/book/session 的事件，并可在失败时回收', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a/', 42);
+  const progress = {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
     moke_book_id: '42',
-    location: target,
+    location: 'reader-normalized-location',
+    moke_navigation_id: navigationId,
+    moke_navigation_kind: 'annotation-locate',
+    moke_navigation_phase: 'navigating',
     updated_at: new Date().toISOString(),
   };
-  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), true);
-  assert.equal(
-    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'reader-normalized-default' }),
-    true,
-  );
-  assert.equal(
-    shouldSuppressAnnotationReaderProgress(serverUrl, { ...restored, location: 'epubcfi(/6/6)' }, Date.now() + 11_000),
-    false,
-  );
-  assert.equal(shouldSuppressAnnotationReaderProgress(serverUrl, restored), false);
-  clearAnnotationLocateProgressSuppression(serverUrl, 42);
+
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-b', progress), false);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', { ...progress, moke_book_id: '43' }), false);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), true);
+
+  clearAnnotationLocateProgressSuppression(navigationId);
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), false);
 });
 
-test('标注定位进度抑制按 serverUrl 隔离', () => {
+test('定位完成事件只用合法对象 payload 中的导航 id 回收状态', () => {
+  const navigationId = beginAnnotationLocateNavigation('http://talebook-a', 42);
   const progress = {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
     moke_book_id: '42',
     location: 'epubcfi(/6/4)',
+    moke_navigation_id: navigationId,
+    moke_navigation_kind: 'annotation-locate',
+    moke_navigation_phase: 'navigating',
     updated_at: new Date().toISOString(),
   };
-  suppressAnnotationLocateProgress('http://talebook-a/', 42, progress.location);
-  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-b', progress), false);
-  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), true);
-  clearAnnotationLocateProgressSuppression('http://talebook-a', 42);
+  const invalidPayloads = [
+    ['null', null],
+    ['array', [{ moke_navigation_id: navigationId }]],
+    ['string', navigationId],
+    ['missing id', {}],
+  ];
+
+  for (const [label, payload] of invalidPayloads) {
+    assert.doesNotThrow(
+      () => clearAnnotationLocateProgressSuppressionFromPayload(payload),
+      label,
+    );
+    assert.equal(
+      shouldSuppressAnnotationReaderProgress('http://talebook-a', progress),
+      true,
+      label,
+    );
+  }
+
+  clearAnnotationLocateProgressSuppressionFromPayload({ moke_navigation_id: navigationId });
+  assert.equal(shouldSuppressAnnotationReaderProgress('http://talebook-a', progress), false);
 });
 
 test('429/5xx/网络错误有限重试，登录失效不会重试', async () => {
@@ -188,6 +250,23 @@ test('429/5xx/网络错误有限重试，登录失效不会重试', async () => 
     { retryDelayMs: 0, sleep: async () => {} },
   );
   assert.equal(attempts, 3);
+});
+
+test('能力探测关闭内部重试时每次 UI 操作至多发送一个请求', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => {
+        attempts += 1;
+        throw new TypeError('Failed to fetch');
+      },
+      'http://talebook-probe-limit',
+      42,
+      { maxRetries: 0 },
+    ),
+    TypeError,
+  );
+  assert.equal(attempts, 1);
 });
 
 test('重复 upsert 复用 client_id，且来源字段使用 v2 source_ 前缀', async () => {
@@ -455,34 +534,7 @@ test('旧服务器或非数组响应明确标记为 contract 不兼容', async (
     ),
     isAnnotationApiUnsupported,
   );
-});
 
-test('真实 HTTP 404/405 标记为接口缺失，其他 HTTP 错误继续上抛', async () => {
-  for (const status of [404, 405]) {
-    await assert.rejects(
-      () => fetchBookAnnotations(
-        async () => jsonResponse({}, status),
-        'http://talebook',
-        42,
-        { maxRetries: 0 },
-      ),
-      (error) => isAnnotationApiUnsupported(error)
-        && error.message.includes(TALEBOOK_ANNOTATION_CONTRACT),
-    );
-  }
-
-  for (const status of [401, 403, 500]) {
-    await assert.rejects(
-      () => fetchBookAnnotations(
-        async () => jsonResponse({}, status),
-        'http://talebook',
-        42,
-        { maxRetries: 0 },
-      ),
-      (error) => error.code === `http.${status}`
-        && !isAnnotationApiUnsupported(error),
-    );
-  }
 });
 
 test('单条畸形记录不会隐藏同一响应中的合法笔记', async () => {
@@ -522,5 +574,25 @@ test('非空响应全部畸形时报告契约不兼容，书籍 404 不误报接
       { maxRetries: 0 },
     ),
     (error) => error.code === 'book.not_found' && !isAnnotationApiUnsupported(error),
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain' } }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    (error) => error.code === 'http.404' && !isAnnotationApiUnsupported(error),
+  );
+
+  await assert.rejects(
+    () => fetchBookAnnotations(
+      async () => new Response('Method Not Allowed', { status: 405, headers: { 'content-type': 'text/plain' } }),
+      'http://talebook',
+      42,
+      { maxRetries: 0 },
+    ),
+    (error) => error.code === 'http.405' && !isAnnotationApiUnsupported(error),
   );
 });

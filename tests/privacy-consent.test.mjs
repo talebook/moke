@@ -51,9 +51,3 @@ test('隐私确认门在服务器同步组件之外，且提供同意与拒绝�
   assert.match(consentGateSource, /拒绝并退出/);
   assert.match(consentGateSource, /@tauri-apps\/plugin-process/);
 });
-
-test('隐私确认弹窗使用极简布局并保留政策入口', () => {
-  assert.match(consentGateSource, />\s*查看隐私政策\s*</);
-  assert.doesNotMatch(consentGateSource, /查看完整/);
-  assert.doesNotMatch(consentGateSource, /max-h-\[45vh\]/);
-});

@@ -96,7 +96,8 @@ test('游客登录后立即失效乐观标注能力并重新确认', () => {
     user: null,
     capabilities: {
       ...DEFAULT_SERVER_CAPABILITIES,
-      annotationApi: true,
+      annotationApiStatus: 'supported',
+      annotationApiCheckedAt: checkedAt,
       checkedAt,
     },
   });
@@ -104,7 +105,8 @@ test('游客登录后立即失效乐观标注能力并重新确认', () => {
   useServerStore.getState().setConnected('', reader());
 
   const loggedInState = useServerStore.getState();
-  assert.equal(loggedInState.capabilities.annotationApi, true);
+  assert.equal(loggedInState.capabilities.annotationApiStatus, 'unchecked');
+  assert.equal(loggedInState.capabilities.annotationApiCheckedAt, null);
   assert.equal(loggedInState.capabilities.checkedAt, null);
   assert.equal(isServerCapabilitiesFresh(loggedInState.capabilities.checkedAt), false);
 
@@ -119,26 +121,33 @@ test('同一已确认用户不破坏缓存，换号与退出会失效能力', ()
     user: firstUser,
     capabilities: {
       ...DEFAULT_SERVER_CAPABILITIES,
-      annotationApi: true,
+      annotationApiStatus: 'supported',
+      annotationApiCheckedAt: checkedAt,
       checkedAt,
     },
   });
 
   useServerStore.getState().setUser({ ...firstUser, name: '更新后的昵称' });
   assert.equal(useServerStore.getState().capabilities.checkedAt, checkedAt);
+  assert.equal(useServerStore.getState().capabilities.annotationApiStatus, 'supported');
 
   useServerStore.getState().setUser(reader(2));
   assert.equal(useServerStore.getState().capabilities.checkedAt, null);
+  assert.equal(useServerStore.getState().capabilities.annotationApiStatus, 'unchecked');
+  assert.equal(useServerStore.getState().capabilities.annotationApiCheckedAt, null);
 
   useServerStore.setState({
     capabilities: {
       ...DEFAULT_SERVER_CAPABILITIES,
-      annotationApi: true,
+      annotationApiStatus: 'supported',
+      annotationApiCheckedAt: checkedAt,
       checkedAt,
     },
   });
   useServerStore.getState().logout();
   assert.equal(useServerStore.getState().capabilities.checkedAt, null);
+  assert.equal(useServerStore.getState().capabilities.annotationApiStatus, 'unchecked');
+  assert.equal(useServerStore.getState().capabilities.annotationApiCheckedAt, null);
 
   useServerStore.getState().disconnect();
 });

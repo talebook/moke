@@ -12,8 +12,16 @@ import {
   invalidateServerCapabilities,
   type ReaderInfo,
 } from '../server-session.ts';
+import {
+  DEFAULT_SERVER_CAPABILITIES,
+  mergePersistedServerCapabilities,
+  type PersistedServerCapabilities,
+  type ServerCapabilities,
+} from '../server-capabilities.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
+export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
+export type { ServerCapabilities } from '../server-capabilities.ts';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -26,27 +34,13 @@ const safeLocalStorage: StateStorage = {
   removeItem: safeRemoveLocalStorageItem,
 };
 
-export interface ServerCapabilities {
-  shelfApi: boolean;
-  annotationApi: boolean;
-  readingStateApi: boolean;
-  readingProgressApi: boolean;
-  readingStatsApi: boolean;
-  networkSourcesApi: boolean;
-  checkedAt: number | null;
-  version: string;
+function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): ServerCapabilities {
+  return {
+    ...invalidateServerCapabilities(capabilities),
+    annotationApiStatus: 'unchecked',
+    annotationApiCheckedAt: null,
+  };
 }
-
-export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
-  shelfApi: false,
-  annotationApi: false,
-  readingStateApi: false,
-  readingProgressApi: false,
-  readingStatsApi: false,
-  networkSourcesApi: false,
-  checkedAt: null,
-  version: '',
-};
 
 interface ServerState {
   serverUrl: string;
@@ -111,7 +105,7 @@ export const useServerStore = create<ServerState>()(
           user,
           // A completed sign-in can replace the server cookie even when the
           // same account was cached locally. Re-confirm auth-dependent APIs.
-          capabilities: invalidateServerCapabilities(state.capabilities),
+          capabilities: invalidateCapabilitiesForSession(state.capabilities),
         }));
       },
       setUser: (user) => {
@@ -120,7 +114,7 @@ export const useServerStore = create<ServerState>()(
           token: user ? state.token : '',
           user,
           capabilities: didServerSessionChange(state.user, user)
-            ? invalidateServerCapabilities(state.capabilities)
+            ? invalidateCapabilitiesForSession(state.capabilities)
             : state.capabilities,
         }));
       },
@@ -138,7 +132,7 @@ export const useServerStore = create<ServerState>()(
           isConnected: Boolean(state.serverUrl),
           token: '',
           user: null,
-          capabilities: invalidateServerCapabilities(state.capabilities),
+          capabilities: invalidateCapabilitiesForSession(state.capabilities),
         }));
       },
       disconnect: () => {
@@ -152,18 +146,14 @@ export const useServerStore = create<ServerState>()(
       // merge 时强制为 true；其余字段仍按持久化值恢复。
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<ServerState>;
-        const persistedCapabilities = persisted.capabilities as Partial<ServerCapabilities> | undefined;
-        const hasAnnotationCapability = typeof persistedCapabilities?.annotationApi === 'boolean';
+        const persistedCapabilities = persisted.capabilities as PersistedServerCapabilities | undefined;
         return {
           ...currentState,
           ...persisted,
-          capabilities: {
-            ...currentState.capabilities,
-            ...persistedCapabilities,
-            // Older persisted stores predate annotationApi. Force one fresh
-            // discovery instead of treating a missing field as unsupported.
-            checkedAt: hasAnnotationCapability ? persistedCapabilities?.checkedAt ?? null : null,
-          },
+          capabilities: mergePersistedServerCapabilities(
+            currentState.capabilities,
+            persistedCapabilities,
+          ),
           hasHydrated: true,
         };
       },
