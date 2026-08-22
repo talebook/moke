@@ -242,6 +242,91 @@ struct DownloadStorageStats {
     available_bytes: u64,
 }
 
+#[derive(Clone, Copy)]
+enum MountPathStyle {
+    Native,
+    Windows,
+}
+
+const SYSTEM_MOUNT_PATH_STYLE: MountPathStyle = if cfg!(windows) {
+    MountPathStyle::Windows
+} else {
+    MountPathStyle::Native
+};
+
+/// A Windows drive path normalized independently of the host platform so the
+/// matching behavior can also be covered by tests on Unix CI. `canonicalize`
+/// may add a verbatim prefix while sysinfo reports ordinary drive mount paths.
+struct WindowsDrivePath {
+    drive: u8,
+    components: Vec<String>,
+}
+
+impl WindowsDrivePath {
+    fn parse(path: &Path) -> Option<Self> {
+        let normalized = path.to_string_lossy().replace('/', "\\");
+        let normalized = normalized
+            .strip_prefix(r"\\?\")
+            .unwrap_or(normalized.as_str());
+        let bytes = normalized.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || bytes[2] != b'\\'
+        {
+            return None;
+        }
+
+        let mut components = Vec::new();
+        for component in normalized[3..].split('\\').filter(|part| !part.is_empty()) {
+            if matches!(component, "." | "..") {
+                return None;
+            }
+            components.push(component.to_lowercase());
+        }
+        Some(Self {
+            drive: bytes[0].to_ascii_lowercase(),
+            components,
+        })
+    }
+
+    fn starts_with(&self, mount: &Self) -> bool {
+        self.drive == mount.drive && self.components.starts_with(&mount.components)
+    }
+
+    fn specificity(&self) -> usize {
+        3 + self
+            .components
+            .iter()
+            .map(|component| component.len() + 1)
+            .sum::<usize>()
+    }
+}
+
+fn target_is_on_mount(target: &Path, mount: &Path, style: MountPathStyle) -> bool {
+    match style {
+        MountPathStyle::Native => target.starts_with(mount),
+        MountPathStyle::Windows => {
+            match (
+                WindowsDrivePath::parse(target),
+                WindowsDrivePath::parse(mount),
+            ) {
+                (Some(target), Some(mount)) => target.starts_with(&mount),
+                _ => target.starts_with(mount),
+            }
+        }
+    }
+}
+
+fn mount_specificity(mount: &Path, style: MountPathStyle) -> usize {
+    match style {
+        MountPathStyle::Native => mount.as_os_str().len(),
+        MountPathStyle::Windows => WindowsDrivePath::parse(mount)
+            .map(|path| path.specificity())
+            .unwrap_or_else(|| mount.as_os_str().len()),
+    }
+}
+
 #[tauri::command]
 fn moke_download_storage_stats(
     app: AppHandle,
@@ -264,8 +349,8 @@ fn moke_download_storage_stats(
     let available_bytes = disks
         .list()
         .iter()
-        .filter(|disk| target.starts_with(disk.mount_point()))
-        .max_by_key(|disk| disk.mount_point().as_os_str().len())
+        .filter(|disk| target_is_on_mount(&target, disk.mount_point(), SYSTEM_MOUNT_PATH_STYLE))
+        .max_by_key(|disk| mount_specificity(disk.mount_point(), SYSTEM_MOUNT_PATH_STYLE))
         .map(|disk| disk.available_space())
         .ok_or_else(|| "disk information unavailable".to_string())?;
     Ok(DownloadStorageStats { available_bytes })
@@ -450,6 +535,76 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod download_storage_tests {
+    use super::{mount_specificity, target_is_on_mount, MountPathStyle};
+    use std::path::Path;
+
+    fn selected_mount<'a>(
+        target: &str,
+        mounts: &'a [&'a str],
+        style: MountPathStyle,
+    ) -> Option<&'a str> {
+        mounts
+            .iter()
+            .copied()
+            .filter(|mount| target_is_on_mount(Path::new(target), Path::new(mount), style))
+            .max_by_key(|mount| mount_specificity(Path::new(mount), style))
+    }
+
+    #[test]
+    fn windows_mount_matching_normalizes_verbatim_paths_drive_and_case() {
+        let style = MountPathStyle::Windows;
+        assert!(target_is_on_mount(
+            Path::new(r"\\?\c:\Users\Moke\Downloads"),
+            Path::new(r"C:\"),
+            style,
+        ));
+        assert!(target_is_on_mount(
+            Path::new(r"C:\Users\Moke\Downloads"),
+            Path::new(r"\\?\c:\users"),
+            style,
+        ));
+        assert!(!target_is_on_mount(
+            Path::new(r"\\?\C:\Users\Moke\Downloads"),
+            Path::new(r"D:\"),
+            style,
+        ));
+        assert!(!target_is_on_mount(
+            Path::new(r"C:\Users\Moke\Downloads"),
+            Path::new(r"C:\User"),
+            style,
+        ));
+    }
+
+    #[test]
+    fn windows_mount_selection_prefers_the_deepest_component_prefix() {
+        let mounts = [r"C:\", r"C:\Users", r"c:\users\moke", r"C:\Users\Mo"];
+        assert_eq!(
+            selected_mount(
+                r"\\?\C:\Users\Moke\Downloads",
+                &mounts,
+                MountPathStyle::Windows,
+            ),
+            Some(r"c:\users\moke"),
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mount_selection_keeps_native_longest_prefix_behavior() {
+        let mounts = ["/", "/srv", "/srv/books", "/srv/book"];
+        assert_eq!(
+            selected_mount(
+                "/srv/books/library/title.epub",
+                &mounts,
+                MountPathStyle::Native,
+            ),
+            Some("/srv/books"),
+        );
+    }
 }
 
 #[cfg(test)]
