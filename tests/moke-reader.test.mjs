@@ -7,7 +7,9 @@ import {
   buildReaderHomeWindowLabel,
   getNativeTopSafeAreaInset,
   isSingleWebviewRuntime,
+  isSafeAppNavigationPath,
   openEmbeddedReaderHome,
+  requiresMokeNavigate,
   resolveRuntimeCategory,
   runtimeCategoryFromPlatform,
   showMokeSystemStatusBar,
@@ -21,6 +23,22 @@ test('OHOS uses the single-WebView reader flow', () => {
   assert.equal(isSingleWebviewRuntime('ios'), true);
   assert.equal(isSingleWebviewRuntime('linux'), false);
   assert.equal(isSingleWebviewRuntime('windows'), false);
+});
+
+test('only OpenHarmony exposes the native full-document navigation command', () => {
+  assert.equal(requiresMokeNavigate('ohos'), true);
+  assert.equal(requiresMokeNavigate('android'), false);
+  assert.equal(requiresMokeNavigate('ios'), false);
+  assert.equal(requiresMokeNavigate('linux'), false);
+  assert.equal(requiresMokeNavigate('windows'), false);
+});
+
+test('full-document navigation accepts only same-origin absolute paths', () => {
+  assert.equal(isSafeAppNavigationPath('/readest/reader?book=1'), true);
+  assert.equal(isSafeAppNavigationPath('/library'), true);
+  assert.equal(isSafeAppNavigationPath('//evil.example/reader'), false);
+  assert.equal(isSafeAppNavigationPath('https://evil.example/reader'), false);
+  assert.equal(isSafeAppNavigationPath('readest/reader'), false);
 });
 
 test('runtimeCategoryFromPlatform classifies each runtime', () => {

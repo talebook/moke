@@ -37,6 +37,10 @@ function installMokeReaderExitTransition() {
   );
 }
 
+// These two head scripts must run before hydration. In production Tauri's
+// asset compiler hashes each emitted inline script and appends the exact
+// sha256 sources to script-src (dangerousDisableAssetCspModification stays
+// false in tauri.conf.json); development uses the separate devCsp policy.
 const mokeReaderExitTransitionScript = `(${installMokeReaderExitTransition.toString()})();`;
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';

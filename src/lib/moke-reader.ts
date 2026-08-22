@@ -3,6 +3,8 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
+export const requiresMokeNavigate = (platform: string): boolean => platform === 'ohos';
+
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
  * the top safe-area inset. Android multi-window and OHOS already keep the
@@ -150,21 +152,30 @@ export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
   return isSingleWebviewRuntime(platform) ? 'mobile' : 'desktop';
 }
 
+/** Full-document navigation is restricted to routes inside this app origin. */
+export function isSafeAppNavigationPath(href: string): boolean {
+  return href.startsWith('/') && !href.startsWith('//');
+}
+
 /**
  * Full-document navigation for single-WebView runtimes (OHOS/Android/iOS).
  *
  * ArkWeb cannot reliably execute Next.js App Router RSC navigation over the
  * custom `tauri://` scheme, and URL params across pages are unreliable there
- * (see the welcome page). Landing redirects that run right after hydration are
- * the likeliest to get stuck on a blank screen, so they go through the native
- * `moke_navigate` command instead of `router.replace`. On any other platform
- * (or if the native command is unavailable), fall back to the client router.
+ * (see the welcome page). OHOS therefore uses the narrowly registered native
+ * `moke_navigate` command. Android/iOS still need a real document load when
+ * crossing between the separate Moke and Readest Next apps, but can use the
+ * browser navigation API without exposing a native navigation command.
  */
 export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
   platformOverride?: string,
 ): Promise<void> {
+  if (!isSafeAppNavigationPath(href)) {
+    console.warn('Refusing unsafe full-document navigation:', href);
+    return;
+  }
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     fallback(href);
     return;
@@ -185,6 +196,17 @@ export async function navigateFullDocument(
   }
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
+    return;
+  }
+  if (!requiresMokeNavigate(currentPlatform)) {
+    // Crossing app boundaries intentionally discards the current shell state;
+    // the launch URL carries all context the embedded reader needs.
+    try {
+      window.location.assign(href);
+    } catch (error) {
+      console.warn('Full-document navigation failed, using router navigation:', error);
+      fallback(href);
+    }
     return;
   }
   try {
