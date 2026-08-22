@@ -124,18 +124,30 @@ test('记录请求会排空响应体以尽早释放连接', async () => {
   assert.equal(drained, true);
 });
 
-test('WebView 缺少 AbortSignal.timeout 时仍会携带超时信号', async () => {
-  const original = AbortSignal.timeout;
-  delete AbortSignal.timeout;
-  try {
-    let capturedSignal;
-    await recordBookRead(async (url, init) => {
-      capturedSignal = init.signal;
-      return new Response('', { status: 200 });
-    }, 'https://books.example', 'a', 100);
+test('记录完成后取消超时，避免晚到 abort 操作已释放的 Tauri resource', async () => {
+  let capturedSignal;
+  let lateAbortCalls = 0;
 
-    assert.ok(capturedSignal instanceof AbortSignal);
-  } finally {
-    AbortSignal.timeout = original;
-  }
+  await recordBookRead(async (url, init) => {
+    capturedSignal = init.signal;
+    capturedSignal.addEventListener('abort', () => { lateAbortCalls += 1; });
+    return new Response('', { status: 200 });
+  }, 'https://books.example', 'a', 1);
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.ok(capturedSignal instanceof AbortSignal);
+  assert.equal(capturedSignal.aborted, false);
+  assert.equal(lateAbortCalls, 0);
+});
+
+test('记录请求超时后仍会中止未完成的请求', async () => {
+  await assert.rejects(
+    recordBookRead(async (url, init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted', 'AbortError'));
+      }, { once: true });
+    }), 'https://books.example', 'a', 1),
+    (error) => error instanceof DOMException && error.name === 'AbortError',
+  );
 });

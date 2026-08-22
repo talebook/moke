@@ -7,17 +7,29 @@ const READ_RECORD_TIMEOUT_MS = 10_000;
 export const READ_RECORD_NAV_TIMEOUT_MS = 3_000;
 
 /**
- * Build a record timeout signal that also works on WebViews without
- * `AbortSignal.timeout` (some OHOS / older iOS WebViews); without any abort
- * mechanism the request runs unbounded, which is still better than throwing
- * and losing the record silently.
+ * Build a timeout that can be disarmed after the response body is consumed.
+ *
+ * Do not use `AbortSignal.timeout` here: Tauri plugin-http keeps its abort
+ * listeners after a completed body read. A later autonomous abort then tries
+ * to cancel an already-released native response and surfaces an unhandled
+ * `The resource id ... is invalid` rejection even though reading succeeded.
  */
-function buildTimeoutSignal(timeoutMs: number): AbortSignal | undefined {
-  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(timeoutMs);
-  if (typeof AbortController !== 'function') return undefined;
+function buildRequestTimeout(timeoutMs: number): {
+  signal: AbortSignal | undefined;
+  clear: () => void;
+} {
+  if (typeof AbortController !== 'function') {
+    // Without an abort mechanism the request runs unbounded, which is still
+    // better than throwing and silently losing the read record.
+    return { signal: undefined, clear: () => {} };
+  }
+
   const controller = new AbortController();
-  setTimeout(() => controller.abort(), timeoutMs);
-  return controller.signal;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timer),
+  };
 }
 
 /** Pathname of an absolute URL with trailing slashes stripped; null if unparseable. */
@@ -41,29 +53,37 @@ export async function recordBookRead(
   timeoutMs = READ_RECORD_TIMEOUT_MS,
 ): Promise<void> {
   const readUrl = `${serverUrl}/read/${encodeURIComponent(String(bookId))}`;
-  const response = await requestLike(readUrl, {
-    credentials: 'include',
-    signal: buildTimeoutSignal(timeoutMs),
-  });
+  const timeout = buildRequestTimeout(timeoutMs);
 
-  // Drain the body promptly so the underlying connection is released; the
-  // online-reader page can be hundreds of KB of HTML this client never uses.
   try {
-    await response.arrayBuffer();
-  } catch {
-    // A body-read failure does not invalidate an otherwise successful record.
-  }
+    const response = await requestLike(readUrl, {
+      credentials: 'include',
+      signal: timeout.signal,
+    });
 
-  if (!response.ok) {
-    throw new Error(`book.read_record.http.${response.status}`);
-  }
+    // Drain the body promptly so the underlying connection is released; the
+    // online-reader page can be hundreds of KB of HTML this client never uses.
+    try {
+      await response.arrayBuffer();
+    } catch {
+      // A body-read failure does not invalidate an otherwise successful record.
+    }
 
-  // A 200 from a login page means the session expired and the server
-  // redirected `/read/{id}` away — the record was never persisted.
-  const finalUrl = response.url || readUrl;
-  const finalPath = pathnameOf(finalUrl);
-  if (finalPath && finalPath !== pathnameOf(readUrl)) {
-    throw new Error('book.read_record.redirect');
+    if (!response.ok) {
+      throw new Error(`book.read_record.http.${response.status}`);
+    }
+
+    // A 200 from a login page means the session expired and the server
+    // redirected `/read/{id}` away — the record was never persisted.
+    const finalUrl = response.url || readUrl;
+    const finalPath = pathnameOf(finalUrl);
+    if (finalPath && finalPath !== pathnameOf(readUrl)) {
+      throw new Error('book.read_record.redirect');
+    }
+  } finally {
+    // Prevent a successful plugin-http response from being aborted later,
+    // after its native body resource has already been released.
+    timeout.clear();
   }
 }
 
