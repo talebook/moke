@@ -10,6 +10,7 @@ dependencies = [
  "block",
  "cocoa",
  "discord-rich-presence",
+ "dispatch2",
  "futures",
  "futures-util",
  "image",
