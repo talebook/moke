@@ -1,5 +1,6 @@
 import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
+import { getSafeErrorCode, logHttpErrorMetadata } from '@/lib/api-log';
 import {
   attachSafeJsonReader,
   buildTauriBinaryHeaders,
@@ -37,12 +38,6 @@ interface UserInfoResponse {
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
-
-/**
- * 服务器原始响应可能携带邮箱/昵称/头像等个人信息。生产构建不输出原始正文，
- * 仅在开发环境（dev server）保留全文，避免敏感信息无条件进入 devtools 与调试面板。
- */
-const isDev = process.env.NODE_ENV !== 'production';
 
 function isRequestCancelled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
@@ -357,7 +352,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     try {
       data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
     } catch (e) {
-      console.error('[validateServerConnection] invalid response, attempt=%d', attempt, e);
+      logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
       if (attempt < maxRetries) continue;
       return {
         err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
@@ -366,7 +361,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     }
 
     if (!response.ok) {
-      console.error(`[validateServerConnection] HTTP ${response.status}:`, data);
+      logHttpErrorMetadata('validateServerConnection', response.status, data);
       if (attempt < maxRetries) continue;
       return {
         err: data.err || `http.${response.status}`,
@@ -375,7 +370,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     }
 
     if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
-      console.error('[validateServerConnection] unexpected err=%s', data.err);
+      console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
       if (attempt < maxRetries) continue;
       return {
         err: data.err || 'server.invalid',
@@ -383,7 +378,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
       };
     }
 
-    console.log('[validateServerConnection] OK err=%s', data.err);
+    console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
     return { err: 'ok' };
   }
 
@@ -411,7 +406,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   try {
     data = await readJsonResponse(response, '服务器返回内容无效，无法确认访问码状态。');
   } catch (e) {
-    console.error('[checkWelcomeRequirement] invalid response:', e);
+    logHttpErrorMetadata('checkWelcomeRequirement invalid response', response.status, e);
     return {
       err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
       msg: getErrorMessage(e, '服务器返回内容无效，无法确认访问码状态。'),
@@ -420,7 +415,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   }
 
   if (!response.ok) {
-    console.error(`[checkWelcomeRequirement] HTTP ${response.status}:`, data);
+    logHttpErrorMetadata('checkWelcomeRequirement', response.status, data);
     return {
       err: data.err || `http.${response.status}`,
       msg: data.msg || '访问码状态检查失败',
@@ -428,8 +423,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
     };
   }
 
-  if (isDev) console.log('[checkWelcomeRequirement]', data.err, data);
-  else console.log('[checkWelcomeRequirement] err=%s', data.err);
+  console.log('[checkWelcomeRequirement] err=%s', getSafeErrorCode(data));
 
   if (data.err === 'ok') {
     return {
@@ -469,8 +463,7 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
   });
 
   const result = await readJsonResponse<{ err: string; msg?: string }>(response);
-  if (isDev) console.log('[submitWelcomeCode]', result);
-  else console.log('[submitWelcomeCode] err=%s', result.err);
+  console.log('[submitWelcomeCode] err=%s', getSafeErrorCode(result));
   return result;
 }
 
