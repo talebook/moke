@@ -22,8 +22,19 @@ test('刷新后路由栈为空时返回确定的上级页面', () => {
   assert.equal(nativeBackFallback('/detail'), '/library');
   assert.deepEqual(resolveNativeBackTarget('/search', []), {
     target: '/shelf',
-    nextStack: [],
+    nextStack: ['/shelf'],
   });
+});
+
+test('显式返回目标会成为真实栈顶，不与推导目标脱钩', () => {
+  assert.deepEqual(
+    resolveNativeBackTarget('/detail', ['/shelf', '/library', '/detail'], '/settings'),
+    { target: '/settings', nextStack: ['/shelf', '/library', '/settings'] },
+  );
+  assert.deepEqual(
+    resolveNativeBackTarget('/detail', ['/shelf', '/library', '/detail'], '/shelf'),
+    { target: '/shelf', nextStack: ['/shelf'] },
+  );
 });
 
 test('页面返回按钮与 Android 系统返回触发同一个动画事件', () => {

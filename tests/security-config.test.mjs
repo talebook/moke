@@ -24,7 +24,7 @@ test('production CSP blocks unhashed inline scripts and lets Tauri hash emitted 
   assert.equal(security.dangerousDisableAssetCspModification, false);
 
   const layout = readFileSync(join(repoRoot, 'src/app/layout.tsx'), 'utf8');
-  assert.match(layout, /mokeReaderExitTransitionScript/);
+  assert.match(layout, /mokeDocumentTransitionGuardScript/);
   assert.match(layout, /MOKE-THEME-INIT/);
   // With asset CSP modification enabled, Tauri computes sha256 sources from
   // these exact emitted bodies (and Next's other generated inline scripts) at

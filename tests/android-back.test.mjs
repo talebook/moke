@@ -94,15 +94,22 @@ test('Android 状态栏任务在 Activity 销毁竞态中安全退出', () => {
 
 test('Android 返回先渲染上一页，再只把当前页向右划出', () => {
   assert.match(backNavigationSource, /document\.startViewTransition/);
-  assert.match(backNavigationSource, /pending\.target === pathname/);
+  assert.match(backNavigationSource, /controllerRef\.current\?\.pathnameChanged\(pathname\)/);
   assert.match(globalStyles, /::view-transition-old\(root\)[\s\S]*animation-name: moke-native-back-exit/);
   assert.match(globalStyles, /::view-transition-new\(root\)[\s\S]*animation: none/);
   assert.match(globalStyles, /to \{ transform: translateX\(100%\); \}/);
 });
 
-test('任意 Readest 文档退出都会触发 Moke 返回动画', () => {
-  assert.match(rootLayoutSource, /pagereveal/);
-  assert.match(rootLayoutSource, /fromPath\.startsWith\('\/readest\/'\)/);
+test('首次原生返回可从 sessionStorage 恢复运行平台', () => {
+  assert.match(
+    backNavigationSource,
+    /sessionStorage\.getItem\('moke-runtime-platform'\)/,
+  );
+});
+
+test('跨文档动画跳过桌面、Web、启动重定向及无关导航', () => {
+  assert.match(rootLayoutSource, /installMokeDocumentTransitionGuard/);
+  assert.match(rootLayoutSource, /event\.viewTransition\?\.skipTransition\(\)/);
   assert.match(rootLayoutSource, /mokeReaderTransition = 'exit'/);
   assert.match(globalStyles, /@view-transition\s*\{\s*navigation: auto;/);
   assert.match(globalStyles, /data-moke-reader-transition='exit'/);

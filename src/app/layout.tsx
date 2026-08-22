@@ -1,47 +1,81 @@
 import '@/app/globals.css';
 import type { Viewport } from 'next';
 import { AppShell } from '@/components/providers/AppShell';
+import { shouldAllowReaderExitTransition } from '@/lib/document-transition';
 
-function installMokeReaderExitTransition() {
-  window.addEventListener(
-    'pagereveal',
-    (event) => {
-      try {
-        const navigationApi = (window as Window & {
-          navigation?: { activation?: { from?: { url?: string } | null } };
-        }).navigation;
-        const fromUrl = navigationApi?.activation?.from?.url;
-        if (!fromUrl) return;
-        const fromPath = new URL(fromUrl).pathname.replace(/\/$/, '') || '/';
-        if (fromPath !== '/readest' && !fromPath.startsWith('/readest/')) return;
+function installMokeDocumentTransitionGuard(
+  shouldAllowReaderExit: (
+    runtimePlatform: string,
+    fromUrl?: string,
+    currentUrl?: string,
+  ) => boolean,
+) {
+  type CrossDocumentTransitionEvent = Event & {
+    viewTransition?: {
+      finished: Promise<unknown>;
+      skipTransition: () => void;
+    };
+  };
 
-        const root = document.documentElement;
-        root.dataset.mokeReaderTransition = 'exit';
-        const clearMarker = () => {
-          delete root.dataset.mokeReaderTransition;
-        };
-        const transition = (event as Event & {
-          viewTransition?: { finished: Promise<unknown> };
-        }).viewTransition;
-        if (transition) {
-          void transition.finished.finally(clearMarker).catch(() => undefined);
-        } else {
-          clearMarker();
-        }
-        window.setTimeout(clearMarker, 1_000);
-      } catch {
-        // Ignore malformed activation URLs and keep the destination usable.
+  const root = document.documentElement;
+  const runtimePlatform = () => root.dataset.mokeRuntimePlatform
+    || window.sessionStorage.getItem('moke-runtime-platform')
+    || '';
+  const clearMarkerAfter = (event: CrossDocumentTransitionEvent) => {
+    const clearMarker = () => {
+      delete root.dataset.mokeReaderTransition;
+    };
+    if (event.viewTransition) {
+      void event.viewTransition.finished.finally(clearMarker).catch(() => undefined);
+    } else {
+      clearMarker();
+    }
+    window.setTimeout(clearMarker, 1_000);
+  };
+  const skip = (event: CrossDocumentTransitionEvent) => {
+    try {
+      event.viewTransition?.skipTransition();
+    } catch {
+      // A transition that already finished needs no cleanup.
+    }
+  };
+
+  // @view-transition is a document-wide opt-in. Moke never animates an
+  // outgoing full-document navigation; this covers startup redirects and
+  // Moke -> Readest entry without paying for an unrelated default fade.
+  window.addEventListener('pageswap', (rawEvent) => {
+    skip(rawEvent as CrossDocumentTransitionEvent);
+  });
+
+  window.addEventListener('pagereveal', (rawEvent) => {
+    const event = rawEvent as CrossDocumentTransitionEvent;
+    try {
+      const navigationApi = (window as Window & {
+        navigation?: { activation?: { from?: { url?: string } | null } };
+      }).navigation;
+      if (!shouldAllowReaderExit(
+        runtimePlatform(),
+        navigationApi?.activation?.from?.url,
+        window.location.href,
+      )) {
+        skip(event);
+        return;
       }
-    },
-    { once: true },
-  );
+      root.dataset.mokeReaderTransition = 'exit';
+      clearMarkerAfter(event);
+    } catch {
+      skip(event);
+    }
+  });
 }
 
-// These two head scripts must run before hydration. In production Tauri's
-// asset compiler hashes each emitted inline script and appends the exact
-// sha256 sources to script-src (dangerousDisableAssetCspModification stays
-// false in tauri.conf.json); development uses the separate devCsp policy.
-const mokeReaderExitTransitionScript = `(${installMokeReaderExitTransition.toString()})();`;
+// Both functions are serialized into the pre-hydration document. Keep their
+// implementations self-contained; tests execute the serialized guard helper.
+// This head script must run before hydration. In production Tauri's asset
+// compiler hashes each emitted inline script and appends the exact sha256
+// sources to script-src (dangerousDisableAssetCspModification stays false in
+// tauri.conf.json); development uses the separate devCsp policy.
+const mokeDocumentTransitionGuardScript = `(${installMokeDocumentTransitionGuard.toString()})(${shouldAllowReaderExitTransition.toString()});`;
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
@@ -64,7 +98,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script dangerouslySetInnerHTML={{ __html: mokeReaderExitTransitionScript }} />
+        <script dangerouslySetInnerHTML={{ __html: mokeDocumentTransitionGuardScript }} />
         {/* Apply the persisted theme before hydration so the first paint is
             already dark when dark mode is on (no flash of white). Reads the
             zustand persist payload directly; falls back to the OS preference
