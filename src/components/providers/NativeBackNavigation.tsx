@@ -18,7 +18,13 @@ function requestedBackTarget(event: NativeBackEvent): string | undefined {
 
 function shouldAnimateBack(): boolean {
   const root = document.documentElement;
-  const runtimePlatform = root.dataset.mokeRuntimePlatform ?? '';
+  let persistedRuntimePlatform = '';
+  try {
+    persistedRuntimePlatform = window.sessionStorage.getItem('moke-runtime-platform') ?? '';
+  } catch {
+    // Storage can be unavailable during restricted/custom-scheme startup.
+  }
+  const runtimePlatform = root.dataset.mokeRuntimePlatform || persistedRuntimePlatform;
   const motionReduced = root.dataset.eink === 'true'
     || window.matchMedia(
       '(prefers-reduced-motion: reduce), (update: slow), (max-color: 1)',

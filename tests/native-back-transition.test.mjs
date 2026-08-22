@@ -90,6 +90,28 @@ test('快速两次 BACK 排队退两级，不吞掉第二次事件', async () =>
   assert.deepEqual(harness.navigations, ['/library', '/shelf']);
 });
 
+test('动画期间手动导航会取消排队 BACK 并重建规划状态', async () => {
+  const first = normalTransition();
+  const afterManualNavigation = normalTransition();
+  const transitions = [first, afterManualNavigation];
+  const harness = createHarness((update) => transitions.shift().start(update));
+  harness.controller.pathnameChanged('/library');
+  harness.controller.pathnameChanged('/detail');
+
+  harness.controller.requestBack();
+  harness.controller.requestBack();
+  assert.deepEqual(harness.navigations, ['/library']);
+
+  harness.controller.pathnameChanged('/settings');
+  assert.equal(first.skipped, 1);
+  first.finished.resolve();
+  await flushPromises();
+  assert.deepEqual(harness.navigations, ['/library']);
+
+  harness.controller.requestBack();
+  assert.deepEqual(harness.navigations, ['/library', '/shelf']);
+});
+
 test('startViewTransition 同步抛错后回退导航并释放锁', () => {
   const harness = createHarness(() => {
     throw new DOMException('busy', 'InvalidStateError');

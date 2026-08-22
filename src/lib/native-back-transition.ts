@@ -75,6 +75,21 @@ export class NativeBackTransitionController {
     const active = this.active;
     if (active && pathname !== active.from) {
       this.resolveUpdate(active);
+      if (pathname !== active.target) {
+        // A route other than the active BACK target is a manual navigation.
+        // It supersedes queued BACK requests and becomes the sole source of
+        // truth for future planning.
+        this.queue.length = 0;
+        this.plannedPathname = pathname;
+        this.routeStack = trackNativeRoute(pathname, []);
+        try {
+          active.transition?.skipTransition();
+        } catch {
+          // The transition may have completed concurrently.
+        }
+        this.finish(active);
+        return;
+      }
     }
 
     // A route not produced by a queued BACK is a normal forward/tab

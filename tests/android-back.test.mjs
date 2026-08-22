@@ -11,6 +11,10 @@ const appShellSource = readFileSync(
   fileURLToPath(new URL('../src/components/providers/AppShell.tsx', import.meta.url)),
   'utf8',
 );
+const backNavigationSource = readFileSync(
+  fileURLToPath(new URL('../src/components/providers/NativeBackNavigation.tsx', import.meta.url)),
+  'utf8',
+);
 const globalStyles = readFileSync(
   fileURLToPath(new URL('../src/app/globals.css', import.meta.url)),
   'utf8',
@@ -73,6 +77,13 @@ test('Android Moke 主界面显式恢复顶部状态栏且不接管导航栏', (
 test('Android 返回动画只把当前页向右划出', () => {
   assert.match(globalStyles, /animation-name: moke-native-back-exit/);
   assert.match(globalStyles, /to \{ transform: translateX\(100%\); \}/);
+});
+
+test('首次原生返回可从 sessionStorage 恢复运行平台', () => {
+  assert.match(
+    backNavigationSource,
+    /sessionStorage\.getItem\('moke-runtime-platform'\)/,
+  );
 });
 
 test('跨文档动画跳过桌面、Web、启动重定向及无关导航', () => {

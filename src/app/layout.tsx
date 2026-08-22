@@ -4,7 +4,11 @@ import { AppShell } from '@/components/providers/AppShell';
 import { shouldAllowReaderExitTransition } from '@/lib/document-transition';
 
 function installMokeDocumentTransitionGuard(
-  shouldAllowReaderExit: (runtimePlatform: string, fromUrl?: string) => boolean,
+  shouldAllowReaderExit: (
+    runtimePlatform: string,
+    fromUrl?: string,
+    currentUrl?: string,
+  ) => boolean,
 ) {
   type CrossDocumentTransitionEvent = Event & {
     viewTransition?: {
@@ -52,6 +56,7 @@ function installMokeDocumentTransitionGuard(
       if (!shouldAllowReaderExit(
         runtimePlatform(),
         navigationApi?.activation?.from?.url,
+        window.location.href,
       )) {
         skip(event);
         return;
@@ -64,6 +69,8 @@ function installMokeDocumentTransitionGuard(
   });
 }
 
+// Both functions are serialized into the pre-hydration document. Keep their
+// implementations self-contained; tests execute the serialized guard helper.
 const mokeDocumentTransitionGuardScript = `(${installMokeDocumentTransitionGuard.toString()})(${shouldAllowReaderExitTransition.toString()});`;
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
