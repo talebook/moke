@@ -5,7 +5,6 @@ import { makeOfflineBookKey, sanitizeOfflineFileName } from './offline-book-core
 
 const DB_NAME = 'moke-offline-books';
 const STORE_NAME = 'books';
-const DB_VERSION = 1;
 
 export interface OfflineBookRecord {
   id: string;
@@ -32,7 +31,10 @@ interface NativeOfflineBookRecord {
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+    // 不指定版本：当前逻辑只依赖 books store，不需要执行 schema 升级。
+    // 这样既能创建全新 v1 数据库，也能打开曾被下载管理中心升级到 v2（或更高）
+    // 的用户数据库，避免用较低固定版本打开时抛 VersionError。
+    const request = window.indexedDB.open(DB_NAME);
 
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -48,15 +50,26 @@ function openDatabase(): Promise<IDBDatabase> {
 
 async function readOfflineBookRecord(serverUrl: string, bookId: string): Promise<OfflineBookRecord | null> {
   const db = await openDatabase();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
+  const store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
+  const direct = await new Promise<OfflineBookRecord | null>((resolve, reject) => {
     const request = store.get(makeOfflineBookKey(serverUrl, bookId));
-
     request.onsuccess = () => resolve((request.result as OfflineBookRecord | undefined) ?? null);
     request.onerror = () => reject(request.error);
   });
+  if (direct) return direct;
+
+  // v2 会把格式加入 key（server::book::format）。按记录身份兜底查找，保证从
+  // 下载管理中心版本切回当前客户端时，已有书仍能被识别。
+  if (typeof store.getAll === 'function') {
+    const records = await new Promise<OfflineBookRecord[]>((resolve, reject) => {
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result as OfflineBookRecord[]);
+      request.onerror = () => reject(request.error);
+    });
+    return records.find((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl)) ?? null;
+  }
+
+  return null;
 }
 
 async function putOfflineBookRecord(record: OfflineBookRecord): Promise<void> {
@@ -109,7 +122,7 @@ export async function getOfflineBook(serverUrl: string, bookId: string): Promise
     if (!nativeRecord) return null;
 
     const recovered: OfflineBookRecord = {
-      id: makeOfflineBookKey(serverUrl, bookId),
+      id: nativeRecord.id || indexedRecord?.id || makeOfflineBookKey(serverUrl, bookId),
       serverUrl,
       bookId,
       title: nativeRecord.title || indexedRecord?.title || '',
@@ -168,7 +181,7 @@ export async function deleteOfflineBook(serverUrl: string, bookId: string): Prom
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(makeOfflineBookKey(serverUrl, bookId));
+    const request = store.delete(record?.id ?? makeOfflineBookKey(serverUrl, bookId));
 
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
