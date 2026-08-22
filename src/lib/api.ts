@@ -11,6 +11,7 @@ import {
   resolveAppPlatform,
 } from '@/lib/api-core';
 import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
+import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -282,7 +283,11 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
     probeJsonEndpoint(serverUrl, '/api/network/sources'),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
     sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`) : Promise.resolve(true),
+    // The annotations endpoint is authenticated. Guests must not probe it;
+    // keep the optimistic capability value so it can be used after login.
+    shouldRequestBookAnnotations(Boolean(info.user?.is_login)) && sampleBookId
+      ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`)
+      : Promise.resolve(true),
   ]);
 
   return {

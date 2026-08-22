@@ -39,6 +39,7 @@ import {
   suppressAnnotationLocateProgress,
   type BookAnnotation,
 } from '@/lib/annotations';
+import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
 
 interface BookDetail {
   id: string;
@@ -651,7 +652,7 @@ function DetailContent() {
           </div>
         </div>
 
-        {capabilities.checkedAt != null && (
+        {capabilities.checkedAt != null && shouldRequestBookAnnotations(Boolean(user)) && (
           <AnnotationPanel
             key={String(book.id)}
             bookId={String(book.id)}
