@@ -8,6 +8,7 @@ import {
   removeOfflineDownloadSnapshot,
   startOfflineDownload,
   subscribeOfflineDownload,
+  subscribeOfflineDownloads,
 } from '../src/lib/offline-download-manager.ts';
 
 const deferred = () => {
@@ -78,6 +79,62 @@ test('异常退出后持久化中的任务恢复为可继续的暂停状态', ()
   assert.equal(restored.status, 'paused');
   assert.equal(restored.downloadedBytes, 420);
   assert.match(String(restored.error), /异常退出/);
+  delete globalThis.window;
+});
+
+test('大量 chunk 的持久化和全局刷新有固定上限且终态不会丢失', async () => {
+  const key = 'https://chunks.test::large::epub';
+  const storage = new Map();
+  let storageWrites = 0;
+  globalThis.window = {
+    localStorage: {
+      getItem: (storageKey) => storage.get(storageKey) ?? null,
+      setItem: (storageKey, value) => {
+        storageWrites += 1;
+        storage.set(storageKey, value);
+      },
+    },
+  };
+
+  let taskRefreshes = 0;
+  let recordRefreshes = 0;
+  const events = [];
+  const unsubscribe = subscribeOfflineDownloads((event) => {
+    if (event.key !== key) return;
+    events.push(event);
+    taskRefreshes += 1;
+    if (event.affectsRecords) recordRefreshes += 1;
+  });
+
+  const chunkCount = 10_000;
+  await startOfflineDownload({
+    key,
+    metadata: {
+      serverUrl: 'https://chunks.test', bookId: 'large', title: '大文件', format: 'epub', totalBytes: chunkCount,
+    },
+    run: async (onProgress, _signal, onTransfer) => {
+      for (let received = 1; received <= chunkCount; received += 1) {
+        onTransfer(received, chunkCount);
+        onProgress(Math.min(99, Math.round(received / chunkCount * 100)));
+      }
+    },
+  });
+  unsubscribe();
+
+  // Hydration may add one write; 20,000 chunk callbacks add none before the immediate terminal flush.
+  assert.ok(storageWrites <= 3, `expected at most 3 localStorage writes, got ${storageWrites}`);
+  assert.ok(taskRefreshes <= 2, `expected at most 2 task refreshes, got ${taskRefreshes}`);
+  assert.equal(recordRefreshes, 1);
+  assert.deepEqual(events.map((event) => event.kind), ['progress', 'terminal']);
+  assert.deepEqual(events.map((event) => event.affectsRecords), [false, true]);
+
+  const finalSnapshot = getOfflineDownloadSnapshot(key);
+  assert.equal(finalSnapshot?.status, 'completed');
+  assert.equal(finalSnapshot?.progress, 100);
+  assert.equal(finalSnapshot?.downloadedBytes, chunkCount);
+  const persisted = JSON.parse(storage.get('moke-offline-download-tasks-v1'));
+  assert.equal(persisted.find((snapshot) => snapshot.key === key)?.status, 'completed');
+  assert.equal(persisted.find((snapshot) => snapshot.key === key)?.downloadedBytes, chunkCount);
   delete globalThis.window;
 });
 

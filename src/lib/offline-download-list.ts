@@ -1,16 +1,19 @@
 import type { OfflineBookRecord } from './offline-books.ts';
+import type { OfflineBookFreshnessResult, OfflineBookFreshnessStatus } from './offline-book-stale.ts';
 import type { OfflineDownloadSnapshot } from './offline-download-manager.ts';
 
 export interface OfflineDownloadItem extends OfflineDownloadSnapshot {
   key: string;
   record?: OfflineBookRecord;
   stale?: boolean;
+  freshness?: OfflineBookFreshnessStatus;
 }
 
 export function mergeOfflineDownloadItems(
   records: OfflineBookRecord[],
   tasks: OfflineDownloadSnapshot[],
   staleKeys: ReadonlySet<string>,
+  freshnessByKey?: ReadonlyMap<string, OfflineBookFreshnessResult>,
 ): OfflineDownloadItem[] {
   const merged = new Map<string, OfflineDownloadItem>();
   for (const task of tasks) {
@@ -20,9 +23,10 @@ export function mergeOfflineDownloadItems(
 
   for (const record of records) {
     const task = merged.get(record.id);
-    const stale = staleKeys.has(record.id);
+    const freshness = freshnessByKey?.get(record.id)?.status;
+    const stale = staleKeys.has(record.id) || freshness === 'stale';
     if (task && task.status !== 'completed') {
-      merged.set(record.id, { ...task, record, stale });
+      merged.set(record.id, { ...task, record, stale, freshness });
       continue;
     }
 
@@ -39,6 +43,7 @@ export function mergeOfflineDownloadItems(
       updatedAt: record.updatedAt,
       record,
       stale,
+      freshness,
     });
   }
 

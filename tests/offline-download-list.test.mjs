@@ -74,3 +74,11 @@ test('无活动任务时完成记录仍作为已下载项显示和计量', () =>
   assert.equal(item.downloadedBytes, record.size);
   assert.equal(calculateOfflineDownloadUsedBytes([item]), record.size);
 });
+
+test('stale 检测结果会保留在合并项且驱动旧版 stale 标志', () => {
+  const freshness = new Map([[record.id, { status: 'stale' }]]);
+  const [item] = mergeOfflineDownloadItems([record], [], new Set(), freshness);
+
+  assert.equal(item.freshness, 'stale');
+  assert.equal(item.stale, true);
+});

@@ -28,9 +28,15 @@ import {
   mergeOfflineDownloadItems,
   type OfflineDownloadItem,
 } from '@/lib/offline-download-list';
+import {
+  OfflineBookStaleCheckScheduler,
+  type OfflineBookFreshnessResult,
+} from '@/lib/offline-book-stale';
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useToast } from '@/lib/toast';
+
+const EMPTY_STALE_KEYS: ReadonlySet<string> = new Set();
 
 const TABS: Array<{ value: 'all' | OfflineDownloadStatus; label: string }> = [
   { value: 'all', label: '全部' },
@@ -67,18 +73,36 @@ export default function DownloadsPage() {
   const [tab, setTab] = useState<'all' | OfflineDownloadStatus>('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [availableBytes, setAvailableBytes] = useState<number | null>(null);
-  const [staleKeys, setStaleKeys] = useState<Set<string>>(new Set());
+  const [freshnessByKey, setFreshnessByKey] = useState<Map<string, OfflineBookFreshnessResult>>(new Map());
+  const [staleCheckRevision, setStaleCheckRevision] = useState(0);
   const [remoteRetry, setRemoteRetry] = useState<{ bookId: string; title: string } | null>(null);
+  const staleCheckScheduler = useMemo(() => new OfflineBookStaleCheckScheduler(
+    (url, init) => request(url, init),
+  ), []);
 
-  const refresh = useCallback(async () => {
+  const refreshTasks = useCallback(() => {
     setTasks(listOfflineDownloadSnapshots(serverUrl));
+  }, [serverUrl]);
+
+  const refreshRecords = useCallback(async () => {
     try { setRecords(await listOfflineBooks(serverUrl)); } catch { setRecords([]); }
   }, [serverUrl]);
 
+  const refresh = useCallback(async () => {
+    refreshTasks();
+    await refreshRecords();
+  }, [refreshRecords, refreshTasks]);
+
   useEffect(() => {
-    void refresh();
-    return subscribeOfflineDownloads(() => { void refresh(); });
-  }, [refresh]);
+    refreshTasks();
+    void refreshRecords();
+    return subscribeOfflineDownloads((event) => {
+      if (event.serverUrl && event.serverUrl !== serverUrl) return;
+      refreshTasks();
+      if (!event.affectsRecords) return;
+      void refreshRecords().finally(() => setStaleCheckRevision((value) => value + 1));
+    });
+  }, [refreshRecords, refreshTasks, serverUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,27 +123,13 @@ export default function DownloadsPage() {
   }, [downloadDirectory, records, tasks]);
 
   useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      const stale = new Set<string>();
-      await Promise.all(records.filter((record) => record.sourceSignature).map(async (record) => {
-        try {
-          const response = await request(`${serverUrl}/api/book/${record.bookId}.${record.format}`, {
-            method: 'HEAD', credentials: 'include',
-          });
-          const signature = response.headers.get('etag') || response.headers.get('last-modified');
-          if (signature && signature !== record.sourceSignature) stale.add(record.id);
-        } catch { /* an offline manager must stay useful without network */ }
-      }));
-      if (!cancelled) setStaleKeys(stale);
-    };
-    void check();
-    return () => { cancelled = true; };
-  }, [records, serverUrl]);
+    staleCheckScheduler.schedule(serverUrl, records, setFreshnessByKey);
+    return () => staleCheckScheduler.cancel();
+  }, [records, serverUrl, staleCheckRevision, staleCheckScheduler]);
 
   const items = useMemo(
-    () => mergeOfflineDownloadItems(records, tasks, staleKeys),
-    [records, staleKeys, tasks],
+    () => mergeOfflineDownloadItems(records, tasks, EMPTY_STALE_KEYS, freshnessByKey),
+    [freshnessByKey, records, tasks],
   );
 
   const visible = tab === 'all' ? items : items.filter((item) => item.status === tab);
@@ -145,8 +155,8 @@ export default function DownloadsPage() {
       onCancel: () => removeOfflinePartial({
         serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!, downloadDirectory,
       }),
-    }).then(refresh).catch(() => refresh());
-  }, [downloadDirectory, refresh]);
+    }).catch(() => { /* the terminal event refreshes this page */ });
+  }, [downloadDirectory]);
 
   const cancel = useCallback(async (item: OfflineDownloadItem) => {
     if (item.status === 'downloading') {
@@ -249,7 +259,9 @@ export default function DownloadsPage() {
                       <h2 className="truncate font-medium text-foreground">{item.title || item.bookId}</h2>
                       <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{item.format}</span>
                       <span className="text-xs text-muted-foreground">{statusLabel(item.status)}</span>
-                      {item.stale && <span className="text-xs text-destructive">服务器文件已更新，建议重新下载</span>}
+                      {item.freshness === 'stale' && <span className="text-xs text-destructive">服务器文件已更新，建议重新下载</span>}
+                      {item.freshness === 'unknown' && <span className="text-xs text-muted-foreground">缺少可比较的版本标识，无法确认是否最新</span>}
+                      {item.freshness === 'unavailable' && <span className="text-xs text-muted-foreground">暂无法检查服务器更新（离线或服务不可用）</span>}
                     </div>
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${item.progress}%` }} />
@@ -263,7 +275,7 @@ export default function DownloadsPage() {
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
                     {item.status === 'downloading' && <button title="暂停" onClick={() => pauseOfflineDownload(item.key)} className="rounded-lg p-2 hover:bg-muted"><Pause className="h-4 w-4" /></button>}
-                    {(item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled' || (item.status === 'completed' && item.stale)) && <button title="继续或重试" onClick={() => start(item)} className="rounded-lg p-2 hover:bg-muted"><Play className="h-4 w-4" /></button>}
+                    {(item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled' || (item.status === 'completed' && item.freshness === 'stale')) && <button title="继续或重试" onClick={() => start(item)} className="rounded-lg p-2 hover:bg-muted"><Play className="h-4 w-4" /></button>}
                     {item.status !== 'completed' && <button title="取消" onClick={() => void cancel(item)} className="rounded-lg p-2 hover:bg-muted"><X className="h-4 w-4" /></button>}
                     {item.status === 'completed' && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' && <button title="打开所在位置" onClick={() => void openLocation(item)} className="rounded-lg p-2 hover:bg-muted"><FolderOpen className="h-4 w-4" /></button>}
                     {item.status === 'completed' && <button title="删除" onClick={() => void remove(item)} className="rounded-lg p-2 text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>}
