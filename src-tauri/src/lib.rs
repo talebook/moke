@@ -17,8 +17,11 @@ mod extensions;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
+
+static MOKE_DOWNLOADS_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
 /// Metadata for a book downloaded by Moke.  The reader uses this small host
 /// API instead of reaching into Moke's IndexedDB, which is private to the
@@ -180,18 +183,47 @@ fn write_moke_downloads(app: &AppHandle, books: &[MokeDownloadedBook]) -> Result
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    // 原子写入：先写同目录临时文件再 rename，避免写入中途崩溃/断电留下截断损坏的索引。
+    // 先写同目录临时文件，再以备份方式替换。Windows 的 fs::rename 不会覆盖
+    // 已存在目标，直接 tmp -> path 会导致第二次更新起全部失败。
     let tmp_path = path.with_extension("json.tmp");
+    let backup_path = path.with_extension("json.bak");
     fs::write(
         &tmp_path,
         serde_json::to_vec(books).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
-    fs::rename(&tmp_path, &path).map_err(|error| error.to_string())
+
+    if backup_path.exists() {
+        if path.exists() {
+            fs::remove_file(&backup_path).map_err(|error| error.to_string())?;
+        } else {
+            // 上一次替换若在 current -> backup 后中断，先恢复旧索引再继续。
+            fs::rename(&backup_path, &path).map_err(|error| error.to_string())?;
+        }
+    }
+    let had_previous = path.exists();
+    if had_previous {
+        fs::rename(&path, &backup_path).map_err(|error| error.to_string())?;
+    }
+
+    if let Err(error) = fs::rename(&tmp_path, &path) {
+        if had_previous {
+            let _ = fs::rename(&backup_path, &path);
+        }
+        return Err(error.to_string());
+    }
+
+    if had_previous {
+        let _ = fs::remove_file(backup_path);
+    }
+    Ok(())
 }
 
 #[tauri::command]
 fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Result<(), String> {
+    let _guard = MOKE_DOWNLOADS_INDEX_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
     if let Some(root) = &book.storage_root {
         let approved = read_download_directory(&app)?
             .and_then(|path| path.canonicalize().ok())
@@ -217,6 +249,9 @@ fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Resu
 
 #[tauri::command]
 fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+    let _guard = MOKE_DOWNLOADS_INDEX_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
     let mut books = read_moke_downloads(&app)?;
     books.retain(|book| book.id != id);
     write_moke_downloads(&app, &books)
@@ -399,6 +434,9 @@ fn moke_download_storage_stats(
 /// predate the metadata index are still exposed with a filename-derived title.
 #[tauri::command]
 fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookResponse>, String> {
+    let _guard = MOKE_DOWNLOADS_INDEX_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
     let books_dir = app
         .path()
         .app_data_dir()
@@ -432,7 +470,10 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy().into_owned();
-            if !path.is_file() || result.iter().any(|book| book.book.file_name == file_name) {
+            if file_name.starts_with('.')
+                || !path.is_file()
+                || result.iter().any(|book| book.book.file_name == file_name)
+            {
                 continue;
             }
             let title = path

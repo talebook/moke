@@ -52,7 +52,9 @@ function hydrate(): void {
   try {
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as OfflineDownloadSnapshot[];
     for (const value of stored) {
-      if (!value.key) continue;
+      // A completed book is represented by its IndexedDB record. Older builds
+      // persisted these forever, so discard them during migration as well.
+      if (!value.key || value.status === 'completed') continue;
       snapshots.set(value.key, value.status === 'downloading'
         ? { ...value, status: 'paused', error: '应用上次异常退出，可继续下载', updatedAt: Date.now() }
         : value);
@@ -87,12 +89,12 @@ function emitSnapshot(key: string, snapshot: OfflineDownloadSnapshot): void {
   for (const listener of globalListeners) listener(event);
 }
 
-function emitRemoval(key: string, snapshot?: OfflineDownloadSnapshot): void {
+function emitRemoval(key: string, snapshot?: OfflineDownloadSnapshot, affectsRecords = true): void {
   persist();
   const event: OfflineDownloadEvent = {
     key,
     kind: 'removed',
-    affectsRecords: true,
+    affectsRecords,
     serverUrl: snapshot?.serverUrl,
   };
   for (const listener of globalListeners) listener(event);
@@ -123,10 +125,20 @@ function queueProgress(task: OfflineDownloadTask, snapshot: OfflineDownloadSnaps
   }, OFFLINE_DOWNLOAD_PROGRESS_INTERVAL_MS);
 }
 
-function deleteSnapshot(key: string): void {
+function deleteSnapshot(key: string, affectsRecords = true): void {
   const snapshot = snapshots.get(key);
   if (!snapshots.delete(key)) return;
-  emitRemoval(key, snapshot);
+  emitRemoval(key, snapshot, affectsRecords);
+}
+
+function scheduleCompletedSnapshotRemoval(key: string, snapshot: OfflineDownloadSnapshot): void {
+  setTimeout(() => {
+    if (tasks.has(key) || snapshots.get(key) !== snapshot) return;
+    // The completed IndexedDB record is the durable source of truth. Keep the
+    // terminal snapshot through the caller's await, then discard it without
+    // forcing a second record refresh.
+    deleteSnapshot(key, false);
+  }, 0);
 }
 
 async function finishCancelledDownload(key: string, task: OfflineDownloadTask): Promise<void> {
@@ -297,7 +309,11 @@ export function startOfflineDownload(options: StartOfflineDownloadOptions): Prom
     clearProgressTimer(task);
     if (tasks.get(options.key) === task) tasks.delete(options.key);
   });
-  void lifecycle.then(resolveTask, rejectTask);
+  void lifecycle.then(() => {
+    resolveTask();
+    const snapshot = snapshots.get(options.key);
+    if (snapshot?.status === 'completed') scheduleCompletedSnapshotRemoval(options.key, snapshot);
+  }, rejectTask);
   return task.promise;
 }
 

@@ -89,6 +89,10 @@ export function parseContentRange(value: string | null): { start: number; end: n
 
 export type OfflineRangeResponseMode = 'full' | 'resume' | 'restart' | 'retry-full' | 'invalid';
 
+export function shouldResumeOfflineDownload(appPlatform?: string, status?: string): boolean {
+  return appPlatform === 'tauri' && status !== 'completed';
+}
+
 /** Decide whether a ranged response is safe before any response bytes are written. */
 export function classifyOfflineRangeResponse(
   requestedOffset: number,

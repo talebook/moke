@@ -48,6 +48,17 @@ export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
   return init;
 }
 
+/** 二进制响应禁用透明压缩，避免部分 NAS/反向代理在正文解压阶段中断。 */
+export function buildTauriBinaryHeaders(headers?: HeadersInit): Headers {
+  const result = new Headers(headers);
+  if (!result.has('accept-encoding')) result.set('Accept-Encoding', 'identity');
+  return result;
+}
+
+export async function cancelResponseBodyQuietly(response: Pick<Response, 'body'>): Promise<void> {
+  try { await response.body?.cancel(); } catch { /* disposal must not mask the retry */ }
+}
+
 export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {
   if (error instanceof MokeApiError) return error.message || fallback;
   if (error instanceof Error) {

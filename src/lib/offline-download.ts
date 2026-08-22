@@ -16,7 +16,7 @@ export interface DownloadOfflineBookOptions {
   onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
   signal?: AbortSignal;
   resume?: boolean;
-  preservePartialOnAbort?: boolean;
+  preservePartialOnFailure?: boolean;
 }
 
 /** Unified entry: Tauri streams to a resumable file; web stores one Blob in IndexedDB. */
@@ -33,7 +33,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
       mimeType: 'application/octet-stream',
       downloadDirectory,
       resume: options.resume,
-      preservePartialOnAbort: options.preservePartialOnAbort,
+      preservePartialOnFailure: options.preservePartialOnFailure,
       write: async (writer) => streamBookDownload(options.bookId, format, {
         write: (chunk) => writer.write(chunk),
         onProgress: options.onProgress,

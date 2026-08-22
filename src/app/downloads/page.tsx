@@ -22,7 +22,7 @@ import {
   type OfflineDownloadSnapshot,
   type OfflineDownloadStatus,
 } from '@/lib/offline-download-manager';
-import { makeOfflineBookKey } from '@/lib/offline-book-core';
+import { makeOfflineBookKey, shouldResumeOfflineDownload } from '@/lib/offline-book-core';
 import {
   calculateOfflineDownloadUsedBytes,
   mergeOfflineDownloadItems,
@@ -143,6 +143,7 @@ export default function DownloadsPage() {
   const start = useCallback((item: OfflineDownloadItem) => {
     if (!item.serverUrl || !item.bookId || !item.title || !item.format) return;
     const key = makeOfflineBookKey(item.serverUrl, item.bookId, item.format);
+    const canResume = shouldResumeOfflineDownload(process.env.NEXT_PUBLIC_APP_PLATFORM, item.status);
     void startOfflineDownload({
       key,
       metadata: {
@@ -150,12 +151,12 @@ export default function DownloadsPage() {
         bookId: item.bookId,
         title: item.title,
         format: item.format,
-        downloadedBytes: item.status === 'completed' ? 0 : item.downloadedBytes,
+        downloadedBytes: canResume ? item.downloadedBytes : 0,
         totalBytes: item.totalBytes,
       },
       run: (onProgress, signal, onTransfer) => downloadAndSaveOfflineBook({
         serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!,
-        onProgress, onTransfer, signal, resume: item.status !== 'completed', preservePartialOnAbort: true,
+        onProgress, onTransfer, signal, resume: canResume, preservePartialOnFailure: true,
       }),
       onCancel: () => removeOfflinePartial({
         serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!, downloadDirectory,
@@ -164,10 +165,8 @@ export default function DownloadsPage() {
   }, [downloadDirectory]);
 
   const cancel = useCallback(async (item: OfflineDownloadItem) => {
-    if (item.status === 'downloading') {
-      cancelOfflineDownload(item.key);
-    } else {
-      cancelOfflineDownload(item.key);
+    cancelOfflineDownload(item.key);
+    if (item.status !== 'downloading') {
       if (item.serverUrl && item.bookId && item.title && item.format) {
         await removeOfflinePartial({
           serverUrl: item.serverUrl, bookId: item.bookId, title: item.title, format: item.format, downloadDirectory,

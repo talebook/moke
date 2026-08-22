@@ -1,5 +1,6 @@
 'use client';
 
+import { debugLog } from './debug-log.ts';
 import {
   hasEpubCentralDirectory,
   makeOfflineBookKey,
@@ -10,7 +11,6 @@ import {
 
 const DB_NAME = 'moke-offline-books';
 const STORE_NAME = 'books';
-const DB_VERSION = 2;
 const EPUB_TAIL_WINDOW = 22 + 0xffff + 4096;
 let databaseOwner: IDBFactory | undefined;
 let databasePromise: Promise<IDBDatabase> | undefined;
@@ -36,42 +36,32 @@ function formatFromRecord(record: Partial<OfflineBookRecord>): string {
   return normalizeOfflineFormat(record.format || record.fileName?.split('.').pop() || 'epub');
 }
 
+interface NativeOfflineBookRecord {
+  id: string;
+  serverUrl: string;
+  bookId: string;
+  title: string;
+  fileName: string;
+  mimeType: string;
+  updatedAt: number;
+  filePath: string;
+  relativePath?: string;
+  storageRoot?: string;
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   const owner = window.indexedDB;
   if (databaseOwner === owner && databasePromise) return databasePromise;
   databaseOwner = owner;
   const promise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = owner.open(DB_NAME, DB_VERSION);
+    // 不指定版本：当前逻辑只依赖 books store，不需要执行 schema 升级。
+    // 这样既能创建全新数据库，也能打开已有 v2（或更高）数据库，避免 VersionError。
+    const request = owner.open(DB_NAME);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-        return;
       }
-
-      // v1 used server + book as the key. Migrate in the same upgrade transaction,
-      // deriving format from the old filename so existing downloads remain visible.
-      const transaction = request.transaction;
-      const store = transaction?.objectStore(STORE_NAME);
-      if (!store || typeof store.openCursor !== 'function') return;
-      const cursorRequest = store.openCursor();
-      cursorRequest.onsuccess = () => {
-        const cursor = cursorRequest.result;
-        if (!cursor) return;
-        const old = cursor.value as OfflineBookRecord;
-        if (!old.format || old.id === makeOfflineBookKey(old.serverUrl, old.bookId)) {
-          const format = formatFromRecord(old);
-          const migrated = {
-            ...old,
-            id: makeOfflineBookKey(old.serverUrl, old.bookId, format),
-            format,
-            size: old.size ?? old.blob?.size ?? 0,
-          };
-          store.put(migrated);
-          if (migrated.id !== old.id) cursor.delete();
-        }
-        cursor.continue();
-      };
     };
     request.onsuccess = () => {
       const database = request.result;
@@ -103,6 +93,20 @@ async function getById(id: string): Promise<OfflineBookRecord | null> {
   return (await requestResult(transaction.objectStore(STORE_NAME).get(id))) ?? null;
 }
 
+async function putOfflineBookRecord(record: OfflineBookRecord): Promise<void> {
+  const db = await openDatabase();
+  await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(record));
+}
+
+function sameServer(left: string, right: string): boolean {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return left.replace(/\/+$/, '') === right.replace(/\/+$/, '');
+  }
+}
+
+
 export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookRecord[]> {
   const db = await openDatabase();
   const store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
@@ -113,7 +117,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
     records = [];
   }
   return records
-    .filter((record) => !serverUrl || record.serverUrl === serverUrl)
+    .filter((record) => !serverUrl || sameServer(record.serverUrl, serverUrl))
     .map((record) => ({ ...record, format: formatFromRecord(record), size: record.size ?? record.blob?.size ?? 0 }))
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
@@ -123,19 +127,70 @@ export async function getOfflineBook(
   bookId: string,
   format?: string,
 ): Promise<OfflineBookRecord | null> {
-  if (format) {
-    const current = await getById(makeOfflineBookKey(serverUrl, bookId, format));
-    if (current) return { ...current, format: formatFromRecord(current), size: current.size ?? current.blob?.size ?? 0 };
-    const legacy = await getById(makeOfflineBookKey(serverUrl, bookId));
-    if (legacy && formatFromRecord(legacy) === normalizeOfflineFormat(format)) {
-      await commitOfflineBookRecord({ ...legacy, format: normalizeOfflineFormat(format) });
-      await deleteRecordOnly(legacy.id);
-      return getById(makeOfflineBookKey(serverUrl, bookId, format));
+  let indexedRecord: OfflineBookRecord | null = null;
+  try {
+    if (format) {
+      indexedRecord = await getById(makeOfflineBookKey(serverUrl, bookId, format));
+      if (!indexedRecord) {
+        const legacy = await getById(makeOfflineBookKey(serverUrl, bookId));
+        if (legacy && formatFromRecord(legacy) === normalizeOfflineFormat(format)) {
+          await commitOfflineBookRecord({ ...legacy, format: normalizeOfflineFormat(format) });
+          await deleteRecordOnly(legacy.id);
+          indexedRecord = await getById(makeOfflineBookKey(serverUrl, bookId, format));
+        }
+      }
+    } else {
+      const records = await listOfflineBooks(serverUrl);
+      indexedRecord = records.find((record) => record.bookId === bookId)
+        ?? await getById(makeOfflineBookKey(serverUrl, bookId));
     }
-    return null;
+  } catch (error) {
+    if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') throw error;
+    debugLog('warn', 'download', '读取 WebView 离线书记录失败，尝试从原生索引恢复', String(error));
   }
-  const records = await listOfflineBooks(serverUrl);
-  return records.find((record) => record.bookId === bookId) ?? await getById(makeOfflineBookKey(serverUrl, bookId));
+
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+    return indexedRecord
+      ? { ...indexedRecord, format: formatFromRecord(indexedRecord), size: indexedRecord.size ?? indexedRecord.blob?.size ?? 0 }
+      : null;
+  }
+
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const nativeRecords = await invoke<NativeOfflineBookRecord[]>('moke_list_downloaded_books');
+    const wantedFormat = format ? normalizeOfflineFormat(format) : undefined;
+    const nativeRecord = nativeRecords.find((record) => (
+      record.bookId === bookId
+      && sameServer(record.serverUrl, serverUrl)
+      && (!wantedFormat || formatFromRecord(record) === wantedFormat)
+    )) ?? (indexedRecord
+      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName)
+      : undefined);
+    if (!nativeRecord) return null;
+
+    const recovered: OfflineBookRecord = {
+      ...indexedRecord,
+      id: nativeRecord.id || indexedRecord?.id || makeOfflineBookKey(serverUrl, bookId, formatFromRecord(nativeRecord)),
+      serverUrl,
+      bookId,
+      format: formatFromRecord(nativeRecord),
+      title: nativeRecord.title || indexedRecord?.title || '',
+      fileName: nativeRecord.fileName,
+      mimeType: nativeRecord.mimeType || indexedRecord?.mimeType || 'application/octet-stream',
+      size: indexedRecord?.size ?? 0,
+      updatedAt: nativeRecord.updatedAt,
+      filePath: nativeRecord.filePath,
+      relativePath: nativeRecord.relativePath || indexedRecord?.relativePath,
+      storageRoot: nativeRecord.storageRoot || indexedRecord?.storageRoot,
+    };
+    try { await putOfflineBookRecord(recovered); } catch (error) {
+      debugLog('warn', 'download', '原生离线书已恢复，但写回 WebView 记录失败', String(error));
+    }
+    return recovered;
+  } catch (error) {
+    debugLog('warn', 'download', '读取原生离线书索引失败，回退到 WebView 记录', String(error));
+    return indexedRecord;
+  }
 }
 
 async function deleteRecordOnly(id: string): Promise<void> {
@@ -247,18 +302,19 @@ async function resolveOfflineBookFilePath(input: {
 async function openOfflineBookFile(input: {
   serverUrl: string; bookId: string; format: string; fileName: string;
   downloadDirectory?: string | null; resume: boolean;
-}): Promise<{ writer: OfflineFileWriter; filePath: string; relativePath: string }> {
+}): Promise<{ writer: OfflineFileWriter; filePath: string; partialPath: string; relativePath: string }> {
   const { open, mkdir, stat } = await import('@tauri-apps/plugin-fs');
   const { dirname } = await import('@tauri-apps/api/path');
   const { filePath, relativePath } = await resolveOfflineBookFilePath(input);
+  const partialPath = `${filePath}.part`;
   const parent = await dirname(filePath);
   await mkdir(parent, { recursive: true });
 
   let position = 0;
   if (input.resume) {
-    try { position = Number((await stat(filePath)).size); } catch { position = 0; }
+    try { position = Number((await stat(partialPath)).size); } catch { position = 0; }
   }
-  const file = await open(filePath, { write: true, create: true, append: position > 0, truncate: position === 0 });
+  const file = await open(partialPath, { write: true, create: true, append: position > 0, truncate: position === 0 });
   const writer: OfflineFileWriter = {
     get position() { return position; },
     async write(data) { await file.write(data); position += data.length; },
@@ -269,7 +325,7 @@ async function openOfflineBookFile(input: {
     },
     async close() { await file.close(); },
   };
-  return { writer, filePath, relativePath };
+  return { writer, filePath, partialPath, relativePath };
 }
 
 async function validateDiskEpub(filePath: string): Promise<boolean> {
@@ -293,12 +349,58 @@ export async function removeOfflinePartial(input: {
     ...input,
     fileName: `${input.title}.${input.format}`,
   });
-  try { await removeDiskFile(filePath); } catch { /* already absent */ }
+  try { await removeDiskFile(`${filePath}.part`); } catch { /* already absent */ }
+}
+
+async function replaceOfflineBookFile(partialPath: string, filePath: string): Promise<{
+  backupPath: string;
+  rollback: () => Promise<void>;
+}> {
+  const { exists, remove, rename } = await import('@tauri-apps/plugin-fs');
+  const backupPath = `${partialPath}.backup`;
+  if (await exists(backupPath)) {
+    if (await exists(filePath)) await remove(backupPath);
+    else await rename(backupPath, filePath);
+  }
+  const hadPreviousFile = await exists(filePath);
+
+  if (hadPreviousFile) await rename(filePath, backupPath);
+
+  try {
+    await rename(partialPath, filePath);
+  } catch (error) {
+    if (hadPreviousFile) {
+      try {
+        await rename(backupPath, filePath);
+      } catch {
+        // 交给外层记录原始安装失败；备份仍留在磁盘，避免静默丢失。
+      }
+    }
+    throw error;
+  }
+
+  return {
+    backupPath,
+    rollback: async () => {
+      try { await remove(filePath); } catch { /* ignore */ }
+      if (hadPreviousFile) await rename(backupPath, filePath);
+    },
+  };
+}
+
+export function shouldPreserveOfflinePartial(error: unknown, enabled?: boolean): boolean {
+  if (!enabled) return false;
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  if (error instanceof TypeError) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message === 'book.download.incomplete'
+    || message === 'book.download.transfer_failed'
+    || /^http\.(408|429|5\d\d)$/.test(message);
 }
 
 export async function saveOfflineBookStream(input: {
   serverUrl: string; bookId: string; title: string; fileName: string; mimeType: string; format?: string;
-  sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnAbort?: boolean;
+  sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnFailure?: boolean;
   write: (writer: OfflineFileWriter) => Promise<string | void | { mimeType?: string; size?: number; sourceSignature?: string }>;
 }): Promise<void> {
   const fileName = sanitizeOfflineFileName(input.fileName);
@@ -306,18 +408,22 @@ export async function saveOfflineBookStream(input: {
   const previous = await getOfflineBook(input.serverUrl, input.bookId, format);
   let writer: OfflineFileWriter | null = null;
   let filePath: string | undefined;
+  let partialPath: string | undefined;
   let relativePath: string | undefined;
+  let replacement: Awaited<ReturnType<typeof replaceOfflineBookFile>> | null = null;
   try {
     const handle = await openOfflineBookFile({ ...input, fileName, format, resume: Boolean(input.resume) });
     writer = handle.writer;
     filePath = handle.filePath;
+    partialPath = handle.partialPath;
     relativePath = handle.relativePath;
     const result = await input.write(writer);
     const details = typeof result === 'string' ? { mimeType: result } : result || {};
     const size = details.size ?? writer.position;
     await writer.close();
     writer = null;
-    if (format === 'epub' && !(await validateDiskEpub(filePath))) throw new Error('book.epub.invalid');
+    if (format === 'epub' && !(await validateDiskEpub(partialPath))) throw new Error('book.epub.invalid');
+    replacement = await replaceOfflineBookFile(partialPath, filePath);
     await commitOfflineBookRecord({
       ...input,
       format,
@@ -329,13 +435,26 @@ export async function saveOfflineBookStream(input: {
       relativePath,
       storageRoot: input.downloadDirectory || undefined,
     });
+    // 索引已经提交，旧文件备份不再需要。
+    const { remove } = await import('@tauri-apps/plugin-fs');
+    try { await remove(replacement.backupPath); } catch { /* no previous file or best-effort cleanup */ }
+    replacement = null;
   } catch (error) {
     try { if (writer) await writer.close(); } catch { /* ignore */ }
-    const aborted = error instanceof DOMException && error.name === 'AbortError';
-    if (filePath && !(aborted && input.preservePartialOnAbort)) {
-      try { await removeDiskFile(filePath); } catch { /* best effort */ }
+    if (replacement) {
+      try { await replacement.rollback(); } catch { /* preserve backup for manual recovery */ }
+    } else if (partialPath && !shouldPreserveOfflinePartial(error, input.preservePartialOnFailure)) {
+      try { await removeDiskFile(partialPath); } catch { /* best effort */ }
     }
-    throw error;
+    if (error instanceof DOMException || error instanceof TypeError) throw error;
+    if (error instanceof Error && (error.message.startsWith('book.') || error.message.startsWith('http.'))) throw error;
+    debugLog(
+      'error',
+      'download',
+      '✗ 创建、关闭或登记离线书籍文件失败',
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    );
+    throw new Error('book.download.storage_failed');
   }
   if (previous?.filePath && filePath && previous.filePath !== filePath) {
     try { await removeDiskFile(previous.filePath); } catch (error) { console.warn('Failed to remove stale offline book file:', error); }
@@ -347,7 +466,6 @@ async function commitOfflineBookRecord(input: {
   size?: number; blob?: Blob; updatedAt?: number; sourceSignature?: string; filePath?: string; relativePath?: string;
   storageRoot?: string;
 }): Promise<void> {
-  const db = await openDatabase();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   const record: OfflineBookRecord = {
     id: makeOfflineBookKey(input.serverUrl, input.bookId, input.format),
@@ -365,8 +483,7 @@ async function commitOfflineBookRecord(input: {
     relativePath: input.relativePath,
     storageRoot: input.storageRoot,
   };
-  const store = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME);
-  await requestResult(store.put(record));
+  await putOfflineBookRecord(record);
   if (isTauriApp) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');

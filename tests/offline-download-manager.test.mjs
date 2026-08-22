@@ -68,6 +68,9 @@ test('异常退出后持久化中的任务恢复为可继续的暂停状态', ()
   const storage = new Map([['moke-offline-download-tasks-v1', JSON.stringify([{
     key: 'https://recover.test::1::epub', serverUrl: 'https://recover.test', bookId: '1',
     title: '恢复任务', format: 'epub', status: 'downloading', progress: 42, downloadedBytes: 420,
+  }, {
+    key: 'https://recover.test::done::epub', serverUrl: 'https://recover.test', bookId: 'done',
+    title: '已完成任务', format: 'epub', status: 'completed', progress: 100, downloadedBytes: 1024,
   }])]]);
   globalThis.window = {
     localStorage: {
@@ -75,7 +78,9 @@ test('异常退出后持久化中的任务恢复为可继续的暂停状态', ()
       setItem: (key, value) => storage.set(key, value),
     },
   };
-  const [restored] = listOfflineDownloadSnapshots('https://recover.test');
+  const restoredSnapshots = listOfflineDownloadSnapshots('https://recover.test');
+  assert.equal(restoredSnapshots.length, 1);
+  const [restored] = restoredSnapshots;
   assert.equal(restored.status, 'paused');
   assert.equal(restored.downloadedBytes, 420);
   assert.match(String(restored.error), /异常退出/);
@@ -135,6 +140,32 @@ test('大量 chunk 的持久化和全局刷新有固定上限且终态不会丢�
   const persisted = JSON.parse(storage.get('moke-offline-download-tasks-v1'));
   assert.equal(persisted.find((snapshot) => snapshot.key === key)?.status, 'completed');
   assert.equal(persisted.find((snapshot) => snapshot.key === key)?.downloadedBytes, chunkCount);
+  delete globalThis.window;
+});
+
+test('成功快照在调用方读取后自动回收，失败快照继续保留供重试', async () => {
+  const storage = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+  const completedKey = 'https://cleanup.test::completed::epub';
+  await startOfflineDownload({ key: completedKey, run: async () => {} });
+  assert.equal(getOfflineDownloadSnapshot(completedKey)?.status, 'completed');
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(getOfflineDownloadSnapshot(completedKey), undefined);
+  assert.equal(JSON.parse(storage.get('moke-offline-download-tasks-v1')).some(({ key }) => key === completedKey), false);
+
+  const failedKey = 'https://cleanup.test::failed::epub';
+  await assert.rejects(startOfflineDownload({
+    key: failedKey,
+    run: async () => { throw new Error('network failed'); },
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(getOfflineDownloadSnapshot(failedKey)?.status, 'failed');
   delete globalThis.window;
 });
 

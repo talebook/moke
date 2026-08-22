@@ -5,6 +5,7 @@ import {
   deleteOfflineBook,
   getOfflineBook,
   saveOfflineBook,
+  shouldPreserveOfflinePartial,
 } from '../src/lib/offline-books.ts';
 import {
   beginOfflineDownload,
@@ -15,6 +16,7 @@ import {
   makeOfflineRelativePath,
   parseContentRange,
   sanitizeOfflineFileName,
+  shouldResumeOfflineDownload,
 } from '../src/lib/offline-book-core.ts';
 
 test('EPUB requires a ZIP central directory at the end of the file', async () => {
@@ -74,6 +76,9 @@ function createFakeIndexedDb() {
   const objectStore = {
     get(key) {
       return makeAsyncRequest(() => records.get(key));
+    },
+    getAll() {
+      return makeAsyncRequest(() => [...records.values()]);
     },
     put(record) {
       return makeAsyncRequest(() => {
@@ -153,6 +158,25 @@ test('Range 响应只接受合法 Content-Range', () => {
   assert.equal(classifyOfflineRangeResponse(100, 206, null), 'retry-full');
   assert.equal(classifyOfflineRangeResponse(0, 206, null), 'invalid');
   assert.equal(classifyOfflineRangeResponse(0, 206, parseContentRange('bytes 0-299/300')), 'full');
+});
+
+test('瞬时下载失败保留断点，校验和存储失败清理断点', () => {
+  assert.equal(shouldPreserveOfflinePartial(new TypeError('network interrupted'), true), true);
+  assert.equal(shouldPreserveOfflinePartial(new Error('book.download.incomplete'), true), true);
+  assert.equal(shouldPreserveOfflinePartial(new Error('book.download.transfer_failed'), true), true);
+  assert.equal(shouldPreserveOfflinePartial(new Error('http.503'), true), true);
+  assert.equal(shouldPreserveOfflinePartial(new DOMException('paused', 'AbortError'), true), true);
+  assert.equal(shouldPreserveOfflinePartial(new Error('book.epub.invalid'), true), false);
+  assert.equal(shouldPreserveOfflinePartial(new Error('book.download.storage_failed'), true), false);
+  assert.equal(shouldPreserveOfflinePartial(new Error('book.download.incomplete'), false), false);
+});
+
+test('Web 重试从零开始，Tauri 只续传未完成任务', () => {
+  assert.equal(shouldResumeOfflineDownload('web', 'failed'), false);
+  assert.equal(shouldResumeOfflineDownload('web', 'paused'), false);
+  assert.equal(shouldResumeOfflineDownload('tauri', 'failed'), true);
+  assert.equal(shouldResumeOfflineDownload('tauri', 'paused'), true);
+  assert.equal(shouldResumeOfflineDownload('tauri', 'completed'), false);
 });
 
 test('离线文件名会清理系统不允许的字符', () => {
@@ -260,4 +284,86 @@ test('删除只移除目标离线书籍，删除不存在的记录也不会失�
 
   assert.equal(await getOfflineBook('https://a.example', '1'), null);
   assert.equal((await getOfflineBook('https://a.example', '2'))?.bookId, '2');
+});
+
+test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载状态', async () => {
+  const indexedDB = createFakeIndexedDb();
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = {
+    indexedDB,
+    __TAURI_INTERNALS__: {
+      invoke: async (command) => {
+        assert.equal(command, 'moke_list_downloaded_books');
+        return [{
+          id: 'https://a.example::42',
+          serverUrl: 'https://a.example:443',
+          bookId: '42',
+          title: '西游记',
+          fileName: '西游记.epub',
+          mimeType: 'application/epub+zip',
+          updatedAt: 123,
+          filePath: '/app-data/books/西游记.epub',
+        }];
+      },
+    },
+  };
+
+  const recovered = await getOfflineBook('https://a.example', '42');
+  assert.equal(recovered?.title, '西游记');
+  assert.equal(recovered?.filePath, '/app-data/books/西游记.epub');
+  assert.equal(indexedDB.records.get('https://a.example::42')?.title, '西游记');
+});
+
+test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别格式化 key', async () => {
+  const indexedDB = createFakeIndexedDb();
+  const open = indexedDB.open.bind(indexedDB);
+  const requestedVersions = [];
+  indexedDB.open = (name, version) => {
+    requestedVersions.push(version);
+    if (version !== undefined && version < 2) {
+      return makeAsyncRequest(() => {
+        throw new DOMException('Requested version is lower than existing version', 'VersionError');
+      });
+    }
+    return open(name, version);
+  };
+  indexedDB.records.set('https://a.example::42::epub', {
+    id: 'https://a.example::42::epub',
+    serverUrl: 'https://a.example',
+    bookId: '42',
+    format: 'epub',
+    title: '西游记',
+    fileName: '西游记.epub',
+    mimeType: 'application/epub+zip',
+    updatedAt: 123,
+  });
+  globalThis.window = { indexedDB };
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'web';
+
+  const record = await getOfflineBook('https://a.example', '42');
+  assert.equal(record?.id, 'https://a.example::42::epub');
+  assert.deepEqual(requestedVersions, [undefined]);
+});
+
+test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显示阅读按钮', async () => {
+  const indexedDB = createFakeIndexedDb();
+  indexedDB.records.set('https://a.example::42', {
+    id: 'https://a.example::42',
+    serverUrl: 'https://a.example',
+    bookId: '42',
+    title: '西游记',
+    fileName: '西游记.epub',
+    mimeType: 'application/epub+zip',
+    updatedAt: 123,
+    filePath: '/app-data/books/西游记.epub',
+  });
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = {
+    indexedDB,
+    __TAURI_INTERNALS__: {
+      invoke: async () => [],
+    },
+  };
+
+  assert.equal(await getOfflineBook('https://a.example', '42'), null);
 });

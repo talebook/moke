@@ -39,10 +39,13 @@ export function Sidebar() {
   return (
     <aside className="moke-sidebar fixed left-0 top-0 hidden h-full w-[220px] flex-col z-10 bg-primary lg:flex">
       <div className="flex items-center gap-3 px-6 h-16 border-b border-white/10">
-        <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/10">
+        <div className="w-8 h-8 shrink-0 flex items-center justify-center rounded-lg bg-white/10">
           <BookOpen className="w-5 h-5 text-primary-foreground" />
         </div>
-        <span className="text-lg font-semibold tracking-tight text-primary-foreground">
+        <span
+          className="min-w-0 flex-1 truncate text-lg font-semibold tracking-tight text-primary-foreground"
+          title={serverTitle || '墨客'}
+        >
           {serverTitle || '墨客'}
         </span>
       </div>
