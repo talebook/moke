@@ -268,13 +268,16 @@ fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String>
 
 #[tauri::command]
 async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>, String> {
-    #[cfg(target_env = "ohos")]
+    // Tauri's folder picker is desktop-only. Keep it out of every mobile
+    // target at compile time: Android/iOS expose `FileDialogBuilder`, but do
+    // not implement `blocking_pick_folder`.
+    #[cfg(any(target_env = "ohos", mobile))]
     {
         let _ = app;
         Err("custom download directory is not supported on this platform".into())
     }
 
-    #[cfg(not(target_env = "ohos"))]
+    #[cfg(not(any(target_env = "ohos", mobile)))]
     {
         use tauri_plugin_dialog::DialogExt;
 

@@ -30,6 +30,17 @@ test('下载目录选择由 Tauri 后端打开系统对话框', () => {
   assert.equal(packageJson.dependencies['@tauri-apps/plugin-dialog'], undefined);
 });
 
+test('移动端不会编译仅桌面可用的目录选择器', () => {
+  assert.match(
+    tauriSource,
+    /#\[cfg\(any\(target_env = "ohos", mobile\)\)\][\s\S]*?custom download directory is not supported on this platform/,
+  );
+  assert.match(
+    tauriSource,
+    /#\[cfg\(not\(any\(target_env = "ohos", mobile\)\)\)\][\s\S]*?blocking_pick_folder\(\)/,
+  );
+});
+
 test('下载目录从后端恢复且 Windows verbatim 前缀不会展示', () => {
   assert.match(appShellSource, /invoke<string \| null>\('moke_get_download_directory'\)/);
   assert.match(tauriSource, /download_directory_for_frontend/);
