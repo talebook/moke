@@ -330,6 +330,46 @@ test('POST 精简响应按提交内容补全，不把已成功写入误报为契
   assert.deepEqual(result.annotation.sources, []);
 });
 
+test('POST 完整结构含畸形 source 时仍从 input 回填缺失展示字段', async () => {
+  const responseAnnotation = annotation({
+    id: '20',
+    sources: [{ id: 'Infinity', source_name: 'weread', source_connection_id: 'conn-1', source_sync_status: 'failed' }],
+  });
+  for (const field of ['chapter', 'quote_text', 'content', 'color', 'author_name']) {
+    delete responseAnnotation[field];
+  }
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const result = await upsertBookAnnotation(
+      async () => jsonResponse({ err: 'ok', annotation: responseAnnotation }),
+      'http://talebook',
+      42,
+      {
+        annotation_type: 'note',
+        client_id: 'moke-full-response-fallback',
+        chapter: '提交章节',
+        quote_text: '提交引用',
+        content: '提交正文',
+        color: 'yellow',
+        author_name: '提交作者',
+      },
+    );
+    assert.equal(result.annotation.chapter, '提交章节');
+    assert.equal(result.annotation.quote_text, '提交引用');
+    assert.equal(result.annotation.content, '提交正文');
+    assert.equal(result.annotation.color, 'yellow');
+    assert.equal(result.annotation.author_name, '提交作者');
+    assert.deepEqual(result.annotation.sources, []);
+    assert.equal(warnings.length, 1);
+    assert.deepEqual(warnings[0][1].source_indices, [0]);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test('空来源字段不触发伪部分来源错误，talebook 来源身份可合法回写', async () => {
   const bodies = [];
   const requestLike = async (_url, init) => {
@@ -502,9 +542,16 @@ test('GET 按条跳过畸形 source，保留正文、合法来源与可观察警
     assert.deepEqual(items.map((item) => item.id), [1, 2, 3]);
     assert.equal(items[1].content, '来源损坏也要显示');
     assert.deepEqual(items[1].sources.map((item) => item.id), [10]);
-    assert.equal(warnings.length, 2);
+    assert.equal(warnings.length, 1);
     assert.match(warnings[0][0], /已跳过畸形来源记录/);
     assert.equal(warnings[0][1].annotation_id, 2);
+    assert.deepEqual(warnings[0][1].source_indices, [1, 2]);
+    assert.deepEqual(
+      warnings[0][1].invalid_sources.map(({ source_index }) => source_index),
+      [1, 2],
+    );
+    assert.match(warnings[0][1].invalid_sources[0].reason, /id.*有限数字/);
+    assert.match(warnings[0][1].invalid_sources[1].reason, /source_connection_id.*source_sync_status/);
   } finally {
     console.warn = originalWarn;
   }
