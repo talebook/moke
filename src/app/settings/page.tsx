@@ -95,14 +95,10 @@ export default function SettingsPage() {
   const handleSelectDownloadDirectory = async () => {
     if (!directorySupported) return;
     try {
-      const [{ open }, { invoke }] = await Promise.all([
-        import('@tauri-apps/plugin-dialog'),
-        import('@tauri-apps/api/core'),
-      ]);
-      const selected = await open({ directory: true, multiple: false, title: '选择下载目录' });
-      if (typeof selected !== 'string') return;
-      const approved = await invoke<string | null>('moke_set_download_directory', { path: selected });
-      setDownloadDirectory(approved);
+      const { invoke } = await import('@tauri-apps/api/core');
+      const selected = await invoke<string | null>('moke_select_download_directory');
+      if (!selected) return;
+      setDownloadDirectory(selected);
       showToast('下载目录已更新');
     } catch (error) {
       console.error('Failed to select download directory:', error);
@@ -113,7 +109,7 @@ export default function SettingsPage() {
   const handleResetDownloadDirectory = async () => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('moke_set_download_directory', { path: null });
+      await invoke('moke_reset_download_directory');
       setDownloadDirectory(null);
       showToast('已恢复默认下载目录');
     } catch { showToast('恢复默认目录失败', 'error'); }

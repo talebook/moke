@@ -205,30 +205,50 @@ fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-fn moke_set_download_directory(
-    app: AppHandle,
-    path: Option<String>,
-) -> Result<Option<String>, String> {
-    let Some(path) = path else {
-        write_download_directory(&app, None)?;
-        return Ok(None);
-    };
-    let directory = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !directory.is_dir() {
-        return Err("download directory must be an existing directory".into());
+async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_env = "ohos")]
+    {
+        let _ = app;
+        Err("custom download directory is not supported on this platform".into())
     }
-    // The dialog plugin adds explicitly selected paths to this runtime scope.
-    // Reject arbitrary IPC paths, then persist the approved path for startup restoration.
-    if !app.fs_scope().is_allowed(&directory) {
-        return Err("download directory was not selected by the user".into());
+
+    #[cfg(not(target_env = "ohos"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+
+        // Keep directory authorization in one native command: the path can only
+        // come from this system picker and is never accepted from frontend IPC.
+        let Some(selected) = app
+            .dialog()
+            .file()
+            .set_title("选择下载目录")
+            .blocking_pick_folder()
+        else {
+            return Ok(None);
+        };
+        let directory = selected
+            .into_path()
+            .map_err(|error| error.to_string())?
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if !directory.is_dir() {
+            return Err("download directory must be an existing directory".into());
+        }
+
+        app.fs_scope()
+            .allow_directory(&directory, true)
+            .map_err(|error| error.to_string())?;
+        app.state::<tauri::scope::Scopes>()
+            .allow_directory(&directory, true)
+            .map_err(|error| error.to_string())?;
+        write_download_directory(&app, Some(&directory))?;
+        Ok(Some(directory.to_string_lossy().into_owned()))
     }
-    app.fs_scope()
-        .allow_directory(&directory, true)
-        .map_err(|error| error.to_string())?;
-    write_download_directory(&app, Some(&directory))?;
-    Ok(Some(directory.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn moke_reset_download_directory(app: AppHandle) -> Result<(), String> {
+    write_download_directory(&app, None)
 }
 
 #[tauri::command]
@@ -429,7 +449,8 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         moke_navigate,
         moke_record_downloaded_book,
         moke_remove_downloaded_book,
-        moke_set_download_directory,
+        moke_select_download_directory,
+        moke_reset_download_directory,
         moke_get_download_directory,
         moke_download_storage_stats,
         moke_list_downloaded_books,
@@ -520,7 +541,10 @@ pub fn run() {
         .setup(|_app| {
             // Restore only the directory that was explicitly selected and persisted earlier.
             if let Ok(Some(directory)) = read_download_directory(_app.handle()) {
-                let _ = _app.fs_scope().allow_directory(directory, true);
+                let _ = _app.fs_scope().allow_directory(&directory, true);
+                let _ = _app
+                    .state::<tauri::scope::Scopes>()
+                    .allow_directory(&directory, true);
             }
             // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
             // readestlib 只在桌面目标暴露 manage_reader_state（OHOS 上被 cfg 排除）。
