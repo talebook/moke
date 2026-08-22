@@ -5,6 +5,15 @@ import {
   safeRemoveLocalStorageItem,
   safeSetLocalStorageItem,
 } from '@/lib/browser-storage';
+import {
+  DEFAULT_SERVER_CAPABILITIES,
+  mergePersistedServerCapabilities,
+  type PersistedServerCapabilities,
+  type ServerCapabilities,
+} from '@/lib/server-capabilities';
+
+export { DEFAULT_SERVER_CAPABILITIES } from '@/lib/server-capabilities';
+export type { ServerCapabilities } from '@/lib/server-capabilities';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -26,28 +35,6 @@ export interface ReaderInfo {
   admin: boolean;
   permission: string;
 }
-
-export interface ServerCapabilities {
-  shelfApi: boolean;
-  annotationApi: boolean;
-  readingStateApi: boolean;
-  readingProgressApi: boolean;
-  readingStatsApi: boolean;
-  networkSourcesApi: boolean;
-  checkedAt: number | null;
-  version: string;
-}
-
-export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
-  shelfApi: false,
-  annotationApi: false,
-  readingStateApi: false,
-  readingProgressApi: false,
-  readingStatsApi: false,
-  networkSourcesApi: false,
-  checkedAt: null,
-  version: '',
-};
 
 interface ServerState {
   serverUrl: string;
@@ -134,18 +121,14 @@ export const useServerStore = create<ServerState>()(
       // merge 时强制为 true；其余字段仍按持久化值恢复。
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<ServerState>;
-        const persistedCapabilities = persisted.capabilities as Partial<ServerCapabilities> | undefined;
-        const hasAnnotationCapability = typeof persistedCapabilities?.annotationApi === 'boolean';
+        const persistedCapabilities = persisted.capabilities as PersistedServerCapabilities | undefined;
         return {
           ...currentState,
           ...persisted,
-          capabilities: {
-            ...currentState.capabilities,
-            ...persistedCapabilities,
-            // Older persisted stores predate annotationApi. Force one fresh
-            // discovery instead of treating a missing field as unsupported.
-            checkedAt: hasAnnotationCapability ? persistedCapabilities?.checkedAt ?? null : null,
-          },
+          capabilities: mergePersistedServerCapabilities(
+            currentState.capabilities,
+            persistedCapabilities,
+          ),
           hasHydrated: true,
         };
       },

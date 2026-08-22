@@ -131,6 +131,19 @@ test('异步订阅：未取消时订阅失败恰好上报一次', async () => {
   assert.deepEqual(reportedErrors, [expectedError]);
 });
 
+test('异步订阅：同步抛出的订阅错误恰好上报一次', () => {
+  const expectedError = new Error('synchronous subscription failure');
+  const reportedErrors = [];
+  const cancel = startAsyncSubscription(
+    () => { throw expectedError; },
+    (error) => { reportedErrors.push(error); },
+  );
+
+  cancel();
+
+  assert.deepEqual(reportedErrors, [expectedError]);
+});
+
 test('异步订阅：cancel 重复调用只清理一次', async () => {
   let cleanupCalls = 0;
   const cancel = startAsyncSubscription(

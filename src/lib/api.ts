@@ -1,7 +1,9 @@
 import type { ReaderInfo, ServerCapabilities } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
+import { getSafeErrorCode, logHttpErrorMetadata } from '@/lib/api-log';
 import {
   attachSafeJsonReader,
+  buildTauriBinaryHeaders,
   buildTauriRequestInit,
   getErrorMessage,
   isAbsoluteHttpUrl,
@@ -11,6 +13,7 @@ import {
   resolveAppPlatform,
 } from '@/lib/api-core';
 import { hasEpubCentralDirectory } from '@/lib/offline-book-core';
+import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 interface UserInfoResponse {
@@ -37,16 +40,37 @@ interface UserInfoResponse {
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
 
-/**
- * 服务器原始响应可能携带邮箱/昵称/头像等个人信息。生产构建不输出原始正文，
- * 仅在开发环境（dev server）保留全文，避免敏感信息无条件进入 devtools 与调试面板。
- */
-const isDev = process.env.NODE_ENV !== 'production';
-
 function isRequestCancelled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   const message = error instanceof Error ? error.message : String(error);
   return /request cancell?ed|aborted?/i.test(message);
+}
+
+function binaryTransferErrorDetail(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function logBinaryTransferFailure(
+  url: string,
+  response: Response,
+  error: unknown,
+  receivedBytes: number,
+): void {
+  debugLog('error', 'download', `✗ GET ${url} 响应正文读取失败`, {
+    status: response.status,
+    receivedBytes,
+    expectedBytes: Number(response.headers.get('content-length') || 0),
+    contentRange: response.headers.get('content-range'),
+    contentEncoding: response.headers.get('content-encoding'),
+    error: binaryTransferErrorDetail(error),
+  }, 'network');
+}
+
+function logOfflineWriteFailure(error: unknown, receivedBytes: number): void {
+  debugLog('error', 'download', '✗ 下载内容写入本地文件失败', {
+    receivedBytes,
+    error: binaryTransferErrorDetail(error),
+  });
 }
 
 async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob> {
@@ -274,27 +298,15 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
     credentials: 'include',
   });
   const info = await readJsonResponse<UserInfoResponse>(infoResponse).catch(() => ({} as UserInfoResponse));
-  const sampleBookId = await findSampleBookId(serverUrl);
 
-  const [shelfApi, readingStatsApi, networkSourcesApi, readingStateApi, readingProgressApi, annotationApi] = await Promise.all([
-    probeJsonEndpoint(serverUrl, '/api/shelf'),
-    probeJsonEndpoint(serverUrl, '/api/reading/stats'),
-    probeJsonEndpoint(serverUrl, '/api/network/sources'),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/readstate`) : Promise.resolve(true),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/progress`) : Promise.resolve(true),
-    sampleBookId ? probeJsonEndpoint(serverUrl, `/api/book/${sampleBookId}/annotations`) : Promise.resolve(true),
-  ]);
-
-  return {
-    shelfApi,
-    annotationApi,
-    readingStateApi,
-    readingProgressApi,
-    readingStatsApi,
-    networkSourcesApi,
-    checkedAt: Date.now(),
+  return discoverGeneralServerCapabilities({
     version: info.sys?.version || '',
-  };
+    findSampleBookId: () => findSampleBookId(serverUrl),
+    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path),
+    // The current Talebook contract has no HEAD/limit endpoint for annotations.
+    // Do not download and discard a sample book's complete annotation list here.
+    // The detail panel's first useful data load doubles as its one-shot probe.
+  });
 }
 
 export async function validateServerConnection(serverUrl: string): Promise<{ err: string; msg?: string }> {
@@ -329,7 +341,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     try {
       data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
     } catch (e) {
-      console.error('[validateServerConnection] invalid response, attempt=%d', attempt, e);
+      logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
       if (attempt < maxRetries) continue;
       return {
         err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
@@ -338,7 +350,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     }
 
     if (!response.ok) {
-      console.error(`[validateServerConnection] HTTP ${response.status}:`, data);
+      logHttpErrorMetadata('validateServerConnection', response.status, data);
       if (attempt < maxRetries) continue;
       return {
         err: data.err || `http.${response.status}`,
@@ -347,7 +359,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     }
 
     if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
-      console.error('[validateServerConnection] unexpected err=%s', data.err);
+      console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
       if (attempt < maxRetries) continue;
       return {
         err: data.err || 'server.invalid',
@@ -355,7 +367,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
       };
     }
 
-    console.log('[validateServerConnection] OK err=%s', data.err);
+    console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
     return { err: 'ok' };
   }
 
@@ -383,7 +395,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   try {
     data = await readJsonResponse(response, '服务器返回内容无效，无法确认访问码状态。');
   } catch (e) {
-    console.error('[checkWelcomeRequirement] invalid response:', e);
+    logHttpErrorMetadata('checkWelcomeRequirement invalid response', response.status, e);
     return {
       err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
       msg: getErrorMessage(e, '服务器返回内容无效，无法确认访问码状态。'),
@@ -392,7 +404,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   }
 
   if (!response.ok) {
-    console.error(`[checkWelcomeRequirement] HTTP ${response.status}:`, data);
+    logHttpErrorMetadata('checkWelcomeRequirement', response.status, data);
     return {
       err: data.err || `http.${response.status}`,
       msg: data.msg || '访问码状态检查失败',
@@ -400,8 +412,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
     };
   }
 
-  if (isDev) console.log('[checkWelcomeRequirement]', data.err, data);
-  else console.log('[checkWelcomeRequirement] err=%s', data.err);
+  console.log('[checkWelcomeRequirement] err=%s', getSafeErrorCode(data));
 
   if (data.err === 'ok') {
     return {
@@ -441,8 +452,7 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
   });
 
   const result = await readJsonResponse<{ err: string; msg?: string }>(response);
-  if (isDev) console.log('[submitWelcomeCode]', result);
-  else console.log('[submitWelcomeCode] err=%s', result.err);
+  console.log('[submitWelcomeCode] err=%s', getSafeErrorCode(result));
   return result;
 }
 
@@ -457,7 +467,12 @@ export async function downloadBookBlob(
   try {
     const response = await request(url, {
       ...(isTauriApp
-        ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+        ? ({
+            method: 'GET',
+            headers: buildTauriBinaryHeaders(),
+            connectTimeout: 30_000,
+            signal: options?.signal,
+          } as any)
         : { credentials: 'include', signal: options?.signal }),
     });
 
@@ -540,7 +555,12 @@ export async function streamBookDownload(
 
   const response = await request(url, {
     ...(isTauriApp
-      ? ({ method: 'GET', connectTimeout: 30_000, signal: options?.signal } as any)
+      ? ({
+          method: 'GET',
+          headers: buildTauriBinaryHeaders(),
+          connectTimeout: 30_000,
+          signal: options?.signal,
+        } as any)
       : { credentials: 'include', signal: options?.signal }),
   });
 
@@ -552,9 +572,21 @@ export async function streamBookDownload(
   const reader = response.body?.getReader();
 
   if (!reader) {
-    const blob = await response.blob();
+    let blob: Blob;
+    try {
+      blob = await response.blob();
+    } catch (error) {
+      logBinaryTransferFailure(url, response, error, 0);
+      throw new Error('book.download.transfer_failed');
+    }
+
     options.onProgress?.(99);
-    await options.write(new Uint8Array(await blob.arrayBuffer()));
+    try {
+      await options.write(new Uint8Array(await blob.arrayBuffer()));
+    } catch (error) {
+      logOfflineWriteFailure(error, blob.size);
+      throw new Error('book.download.storage_failed');
+    }
     if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
       throw new Error('book.epub.invalid');
     }
@@ -568,12 +600,30 @@ export async function streamBookDownload(
   let received = 0;
 
   while (true) {
-    const { done, value } = await reader.read();
+    let result: ReadableStreamReadResult<Uint8Array>;
+    try {
+      result = await reader.read();
+    } catch (error) {
+      if (isRequestCancelled(error)) throw error;
+      logBinaryTransferFailure(url, response, error, received);
+      throw new Error('book.download.transfer_failed');
+    }
 
+    const { done, value } = result;
     if (done) break;
     if (!value) continue;
 
-    await options.write(value);
+    try {
+      await options.write(value);
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        // 原始写入错误更有诊断价值，取消失败不覆盖它。
+      }
+      logOfflineWriteFailure(error, received);
+      throw new Error('book.download.storage_failed');
+    }
     received += value.length;
     tail = keepTailBytes(tail, value, BOOK_TAIL_WINDOW);
 

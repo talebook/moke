@@ -2,7 +2,10 @@
 
 import { useEffect, useRef } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress, type ReadingProgressPayload } from '@/lib/reading-progress';
-import { shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
+import {
+  clearAnnotationLocateProgressSuppressionFromPayload,
+  shouldSuppressAnnotationReaderProgress,
+} from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
 import { useServerStore } from '@/lib/store/server';
 
@@ -20,9 +23,13 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
     if (!serverUrl) return;
     if (capabilityChecked && !progressSupported) return;
 
-    const cancelListener = startAsyncSubscription(
-      async () => {
-        const { listen } = await import('@tauri-apps/api/event');
+    const eventApi = import('@tauri-apps/api/event');
+    const reportListenError = (error: unknown) => {
+      console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
+    };
+    const cancelListeners = [
+      startAsyncSubscription(async () => {
+        const { listen } = await eventApi;
         return listen<Record<string, unknown>>('reader:page:changed', (event) => {
           const progress = normalizeReaderProgressEvent(event.payload);
           if (!progress) return;
@@ -43,14 +50,17 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
 
           timersRef.current.set(bookId, timer);
         });
-      },
-      (error) => {
-        console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
-      },
-    );
+      }, reportListenError),
+      startAsyncSubscription(async () => {
+        const { listen } = await eventApi;
+        return listen<unknown>('reader:annotation-locate:finished', (event) => {
+          clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
+        });
+      }, reportListenError),
+    ];
 
     return () => {
-      cancelListener();
+      for (const cancelListener of cancelListeners) cancelListener();
       for (const timer of timersRef.current.values()) clearTimeout(timer);
       for (const [bookId, progress] of pendingRef.current.entries()) {
         void saveReadingProgress(bookId, progress);
