@@ -101,10 +101,9 @@ const DEFAULT_BATCH_CONCURRENCY = 6;
 const MAX_BATCH_CONCURRENCY = 20;
 const TRANSPORT_ERROR_PATTERN = /network|fetch|offline|timed?\s*out|connection (?:refused|reset|closed)|failed to connect|error sending request|dns|socket/i;
 const ANNOTATION_LOCATE_SUPPRESSION_TTL_MS = 2 * 60 * 1000;
-const ANNOTATION_LOCATE_GRACE_MS = 10 * 1000;
 const annotationLocateSuppressions = new Map<string, {
-  location: string;
-  graceUntil: number;
+  serverUrl: string;
+  bookId: string;
   expiresAt: number;
   cleanupTimer: ReturnType<typeof setTimeout>;
 }>();
@@ -295,12 +294,14 @@ export function newMokeAnnotationClientId(): string {
 
 export function annotationSourceNames(annotation: BookAnnotation): string[] {
   const names = annotation.sources.map((source) => source.source_name).filter(Boolean);
-  return names.length > 0 ? Array.from(new Set(names)) : ['talebook'];
+  if (names.length > 0) return Array.from(new Set(names));
+  return annotation.client_id?.startsWith('moke-') ? ['moke'] : ['talebook'];
 }
 
 export function annotationReaderProgress(
   annotation: BookAnnotation,
   bookId: string | number,
+  navigationId?: string,
 ): ReadingProgressPayload | null {
   const cfi = readestAnnotationCfi(annotation.cfi);
   if (!cfi) return null;
@@ -310,6 +311,8 @@ export function annotationReaderProgress(
     moke_book_id: String(bookId),
     location: cfi,
     chapter: annotation.chapter || undefined,
+    moke_navigation_id: navigationId,
+    moke_navigation_kind: navigationId ? 'annotation-locate' : undefined,
     updated_at: new Date().toISOString(),
   };
 }
@@ -319,36 +322,39 @@ export function hasReadestAnnotationLocation(annotation: BookAnnotation): boolea
 }
 
 /**
- * Desktop Readest emits startup and restored locations as page-change events.
- * Suppress a short startup window, scoped by server and book, then keep exact
- * restore suppression until the user moves elsewhere. A timer bounds cleanup.
+ * Start a one-shot annotation navigation correlation. Readest echoes this id
+ * only on startup/restore relocations caused by this navigation; ordinary page
+ * turns carry no marker and are persisted immediately, regardless of timing or
+ * CFI normalization. The timer is resource cleanup, not a correctness window.
  */
-export function suppressAnnotationLocateProgress(
+export function beginAnnotationLocateNavigation(
   serverUrl: string,
   bookId: string | number,
-  location: string,
-): void {
-  const key = annotationProgressKey(serverUrl, bookId);
-  const existing = annotationLocateSuppressions.get(key);
-  if (existing) clearTimeout(existing.cleanupTimer);
-  const startedAt = Date.now();
+): string {
+  const navigationId = newAnnotationNavigationId();
   const cleanupTimer = setTimeout(() => {
-    annotationLocateSuppressions.delete(key);
+    annotationLocateSuppressions.delete(navigationId);
   }, ANNOTATION_LOCATE_SUPPRESSION_TTL_MS);
   if (typeof cleanupTimer === 'object' && 'unref' in cleanupTimer) cleanupTimer.unref();
-  annotationLocateSuppressions.set(key, {
-    location,
-    graceUntil: startedAt + ANNOTATION_LOCATE_GRACE_MS,
-    expiresAt: startedAt + ANNOTATION_LOCATE_SUPPRESSION_TTL_MS,
+  annotationLocateSuppressions.set(navigationId, {
+    serverUrl: normalizeServerUrl(serverUrl),
+    bookId: String(bookId),
+    expiresAt: Date.now() + ANNOTATION_LOCATE_SUPPRESSION_TTL_MS,
     cleanupTimer,
   });
+  return navigationId;
 }
 
-export function clearAnnotationLocateProgressSuppression(serverUrl: string, bookId: string | number): void {
-  const key = annotationProgressKey(serverUrl, bookId);
-  const suppression = annotationLocateSuppressions.get(key);
+export function clearAnnotationLocateProgressSuppression(navigationId: string): void {
+  const suppression = annotationLocateSuppressions.get(navigationId);
   if (suppression) clearTimeout(suppression.cleanupTimer);
-  annotationLocateSuppressions.delete(key);
+  annotationLocateSuppressions.delete(navigationId);
+}
+
+export function clearAnnotationLocateProgressSuppressionFromPayload(payload: unknown): void {
+  if (!isRecord(payload) || Array.isArray(payload)) return;
+  const navigationId = nullableString(payload.moke_navigation_id);
+  if (navigationId) clearAnnotationLocateProgressSuppression(navigationId);
 }
 
 export function shouldSuppressAnnotationReaderProgress(
@@ -356,22 +362,33 @@ export function shouldSuppressAnnotationReaderProgress(
   progress: ReadingProgressPayload,
   now = Date.now(),
 ): boolean {
-  const key = annotationProgressKey(serverUrl, progress.moke_book_id);
-  const suppression = annotationLocateSuppressions.get(key);
+  if (
+    progress.moke_navigation_kind !== 'annotation-locate'
+    || !progress.moke_navigation_id
+  ) return false;
+
+  const suppression = annotationLocateSuppressions.get(progress.moke_navigation_id);
   if (!suppression) return false;
   if (now >= suppression.expiresAt) {
-    clearTimeout(suppression.cleanupTimer);
-    annotationLocateSuppressions.delete(key);
+    clearAnnotationLocateProgressSuppression(progress.moke_navigation_id);
     return false;
   }
-  // Readest may first emit its default page and may normalize the supplied CFI
-  // before emitting the restored page. Suppress every startup event during a
-  // short grace period rather than relying on byte-for-byte CFI equality.
-  if (now < suppression.graceUntil) return true;
-  if (progress.location === suppression.location) return true;
-  clearTimeout(suppression.cleanupTimer);
-  annotationLocateSuppressions.delete(key);
-  return false;
+  if (
+    suppression.serverUrl !== normalizeServerUrl(serverUrl)
+    || suppression.bookId !== progress.moke_book_id
+  ) return false;
+
+  // A terminal page event can still be followed by a coalesced correlated
+  // relocate. Keep suppressing this id until Readest confirms that every
+  // correlated event has been delivered (or the TTL reclaims the state).
+  return true;
+}
+
+function newAnnotationNavigationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return `annotation-locate-${globalThis.crypto.randomUUID()}`;
+  }
+  return `annotation-locate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 18)}`;
 }
 
 function hash32(value: string, seed: number): number {
@@ -415,15 +432,25 @@ function normalizeUpsertAnnotation(
   input: AnnotationUpsertInput,
   requestedBookId: string | number,
 ): BookAnnotation {
+  if (!isRecord(value)) throw unsupportedContractError();
+
   try {
-    return normalizeAnnotation(value);
+    const annotation = normalizeAnnotation(value);
+    return {
+      ...annotation,
+      client_id: nullableString(value.client_id) ?? nullableString(input.client_id),
+      cfi: fallbackNullableString(value.cfi, input.cfi),
+      chapter: fallbackString(value.chapter, input.chapter),
+      quote_text: fallbackString(value.quote_text, input.quote_text),
+      content: fallbackString(value.content, input.content),
+      color: fallbackString(value.color, input.color),
+      author_name: fallbackString(value.author_name, input.author_name),
+    };
   } catch {
     // A successful idempotent POST may return a compact representation even
     // when the GET endpoint uses the full v2 shape. Preserve the committed
     // result by filling optional display fields from the submitted payload.
   }
-
-  if (!isRecord(value)) throw unsupportedContractError();
   const id = finiteNumber(value.id);
   const bookId = finiteNumber(value.book_id) ?? finiteNumber(requestedBookId);
   const annotationType = typeof value.annotation_type === 'string'
@@ -434,17 +461,9 @@ function normalizeUpsertAnnotation(
     throw unsupportedContractError();
   }
 
-  const sources: AnnotationSource[] = [];
-  if (Array.isArray(value.sources)) {
-    for (const source of value.sources) {
-      try {
-        sources.push(normalizeSource(source));
-      } catch {
-        // A malformed optional source must not turn a committed POST into a
-        // visible save failure. The next GET can recover the canonical shape.
-      }
-    }
-  }
+  const sources = Array.isArray(value.sources)
+    ? normalizeSources(value.sources, value.id)
+    : [];
 
   return {
     id,
@@ -492,20 +511,54 @@ function normalizeAnnotation(value: unknown): BookAnnotation {
     user_modified_at: nullableString(value.user_modified_at),
     created_at: nullableString(value.created_at),
     updated_at: nullableString(value.updated_at),
-    sources: value.sources.map(normalizeSource),
+    sources: normalizeSources(value.sources, value.id),
   };
 }
 
+function normalizeSources(values: unknown[], annotationId: unknown): AnnotationSource[] {
+  const sources: AnnotationSource[] = [];
+  const invalidSources: Array<{ source_index: number; reason: string }> = [];
+  values.forEach((value, sourceIndex) => {
+    try {
+      sources.push(normalizeSource(value));
+    } catch (error) {
+      invalidSources.push({
+        source_index: sourceIndex,
+        reason: error instanceof Error ? error.message : '未知来源结构错误。',
+      });
+    }
+  });
+  if (invalidSources.length > 0) {
+    // Source rows are optional provenance. Keep the annotation's readable
+    // body and aggregate diagnostics so one annotation emits one warning.
+    console.warn('[annotations] 已跳过畸形来源记录', {
+      annotation_id: finiteNumber(annotationId),
+      source_indices: invalidSources.map(({ source_index }) => source_index),
+      invalid_sources: invalidSources,
+    });
+  }
+  return sources;
+}
+
 function normalizeSource(value: unknown): AnnotationSource {
-  if (!isRecord(value)
-    || typeof value.id !== 'number'
+  if (!isRecord(value)) {
+    throw new TypeError('来源记录必须是对象。');
+  }
+  const id = finiteNumber(value.id);
+  if (id === null
     || typeof value.source_name !== 'string'
     || typeof value.source_connection_id !== 'string'
     || typeof value.source_sync_status !== 'string') {
-    throw unsupportedContractError();
+    const invalidFields = [
+      id === null ? 'id（必须为有限数字）' : '',
+      typeof value.source_name !== 'string' ? 'source_name（必须为字符串）' : '',
+      typeof value.source_connection_id !== 'string' ? 'source_connection_id（必须为字符串）' : '',
+      typeof value.source_sync_status !== 'string' ? 'source_sync_status（必须为字符串）' : '',
+    ].filter(Boolean);
+    throw new TypeError(`来源必填字段无效：${invalidFields.join('、')}。`);
   }
   return {
-    id: value.id,
+    id,
     source_name: value.source_name,
     source_connection_id: value.source_connection_id,
     source_annotation_id: nullableString(value.source_annotation_id),
@@ -564,8 +617,8 @@ function readestAnnotationCfi(value: string | null): string | null {
   return /^epubcfi\(.+\)$/.test(cfi) ? cfi : null;
 }
 
-function annotationProgressKey(serverUrl: string, bookId: string | number): string {
-  return `${serverUrl.replace(/\/+$/, '')}\u0000${String(bookId)}`;
+function normalizeServerUrl(serverUrl: string): string {
+  return serverUrl.replace(/\/+$/, '');
 }
 
 function unsupportedContractError(): MokeApiError {
