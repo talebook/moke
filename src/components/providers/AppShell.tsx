@@ -14,6 +14,7 @@ import {
   showMokeSystemStatusBar,
   shouldApplyTopSafeArea,
 } from '@/lib/moke-reader';
+import { createBoundedRetryCache } from '@/lib/bounded-retry-cache';
 import { shouldPreventNativeAppZoomShortcut } from '@/lib/native-app-zoom';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
@@ -82,11 +83,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
     const autoEinkMq = window.matchMedia('(update: slow), (max-color: 1)');
     let cancelled = false;
-    let platformPromise: Promise<string> | undefined;
+    const platformCache = createBoundedRetryCache(getMokeRuntimePlatform, {
+      maxAttempts: 3,
+      retryDelayMs: 250,
+    });
 
     const restoreStatusBar = (dark: boolean) => {
-      platformPromise ??= getMokeRuntimePlatform();
-      void platformPromise
+      void platformCache.get()
         .then(async (platform) => {
           if (cancelled) return;
           await showMokeSystemStatusBar(platform, dark, window.MokeWindowMode);

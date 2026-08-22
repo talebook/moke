@@ -2,6 +2,7 @@
 
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { debugLog } from '@/lib/debug-log';
+import { readingProgressForPersistence } from '@/lib/reading-progress-payload';
 import { useServerStore } from '@/lib/store/server';
 
 export interface ReadingProgressPayload {
@@ -17,6 +18,9 @@ export interface ReadingProgressPayload {
   total_pages?: number;
   progress?: number;
   fraction?: number;
+  moke_navigation_id?: string;
+  moke_navigation_kind?: 'annotation-locate';
+  moke_navigation_phase?: 'pending' | 'navigating' | 'complete';
   updated_at: string;
 }
 
@@ -50,6 +54,13 @@ export function normalizeReaderProgressEvent(input: Record<string, unknown>): Re
     total_pages: totalPages,
     progress,
     fraction,
+    moke_navigation_id: toStringValue(input.moke_navigation_id),
+    moke_navigation_kind: input.moke_navigation_kind === 'annotation-locate'
+      ? 'annotation-locate'
+      : undefined,
+    moke_navigation_phase: isNavigationPhase(input.moke_navigation_phase)
+      ? input.moke_navigation_phase
+      : undefined,
     updated_at: new Date().toISOString(),
   };
 }
@@ -66,7 +77,7 @@ export async function fetchReadingProgress(bookId: string | number): Promise<Rea
     const progress = data.progress;
 
     if (!progress || progress.schema !== 'moke.readest.progress.v1') return null;
-    return progress as ReadingProgressPayload;
+    return readingProgressForPersistence(progress as ReadingProgressPayload);
   } catch (error) {
     markProgressUnsupported(error);
     debugLog('warn', 'reading-progress', `读取阅读进度失败: ${bookId}`, getErrorMessage(error));
@@ -83,7 +94,7 @@ export async function saveReadingProgress(bookId: string | number, progress: Rea
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ progress }),
+      body: JSON.stringify({ progress: readingProgressForPersistence(progress) }),
     });
     await readApiJson<ReadingProgressResponse>(response);
   } catch (error) {
@@ -110,6 +121,10 @@ function toStringValue(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (typeof value === 'number') return String(value);
   return undefined;
+}
+
+function isNavigationPhase(value: unknown): value is NonNullable<ReadingProgressPayload['moke_navigation_phase']> {
+  return value === 'pending' || value === 'navigating' || value === 'complete';
 }
 
 function toNumber(value: unknown): number | undefined {

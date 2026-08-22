@@ -38,11 +38,9 @@ pub struct ExtensionRuntime {
     pub ws_port: u16,
     /// WebSocket 广播发送端，供 ext_reader_event 等向外广播事件
     pub ws_broadcast: Sender<events::WsBroadcast>,
-    /// 阻塞等待命令回执的注册表：request_id → 回执发送端。
-    /// 与 api_server 的 ServerContext 共享同一份，ext_reader_event 收到
-    /// `command:result` 时按 request_id 投递给等待中的 /command 调用。
-    pub pending_commands:
-        Arc<Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>>,
+    /// 阻塞等待命令回执的注册表。外部请求按拓展和目标窗口隔离，阅读器
+    /// 回执使用每次调用独有的 correlation_id，并校验上报窗口来源。
+    pub pending_commands: Arc<Mutex<api_server::PendingCommands>>,
     /// 端口分配的起始值（wrap 时回到这里）
     pub port_range_start: u16,
 }
@@ -464,20 +462,48 @@ fn ext_diagnostics(
 fn ext_reader_event(
     state: tauri::State<'_, ExtensionRuntime>,
     app: AppHandle,
+    source_window: tauri::WebviewWindow,
     event: String,
-    data: serde_json::Value,
+    mut data: serde_json::Value,
 ) -> Result<(), String> {
-    // 命令回执投递：若有 REST /command 正在阻塞等待该 request_id，
-    // 先把回执发给等待方（不改变原有的 WS/Tauri 广播路径）。
+    // 同步命令回执使用宿主生成的 correlation_id。只有发出命令的目标窗口
+    // 才能满足等待方；投递和广播前恢复拓展原始 request_id。
     if event == "command:result" {
-        if let Some(request_id) = data.get("request_id").and_then(|v| v.as_str()) {
-            if let Some(tx) = state
-                .pending_commands
-                .lock()
-                .unwrap()
-                .remove(request_id)
-            {
-                let _ = tx.send(data.clone());
+        if let Some(correlation_id) = data
+            .get("request_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+        {
+            let receipt_match = state.pending_commands.lock().unwrap().deliver(
+                &correlation_id,
+                source_window.label(),
+                data.clone(),
+            );
+            match receipt_match {
+                api_server::ReceiptMatch::Active { request_id } => {
+                    data["request_id"] = serde_json::Value::String(request_id);
+                }
+                api_server::ReceiptMatch::Late { request_id } => {
+                    data["request_id"] = serde_json::Value::String(request_id);
+                    data["late"] = serde_json::Value::Bool(true);
+                }
+                api_server::ReceiptMatch::SourceMismatch { target_window } => {
+                    log::warn!(
+                        "[ext] 忽略来自窗口「{}」的命令回执：目标窗口为「{}」",
+                        source_window.label(),
+                        target_window
+                    );
+                    return Ok(());
+                }
+                api_server::ReceiptMatch::Unknown
+                    if api_server::is_internal_request_id(&correlation_id) =>
+                {
+                    log::warn!("[ext] 忽略未知的内部命令关联 ID");
+                    if let Some(object) = data.as_object_mut() {
+                        object.remove("request_id");
+                    }
+                }
+                api_server::ReceiptMatch::Unknown => {}
             }
         }
     }
@@ -601,9 +627,7 @@ pub fn init(app: &AppHandle) {
     let (ws_port, ws_sender) = events::start(enabled.clone(), WS_SERVER_PORT);
 
     // 命令回执等待注册表：api_server 与 ext_reader_event 共享同一份 Arc
-    let pending_commands: Arc<
-        Mutex<HashMap<String, std::sync::mpsc::Sender<serde_json::Value>>>,
-    > = Arc::new(Mutex::new(HashMap::new()));
+    let pending_commands = Arc::new(Mutex::new(api_server::PendingCommands::default()));
 
     // 2. 再启动 REST API Server（如果 WS 回退了端口，REST 继续往后试）
     let api_ctx = Arc::new(api_server::ServerContext {

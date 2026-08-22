@@ -160,9 +160,15 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
      */
     private fun showMokeStatusBar(darkMode: Boolean) {
         runOnUiThread {
-            val controller = WindowCompat.getInsetsController(window, window.decorView)
-            controller.show(WindowInsetsCompat.Type.statusBars())
-            controller.isAppearanceLightStatusBars = !darkMode
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            try {
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                controller.show(WindowInsetsCompat.Type.statusBars())
+                controller.isAppearanceLightStatusBars = !darkMode
+            } catch (_: IllegalStateException) {
+                // The Activity may be destroyed after the lifecycle guard but
+                // before its queued UI operation reaches the window.
+            }
         }
     }
 

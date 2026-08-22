@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { logErrorMetadata } from '../src/lib/api-log.ts';
 import {
   installConsoleCapture,
   uninstallConsoleCapture,
@@ -58,6 +59,34 @@ test('installConsoleCapture patch console 后日志进入面板，uninstall 后�
   assert.equal(logs.length, 1);
 
   restoreWindow();
+});
+
+test('welcome 失败元数据持久化时不包含两条调用链的原始 msg', () => {
+  const localStorage = mockWindow();
+  let serialized = '';
+
+  try {
+    useDebugLogStore.getState().clear();
+    installConsoleCapture();
+    logErrorMetadata('WelcomePage validateServerConnection failed', {
+      err: 'user.need_login',
+      msg: 'validate raw msg token=first-secret',
+    });
+    logErrorMetadata('WelcomePage checkWelcomeRequirement failed', {
+      err: 'server.invalid_response',
+      msg: 'welcome raw msg token=second-secret',
+    });
+    serialized = localStorage.getItem('moke-debug-logs-v1') || '';
+  } finally {
+    uninstallConsoleCapture();
+    restoreWindow();
+  }
+
+  const stored = JSON.parse(serialized);
+  assert.equal(stored.length, 2);
+  assert.match(serialized, /user\.need_login/);
+  assert.match(serialized, /server\.invalid_response/);
+  assert.doesNotMatch(serialized, /validate raw msg|welcome raw msg|first-secret|second-secret/);
 });
 
 test('日志持久化，显式清空后不会被旧快照带回', () => {

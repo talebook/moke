@@ -3,6 +3,8 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
+export const requiresMokeNavigate = (platform: string): boolean => platform === 'ohos';
+
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
  * the top safe-area inset. Android multi-window and OHOS already keep the
@@ -150,21 +152,30 @@ export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
   return isSingleWebviewRuntime(platform) ? 'mobile' : 'desktop';
 }
 
+/** Full-document navigation is restricted to routes inside this app origin. */
+export function isSafeAppNavigationPath(href: string): boolean {
+  return href.startsWith('/') && !href.startsWith('//');
+}
+
 /**
  * Full-document navigation for single-WebView runtimes (OHOS/Android/iOS).
  *
  * ArkWeb cannot reliably execute Next.js App Router RSC navigation over the
  * custom `tauri://` scheme, and URL params across pages are unreliable there
- * (see the welcome page). Landing redirects that run right after hydration are
- * the likeliest to get stuck on a blank screen, so they go through the native
- * `moke_navigate` command instead of `router.replace`. On any other platform
- * (or if the native command is unavailable), fall back to the client router.
+ * (see the welcome page). OHOS therefore uses the narrowly registered native
+ * `moke_navigate` command. Android/iOS still need a real document load when
+ * crossing between the separate Moke and Readest Next apps, but can use the
+ * browser navigation API without exposing a native navigation command.
  */
 export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
   platformOverride?: string,
 ): Promise<void> {
+  if (!isSafeAppNavigationPath(href)) {
+    console.warn('Refusing unsafe full-document navigation:', href);
+    return;
+  }
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     fallback(href);
     return;
@@ -185,6 +196,17 @@ export async function navigateFullDocument(
   }
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
+    return;
+  }
+  if (!requiresMokeNavigate(currentPlatform)) {
+    // Crossing app boundaries intentionally discards the current shell state;
+    // the launch URL carries all context the embedded reader needs.
+    try {
+      window.location.assign(href);
+    } catch (error) {
+      console.warn('Full-document navigation failed, using router navigation:', error);
+      fallback(href);
+    }
     return;
   }
   try {
@@ -236,31 +258,66 @@ export function buildEmbeddedReaderHomeUrl({
   return `/readest/?${params.toString()}`;
 }
 
+interface ReaderHomeWindowEvent {
+  payload?: unknown;
+}
+
+interface ReaderHomeWindow {
+  once(
+    event: 'tauri://created' | 'tauri://error',
+    handler: (event: ReaderHomeWindowEvent) => void,
+  ): unknown;
+}
+
+interface ReaderHomeWindowOptions {
+  url: string;
+  title: string;
+  width: number;
+  height: number;
+  minWidth: number;
+  minHeight: number;
+  resizable: boolean;
+  focus: boolean;
+}
+
+export type ReaderHomeWindowFactory = (
+  label: string,
+  options: ReaderHomeWindowOptions,
+) => ReaderHomeWindow;
+
 export async function openEmbeddedReaderHome({
   eink,
   debugPanel = false,
   serverUrl,
   navigate,
+  platformOverride,
+  windowFactory,
 }: {
   eink: boolean;
   debugPanel?: boolean;
   serverUrl?: string;
   navigate: (href: string) => void;
+  platformOverride?: string;
+  windowFactory?: ReaderHomeWindowFactory;
 }): Promise<void> {
   const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   let currentPlatform = 'web';
   let probeFailed = false;
   if (isTauri) {
-    try {
-      currentPlatform = await getMokeRuntimePlatform();
-    } catch (error) {
-      // A failed probe must not block opening the reader. Fall back to the
-      // desktop window flow (on single-WebView runtimes window creation fails
-      // and we degrade to in-place navigation, which is the right flow there).
-      console.warn('Unable to detect runtime platform, assuming desktop reader window flow:', error);
-      currentPlatform = 'desktop';
-      probeFailed = true;
+    if (platformOverride) {
+      currentPlatform = platformOverride;
+    } else {
+      try {
+        currentPlatform = await getMokeRuntimePlatform();
+      } catch (error) {
+        // A failed probe must not block opening the reader. Fall back to the
+        // desktop window flow (on single-WebView runtimes window creation fails
+        // and we degrade to in-place navigation, which is the right flow there).
+        console.warn('Unable to detect runtime platform, assuming desktop reader window flow:', error);
+        currentPlatform = 'desktop';
+        probeFailed = true;
+      }
     }
   }
 
@@ -284,30 +341,34 @@ export async function openEmbeddedReaderHome({
   const includeServerUrl =
     (isTauri && probeFailed) || shouldIncludeServerUrl(isTauri, currentPlatform);
 
-  const href = buildEmbeddedReaderHomeUrl({
+  const readerHref = buildEmbeddedReaderHomeUrl({
     eink,
     debugPanel,
     serverUrl: includeServerUrl ? serverUrl : undefined,
   });
 
   if (!isTauri) {
-    navigate(href);
+    navigate(readerHref);
     return;
   }
 
   if (singleWebview) {
     // Reuse the platform already probed above instead of probing again inside
     // navigateFullDocument (each probe is a Rust IPC call).
-    await navigateFullDocument(href, navigate, currentPlatform);
+    await navigateFullDocument(readerHref, navigate, currentPlatform);
     return;
   }
 
   try {
-    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    let createWindow = windowFactory;
+    if (!createWindow) {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      createWindow = (label, options) => new WebviewWindow(label, options);
+    }
     // 书库首页窗口不代表阅读器，不能落入扩展的 `reader-*` 枚举（H20-L4）。
     const label = buildReaderHomeWindowLabel();
-    const readerWindow = new WebviewWindow(label, {
-      url: href,
+    const readerWindow = createWindow(label, {
+      url: readerHref,
       title: 'Readest',
       width: 1280,
       height: 800,
@@ -325,7 +386,9 @@ export async function openEmbeddedReaderHome({
     });
   } catch (error) {
     console.warn('Falling back to current-window embedded reader navigation:', error);
-    navigate(href);
+    // The main-window ReaderProgressProvider is unmounted by this navigation,
+    // so the reader must take over progress saving in the fallback path.
+    navigate(buildEmbeddedReaderHomeUrl({ eink, debugPanel, serverUrl }));
   }
 }
 

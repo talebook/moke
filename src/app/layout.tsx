@@ -71,6 +71,10 @@ function installMokeDocumentTransitionGuard(
 
 // Both functions are serialized into the pre-hydration document. Keep their
 // implementations self-contained; tests execute the serialized guard helper.
+// This head script must run before hydration. In production Tauri's asset
+// compiler hashes each emitted inline script and appends the exact sha256
+// sources to script-src (dangerousDisableAssetCspModification stays false in
+// tauri.conf.json); development uses the separate devCsp policy.
 const mokeDocumentTransitionGuardScript = `(${installMokeDocumentTransitionGuard.toString()})(${shouldAllowReaderExitTransition.toString()});`;
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';

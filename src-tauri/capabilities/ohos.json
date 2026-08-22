@@ -1,18 +1,13 @@
 {
-  "$schema": "../gen/schemas/desktop-schema.json",
+  "$schema": "../gen/schemas/open-harmony-schema.json",
   "identifier": "ohos",
   "description": "OpenHarmony capabilities: storage, network, sync and host IPC.",
   "windows": [
     "main"
   ],
-  "remote": {
-    "urls": [
-      "http://*:3000/**",
-      "https://*:3000/**",
-      "http://*:3001/**",
-      "https://*:3001/**"
-    ]
-  },
+  "platforms": [
+    "openHarmony"
+  ],
   "permissions": [
     "core:default",
     "fs:default",
