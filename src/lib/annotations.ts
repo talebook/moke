@@ -422,6 +422,7 @@ function normalizeUpsertAnnotation(
     const annotation = normalizeAnnotation(value);
     return {
       ...annotation,
+      client_id: nullableString(value.client_id) ?? nullableString(input.client_id),
       cfi: fallbackNullableString(value.cfi, input.cfi),
       chapter: fallbackString(value.chapter, input.chapter),
       quote_text: fallbackString(value.quote_text, input.quote_text),

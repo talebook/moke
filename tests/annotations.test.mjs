@@ -370,6 +370,21 @@ test('POST 完整结构含畸形 source 时仍从 input 回填缺失展示字段
   }
 });
 
+test('POST 完整结构省略 client_id 时保留本机 Moke 来源身份', async () => {
+  const responseAnnotation = annotation({ sources: [] });
+  delete responseAnnotation.client_id;
+
+  const result = await upsertBookAnnotation(
+    async () => jsonResponse({ err: 'ok', annotation: responseAnnotation }),
+    'http://talebook',
+    42,
+    { annotation_type: 'note', client_id: 'moke-full-response-client-id' },
+  );
+
+  assert.equal(result.annotation.client_id, 'moke-full-response-client-id');
+  assert.deepEqual(annotationSourceNames(result.annotation), ['moke']);
+});
+
 test('空来源字段不触发伪部分来源错误，talebook 来源身份可合法回写', async () => {
   const bodies = [];
   const requestLike = async (_url, init) => {
