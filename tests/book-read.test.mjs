@@ -128,6 +128,14 @@ test('仍落在同源阅读路由上的重定向视为记录成功', async () =>
   );
 });
 
+test('Tauri 响应未暴露最终 URL 时仍视为记录成功', async () => {
+  await recordBookRead(
+    async () => fakeResponse({ url: '' }),
+    'https://books.example',
+    'a',
+  );
+});
+
 test('JSON 成功响应遵循明确的 err=ok 契约', async () => {
   await recordBookRead(
     async () => fakeResponse({ body: JSON.stringify({ err: 'ok' }), contentType: 'application/json' }),
@@ -151,6 +159,16 @@ test('非成功 HTTP 状态返回记录错误', async () => {
   await assert.rejects(
     recordBookRead(async () => fakeResponse({ status: 403 }), 'https://books.example', 'a'),
     /book\.read_record\.http\.403/,
+  );
+});
+
+test('非成功 JSON 响应读体失败时保留 HTTP 状态错误', async () => {
+  await assert.rejects(
+    recordBookRead(async () => ({
+      ...fakeResponse({ contentType: 'application/json', status: 503 }),
+      arrayBuffer: async () => { throw new Error('body read failed'); },
+    }), 'https://books.example', 'a'),
+    /book\.read_record\.http\.503/,
   );
 });
 

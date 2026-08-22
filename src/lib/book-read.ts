@@ -97,8 +97,11 @@ export async function recordBookRead(
     } catch (error) {
       if (error instanceof Error && error.message === 'book.read_record.timeout') throw error;
       // A body-read failure does not invalidate an otherwise successful HTML
-      // record, but a JSON response cannot be verified without its payload.
-      if (isJsonResponse(response)) throw new Error('book.read_record.response.invalid');
+      // record, but a successful JSON response cannot be verified without its
+      // payload. Preserve the HTTP status error for unsuccessful responses.
+      if (response.ok && isJsonResponse(response)) {
+        throw new Error('book.read_record.response.invalid');
+      }
     }
 
     if (!response.ok) {
@@ -106,10 +109,10 @@ export async function recordBookRead(
     }
 
     // A 200 from `/`, a login page, or another host means the server followed
-    // a redirect and the record was never persisted. A missing/unparseable URL
-    // is also rejected because it cannot prove that the reader route handled
-    // the request.
-    const finalTarget = urlTargetOf(response.url);
+    // a redirect and the record was never persisted. Tauri plugin-http may not
+    // expose the final URL, so retain compatibility by falling back to the
+    // requested route when response.url is empty.
+    const finalTarget = urlTargetOf(response.url || readUrl);
     if (
       !expectedTarget
       || !finalTarget
