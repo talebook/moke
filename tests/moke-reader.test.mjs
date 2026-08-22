@@ -180,6 +180,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
         reader: 'readest',
         moke_book_id: '14',
         location: 'page=142',
+        moke_navigation_id: 'annotation-locate-14',
+        moke_navigation_kind: 'annotation-locate',
         updated_at: '2026-07-24T00:00:00.000Z',
       },
     }),
@@ -199,6 +201,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
     reader: 'readest',
     moke_book_id: '14',
     location: 'page=142',
+    moke_navigation_id: 'annotation-locate-14',
+    moke_navigation_kind: 'annotation-locate',
     updated_at: '2026-07-24T00:00:00.000Z',
   });
 
