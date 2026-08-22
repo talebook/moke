@@ -140,6 +140,20 @@ test('desktop and mobile reader variants grant the same reader operations', () =
   assert.deepEqual(mobile.permissions, desktop.permissions);
 });
 
+test('embedded reader windows can update their native window title', () => {
+  for (const file of [
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+    'src-tauri/capabilities/ohos.json',
+  ]) {
+    const capability = readCapability(file);
+    assert.ok(
+      capability.permissions.includes('core:window:allow-set-title'),
+      `${file} must allow Readest to update the active book title`,
+    );
+  }
+});
+
 test('main window does not inherit reader-only plugins', () => {
   const main = readCapability('src-tauri/capabilities/default.json');
   const identifiers = new Set(main.permissions.map(permissionIdentifier));
