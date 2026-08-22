@@ -1,5 +1,6 @@
 'use client';
 
+import { debugLog } from './debug-log.ts';
 import { makeOfflineBookKey, sanitizeOfflineFileName } from './offline-book-core.ts';
 
 const DB_NAME = 'moke-offline-books';
@@ -214,7 +215,17 @@ export async function saveOfflineBookStream(input: {
         // ignore
       }
     }
-    throw e;
+
+    if (e instanceof Error && (e.message === 'book.epub.invalid' || e.message.startsWith('book.download.'))) {
+      throw e;
+    }
+    debugLog(
+      'error',
+      'download',
+      '✗ 创建、关闭或登记离线书籍文件失败',
+      e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+    );
+    throw new Error('book.download.storage_failed');
   }
 
   // M1：同书换格式/改名再下载时，删除旧的残留磁盘文件，避免目录扫描

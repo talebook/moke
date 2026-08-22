@@ -48,6 +48,17 @@ export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
   return init;
 }
 
+/**
+ * Tauri plugin-http 会在请求带 Range 时自动补 `Accept-Encoding: identity`。
+ * 二进制响应禁用透明压缩，可避免部分 NAS/反向代理返回 200 后在正文解压阶段
+ * 中断；`bytes=0-` 仍请求完整文件，支持 Range 的服务器返回 206，不支持的会忽略。
+ */
+export function buildTauriBinaryHeaders(headers?: HeadersInit): Headers {
+  const result = new Headers(headers);
+  if (!result.has('range')) result.set('Range', 'bytes=0-');
+  return result;
+}
+
 export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {
   if (error instanceof MokeApiError) return error.message || fallback;
   if (error instanceof Error) {

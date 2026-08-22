@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   attachSafeJsonReader,
   MokeApiError,
+  buildTauriBinaryHeaders,
   buildTauriRequestInit,
   getErrorMessage,
   isAbsoluteHttpUrl,
@@ -156,6 +157,15 @@ test('错误提示映射覆盖地址丢失、HTTP 错误和未知错误', () => 
   assert.equal(getErrorMessage(new Error('Failed to fetch'), '网络异常'), '网络异常');
   // MokeApiError 保留服务端业务提示
   assert.equal(getErrorMessage(new MokeApiError('没有权限', 'permission.denied', 403)), '没有权限');
+});
+
+test('Tauri 二进制请求使用完整 Range 以禁用透明压缩', () => {
+  const headers = buildTauriBinaryHeaders({ Accept: 'application/epub+zip' });
+  assert.equal(headers.get('range'), 'bytes=0-');
+  assert.equal(headers.get('accept'), 'application/epub+zip');
+
+  const customRange = buildTauriBinaryHeaders({ Range: 'bytes=1024-2047' });
+  assert.equal(customRange.get('range'), 'bytes=1024-2047');
 });
 
 test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {
