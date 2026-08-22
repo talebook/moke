@@ -31,73 +31,22 @@ jobs:
         with:
           fetch-depth: 0        # 获取完整历史，便于审查
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install LiteLLM proxy
-        run: python -m pip install 'litellm[proxy]==1.97.0' 'fastapi==0.139.2'
-
-      - name: Create LiteLLM config
-        run: |
-          cat > litellm_config.yaml << 'EOF'
-          model_list:
-            - model_name: deepseek-v4-pro
-              litellm_params:
-                model: openai/deepseek-v4-pro
-                api_base: ${{ secrets.OPENCODE_GO_API_URL }}
-                api_key: ${{ secrets.OPENCODE_GO_API_KEY }}
-                drop_params: true
-                max_tokens: 4096
-          litellm_settings:
-            drop_params: true
-          general_settings:
-            master_key: sk-proxy-key
-          EOF
-
-      - name: Start LiteLLM proxy
-        env:
-          LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES: "true"
-        run: |
-          litellm --config litellm_config.yaml --port 8080 > "$RUNNER_TEMP/litellm.log" 2>&1 &
-          litellm_pid=$!
-
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8080/health/liveliness; then
-              echo "LiteLLM proxy is ready"
-              exit 0
-            fi
-
-            if ! kill -0 "$litellm_pid" 2>/dev/null; then
-              echo "LiteLLM proxy exited before becoming ready"
-              cat "$RUNNER_TEMP/litellm.log"
-              exit 1
-            fi
-
-            sleep 1
-          done
-
-          echo "LiteLLM proxy did not become ready within 30 seconds"
-          cat "$RUNNER_TEMP/litellm.log"
-          exit 1
-
       - name: Run Claude Review via DeepSeek
         id: claude-review
         uses: anthropics/claude-code-action@v1
         env:
-          # ---- 接入配置 ----
-          ANTHROPIC_BASE_URL: http://localhost:8080
-          ANTHROPIC_AUTH_TOKEN: sk-proxy-key
+          # ---- DeepSeek 接入配置 ----
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_API_KEY }}   # 你的 DeepSeek API Key
           # ---- 模型指定 ----
-          ANTHROPIC_MODEL: "deepseek-v4-pro"
-          ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro"
-          ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro"
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-pro"
-          CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-pro"
+          ANTHROPIC_MODEL: "deepseek-v4-flash"                     # 主模型用 Flash
+          ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash"        # 映射 Opus → Flash
+          ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash"      # 映射 Sonnet → Flash
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash"       # 映射 Haiku → Flash
+          CLAUDE_CODE_SUBAGENT_MODEL: "deepseek-v4-flash"          # 子代理也用 Flash
         with:
-          anthropic_api_key: sk-proxy-key
-          show_full_output: true
+          # 认证密钥（与 env 中 ANTHROPIC_AUTH_TOKEN 保持一致，但这里也需要显式传递）
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -112,15 +61,6 @@ jobs:
             Please respond in Simplified Chinese.
 
           # ---- claude_args 传递额外参数 ----
+
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
-
-      - name: Show LiteLLM logs on failure
-        if: failure()
-        run: |
-          if [ -f "$RUNNER_TEMP/litellm.log" ]; then
-            echo "Last 500 lines from the LiteLLM proxy:"
-            tail -n 500 "$RUNNER_TEMP/litellm.log"
-          else
-            echo "LiteLLM log file was not created"
-          fi
