@@ -279,25 +279,37 @@ pub fn run() {
 mod fs_scope_tests {
     use glob::{MatchOptions, Pattern};
     use serde_json::Value;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    // Mirrors the exact MatchOptions tauri's `fs::Scope::is_allowed` uses
-    // (tauri/src/scope/fs.rs): require_literal_separator: true so `/dir/*`
-    // doesn't match files inside subdirectories.
+    // Mirrors the pinned Tauri `fs::Scope::new` options
+    // (`vendor/tauri/crates/tauri/src/scope/fs.rs`). `glob` derives Default,
+    // so matching is case-insensitive; Tauri overrides only separator and
+    // platform dotfile handling here.
     fn tauri_match_options() -> MatchOptions {
         MatchOptions {
             require_literal_separator: true,
-            require_literal_leading_dot: false,
-            case_sensitive: true,
+            require_literal_leading_dot: cfg!(unix),
+            ..Default::default()
         }
+    }
+
+    // The asset handler percent-decodes the request path and validates it with
+    // SafePathBuf before consulting fs::Scope. Lock that serve-time boundary so
+    // the static glob test below is not mistaken for the traversal defense.
+    #[test]
+    fn asset_protocol_rejects_parent_traversal_before_scope_matching() {
+        let decoded_request_path = PathBuf::from("/appdata/Readest/../../../etc/hosts");
+        assert!(tauri::path::SafePathBuf::new(decoded_request_path).is_err());
     }
 
     // TB-85 F4 / TB-89 security regression: an unanchored pattern such as
     // `**/Readest/**/*` lets the asset protocol serve any absolute path that
     // happens to contain a `Readest` directory. Keep every static entry bound
     // to a known application/system base directory. Readest's managed files
-    // live below `$APPDATA/Readest` and are already covered by `$APPDATA/**/*`;
-    // user-selected files receive an exact runtime grant from the picker flow.
+    // live below `$APPDATA/Readest` and are already covered by `$APPDATA/**/*`.
+    // For external books, Readest's `allow_paths_in_scopes` and
+    // `open_reader_window` explicitly grant the selected file to both fs and
+    // asset scopes after checking the picker/fs authorization.
     #[test]
     fn asset_protocol_allow_entries_are_anchored_to_known_roots() {
         let opts = tauri_match_options();
