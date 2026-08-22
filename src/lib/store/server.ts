@@ -6,10 +6,14 @@ import {
   safeSetLocalStorageItem,
 } from '@/lib/browser-storage';
 import {
-  createUncheckedAnnotationCapability,
-  isAnnotationCapabilityStatus,
-  type AnnotationCapabilityStatus,
-} from '@/lib/annotation-capability';
+  DEFAULT_SERVER_CAPABILITIES,
+  mergePersistedServerCapabilities,
+  type PersistedServerCapabilities,
+  type ServerCapabilities,
+} from '@/lib/server-capabilities';
+
+export { DEFAULT_SERVER_CAPABILITIES } from '@/lib/server-capabilities';
+export type { ServerCapabilities } from '@/lib/server-capabilities';
 
 // ArkWeb may expose localStorage but reject access for the tauri:// custom
 // scheme. Zustand otherwise treats storage as unavailable and skips hydration
@@ -31,32 +35,6 @@ export interface ReaderInfo {
   admin: boolean;
   permission: string;
 }
-
-export interface ServerCapabilities {
-  shelfApi: boolean;
-  annotationApiStatus: AnnotationCapabilityStatus;
-  annotationApiCheckedAt: number | null;
-  readingStateApi: boolean;
-  readingProgressApi: boolean;
-  readingStatsApi: boolean;
-  networkSourcesApi: boolean;
-  checkedAt: number | null;
-  version: string;
-}
-
-const uncheckedAnnotationCapability = createUncheckedAnnotationCapability();
-
-export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
-  shelfApi: false,
-  annotationApiStatus: uncheckedAnnotationCapability.status,
-  annotationApiCheckedAt: uncheckedAnnotationCapability.checkedAt,
-  readingStateApi: false,
-  readingProgressApi: false,
-  readingStatsApi: false,
-  networkSourcesApi: false,
-  checkedAt: null,
-  version: '',
-};
 
 interface ServerState {
   serverUrl: string;
@@ -143,31 +121,14 @@ export const useServerStore = create<ServerState>()(
       // merge 时强制为 true；其余字段仍按持久化值恢复。
       merge: (persistedState, currentState) => {
         const persisted = (persistedState ?? {}) as Partial<ServerState>;
-        const persistedCapabilities = persisted.capabilities as (
-          Partial<ServerCapabilities> & { annotationApi?: unknown }
-        ) | undefined;
-        const persistedStatus = persistedCapabilities?.annotationApiStatus;
-        // A legacy `false` may have come from a network failure, so it must be
-        // rechecked rather than migrated to a durable "unsupported" result.
-        const annotationApiStatus = isAnnotationCapabilityStatus(persistedStatus)
-          ? persistedStatus
-          : persistedCapabilities?.annotationApi === true
-            ? 'supported'
-            : 'unchecked';
-        const annotationApiCheckedAt = annotationApiStatus === 'unchecked'
-          ? null
-          : typeof persistedCapabilities?.annotationApiCheckedAt === 'number'
-            ? persistedCapabilities.annotationApiCheckedAt
-            : persistedCapabilities?.checkedAt ?? null;
+        const persistedCapabilities = persisted.capabilities as PersistedServerCapabilities | undefined;
         return {
           ...currentState,
           ...persisted,
-          capabilities: {
-            ...currentState.capabilities,
-            ...persistedCapabilities,
-            annotationApiStatus,
-            annotationApiCheckedAt,
-          },
+          capabilities: mergePersistedServerCapabilities(
+            currentState.capabilities,
+            persistedCapabilities,
+          ),
           hasHydrated: true,
         };
       },

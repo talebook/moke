@@ -16,6 +16,7 @@ import {
 } from '@/lib/annotations';
 import {
   ANNOTATION_CAPABILITY_PROBE_MAX_REQUESTS,
+  getInitialAnnotationLoadState,
   shouldAutomaticallyLoadAnnotations,
   type AnnotationCapabilityStatus,
 } from '@/lib/annotation-capability';
@@ -61,14 +62,14 @@ export function AnnotationPanel({
   onAuthRequired,
 }: AnnotationPanelProps) {
   const [annotations, setAnnotations] = useState<BookAnnotation[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>(() => {
-    if (capabilityStatus === 'unsupported') return 'unsupported';
-    if (capabilityStatus === 'transient-error') return 'error';
-    return 'loading';
+  const initialLoadState = getInitialAnnotationLoadState({
+    status: capabilityStatus,
+    checkedAt: capabilityCheckedAt,
   });
-  const [errorMessage, setErrorMessage] = useState(() => (
-    capabilityStatus === 'transient-error' ? '上次探测遇到网络异常，请检查网络后重试。' : ''
-  ));
+  const [loadState, setLoadState] = useState<LoadState>(initialLoadState);
+  const [errorMessage, setErrorMessage] = useState(
+    initialLoadState === 'error' ? '上次探测遇到网络异常，请检查网络后重试。' : '',
+  );
   const [sourceFilter, setSourceFilter] = useState('all');
   const [showComposer, setShowComposer] = useState(false);
   const [chapter, setChapter] = useState('');

@@ -9,6 +9,8 @@ export interface AnnotationCapabilitySnapshot {
   checkedAt: number | null;
 }
 
+export type InitialAnnotationLoadState = 'loading' | 'error' | 'unsupported';
+
 /**
  * A transient failure is cached briefly so route changes do not create a
  * request loop. The panel always exposes an immediate manual retry.
@@ -43,4 +45,13 @@ export function shouldAutomaticallyLoadAnnotations(
   if (capability.status === 'unsupported') return false;
   return capability.checkedAt == null
     || now - capability.checkedAt >= ANNOTATION_CAPABILITY_RETRY_TTL_MS;
+}
+
+/** Keep the first rendered state consistent with the automatic-load decision. */
+export function getInitialAnnotationLoadState(
+  capability: AnnotationCapabilitySnapshot,
+  now = Date.now(),
+): InitialAnnotationLoadState {
+  if (shouldAutomaticallyLoadAnnotations(capability, now)) return 'loading';
+  return capability.status === 'unsupported' ? 'unsupported' : 'error';
 }
