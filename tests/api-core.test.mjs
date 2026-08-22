@@ -6,6 +6,7 @@ import {
   MokeApiError,
   buildTauriBinaryHeaders,
   buildTauriRequestInit,
+  cancelResponseBodyQuietly,
   getErrorMessage,
   isAbsoluteHttpUrl,
   readApiJson,
@@ -166,6 +167,18 @@ test('Tauri 二进制请求显式禁用透明压缩', () => {
 
   const customEncoding = buildTauriBinaryHeaders({ 'Accept-Encoding': 'br' });
   assert.equal(customEncoding.get('accept-encoding'), 'br');
+});
+
+test('Range 降级重试前会取消未消费的首个响应体', async () => {
+  let cancellations = 0;
+  await cancelResponseBodyQuietly({
+    body: { cancel: async () => { cancellations += 1; } },
+  });
+  assert.equal(cancellations, 1);
+
+  await assert.doesNotReject(cancelResponseBodyQuietly({
+    body: { cancel: async () => { throw new Error('already closed'); } },
+  }));
 });
 
 test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Copy, Download, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -13,7 +13,7 @@ import type { ThemeMode } from '@/lib/store/settings';
 import { cn } from '@/lib/utils';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
-import { openEmbeddedReaderHome } from '@/lib/moke-reader';
+import { getMokeRuntimePlatform, openEmbeddedReaderHome } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 
@@ -26,8 +26,23 @@ export default function SettingsPage() {
   const setEink = useSettingsStore((s) => s.setEink);
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
+  const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
+  const setDownloadDirectory = useSettingsStore((s) => s.setDownloadDirectory);
+  const [directorySupported, setDirectorySupported] = useState<boolean | null>(null);
   const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+      setDirectorySupported(false);
+      return;
+    }
+    void getMokeRuntimePlatform().then((platform) => {
+      if (!cancelled) setDirectorySupported(['windows', 'macos', 'linux'].includes(platform));
+    }).catch(() => { if (!cancelled) setDirectorySupported(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +90,29 @@ export default function SettingsPage() {
     logout();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/login');
+  };
+
+  const handleSelectDownloadDirectory = async () => {
+    if (!directorySupported) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const selected = await invoke<string | null>('moke_select_download_directory');
+      if (!selected) return;
+      setDownloadDirectory(selected);
+      showToast('下载目录已更新');
+    } catch (error) {
+      console.error('Failed to select download directory:', error);
+      showToast('无法使用所选目录，请重新选择', 'error');
+    }
+  };
+
+  const handleResetDownloadDirectory = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('moke_reset_download_directory');
+      setDownloadDirectory(null);
+      showToast('已恢复默认下载目录');
+    } catch { showToast('恢复默认目录失败', 'error'); }
   };
 
   const handleOpenReaderHome = async () => {
@@ -130,6 +168,27 @@ export default function SettingsPage() {
               tone="danger"
               onClick={handleDisconnect}
             />
+          </SettingsSection>
+
+          <SettingsSection title="离线下载" description="管理离线文件与存储位置">
+            <SettingsLinkRow
+              icon={Download}
+              label="下载管理"
+              description="查看进度、暂停、继续、重试或删除下载"
+              href="/downloads"
+            />
+            <SettingsRow
+              label="下载目录"
+              value={directorySupported === false
+                ? (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? '当前移动平台由系统管理，不支持自定义' : 'Web 版使用浏览器存储')
+                : (downloadDirectory || '应用默认目录')}
+            />
+            {directorySupported && (
+              <>
+                <ActionRow icon={FolderOpen} label="选择下载目录" onClick={() => void handleSelectDownloadDirectory()} />
+                {downloadDirectory && <ActionRow icon={RefreshCw} label="恢复默认目录" onClick={() => void handleResetDownloadDirectory()} />}
+              </>
+            )}
           </SettingsSection>
 
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">

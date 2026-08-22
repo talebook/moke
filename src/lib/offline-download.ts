@@ -3,6 +3,7 @@
 import { downloadBookBlob, streamBookDownload } from '@/lib/api';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-book-core';
 import { saveOfflineBook, saveOfflineBookStream } from '@/lib/offline-books';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export { beginOfflineDownload, endOfflineDownload };
 
@@ -12,39 +13,51 @@ export interface DownloadOfflineBookOptions {
   title: string;
   format: string;
   onProgress?: (progress: number) => void;
+  onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
   signal?: AbortSignal;
+  resume?: boolean;
+  preservePartialOnFailure?: boolean;
 }
 
-/** 统一离线下载入口：tauri 走磁盘流式写入（低内存峰值 + 原子索引），web 走 Blob 存 IndexedDB。 */
+/** Unified entry: Tauri streams to a resumable file; web stores one Blob in IndexedDB. */
 export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOptions): Promise<void> {
+  const format = options.format.toLowerCase();
   if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+    const downloadDirectory = useSettingsStore.getState().downloadDirectory;
     await saveOfflineBookStream({
       serverUrl: options.serverUrl,
       bookId: options.bookId,
       title: options.title,
-      fileName: `${options.title}.${options.format}`,
+      format,
+      fileName: `${options.title}.${format}`,
       mimeType: 'application/octet-stream',
-      write: async (writer) => {
-        const result = await streamBookDownload(options.bookId, options.format, {
-          write: (chunk) => writer.write(chunk),
-          onProgress: options.onProgress,
-          signal: options.signal,
-        });
-        return result.mimeType;
-      },
+      downloadDirectory,
+      resume: options.resume,
+      preservePartialOnFailure: options.preservePartialOnFailure,
+      write: async (writer) => streamBookDownload(options.bookId, format, {
+        write: (chunk) => writer.write(chunk),
+        onProgress: options.onProgress,
+        onTransfer: options.onTransfer,
+        signal: options.signal,
+        resumeFrom: writer.position,
+        onRangeReset: () => writer.truncate(),
+        validateEpub: false,
+      }),
     });
     return;
   }
 
-  const blob = await downloadBookBlob(options.bookId, options.format, {
+  const blob = await downloadBookBlob(options.bookId, format, {
     onProgress: options.onProgress,
     signal: options.signal,
   });
+  options.onTransfer?.(blob.size, blob.size);
   await saveOfflineBook({
     serverUrl: options.serverUrl,
     bookId: options.bookId,
     title: options.title,
-    fileName: `${options.title}.${options.format}`,
+    format,
+    fileName: `${options.title}.${format}`,
     mimeType: blob.type || 'application/octet-stream',
     blob,
   });

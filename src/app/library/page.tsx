@@ -17,11 +17,8 @@ import { BatchActionBar, type BatchAction } from '@/components/book/BatchActionB
 import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookContextMenu';
 import { Select } from '@/components/ui/Select';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
-import {
-  beginOfflineDownload,
-  downloadAndSaveOfflineBook,
-  endOfflineDownload,
-} from '@/lib/offline-download';
+import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
+import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { useToast } from '@/lib/toast';
 import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
@@ -440,13 +437,13 @@ export default function LibraryPage() {
   const downloadOne = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
-    if (!beginOfflineDownload(serverUrl, id)) {
+    const format = (book.files?.[0]?.format || 'epub').toLowerCase();
+    if (!beginOfflineDownload(serverUrl, id, format)) {
       toast(`《${book.title}》正在下载中`);
       return;
     }
-    const format = (book.files?.[0]?.format || 'epub').toLowerCase();
     try {
-      await downloadAndSaveOfflineBook({
+      await startManagedOfflineBookDownload({
         serverUrl,
         bookId: id,
         title: book.title,
@@ -456,7 +453,7 @@ export default function LibraryPage() {
     } catch {
       toast('下载失败');
     } finally {
-      endOfflineDownload(serverUrl, id);
+      endOfflineDownload(serverUrl, id, format);
     }
   };
 
@@ -614,10 +611,10 @@ export default function LibraryPage() {
       for (const id of ids) {
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
-        if (!beginOfflineDownload(serverUrl, id)) { skipped++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
+        if (!beginOfflineDownload(serverUrl, id, format)) { skipped++; continue; }
         try {
-          await downloadAndSaveOfflineBook({
+          await startManagedOfflineBookDownload({
             serverUrl,
             bookId: id,
             title: book.title,
@@ -625,7 +622,7 @@ export default function LibraryPage() {
           });
           ok++;
         } catch { fail++; }
-        finally { endOfflineDownload(serverUrl, id); }
+        finally { endOfflineDownload(serverUrl, id, format); }
       }
       exitBatchMode();
       if (ok > 0) toast(`已下载 ${ok} 本`);

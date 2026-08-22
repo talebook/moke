@@ -3,8 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   getOfflineDownloadSnapshot,
+  listOfflineDownloadSnapshots,
+  pauseOfflineDownload,
+  removeOfflineDownloadSnapshot,
   startOfflineDownload,
   subscribeOfflineDownload,
+  subscribeOfflineDownloads,
 } from '../src/lib/offline-download-manager.ts';
 
 const deferred = () => {
@@ -39,6 +43,132 @@ test('离线下载不依赖详情页订阅者生命周期', async () => {
   assert.equal(updates.at(-1)?.progress, 25);
 });
 
+test('暂停会中止写入并保留已下载字节供继续', async () => {
+  const key = 'https://example.test::resume::epub';
+  let writes = 0;
+  const download = startOfflineDownload({
+    key,
+    metadata: { serverUrl: 'https://example.test', bookId: 'resume', title: '恢复', format: 'epub' },
+    run: async (_onProgress, signal, onTransfer) => {
+      onTransfer(128, 1024);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      });
+      writes += 1;
+    },
+  });
+  assert.equal(pauseOfflineDownload(key), true);
+  await download;
+  assert.equal(writes, 0);
+  assert.equal(getOfflineDownloadSnapshot(key)?.status, 'paused');
+  assert.equal(getOfflineDownloadSnapshot(key)?.downloadedBytes, 128);
+});
+
+test('异常退出后持久化中的任务恢复为可继续的暂停状态', () => {
+  const storage = new Map([['moke-offline-download-tasks-v1', JSON.stringify([{
+    key: 'https://recover.test::1::epub', serverUrl: 'https://recover.test', bookId: '1',
+    title: '恢复任务', format: 'epub', status: 'downloading', progress: 42, downloadedBytes: 420,
+  }, {
+    key: 'https://recover.test::done::epub', serverUrl: 'https://recover.test', bookId: 'done',
+    title: '已完成任务', format: 'epub', status: 'completed', progress: 100, downloadedBytes: 1024,
+  }])]]);
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+  const restoredSnapshots = listOfflineDownloadSnapshots('https://recover.test');
+  assert.equal(restoredSnapshots.length, 1);
+  const [restored] = restoredSnapshots;
+  assert.equal(restored.status, 'paused');
+  assert.equal(restored.downloadedBytes, 420);
+  assert.match(String(restored.error), /异常退出/);
+  delete globalThis.window;
+});
+
+test('大量 chunk 的持久化和全局刷新有固定上限且终态不会丢失', async () => {
+  const key = 'https://chunks.test::large::epub';
+  const storage = new Map();
+  let storageWrites = 0;
+  globalThis.window = {
+    localStorage: {
+      getItem: (storageKey) => storage.get(storageKey) ?? null,
+      setItem: (storageKey, value) => {
+        storageWrites += 1;
+        storage.set(storageKey, value);
+      },
+    },
+  };
+
+  let taskRefreshes = 0;
+  let recordRefreshes = 0;
+  const events = [];
+  const unsubscribe = subscribeOfflineDownloads((event) => {
+    if (event.key !== key) return;
+    events.push(event);
+    taskRefreshes += 1;
+    if (event.affectsRecords) recordRefreshes += 1;
+  });
+
+  const chunkCount = 10_000;
+  await startOfflineDownload({
+    key,
+    metadata: {
+      serverUrl: 'https://chunks.test', bookId: 'large', title: '大文件', format: 'epub', totalBytes: chunkCount,
+    },
+    run: async (onProgress, _signal, onTransfer) => {
+      for (let received = 1; received <= chunkCount; received += 1) {
+        onTransfer(received, chunkCount);
+        onProgress(Math.min(99, Math.round(received / chunkCount * 100)));
+      }
+    },
+  });
+  unsubscribe();
+
+  // Hydration may add one write; 20,000 chunk callbacks add none before the immediate terminal flush.
+  assert.ok(storageWrites <= 3, `expected at most 3 localStorage writes, got ${storageWrites}`);
+  assert.ok(taskRefreshes <= 2, `expected at most 2 task refreshes, got ${taskRefreshes}`);
+  assert.equal(recordRefreshes, 1);
+  assert.deepEqual(events.map((event) => event.kind), ['progress', 'terminal']);
+  assert.deepEqual(events.map((event) => event.affectsRecords), [false, true]);
+
+  const finalSnapshot = getOfflineDownloadSnapshot(key);
+  assert.equal(finalSnapshot?.status, 'completed');
+  assert.equal(finalSnapshot?.progress, 100);
+  assert.equal(finalSnapshot?.downloadedBytes, chunkCount);
+  const persisted = JSON.parse(storage.get('moke-offline-download-tasks-v1'));
+  assert.equal(persisted.find((snapshot) => snapshot.key === key)?.status, 'completed');
+  assert.equal(persisted.find((snapshot) => snapshot.key === key)?.downloadedBytes, chunkCount);
+  delete globalThis.window;
+});
+
+test('成功快照在调用方读取后自动回收，失败快照继续保留供重试', async () => {
+  const storage = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+    },
+  };
+  const completedKey = 'https://cleanup.test::completed::epub';
+  await startOfflineDownload({ key: completedKey, run: async () => {} });
+  assert.equal(getOfflineDownloadSnapshot(completedKey)?.status, 'completed');
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(getOfflineDownloadSnapshot(completedKey), undefined);
+  assert.equal(JSON.parse(storage.get('moke-offline-download-tasks-v1')).some(({ key }) => key === completedKey), false);
+
+  const failedKey = 'https://cleanup.test::failed::epub';
+  await assert.rejects(startOfflineDownload({
+    key: failedKey,
+    run: async () => { throw new Error('network failed'); },
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(getOfflineDownloadSnapshot(failedKey)?.status, 'failed');
+  delete globalThis.window;
+});
+
 test('同一本书复用在途下载任务', async () => {
   const write = deferred();
   const key = 'https://example.test::40';
@@ -58,4 +188,92 @@ test('同一本书复用在途下载任务', async () => {
 
   write.resolve();
   await first;
+});
+
+test('删除运行中任务会等待取消清理且不会重新发布失败快照', async () => {
+  const cleanup = deferred();
+  const key = 'https://example.test::remove-active::epub';
+  let cleanupCalls = 0;
+
+  startOfflineDownload({
+    key,
+    metadata: { serverUrl: 'https://example.test', bookId: 'remove-active', title: '删除中', format: 'epub' },
+    run: async (_onProgress, signal, onTransfer) => {
+      onTransfer(256, 1024);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true });
+      });
+    },
+    onCancel: async () => {
+      cleanupCalls += 1;
+      await cleanup.promise;
+    },
+  });
+
+  let removed = false;
+  const firstRemoval = removeOfflineDownloadSnapshot(key).then(() => { removed = true; });
+  const secondRemoval = removeOfflineDownloadSnapshot(key);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(cleanupCalls, 1);
+  assert.equal(removed, false);
+  cleanup.resolve();
+  await Promise.all([firstRemoval, secondRemoval]);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(cleanupCalls, 1);
+  assert.equal(getOfflineDownloadSnapshot(key), undefined);
+  assert.equal(listOfflineDownloadSnapshots().some((snapshot) => snapshot.key === key), false);
+});
+
+test('旧任务结束不会误删同 key 的新任务', async () => {
+  const key = 'https://example.test::replacement::epub';
+  let replacement;
+  const unsubscribe = subscribeOfflineDownloads((event) => {
+    if (event.key !== key || event.snapshot?.status !== 'paused' || replacement) return;
+    replacement = startOfflineDownload({
+      key,
+      run: async (_onProgress, signal) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      }),
+    });
+  });
+
+  const first = startOfflineDownload({
+    key,
+    run: async (_onProgress, signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+    }),
+  });
+  assert.equal(pauseOfflineDownload(key), true);
+  await first;
+  assert.ok(replacement);
+  assert.equal(pauseOfflineDownload(key), true, 'replacement task must remain controllable');
+  await replacement;
+  unsubscribe();
+});
+
+test('重下已完成书籍从 0% 开始且首个快速分片不产生速度尖峰', async () => {
+  const key = 'https://example.test::redownload::epub';
+  await startOfflineDownload({ key, run: async () => {} });
+  const transfer = deferred();
+
+  const next = startOfflineDownload({
+    key,
+    metadata: { downloadedBytes: 0, totalBytes: 1_000 },
+    run: async (_onProgress, signal, onTransfer) => {
+      await transfer.promise;
+      onTransfer(10, 1_000);
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('paused', 'AbortError')), { once: true });
+      });
+    },
+  });
+  assert.equal(getOfflineDownloadSnapshot(key)?.progress, 0);
+  transfer.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getOfflineDownloadSnapshot(key)?.progress, 1);
+  assert.equal(getOfflineDownloadSnapshot(key)?.speedBytesPerSecond, 0);
+  assert.equal(pauseOfflineDownload(key), true);
+  await next;
 });

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Bookmark, Library, LogIn, Package, Puzzle, Settings } from 'lucide-react';
+import { BookOpen, Bookmark, Library, LogIn, Package, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useServerStore } from '@/lib/store/server';
 import { useExtensionStore } from '@/lib/store/extensions';

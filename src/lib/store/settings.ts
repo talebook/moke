@@ -25,6 +25,9 @@ interface SettingsState {
   // Appearance theme: 'light' | 'dark' | 'system' (follow the OS preference).
   theme: ThemeMode;
   setTheme: (v: ThemeMode) => void;
+  /** Desktop-only directory explicitly selected by the user; null uses AppData/books. */
+  downloadDirectory: string | null;
+  setDownloadDirectory: (path: string | null) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -34,6 +37,8 @@ export const useSettingsStore = create<SettingsState>()(
       setEink: (v) => set({ eink: v }),
       theme: 'system',
       setTheme: (v) => set({ theme: v }),
+      downloadDirectory: null,
+      setDownloadDirectory: (downloadDirectory) => set({ downloadDirectory }),
     }),
     { name: 'moke-settings' }
   )

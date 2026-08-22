@@ -12,7 +12,6 @@
 ///
 /// 拓展系统：通过 `extensions` 模块管理拓展的发现、生命周期、存储。
 /// 拓展以独立进程方式运行，通过本地 HTTP + WebSocket 与主程序通信。
-
 mod extensions;
 
 // Keep build-script profile routing covered by the normal `cargo test --lib`
@@ -23,8 +22,10 @@ mod build_config;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_fs::FsExt;
 
 static MOKE_DOWNLOADS_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
@@ -39,6 +40,10 @@ struct MokeDownloadedBook {
     book_id: String,
     title: String,
     file_name: String,
+    #[serde(default)]
+    relative_path: Option<String>,
+    #[serde(default)]
+    storage_root: Option<String>,
     mime_type: String,
     updated_at: u64,
 }
@@ -83,8 +88,94 @@ fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
     webview.navigate(target).map_err(|error| error.to_string())
 }
 
-fn moke_downloads_index_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|error| error.to_string())?.join("moke-downloads.json"))
+fn moke_downloads_index_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("moke-downloads.json"))
+}
+
+fn moke_download_directory_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("download-directory.json"))
+}
+
+fn read_download_directory(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let path = moke_download_directory_path(app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let value: Option<String> =
+        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    Ok(value.map(PathBuf::from))
+}
+
+fn write_download_directory(app: &AppHandle, directory: Option<&Path>) -> Result<(), String> {
+    let path = moke_download_directory_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let value = directory.map(|path| path.to_string_lossy().into_owned());
+    fs::write(
+        path,
+        serde_json::to_vec(&value).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// `std::fs::canonicalize` adds a verbatim prefix on Windows. Keep that form
+/// internally for comparisons, but never leak it into the settings UI or the
+/// frontend store, where users expect an ordinary drive/UNC path.
+fn download_directory_for_frontend(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if let Some(stripped) = value.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{}", stripped);
+    }
+    value
+        .strip_prefix(r"\\?\")
+        .unwrap_or(value.as_ref())
+        .to_string()
+}
+
+fn safe_relative_path(value: &str) -> Option<&Path> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(path)
+}
+
+fn downloaded_book_path(app: &AppHandle, book: &MokeDownloadedBook) -> Result<PathBuf, String> {
+    if let Some(relative) = book.relative_path.as_deref().and_then(safe_relative_path) {
+        if let Some(root) = &book.storage_root {
+            let stripped = relative.strip_prefix("books").unwrap_or(relative);
+            return Ok(PathBuf::from(root).join(stripped));
+        }
+        return Ok(app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join(relative));
+    }
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("books")
+        .join(&book.file_name))
+}
+
+fn should_prune_missing_download(book: &MokeDownloadedBook) -> bool {
+    book.storage_root.is_none()
 }
 
 fn read_moke_downloads(app: &AppHandle) -> Result<Vec<MokeDownloadedBook>, String> {
@@ -105,8 +196,11 @@ fn write_moke_downloads(app: &AppHandle, books: &[MokeDownloadedBook]) -> Result
     // 已存在目标，直接 tmp -> path 会导致第二次更新起全部失败。
     let tmp_path = path.with_extension("json.tmp");
     let backup_path = path.with_extension("json.bak");
-    fs::write(&tmp_path, serde_json::to_vec(books).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())?;
+    fs::write(
+        &tmp_path,
+        serde_json::to_vec(books).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
 
     if backup_path.exists() {
         if path.exists() {
@@ -139,6 +233,23 @@ fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Resu
     let _guard = MOKE_DOWNLOADS_INDEX_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
+    if let Some(root) = &book.storage_root {
+        let approved = read_download_directory(&app)?
+            .and_then(|path| path.canonicalize().ok())
+            .ok_or_else(|| "custom download directory is not approved".to_string())?;
+        let requested = PathBuf::from(root)
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if requested != approved
+            || book
+                .relative_path
+                .as_deref()
+                .and_then(safe_relative_path)
+                .is_none()
+        {
+            return Err("custom download path is outside the approved directory".into());
+        }
+    }
     let mut books = read_moke_downloads(&app)?;
     books.retain(|existing| existing.id != book.id);
     books.push(book);
@@ -155,6 +266,179 @@ fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String>
     write_moke_downloads(&app, &books)
 }
 
+#[tauri::command]
+async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>, String> {
+    #[cfg(target_env = "ohos")]
+    {
+        let _ = app;
+        Err("custom download directory is not supported on this platform".into())
+    }
+
+    #[cfg(not(target_env = "ohos"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+
+        // Keep directory authorization in one native command: the path can only
+        // come from this system picker and is never accepted from frontend IPC.
+        let Some(selected) = app
+            .dialog()
+            .file()
+            .set_title("选择下载目录")
+            .blocking_pick_folder()
+        else {
+            return Ok(None);
+        };
+        let directory = selected
+            .into_path()
+            .map_err(|error| error.to_string())?
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if !directory.is_dir() {
+            return Err("download directory must be an existing directory".into());
+        }
+
+        app.fs_scope()
+            .allow_directory(&directory, true)
+            .map_err(|error| error.to_string())?;
+        app.state::<tauri::scope::Scopes>()
+            .allow_directory(&directory, true)
+            .map_err(|error| error.to_string())?;
+        write_download_directory(&app, Some(&directory))?;
+        Ok(Some(download_directory_for_frontend(&directory)))
+    }
+}
+
+#[tauri::command]
+fn moke_reset_download_directory(app: AppHandle) -> Result<(), String> {
+    write_download_directory(&app, None)
+}
+
+#[tauri::command]
+fn moke_get_download_directory(app: AppHandle) -> Result<Option<String>, String> {
+    Ok(read_download_directory(&app)?.map(|path| download_directory_for_frontend(&path)))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadStorageStats {
+    available_bytes: u64,
+}
+
+#[derive(Clone, Copy)]
+enum MountPathStyle {
+    Native,
+    Windows,
+}
+
+const SYSTEM_MOUNT_PATH_STYLE: MountPathStyle = if cfg!(windows) {
+    MountPathStyle::Windows
+} else {
+    MountPathStyle::Native
+};
+
+/// A Windows drive path normalized independently of the host platform so the
+/// matching behavior can also be covered by tests on Unix CI. `canonicalize`
+/// may add a verbatim prefix while sysinfo reports ordinary drive mount paths.
+struct WindowsDrivePath {
+    drive: u8,
+    components: Vec<String>,
+}
+
+impl WindowsDrivePath {
+    fn parse(path: &Path) -> Option<Self> {
+        let normalized = path.to_string_lossy().replace('/', "\\");
+        let normalized = normalized
+            .strip_prefix(r"\\?\")
+            .unwrap_or(normalized.as_str());
+        let bytes = normalized.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || bytes[2] != b'\\'
+        {
+            return None;
+        }
+
+        let mut components = Vec::new();
+        for component in normalized[3..].split('\\').filter(|part| !part.is_empty()) {
+            if matches!(component, "." | "..") {
+                return None;
+            }
+            components.push(component.to_lowercase());
+        }
+        Some(Self {
+            drive: bytes[0].to_ascii_lowercase(),
+            components,
+        })
+    }
+
+    fn starts_with(&self, mount: &Self) -> bool {
+        self.drive == mount.drive && self.components.starts_with(&mount.components)
+    }
+
+    fn specificity(&self) -> usize {
+        3 + self
+            .components
+            .iter()
+            .map(|component| component.len() + 1)
+            .sum::<usize>()
+    }
+}
+
+fn target_is_on_mount(target: &Path, mount: &Path, style: MountPathStyle) -> bool {
+    match style {
+        MountPathStyle::Native => target.starts_with(mount),
+        MountPathStyle::Windows => {
+            match (
+                WindowsDrivePath::parse(target),
+                WindowsDrivePath::parse(mount),
+            ) {
+                (Some(target), Some(mount)) => target.starts_with(&mount),
+                _ => target.starts_with(mount),
+            }
+        }
+    }
+}
+
+fn mount_specificity(mount: &Path, style: MountPathStyle) -> usize {
+    match style {
+        MountPathStyle::Native => mount.as_os_str().len(),
+        MountPathStyle::Windows => WindowsDrivePath::parse(mount)
+            .map(|path| path.specificity())
+            .unwrap_or_else(|| mount.as_os_str().len()),
+    }
+}
+
+#[tauri::command]
+fn moke_download_storage_stats(
+    app: AppHandle,
+    directory: Option<String>,
+) -> Result<DownloadStorageStats, String> {
+    let configured = read_download_directory(&app)?;
+    let target = match (directory, configured) {
+        (Some(requested), Some(configured))
+            if PathBuf::from(&requested).canonicalize().ok().as_ref() == Some(&configured) =>
+        {
+            configured
+        }
+        (Some(_), _) => return Err("download directory is not approved".into()),
+        (None, Some(configured)) => configured,
+        (None, None) => app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
+    };
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let available_bytes = disks
+        .list()
+        .iter()
+        .filter(|disk| target_is_on_mount(&target, disk.mount_point(), SYSTEM_MOUNT_PATH_STYLE))
+        .max_by_key(|disk| mount_specificity(disk.mount_point(), SYSTEM_MOUNT_PATH_STYLE))
+        .map(|disk| disk.available_space())
+        .ok_or_else(|| "disk information unavailable".to_string())?;
+    Ok(DownloadStorageStats { available_bytes })
+}
+
 /// Lists local Moke downloads for the embedded Readest home page. Files that
 /// predate the metadata index are still exposed with a filename-derived title.
 #[tauri::command]
@@ -162,21 +446,33 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
     let _guard = MOKE_DOWNLOADS_INDEX_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
-    let books_dir = app.path().app_data_dir().map_err(|error| error.to_string())?.join("books");
-    let mut indexed = read_moke_downloads(&app)?;
-    let indexed_count = indexed.len();
-    indexed.retain(|book| books_dir.join(&book.file_name).is_file());
-    if indexed.len() != indexed_count {
-        write_moke_downloads(&app, &indexed)?;
+    let books_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("books");
+    let indexed = read_moke_downloads(&app)?;
+    let mut retained = Vec::with_capacity(indexed.len());
+    let mut result = Vec::with_capacity(indexed.len());
+    let mut pruned_default_record = false;
+    for book in indexed {
+        match downloaded_book_path(&app, &book) {
+            Ok(path) if path.is_file() => {
+                result.push(MokeDownloadedBookResponse {
+                    file_path: path.to_string_lossy().into_owned(),
+                    book: book.clone(),
+                });
+                retained.push(book);
+            }
+            // A removable/network drive can be temporarily unavailable. Hide
+            // the book for this listing, but preserve its durable index entry.
+            _ if !should_prune_missing_download(&book) => retained.push(book),
+            _ => pruned_default_record = true,
+        }
     }
-
-    let mut result: Vec<_> = indexed
-        .into_iter()
-        .map(|book| MokeDownloadedBookResponse {
-            file_path: books_dir.join(&book.file_name).to_string_lossy().into_owned(),
-            book,
-        })
-        .collect();
+    if pruned_default_record {
+        write_moke_downloads(&app, &retained)?;
+    }
 
     if books_dir.is_dir() {
         for entry in fs::read_dir(&books_dir).map_err(|error| error.to_string())? {
@@ -208,6 +504,8 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
                     book_id: String::new(),
                     title,
                     file_name,
+                    relative_path: None,
+                    storage_root: None,
                     mime_type: String::new(),
                     updated_at,
                 },
@@ -220,14 +518,18 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
     Ok(result)
 }
 
-fn moke_invoke_handler(
-) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static
+{
     tauri::generate_handler![
         moke_runtime_platform,
         #[cfg(target_env = "ohos")]
         moke_navigate,
         moke_record_downloaded_book,
         moke_remove_downloaded_book,
+        moke_select_download_directory,
+        moke_reset_download_directory,
+        moke_get_download_directory,
+        moke_download_storage_stats,
         moke_list_downloaded_books,
     ]
 }
@@ -330,6 +632,14 @@ pub fn run() {
             }
         })
         .setup(|_app| {
+            // Restore only the directory that was explicitly selected and persisted earlier.
+            if let Ok(Some(directory)) = read_download_directory(_app.handle()) {
+                let _ = _app.fs_scope().allow_directory(&directory, true);
+                let _ = _app
+                    .state::<tauri::scope::Scopes>()
+                    .allow_directory(&directory, true);
+            }
+
             #[cfg(debug_assertions)]
             _app.add_capability(reader_dev_remote_capability()?)?;
 
@@ -346,6 +656,109 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod download_storage_tests {
+    use super::{
+        download_directory_for_frontend, mount_specificity, should_prune_missing_download,
+        target_is_on_mount, MokeDownloadedBook, MountPathStyle,
+    };
+    use std::path::Path;
+
+    fn selected_mount<'a>(
+        target: &str,
+        mounts: &'a [&'a str],
+        style: MountPathStyle,
+    ) -> Option<&'a str> {
+        mounts
+            .iter()
+            .copied()
+            .filter(|mount| target_is_on_mount(Path::new(target), Path::new(mount), style))
+            .max_by_key(|mount| mount_specificity(Path::new(mount), style))
+    }
+
+    #[test]
+    fn windows_mount_matching_normalizes_verbatim_paths_drive_and_case() {
+        let style = MountPathStyle::Windows;
+        assert!(target_is_on_mount(
+            Path::new(r"\\?\c:\Users\Moke\Downloads"),
+            Path::new(r"C:\"),
+            style,
+        ));
+        assert!(target_is_on_mount(
+            Path::new(r"C:\Users\Moke\Downloads"),
+            Path::new(r"\\?\c:\users"),
+            style,
+        ));
+        assert!(!target_is_on_mount(
+            Path::new(r"\\?\C:\Users\Moke\Downloads"),
+            Path::new(r"D:\"),
+            style,
+        ));
+        assert!(!target_is_on_mount(
+            Path::new(r"C:\Users\Moke\Downloads"),
+            Path::new(r"C:\User"),
+            style,
+        ));
+    }
+
+    #[test]
+    fn windows_mount_selection_prefers_the_deepest_component_prefix() {
+        let mounts = [r"C:\", r"C:\Users", r"c:\users\moke", r"C:\Users\Mo"];
+        assert_eq!(
+            selected_mount(
+                r"\\?\C:\Users\Moke\Downloads",
+                &mounts,
+                MountPathStyle::Windows,
+            ),
+            Some(r"c:\users\moke"),
+        );
+    }
+
+    #[test]
+    fn frontend_directory_strips_windows_verbatim_prefixes() {
+        assert_eq!(
+            download_directory_for_frontend(Path::new(r"\\?\C:\Users\Administrator\Downloads")),
+            r"C:\Users\Administrator\Downloads",
+        );
+        assert_eq!(
+            download_directory_for_frontend(Path::new(r"\\?\UNC\server\books")),
+            r"\\server\books",
+        );
+    }
+
+    #[test]
+    fn missing_custom_downloads_are_not_pruned_from_the_index() {
+        let mut book = MokeDownloadedBook {
+            id: "book".into(),
+            server_url: "https://books.test".into(),
+            book_id: "1".into(),
+            title: "Book".into(),
+            file_name: "book.epub".into(),
+            relative_path: Some("books/server/1/epub/book.epub".into()),
+            storage_root: Some(r"D:\Books".into()),
+            mime_type: "application/epub+zip".into(),
+            updated_at: 1,
+        };
+        assert!(!should_prune_missing_download(&book));
+        book.storage_root = None;
+        assert!(should_prune_missing_download(&book));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mount_selection_keeps_native_longest_prefix_behavior() {
+        let mounts = ["/", "/srv", "/srv/books", "/srv/book"];
+        assert_eq!(
+            selected_mount(
+                "/srv/books/library/title.epub",
+                &mounts,
+                MountPathStyle::Native,
+            ),
+            Some("/srv/books"),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -401,13 +814,19 @@ mod fs_scope_tests {
             let cap: Value = serde_json::from_str(&text).unwrap();
             let perms = cap["permissions"].as_array().unwrap();
             for perm in perms {
-                let Some(id) = perm["identifier"].as_str() else { continue };
+                let Some(id) = perm["identifier"].as_str() else {
+                    continue;
+                };
                 if !id.starts_with("fs:") && !id.starts_with("opener:") {
                     continue;
                 }
-                let Some(allow) = perm["allow"].as_array() else { continue };
+                let Some(allow) = perm["allow"].as_array() else {
+                    continue;
+                };
                 for entry in allow {
-                    let Some(path) = entry["path"].as_str() else { continue };
+                    let Some(path) = entry["path"].as_str() else {
+                        continue;
+                    };
                     // Replace the $VAR with a concrete root to exercise glob
                     // matching the way the resolved scope would.
                     let resolved = path

@@ -1,63 +1,353 @@
-export type OfflineDownloadStatus = 'downloading' | 'completed' | 'failed';
+'use client';
+
+export type OfflineDownloadStatus = 'downloading' | 'completed' | 'failed' | 'paused' | 'cancelled';
 
 export interface OfflineDownloadSnapshot {
+  key?: string;
   status: OfflineDownloadStatus;
   progress: number;
   error?: unknown;
+  serverUrl?: string;
+  bookId?: string;
+  title?: string;
+  format?: string;
+  downloadedBytes?: number;
+  totalBytes?: number | null;
+  speedBytesPerSecond?: number;
+  etaSeconds?: number | null;
+  updatedAt?: number;
 }
 
 interface OfflineDownloadTask {
   snapshot: OfflineDownloadSnapshot;
   promise: Promise<void>;
   listeners: Set<(snapshot: OfflineDownloadSnapshot) => void>;
+  controller: AbortController;
+  progressTimer?: ReturnType<typeof setTimeout>;
+  stopReason?: 'pause' | 'cancel';
+  onCancel?: () => Promise<void>;
+  cancelCleanup?: Promise<void>;
 }
 
+export interface OfflineDownloadEvent {
+  key: string;
+  kind: 'progress' | 'terminal' | 'removed';
+  affectsRecords: boolean;
+  snapshot?: OfflineDownloadSnapshot;
+  serverUrl?: string;
+}
+
+export const OFFLINE_DOWNLOAD_PROGRESS_INTERVAL_MS = 500;
+
+const STORAGE_KEY = 'moke-offline-download-tasks-v1';
 const tasks = new Map<string, OfflineDownloadTask>();
+const snapshots = new Map<string, OfflineDownloadSnapshot>();
 const listenersByKey = new Map<string, Set<(snapshot: OfflineDownloadSnapshot) => void>>();
+const globalListeners = new Set<(event: OfflineDownloadEvent) => void>();
+let hydrated = false;
+
+function hydrate(): void {
+  if (hydrated || typeof window === 'undefined') return;
+  hydrated = true;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]') as OfflineDownloadSnapshot[];
+    for (const value of stored) {
+      // A completed book is represented by its IndexedDB record. Older builds
+      // persisted these forever, so discard them during migration as well.
+      if (!value.key || value.status === 'completed') continue;
+      snapshots.set(value.key, value.status === 'downloading'
+        ? { ...value, status: 'paused', error: '应用上次异常退出，可继续下载', updatedAt: Date.now() }
+        : value);
+    }
+    persist();
+  } catch { /* corrupted task state is non-fatal */ }
+}
+
+function persist(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const values = Array.from(snapshots.values()).map((snapshot) => ({
+      ...snapshot,
+      error: snapshot.error instanceof Error ? snapshot.error.message : snapshot.error,
+    }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+  } catch { /* quota/privacy mode */ }
+}
+
+function emitSnapshot(key: string, snapshot: OfflineDownloadSnapshot): void {
+  snapshots.set(key, snapshot);
+  persist();
+  for (const listener of listenersByKey.get(key) ?? []) listener(snapshot);
+  const terminal = snapshot.status !== 'downloading';
+  const event: OfflineDownloadEvent = {
+    key,
+    kind: terminal ? 'terminal' : 'progress',
+    affectsRecords: terminal,
+    snapshot,
+    serverUrl: snapshot.serverUrl,
+  };
+  for (const listener of globalListeners) listener(event);
+}
+
+function emitRemoval(key: string, snapshot?: OfflineDownloadSnapshot, affectsRecords = true): void {
+  persist();
+  const event: OfflineDownloadEvent = {
+    key,
+    kind: 'removed',
+    affectsRecords,
+    serverUrl: snapshot?.serverUrl,
+  };
+  for (const listener of globalListeners) listener(event);
+}
+
+function clearProgressTimer(task: OfflineDownloadTask): void {
+  if (task.progressTimer === undefined) return;
+  clearTimeout(task.progressTimer);
+  task.progressTimer = undefined;
+}
 
 function publish(task: OfflineDownloadTask, snapshot: OfflineDownloadSnapshot): void {
+  clearProgressTimer(task);
   task.snapshot = snapshot;
-  for (const listener of task.listeners) listener(snapshot);
+  emitSnapshot(snapshot.key!, snapshot);
+}
+
+/** Merge the two callbacks emitted for each chunk and publish at most twice a second. */
+function queueProgress(task: OfflineDownloadTask, snapshot: OfflineDownloadSnapshot): void {
+  task.snapshot = snapshot;
+  snapshots.set(snapshot.key!, snapshot);
+  if (task.progressTimer !== undefined) return;
+  task.progressTimer = setTimeout(() => {
+    task.progressTimer = undefined;
+    const key = task.snapshot.key!;
+    if (tasks.get(key) !== task || task.snapshot.status !== 'downloading') return;
+    emitSnapshot(key, task.snapshot);
+  }, OFFLINE_DOWNLOAD_PROGRESS_INTERVAL_MS);
+}
+
+function deleteSnapshot(key: string, affectsRecords = true): void {
+  const snapshot = snapshots.get(key);
+  if (!snapshots.delete(key)) return;
+  emitRemoval(key, snapshot, affectsRecords);
+}
+
+function scheduleCompletedSnapshotRemoval(key: string, snapshot: OfflineDownloadSnapshot): void {
+  setTimeout(() => {
+    if (tasks.has(key) || snapshots.get(key) !== snapshot) return;
+    // The completed IndexedDB record is the durable source of truth. Keep the
+    // terminal snapshot through the caller's await, then discard it without
+    // forcing a second record refresh.
+    deleteSnapshot(key, false);
+  }, 0);
+}
+
+async function finishCancelledDownload(key: string, task: OfflineDownloadTask): Promise<void> {
+  task.cancelCleanup ??= (async () => {
+    try {
+      await task.onCancel?.();
+    } catch (cleanupError) {
+      console.warn('Failed to clean cancelled download:', cleanupError);
+    } finally {
+      deleteSnapshot(key);
+    }
+  })();
+  await task.cancelCleanup;
+}
+
+async function settleStoppedDownload(key: string, task: OfflineDownloadTask): Promise<boolean> {
+  if (task.stopReason === 'cancel') {
+    await finishCancelledDownload(key, task);
+    return true;
+  }
+  if (task.stopReason === 'pause') {
+    publish(task, {
+      ...task.snapshot,
+      status: 'paused',
+      speedBytesPerSecond: 0,
+      etaSeconds: null,
+      error: undefined,
+      updatedAt: Date.now(),
+    });
+    return true;
+  }
+  return false;
 }
 
 export function getOfflineDownloadSnapshot(key: string): OfflineDownloadSnapshot | undefined {
-  return tasks.get(key)?.snapshot;
+  hydrate();
+  return tasks.get(key)?.snapshot ?? snapshots.get(key);
 }
 
-export function subscribeOfflineDownload(
-  key: string,
-  listener: (snapshot: OfflineDownloadSnapshot) => void,
-): () => void {
-  const task = tasks.get(key);
+export function listOfflineDownloadSnapshots(serverUrl?: string): OfflineDownloadSnapshot[] {
+  hydrate();
+  return Array.from(snapshots.values())
+    .filter((snapshot) => !serverUrl || snapshot.serverUrl === serverUrl)
+    .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+}
+
+export function subscribeOfflineDownloads(listener: (event: OfflineDownloadEvent) => void): () => void {
+  hydrate();
+  globalListeners.add(listener);
+  return () => { globalListeners.delete(listener); };
+}
+
+export function subscribeOfflineDownload(key: string, listener: (snapshot: OfflineDownloadSnapshot) => void): () => void {
+  hydrate();
   const listeners = listenersByKey.get(key) ?? new Set();
   listenersByKey.set(key, listeners);
   listeners.add(listener);
-  if (task) listener(task.snapshot);
-  return () => {
-    listeners.delete(listener);
-  };
+  const snapshot = getOfflineDownloadSnapshot(key);
+  if (snapshot) listener(snapshot);
+  return () => { listeners.delete(listener); };
 }
 
-/** Start a process-wide download that survives the page which initiated it. */
-export function startOfflineDownload(options: {
+export interface StartOfflineDownloadOptions {
   key: string;
-  run: (onProgress: (progress: number) => void) => Promise<void>;
-}): Promise<void> {
+  metadata?: Pick<OfflineDownloadSnapshot, 'serverUrl' | 'bookId' | 'title' | 'format' | 'downloadedBytes' | 'totalBytes'>;
+  run: (
+    onProgress: (progress: number) => void,
+    signal: AbortSignal,
+    onTransfer: (receivedBytes: number, totalBytes: number | null) => void,
+  ) => Promise<void>;
+  onCancel?: () => Promise<void>;
+}
+
+/** Start a process-wide, persisted download that survives its initiating page. */
+export function startOfflineDownload(options: StartOfflineDownloadOptions): Promise<void> {
+  hydrate();
   const existing = tasks.get(options.key);
   if (existing?.snapshot.status === 'downloading') return existing.promise;
 
+  const previous = snapshots.get(options.key);
+  const startedAt = Date.now();
+  const initialBytes = options.metadata?.downloadedBytes ?? previous?.downloadedBytes ?? 0;
+  const initialTotal = options.metadata?.totalBytes ?? previous?.totalBytes ?? null;
+  const initialProgress = initialTotal && initialTotal > 0
+    ? Math.min(99, Math.round(initialBytes / initialTotal * 100))
+    : (initialBytes > 0 ? previous?.progress ?? 0 : 0);
+  let sampleAt = startedAt;
+  let sampleBytes = initialBytes;
+  const controller = new AbortController();
+  let resolveTask: () => void = () => {};
+  let rejectTask: (reason?: unknown) => void = () => {};
+  const taskPromise = new Promise<void>((resolve, reject) => {
+    resolveTask = resolve;
+    rejectTask = reject;
+  });
   const task: OfflineDownloadTask = {
-    snapshot: { status: 'downloading', progress: 0 },
-    promise: Promise.resolve(),
+    snapshot: {
+      ...previous,
+      ...options.metadata,
+      key: options.key,
+      status: 'downloading',
+      progress: initialProgress,
+      downloadedBytes: initialBytes,
+      error: undefined,
+      speedBytesPerSecond: 0,
+      etaSeconds: null,
+      updatedAt: startedAt,
+    },
+    promise: taskPromise,
     listeners: listenersByKey.get(options.key) ?? new Set(),
+    controller,
+    onCancel: options.onCancel,
   };
   tasks.set(options.key, task);
-  task.promise = options
-    .run((progress) => publish(task, { status: 'downloading', progress }))
-    .then(() => publish(task, { status: 'completed', progress: 100 }))
-    .catch((error: unknown) => {
-      publish(task, { status: 'failed', progress: 0, error });
-      throw error;
+  publish(task, task.snapshot);
+
+  let runPromise: Promise<void>;
+  try {
+    runPromise = options.run(
+      (progress) => queueProgress(task, { ...task.snapshot, status: 'downloading', progress, updatedAt: Date.now() }),
+      controller.signal,
+      (downloadedBytes, totalBytes) => {
+        const now = Date.now();
+        const elapsed = now - sampleAt;
+        const previousSpeed = task.snapshot.speedBytesPerSecond || 0;
+        let speedBytesPerSecond = previousSpeed;
+        // Accumulate a meaningful sample window before estimating throughput.
+        // This avoids the first chunk turning a few milliseconds into a huge rate.
+        if (elapsed >= 250) {
+          const instantaneous = Math.max(0, downloadedBytes - sampleBytes) * 1000 / elapsed;
+          speedBytesPerSecond = previousSpeed ? previousSpeed * 0.7 + instantaneous * 0.3 : instantaneous;
+          sampleAt = now;
+          sampleBytes = downloadedBytes;
+        }
+        const progress = totalBytes ? Math.min(99, Math.round(downloadedBytes / totalBytes * 100)) : task.snapshot.progress;
+        queueProgress(task, {
+          ...task.snapshot,
+          status: 'downloading',
+          progress,
+          downloadedBytes,
+          totalBytes,
+          speedBytesPerSecond,
+          etaSeconds: totalBytes && speedBytesPerSecond > 0 ? Math.max(0, (totalBytes - downloadedBytes) / speedBytesPerSecond) : null,
+          updatedAt: now,
+        });
+      },
+    );
+  } catch (error) {
+    runPromise = Promise.reject(error);
+  }
+
+  const lifecycle = runPromise.then(async () => {
+    if (await settleStoppedDownload(options.key, task)) return;
+    publish(task, {
+      ...task.snapshot,
+      status: 'completed',
+      progress: 100,
+      speedBytesPerSecond: 0,
+      etaSeconds: 0,
+      error: undefined,
+      updatedAt: Date.now(),
     });
+  }, async (error: unknown) => {
+    if (await settleStoppedDownload(options.key, task)) return;
+    publish(task, { ...task.snapshot, status: 'failed', speedBytesPerSecond: 0, etaSeconds: null, error, updatedAt: Date.now() });
+    throw error;
+  }).finally(() => {
+    clearProgressTimer(task);
+    if (tasks.get(options.key) === task) tasks.delete(options.key);
+  });
+  void lifecycle.then(() => {
+    resolveTask();
+    const snapshot = snapshots.get(options.key);
+    if (snapshot?.status === 'completed') scheduleCompletedSnapshotRemoval(options.key, snapshot);
+  }, rejectTask);
   return task.promise;
+}
+
+export function pauseOfflineDownload(key: string): boolean {
+  const task = tasks.get(key);
+  if (!task || task.snapshot.status !== 'downloading') return false;
+  clearProgressTimer(task);
+  task.stopReason = 'pause';
+  task.controller.abort();
+  return true;
+}
+
+export function cancelOfflineDownload(key: string): boolean {
+  const task = tasks.get(key);
+  if (!task || task.snapshot.status !== 'downloading') {
+    const snapshot = snapshots.get(key);
+    if (!snapshot) return false;
+    emitSnapshot(key, { ...snapshot, status: 'cancelled', error: undefined, updatedAt: Date.now() });
+    return true;
+  }
+  clearProgressTimer(task);
+  task.stopReason = 'cancel';
+  task.controller.abort();
+  return true;
+}
+
+export async function removeOfflineDownloadSnapshot(key: string): Promise<void> {
+  hydrate();
+  const task = tasks.get(key);
+  if (task) {
+    clearProgressTimer(task);
+    task.stopReason = 'cancel';
+    task.controller.abort();
+    await task.promise.catch(() => undefined);
+  }
+  deleteSnapshot(key);
 }

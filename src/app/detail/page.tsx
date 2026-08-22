@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen,
 import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
-import { deleteOfflineBook, getOfflineBook } from '@/lib/offline-books';
+import { deleteOfflineBook, getOfflineBook, removeOfflinePartial } from '@/lib/offline-books';
 import {
   beginOfflineDownload,
   downloadAndSaveOfflineBook,
@@ -28,10 +28,11 @@ import {
 import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
+  removeOfflineDownloadSnapshot,
   startOfflineDownload,
   subscribeOfflineDownload,
 } from '@/lib/offline-download-manager';
-import { makeOfflineBookKey } from '@/lib/offline-book-core';
+import { makeOfflineBookKey, shouldResumeOfflineDownload } from '@/lib/offline-book-core';
 import { AnnotationPanel } from '@/components/annotations/AnnotationPanel';
 import {
   annotationReaderProgress,
@@ -96,7 +97,7 @@ function DetailContent() {
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
   const summary = bookSummaryText(book?.comments || book?.description);
-  const downloadKey = serverUrl && id ? makeOfflineBookKey(serverUrl, id) : '';
+  const downloadKey = serverUrl && id ? makeOfflineBookKey(serverUrl, id, selectedFormat) : '';
   const primaryFile = book?.files?.[0];
   const fileFormats = Array.from(new Set(
     book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
@@ -122,7 +123,7 @@ function DetailContent() {
 
     const checkOffline = async () => {
       try {
-        const record = await getOfflineBook(serverUrl, id!);
+        const record = await getOfflineBook(serverUrl, id!, selectedFormat);
         if (!cancelled) {
           setDownloaded(Boolean(record));
         }
@@ -140,7 +141,7 @@ function DetailContent() {
     return () => {
       cancelled = true;
     };
-  }, [id, serverUrl]);
+  }, [id, selectedFormat, serverUrl]);
 
   useEffect(() => {
     if (!downloadKey) return;
@@ -272,10 +273,18 @@ function DetailContent() {
     setMessage('');
 
     try {
+      const canResume = shouldResumeOfflineDownload(process.env.NEXT_PUBLIC_APP_PLATFORM);
       await startOfflineDownload({
-        key: makeOfflineBookKey(serverUrl, String(book.id)),
-        run: async (onProgress) => {
-          if (!beginOfflineDownload(serverUrl, String(book.id))) {
+        key: makeOfflineBookKey(serverUrl, String(book.id), selectedFormat),
+        metadata: {
+          serverUrl,
+          bookId: String(book.id),
+          title: book.title,
+          format: selectedFormat,
+          downloadedBytes: canResume ? undefined : 0,
+        },
+        run: async (onProgress, signal, onTransfer) => {
+          if (!beginOfflineDownload(serverUrl, String(book.id), selectedFormat)) {
             throw new Error('book.download.in_progress');
           }
           try {
@@ -285,13 +294,26 @@ function DetailContent() {
               title: book.title,
               format: selectedFormat,
               onProgress,
+              onTransfer,
+              signal,
+              resume: canResume,
+              preservePartialOnFailure: true,
             });
           } finally {
-            endOfflineDownload(serverUrl, String(book.id));
+            endOfflineDownload(serverUrl, String(book.id), selectedFormat);
           }
         },
+        onCancel: () => removeOfflinePartial({
+          serverUrl,
+          bookId: String(book.id),
+          title: book.title,
+          format: selectedFormat,
+          downloadDirectory: useSettingsStore.getState().downloadDirectory,
+        }),
       });
 
+      const finalStatus = getOfflineDownloadSnapshot(makeOfflineBookKey(serverUrl, String(book.id), selectedFormat))?.status;
+      if (finalStatus !== 'completed') throw new Error(`book.download.${finalStatus || 'interrupted'}`);
       setDownloadProgress(100);
       void updateReadingState({ download: 1 });
       // 等待下一个版本更新后加入read_state: 1
@@ -305,6 +327,10 @@ function DetailContent() {
       const reason = error instanceof Error ? error.message : '';
       if (reason === 'book.download.in_progress') {
         setMessage('该书籍正在下载中，请稍候。');
+      } else if (reason === 'book.download.paused') {
+        setMessage('下载已暂停，可在下载管理中继续。');
+      } else if (reason === 'book.download.cancelled') {
+        setMessage('下载已取消。');
       } else if (reason.startsWith('http.')) {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
       } else if (reason === 'book.epub.invalid') {
@@ -345,7 +371,7 @@ function DetailContent() {
     };
 
     try {
-      const record = await getOfflineBook(serverUrl, id!);
+      const record = await getOfflineBook(serverUrl, id!, selectedFormat);
       if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
@@ -429,11 +455,14 @@ function DetailContent() {
     setMessage('');
 
     try {
-      await deleteOfflineBook(serverUrl, String(book.id));
+      const result = await deleteOfflineBook(serverUrl, String(book.id), selectedFormat);
+      await removeOfflineDownloadSnapshot(makeOfflineBookKey(serverUrl, String(book.id), selectedFormat));
       setDownloaded(false);
       setDownloadProgress(0);
       setShowDeleteConfirm(false);
-      setMessage('已删除下载书籍。');
+      setMessage(result.remoteSynced
+        ? '已删除下载书籍。'
+        : '本地文件已删除；服务器状态同步失败，可在下载管理中重试。');
     } catch {
       setMessage('删除下载书籍失败。');
     } finally {
