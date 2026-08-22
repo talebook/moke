@@ -255,7 +255,10 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
         match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
             Ok(s) => break s,
             Err(_e) if port < start_port + 10 => {
-                log::warn!("API Server 端口 {port} 被占用，尝试 {next}", next = port + 1);
+                log::warn!(
+                    "API Server 端口 {port} 被占用，尝试 {next}",
+                    next = port + 1
+                );
                 port += 1;
             }
             Err(e) => panic!("无法启动 API Server (尝试了 {start_port}-{port}): {e}"),
@@ -311,12 +314,18 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
         let response = tiny_http::Response::from_string("")
             .with_header(cors_header)
             .with_header(
-                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"X-Extension-Name, X-Extension-Token, Content-Type"[..])
-                    .unwrap(),
+                tiny_http::Header::from_bytes(
+                    &b"Access-Control-Allow-Headers"[..],
+                    &b"X-Extension-Name, X-Extension-Token, Content-Type"[..],
+                )
+                .unwrap(),
             )
             .with_header(
-                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, PUT, DELETE, OPTIONS"[..])
-                    .unwrap(),
+                tiny_http::Header::from_bytes(
+                    &b"Access-Control-Allow-Methods"[..],
+                    &b"GET, POST, PUT, DELETE, OPTIONS"[..],
+                )
+                .unwrap(),
             );
         let _ = request.respond(response);
         return;
@@ -324,13 +333,14 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
 
     // Token 认证
     if let Err(e) = authenticate(&ctx, ext_name.as_deref(), ext_token.as_deref()) {
-        let response = tiny_http::Response::from_string(serde_json::json!({"error": e}).to_string())
-            .with_status_code(401)
-            .with_header(cors_header)
-            .with_header(
-                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                    .unwrap(),
-            );
+        let response =
+            tiny_http::Response::from_string(serde_json::json!({"error": e}).to_string())
+                .with_status_code(401)
+                .with_header(cors_header)
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
+                );
         let _ = request.respond(response);
         return;
     }
@@ -372,11 +382,8 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
             let response = tiny_http::Response::from_string(body)
                 .with_header(cors_header)
                 .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
             let _ = request.respond(response);
         }
@@ -390,11 +397,8 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
                 .with_status_code(error.status)
                 .with_header(cors_header)
                 .with_header(
-                    tiny_http::Header::from_bytes(
-                        &b"Content-Type"[..],
-                        &b"application/json"[..],
-                    )
-                    .unwrap(),
+                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
+                        .unwrap(),
                 );
             let _ = request.respond(response);
         }
@@ -431,12 +435,7 @@ fn authenticate(
 
 /// GET /api/v1/info
 fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
-    let all_windows: Vec<String> = ctx
-        .app_handle
-        .webview_windows()
-        .keys()
-        .cloned()
-        .collect();
+    let all_windows: Vec<String> = ctx.app_handle.webview_windows().keys().cloned().collect();
     log::info!("/api/v1/info: all windows = {:?}", all_windows);
 
     let windows: Vec<String> = all_windows
@@ -468,9 +467,9 @@ fn parse_command_wait(payload: &serde_json::Value) -> Result<(Option<String>, u6
     };
 
     let wait_ms = match payload.get("wait_ms") {
-        Some(value) => value.as_u64().ok_or_else(|| {
-            ApiError::bad_request("INVALID_WAIT_MS", "wait_ms 必须是非负整数")
-        })?,
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| ApiError::bad_request("INVALID_WAIT_MS", "wait_ms 必须是非负整数"))?,
         None => 0,
     };
 
@@ -572,9 +571,7 @@ fn handle_reader(
                 });
                 return Ok(state.to_string());
             } else {
-                return Ok(
-                    serde_json::json!({"window": label, "status": "closed"}).to_string(),
-                );
+                return Ok(serde_json::json!({"window": label, "status": "closed"}).to_string());
             }
         }
 
@@ -585,8 +582,9 @@ fn handle_reader(
                 // 将命令作为 Tauri event 转发给阅读器窗口。同步等待时会暂时把
                 // request_id 替换为宿主生成的 correlation_id；回执投递和广播前
                 // 再恢复拓展传入的 request_id，隔离同名并发和迟到回执。
-                let mut payload: serde_json::Value = serde_json::from_str(body)
-                    .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
+                let mut payload: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+                    ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}"))
+                })?;
                 if !payload.is_object() {
                     return Err(ApiError::bad_request(
                         "INVALID_COMMAND",
@@ -596,7 +594,9 @@ fn handle_reader(
 
                 let (request_id, wait_ms) = parse_command_wait(&payload)?;
                 let result_rx = if wait_ms > 0 {
-                    let rid = request_id.as_ref().expect("parse_command_wait 已校验 request_id");
+                    let rid = request_id
+                        .as_ref()
+                        .expect("parse_command_wait 已校验 request_id");
                     let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
                     let key = PendingCommandKey {
                         extension_name: ext_name.to_string(),
@@ -619,10 +619,7 @@ fn handle_reader(
 
                 if let Err(e) = window.emit("reader:command", &payload) {
                     if let Some((_, correlation_id, _)) = &result_rx {
-                        ctx.pending_commands
-                            .lock()
-                            .unwrap()
-                            .cancel(correlation_id);
+                        ctx.pending_commands.lock().unwrap().cancel(correlation_id);
                     }
                     return Err(format!("发送命令失败: {e}").into());
                 }
@@ -631,10 +628,7 @@ fn handle_reader(
                     return match rx.recv_timeout(Duration::from_millis(wait_ms)) {
                         Ok(result) => Ok(build_command_result_response(&rid, &result)),
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            ctx.pending_commands
-                                .lock()
-                                .unwrap()
-                                .retire(&correlation_id);
+                            ctx.pending_commands.lock().unwrap().retire(&correlation_id);
                             Ok(serde_json::json!({
                                 "sent": true,
                                 "request_id": rid,
@@ -643,10 +637,7 @@ fn handle_reader(
                             .to_string())
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                            ctx.pending_commands
-                                .lock()
-                                .unwrap()
-                                .cancel(&correlation_id);
+                            ctx.pending_commands.lock().unwrap().cancel(&correlation_id);
                             Err(ApiError::bad_request(
                                 "COMMAND_WAIT_CANCELLED",
                                 "等待阅读器回执时通道已关闭",
@@ -670,11 +661,7 @@ fn handle_reader(
 }
 
 /// POST /api/v1/extension/sidebar/add
-fn handle_ext_sidebar_add(
-    ctx: &ServerContext,
-    _ext_name: &str,
-    body: &str,
-) -> ApiResult {
+fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
     let data: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
 
@@ -687,11 +674,7 @@ fn handle_ext_sidebar_add(
 }
 
 /// POST /api/v1/extension/page/register
-fn handle_ext_page_register(
-    ctx: &ServerContext,
-    _ext_name: &str,
-    body: &str,
-) -> ApiResult {
+fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
     let data: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
 
@@ -721,9 +704,7 @@ fn handle_ext_storage(
     // 安全：只有允许 storage 权限的拓展才能访问
     super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
 
-    let key = url
-        .strip_prefix("/api/v1/extension/storage/")
-        .unwrap_or("");
+    let key = url.strip_prefix("/api/v1/extension/storage/").unwrap_or("");
     if key.is_empty() {
         return Err("缺少 key".into());
     }
@@ -736,11 +717,9 @@ fn handle_ext_storage(
             Ok(serde_json::json!({"key": key, "value": value}).to_string())
         }
         &tiny_http::Method::Put => {
-            let data: serde_json::Value = serde_json::from_str(body)
-                .map_err(|e| format!("JSON 解析失败: {e}"))?;
-            let value = data["value"]
-                .as_str()
-                .ok_or("缺少 value 字段")?;
+            let data: serde_json::Value =
+                serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
+            let value = data["value"].as_str().ok_or("缺少 value 字段")?;
             super::storage::set(&ext_dir, key, value)?;
             Ok(serde_json::json!({"key": key, "stored": true}).to_string())
         }
@@ -814,10 +793,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            pending.register(
-                key("extension-a", "reader-one", "request-1"),
-                duplicate_tx,
-            ),
+            pending.register(key("extension-a", "reader-one", "request-1"), duplicate_tx,),
             Err(RegisterPendingCommandError::Duplicate)
         );
     }
