@@ -83,6 +83,8 @@ export async function recordBookRead(
   } finally {
     // Prevent a successful plugin-http response from being aborted later,
     // after its native body resource has already been released.
+    // This is a no-op after a real timeout has fired; do not abort the
+    // controller here, as that would recreate the late plugin-http failure.
     timeout.clear();
   }
 }

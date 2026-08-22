@@ -141,6 +141,26 @@ test('记录完成后取消超时，避免晚到 abort 操作已释放的 Tauri 
   assert.equal(lateAbortCalls, 0);
 });
 
+test('记录请求失败后也取消超时，避免晚到 abort', async () => {
+  let capturedSignal;
+  let lateAbortCalls = 0;
+
+  await assert.rejects(
+    recordBookRead(async (url, init) => {
+      capturedSignal = init.signal;
+      capturedSignal.addEventListener('abort', () => { lateAbortCalls += 1; });
+      throw new Error('network failed');
+    }, 'https://books.example', 'a', 1),
+    /network failed/,
+  );
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.ok(capturedSignal instanceof AbortSignal);
+  assert.equal(capturedSignal.aborted, false);
+  assert.equal(lateAbortCalls, 0);
+});
+
 test('记录请求超时后仍会中止未完成的请求', async () => {
   await assert.rejects(
     recordBookRead(async (url, init) => new Promise((resolve, reject) => {
