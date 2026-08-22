@@ -159,13 +159,13 @@ test('错误提示映射覆盖地址丢失、HTTP 错误和未知错误', () => 
   assert.equal(getErrorMessage(new MokeApiError('没有权限', 'permission.denied', 403)), '没有权限');
 });
 
-test('Tauri 二进制请求使用完整 Range 以禁用透明压缩', () => {
+test('Tauri 二进制请求显式禁用透明压缩', () => {
   const headers = buildTauriBinaryHeaders({ Accept: 'application/epub+zip' });
-  assert.equal(headers.get('range'), 'bytes=0-');
+  assert.equal(headers.get('accept-encoding'), 'identity');
   assert.equal(headers.get('accept'), 'application/epub+zip');
 
-  const customRange = buildTauriBinaryHeaders({ Range: 'bytes=1024-2047' });
-  assert.equal(customRange.get('range'), 'bytes=1024-2047');
+  const customEncoding = buildTauriBinaryHeaders({ 'Accept-Encoding': 'br' });
+  assert.equal(customEncoding.get('accept-encoding'), 'br');
 });
 
 test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {

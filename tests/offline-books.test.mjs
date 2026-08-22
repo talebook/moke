@@ -227,3 +227,54 @@ test('删除只移除目标离线书籍，删除不存在的记录也不会失�
   assert.equal(await getOfflineBook('https://a.example', '1'), null);
   assert.equal((await getOfflineBook('https://a.example', '2'))?.bookId, '2');
 });
+
+test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载状态', async () => {
+  const indexedDB = createFakeIndexedDb();
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = {
+    indexedDB,
+    __TAURI_INTERNALS__: {
+      invoke: async (command) => {
+        assert.equal(command, 'moke_list_downloaded_books');
+        return [{
+          id: 'https://a.example::42',
+          serverUrl: 'https://a.example:443',
+          bookId: '42',
+          title: '西游记',
+          fileName: '西游记.epub',
+          mimeType: 'application/epub+zip',
+          updatedAt: 123,
+          filePath: '/app-data/books/西游记.epub',
+        }];
+      },
+    },
+  };
+
+  const recovered = await getOfflineBook('https://a.example', '42');
+  assert.equal(recovered?.title, '西游记');
+  assert.equal(recovered?.filePath, '/app-data/books/西游记.epub');
+  assert.equal(indexedDB.records.get('https://a.example::42')?.title, '西游记');
+});
+
+test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显示阅读按钮', async () => {
+  const indexedDB = createFakeIndexedDb();
+  indexedDB.records.set('https://a.example::42', {
+    id: 'https://a.example::42',
+    serverUrl: 'https://a.example',
+    bookId: '42',
+    title: '西游记',
+    fileName: '西游记.epub',
+    mimeType: 'application/epub+zip',
+    updatedAt: 123,
+    filePath: '/app-data/books/西游记.epub',
+  });
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = {
+    indexedDB,
+    __TAURI_INTERNALS__: {
+      invoke: async () => [],
+    },
+  };
+
+  assert.equal(await getOfflineBook('https://a.example', '42'), null);
+});

@@ -158,11 +158,7 @@ export async function fetchImageObjectUrl(imageUrl: string): Promise<string> {
   const startedAt = Date.now();
   debugLog('info', 'image', `→ GET ${imageUrl}`);
   try {
-    const response = await request(imageUrl, {
-      credentials: 'include',
-      // Range 会让 plugin-http 使用 identity 编码，规避部分代理的二进制正文解压中断。
-      ...(isTauriApp ? { headers: buildTauriBinaryHeaders() } : {}),
-    });
+    const response = await request(imageUrl, { credentials: 'include' });
     if (!response.ok) {
       debugLog(
         'error',
@@ -626,6 +622,7 @@ export async function streamBookDownload(
     try {
       result = await reader.read();
     } catch (error) {
+      if (isRequestCancelled(error)) throw error;
       logBinaryTransferFailure(url, response, error, received);
       throw new Error('book.download.transfer_failed');
     }
@@ -637,6 +634,11 @@ export async function streamBookDownload(
     try {
       await options.write(value);
     } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        // 原始写入错误更有诊断价值，取消失败不覆盖它。
+      }
       logOfflineWriteFailure(error, received);
       throw new Error('book.download.storage_failed');
     }
