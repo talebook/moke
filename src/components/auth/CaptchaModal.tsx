@@ -3,8 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
-import { buildGeetestOptions } from '@/lib/captcha-core';
-import { getMokeRuntimePlatform } from '@/lib/moke-reader';
+import {
+  buildCaptchaSandboxDocument,
+  buildGeetestSandboxDocument,
+  createCaptchaSandboxChannel,
+  parseCaptchaSandboxMessage,
+  type GeetestCaptchaConfig,
+} from '@/lib/captcha-core';
 
 interface CaptchaModalProps {
   isOpen: boolean;
@@ -13,18 +18,27 @@ interface CaptchaModalProps {
   onSuccess: (data: any) => void;
 }
 
+interface CaptchaConfig extends GeetestCaptchaConfig {
+  provider?: string;
+  html?: unknown;
+  webCode?: unknown;
+}
+
 export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaModalProps) {
   const [mode, setMode] = useState<'loading' | 'image' | 'geetest' | 'webcode' | 'error'>('loading');
-  const [config, setConfig] = useState<any>(null);
-  
+  const [config, setConfig] = useState<CaptchaConfig | null>(null);
+
   // Image Captcha state
   const [image, setImage] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Web Code container
-  const webCodeContainerRef = useRef<HTMLDivElement>(null);
+  // Remote captcha scripts live only in this opaque-origin sandbox frame.
+  const captchaFrameRef = useRef<HTMLIFrameElement>(null);
+  const sandboxChannelRef = useRef('');
+  const [sandboxDocument, setSandboxDocument] = useState('');
+  const configRequestIdRef = useRef(0);
   const successHandledRef = useRef(false);
 
   const completeCaptcha = useCallback((data: any) => {
@@ -32,130 +46,56 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     successHandledRef.current = true;
     onSuccess(data);
   }, [onSuccess]);
-  
-  // Global callback setup for injected web code
+
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      (window as any).__moke_captcha_success = (data: any) => {
-        completeCaptcha(data);
-      };
-      (window as any).__moke_captcha_error = (err: string) => {
-        setError(err);
-      };
-    }
+    const handleSandboxMessage = (event: MessageEvent) => {
+      const message = parseCaptchaSandboxMessage(
+        event,
+        captchaFrameRef.current?.contentWindow,
+        sandboxChannelRef.current,
+      );
+      if (!message) return;
+
+      if (message.type === 'success') {
+        completeCaptcha(message.payload);
+        return;
+      }
+
+      setError(
+        typeof message.payload === 'string' && message.payload
+          ? message.payload
+          : '验证码验证失败',
+      );
+    };
+
+    window.addEventListener('message', handleSandboxMessage);
+    return () => window.removeEventListener('message', handleSandboxMessage);
   }, [completeCaptcha]);
 
-  const loadCaptcha = async () => {
+  const loadCaptcha = useCallback(async () => {
+    const requestId = ++configRequestIdRef.current;
     setLoading(true);
     setError('');
-    
+
     try {
-      // 1. Fetch Config
       const configRes = await request(`${serverUrl}/api/captcha/config`, { credentials: 'include' });
       const configData = await configRes.json();
-      
+      if (requestId !== configRequestIdRef.current) return;
+
       if (configData.err !== 'ok' || !configData.config) {
         throw new Error(configData.msg || '无法加载验证码配置');
       }
 
-      const captchaConfig = configData.config;
-      setConfig(captchaConfig);
-      
-      // Delay changing mode to let React commit the mode change, then call specific logic in useEffect
-    } catch (err: any) {
+      setConfig(configData.config as CaptchaConfig);
+    } catch (err) {
+      if (requestId !== configRequestIdRef.current) return;
       setMode('error');
-      setError(err.message || '网络错误，无法加载验证码');
+      setError(err instanceof Error ? err.message : '网络错误，无法加载验证码');
       setLoading(false);
     }
-  };
+  }, [serverUrl]);
 
-  useEffect(() => {
-    if (config) {
-      if (config.provider === 'image') {
-        setMode('image');
-      } else if (config.provider === 'geetest') {
-        setMode('geetest');
-      } else {
-        setMode('webcode');
-      }
-    }
-  }, [config]);
-
-  useEffect(() => {
-    if (mode === 'image') {
-      fetchImageCaptcha();
-      return;
-    }
-
-    if (mode === 'geetest') {
-      if (!config) return;
-
-      let disposed = false;
-      let script: HTMLScriptElement | null = null;
-      let isOhos = false;
-
-      const handleLoad = () => {
-        if (disposed) return;
-        renderGeetest(config, isOhos);
-      };
-
-      const handleError = () => {
-        if (disposed) return;
-        setMode('error');
-        setError('极验 SDK 加载失败');
-      };
-
-      getMokeRuntimePlatform()
-        .then((platform) => {
-          if (disposed) return;
-          isOhos = platform === 'ohos';
-
-          // SDK 已就绪：直接渲染，不重复挂监听
-          if ((window as any).initGeetest4) {
-            renderGeetest(config, isOhos);
-            return;
-          }
-
-          const scriptId = 'geetest-sdk-script';
-          script = document.getElementById(scriptId) as HTMLScriptElement | null;
-
-          if (!script) {
-            script = document.createElement('script');
-            script.id = scriptId;
-            script.src = config.sdkUrl || 'https://static.geetest.com/v4/gt4.js';
-            script.async = true;
-            document.head.appendChild(script);
-          }
-
-          script.addEventListener('load', handleLoad);
-          script.addEventListener('error', handleError);
-
-          // 脚本已加载但监听挂得太晚
-          if ((window as any).initGeetest4) {
-            renderGeetest(config, isOhos);
-          }
-        })
-        .catch(() => {
-          if (disposed) return;
-          setMode('error');
-          setError('极验 SDK 加载失败');
-        });
-
-      return () => {
-        disposed = true;
-        if (script) {
-          script.removeEventListener('load', handleLoad);
-          script.removeEventListener('error', handleError);
-        }
-      };
-    }
-
-    if (mode === 'webcode') {
-      fetchAndInjectWebCode(config);
-    }
-  }, [mode]);
-
-  const fetchImageCaptcha = async () => {
+  const fetchImageCaptcha = useCallback(async () => {
     setLoading(true);
     try {
       const res = await request(`${serverUrl}/api/captcha/image`, { credentials: 'include' });
@@ -165,87 +105,119 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       } else {
         setError(data.msg || '无法加载验证码');
       }
-    } catch (err) {
+    } catch {
       setError('网络错误，无法加载验证码');
     } finally {
       setLoading(false);
     }
-  };
-
-  const renderGeetest = (captchaConfig: any, isOhos: boolean) => {
-    const container = document.getElementById('geetest-container');
-    if (!container) return; // Might not be mounted yet
-    container.innerHTML = ''; // Clear previous
-
-    (window as any).initGeetest4(buildGeetestOptions(captchaConfig, isOhos), (gt: any) => {
-      gt.appendTo('#geetest-container')
-        .onSuccess(() => {
-          const result = gt.getValidate();
-          completeCaptcha({
-            provider: 'geetest',
-            lot_number: result.lot_number,
-            captcha_output: result.captcha_output,
-            pass_token: result.pass_token,
-            gen_time: result.gen_time
-          });
-        })
-        .onError(() => {
-          setError('极验验证失败');
-        });
-        
-      // Show automatically for popup product
-      gt.showCaptcha();
-    });
-  };
-
-  const fetchAndInjectWebCode = async (captchaConfig: any) => {
-    try {
-      let html = captchaConfig.html || captchaConfig.webCode;
-      
-      // If the config doesn't provide HTML directly, call the API to get it
-      if (!html) {
-        const res = await request(`${serverUrl}/api/captcha/web_code?provider=${captchaConfig.provider}`, { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          html = data.html || data.web_code;
-        }
-      }
-
-      if (html && webCodeContainerRef.current) {
-        injectHtmlWithScripts(webCodeContainerRef.current, html);
-      } else {
-        throw new Error('未提供或无法获取页面代码');
-      }
-    } catch (err: any) {
-      setError(`获取 web 代码失败: ${err.message}`);
-    }
-  };
-
-  const injectHtmlWithScripts = (container: HTMLElement, html: string) => {
-    container.innerHTML = html;
-    const scripts = container.querySelectorAll('script');
-    scripts.forEach(oldScript => {
-      const newScript = document.createElement('script');
-      Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-      if (oldScript.innerHTML) {
-        newScript.innerHTML = oldScript.innerHTML;
-      }
-      oldScript.parentNode?.replaceChild(newScript, oldScript);
-    });
-  };
+  }, [serverUrl]);
 
   useEffect(() => {
-    if (isOpen) {
-      setCode('');
-      successHandledRef.current = false;
-      setMode('loading'); // 重置模式状态
-      setConfig(null); // 清除旧的配置
-      if (webCodeContainerRef.current) {
-        webCodeContainerRef.current.innerHTML = ''; // 清除之前的注入代码
-      }
-      loadCaptcha();
+    if (!config) return;
+
+    if (config.provider === 'image') {
+      setMode('image');
+    } else if (config.provider === 'geetest') {
+      setMode('geetest');
+    } else {
+      setMode('webcode');
     }
-  }, [isOpen, serverUrl]);
+  }, [config]);
+
+  useEffect(() => {
+    let disposed = false;
+    setSandboxDocument('');
+    sandboxChannelRef.current = '';
+
+    if (mode === 'image') {
+      void fetchImageCaptcha();
+      return;
+    }
+
+    if (mode === 'geetest') {
+      if (!config) return;
+
+      try {
+        const channel = createCaptchaSandboxChannel();
+        sandboxChannelRef.current = channel;
+        setSandboxDocument(buildGeetestSandboxDocument(config, channel));
+      } catch (err) {
+        setMode('error');
+        setError(err instanceof Error ? err.message : '极验 SDK 加载失败');
+      }
+
+      return () => {
+        sandboxChannelRef.current = '';
+      };
+    }
+
+    if (mode === 'webcode') {
+      if (!config) return;
+
+      const fetchWebCode = async () => {
+        try {
+          let html = typeof config.html === 'string'
+            ? config.html
+            : typeof config.webCode === 'string'
+              ? config.webCode
+              : '';
+
+          if (!html) {
+            const provider = encodeURIComponent(config.provider || '');
+            const res = await request(
+              `${serverUrl}/api/captcha/web_code?provider=${provider}`,
+              { credentials: 'include' },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            const data = await res.json();
+            html = typeof data.html === 'string'
+              ? data.html
+              : typeof data.web_code === 'string'
+                ? data.web_code
+                : '';
+          }
+
+          if (!html) throw new Error('未提供或无法获取页面代码');
+          if (disposed) return;
+
+          const channel = createCaptchaSandboxChannel();
+          sandboxChannelRef.current = channel;
+          setSandboxDocument(buildCaptchaSandboxDocument(html, channel));
+        } catch (err) {
+          if (disposed) return;
+          const message = err instanceof Error ? err.message : '网络错误';
+          setError(`获取 web 代码失败: ${message}`);
+        }
+      };
+
+      void fetchWebCode();
+    }
+
+    return () => {
+      disposed = true;
+      sandboxChannelRef.current = '';
+    };
+  }, [config, fetchImageCaptcha, mode, serverUrl]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      configRequestIdRef.current += 1;
+      sandboxChannelRef.current = '';
+      setSandboxDocument('');
+      setConfig(null);
+      setMode('loading');
+      return;
+    }
+
+    setCode('');
+    setImage('');
+    setError('');
+    successHandledRef.current = false;
+    setMode('loading');
+    setConfig(null);
+    void loadCaptcha();
+  }, [isOpen, loadCaptcha]);
 
   if (!isOpen) return null;
 
@@ -258,6 +230,21 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     completeCaptcha(code.trim());
   };
 
+  const sandboxFrame = sandboxDocument ? (
+    <iframe
+      ref={captchaFrameRef}
+      title={mode === 'geetest' ? '极验验证码' : '第三方验证码'}
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
+      srcDoc={sandboxDocument}
+      className={`w-full border-0 bg-transparent ${mode === 'geetest' ? 'h-[360px]' : 'min-h-[220px]'}`}
+    />
+  ) : (
+    <div className="flex h-[150px] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
       <div className="relative w-full max-w-[320px] mx-4 rounded-xl p-6 bg-card border border-border shadow-lg">
@@ -269,7 +256,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
         </button>
 
         <h2 className="text-lg font-bold text-foreground mb-4">安全验证</h2>
-        
+
         {error && (
           <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-2 mb-4 text-center">
             {error}
@@ -295,7 +282,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
                   <span className="text-xs text-muted-foreground">加载失败</span>
                 )}
               </div>
-              
+
               <button
                 type="button"
                 onClick={fetchImageCaptcha}
@@ -330,21 +317,20 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
         {mode === 'geetest' && (
           <div className="flex flex-col items-center justify-center py-4 min-h-[150px]">
-            <div id="geetest-container" className="w-full flex justify-center"></div>
+            {sandboxFrame}
           </div>
         )}
 
         {mode === 'webcode' && (
           <div className="flex flex-col items-center justify-center py-4 min-h-[150px]">
-            <div ref={webCodeContainerRef} className="w-full" />
+            {sandboxFrame}
             <p className="text-xs text-muted-foreground mt-4 mb-4 text-center">
-              提示：此验证码由远端直接注入页面代码。请确保在远端代码执行完成后调用 <code>window.__moke_captcha_success(data)</code>。
+              验证码在隔离环境中运行，完成后将自动提交结果。
             </p>
             <button
               type="button"
               onClick={() => {
-                // 这个按钮仅作为降级/测试使用，实际应该由注入的JS自动调用回调
-                // 这里我们调用一个模拟的成功回调，主要为了防止页面卡死
+                // 这个按钮仅作为降级/测试使用，实际由沙箱内的 JS 调用回调。
                 completeCaptcha({ provider: config?.provider || 'webcode', fallback: true });
               }}
               className="w-full h-11 rounded-lg border border-primary text-primary font-medium transition hover:bg-primary/5 active:bg-primary/10"
@@ -353,7 +339,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
             </button>
           </div>
         )}
-        
+
         {mode === 'error' && (
           <div className="flex flex-col items-center justify-center py-8">
             <button

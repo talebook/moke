@@ -160,8 +160,8 @@ jobs:
           cat "$RUNNER_TEMP/moke-web.log"
           exit 1
 
-      - name: Run responsive smoke test
-        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs --workers=1
+      - name: Run browser smoke tests
+        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs --workers=1
 
       - name: Upload responsive screenshots and server log
         if: always()
