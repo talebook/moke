@@ -3,6 +3,8 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
+export const requiresMokeNavigate = (platform: string): boolean => platform === 'ohos';
+
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
  * the top safe-area inset. Android multi-window and OHOS already keep the
@@ -155,10 +157,10 @@ export function runtimeCategoryFromPlatform(platform: string): RuntimeCategory {
  *
  * ArkWeb cannot reliably execute Next.js App Router RSC navigation over the
  * custom `tauri://` scheme, and URL params across pages are unreliable there
- * (see the welcome page). Landing redirects that run right after hydration are
- * the likeliest to get stuck on a blank screen, so they go through the native
- * `moke_navigate` command instead of `router.replace`. On any other platform
- * (or if the native command is unavailable), fall back to the client router.
+ * (see the welcome page). OHOS therefore uses the narrowly registered native
+ * `moke_navigate` command. Android/iOS still need a real document load when
+ * crossing between the separate Moke and Readest Next apps, but can use the
+ * browser navigation API without exposing a native navigation command.
  */
 export async function navigateFullDocument(
   href: string,
@@ -185,6 +187,12 @@ export async function navigateFullDocument(
   }
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
+    return;
+  }
+  if (!requiresMokeNavigate(currentPlatform)) {
+    // Crossing app boundaries intentionally discards the current shell state;
+    // the launch URL carries all context the embedded reader needs.
+    window.location.assign(href);
     return;
   }
   try {

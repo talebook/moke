@@ -5,6 +5,14 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "http://*:3000/**",
+      "https://*:3000/**",
+      "http://*:3001/**",
+      "https://*:3001/**"
+    ]
+  },
   "permissions": [
     "core:default",
     "fs:default",

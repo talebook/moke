@@ -6,113 +6,243 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const CAPABILITY_FILES = [
+const PRODUCTION_CAPABILITY_FILES = [
   'src-tauri/capabilities/default.json',
+  'src-tauri/capabilities/reader.json',
+  'src-tauri/capabilities/reader-mobile.json',
   'src-tauri/capabilities/ohos.json',
 ];
-
-for (const file of CAPABILITY_FILES) {
-  test(`${file} allows seek for Readest random-access book parsing`, () => {
-    const capability = readCapability(file);
-    assert.ok(
-      capability.permissions.includes('fs:allow-seek'),
-      `${file} must allow plugin:fs|seek for NativeFile EPUB/MOBI reads`,
-    );
-  });
-}
-
-// HOU-15 H1 / HOU-30 regression guard. The fs/opener capability allow lists
-// were narrowed away from unrestricted path grants. A `**` catch-all must not
-// come back, whether written exactly, as `**/*`, under a home/root prefix
-// (`$HOME/**`, `C:\**`), or any other equivalent full-disk pattern. Only
-// application-private / temp base dirs are allowed in fs/opener allow entries.
-//
-// `$RESOURCE` (the install dir) is deliberately NOT whitelisted: none of the
-// capability files grants it, and writing to it would overwrite the app
-// binary/resources. Static packaged assets are served via the asset protocol
-// (see tauri.conf.json assetProtocol scope), not the fs plugin.
-const ALLOWED_FS_OPEN_PREFIXES = [
-  '$APPDATA',
-  '$APPCONFIG',
-  '$APPCACHE',
-  '$APPLOG',
-  '$TEMP',
-];
+const DEV_OHOS_CAPABILITY = 'src-tauri/capabilities-dev/ohos.json';
+const ALL_CAPABILITY_FILES = [...PRODUCTION_CAPABILITY_FILES, DEV_OHOS_CAPABILITY];
 
 function readCapability(file) {
   return JSON.parse(readFileSync(join(repoRoot, file), 'utf8'));
+}
+
+function readTauriConfig() {
+  return JSON.parse(readFileSync(join(repoRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
+}
+
+function permissionIdentifier(permission) {
+  return typeof permission === 'string' ? permission : permission.identifier ?? '';
+}
+
+function findPermission(capability, identifier) {
+  return capability.permissions.find(
+    (permission) => permissionIdentifier(permission) === identifier,
+  );
+}
+
+function permissionPaths(permission) {
+  if (!permission || typeof permission === 'string') return [];
+  return (permission.allow ?? [])
+    .map((entry) => entry?.path)
+    .filter((path) => typeof path === 'string');
 }
 
 function collectFsOpenerAllowEntries(capability) {
   const entries = [];
   for (const permission of capability.permissions) {
     if (typeof permission === 'string') continue;
-    const identifier = permission.identifier ?? '';
+    const identifier = permissionIdentifier(permission);
     if (!identifier.startsWith('fs:') && !identifier.startsWith('opener:')) continue;
-    for (const entry of permission.allow ?? []) {
-      if (entry && typeof entry === 'object' && typeof entry.path === 'string') {
-        entries.push({ identifier, path: entry.path });
-      }
+    for (const path of permissionPaths(permission)) {
+      entries.push({ identifier, path });
     }
   }
   return entries;
 }
 
+const PRIVATE_BASES = ['$APPDATA', '$APPCONFIG', '$APPCACHE', '$APPLOG', '$TEMP'];
+
 function hasParentDirTraversal(path) {
   return path.split(/[\\/]/).includes('..');
 }
 
-// A path is restricted only when it points strictly *inside* an allowed base
-// dir — `$APPDATA/**`, `$APPDATA/settings.json`, `$APPDATA\books\x` — and not
-// at the bare root itself. A bare `$APPDATA` entry would put the whole
-// app-data root into scope, allowing `remove(appDataDir(), {recursive:true})`
-// etc. (the exact regression this PR removed), so bare roots are rejected.
-// Matching must use a single backslash (`\`), the form JSON.parse produces.
 function isRestrictedToPrivateDirs(path) {
   if (hasParentDirTraversal(path)) return false;
-  return ALLOWED_FS_OPEN_PREFIXES.some(
-    (prefix) => path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\`)
+  return PRIVATE_BASES.some(
+    (prefix) => path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\`),
   );
 }
 
-for (const file of CAPABILITY_FILES) {
-  test(`${file} fs/opener allow entries are restricted to app-private/temp dirs`, () => {
-    const capability = readCapability(file);
-    const offenders = collectFsOpenerAllowEntries(capability)
+for (const file of ALL_CAPABILITY_FILES) {
+  test(`${file} fs/opener allow entries stay inside app-private or temp directories`, () => {
+    const offenders = collectFsOpenerAllowEntries(readCapability(file))
       .filter(({ path }) => !isRestrictedToPrivateDirs(path))
+      .map(({ identifier, path }) => `${identifier}: ${path}`);
+    assert.deepEqual(offenders, []);
+  });
+
+  test(`${file} does not grant an app-directory root`, () => {
+    const offenders = collectFsOpenerAllowEntries(readCapability(file))
+      .filter(({ path }) => PRIVATE_BASES.includes(path))
       .map(({ identifier, path }) => `${identifier}: ${path}`);
     assert.deepEqual(offenders, []);
   });
 }
 
-const FS_LIST_PERMISSIONS = [
-  'fs:allow-read',
-  'fs:allow-write',
-  'fs:allow-write-text-file',
-  'fs:allow-write-file',
-  'fs:allow-mkdir',
-  'fs:scope',
-  'fs:scope-appdata-recursive',
-  'fs:scope-appconfig-recursive',
-];
+test('production capabilities are split by host, desktop reader, and mobile reader windows', () => {
+  const main = readCapability('src-tauri/capabilities/default.json');
+  const reader = readCapability('src-tauri/capabilities/reader.json');
+  const mobileReader = readCapability('src-tauri/capabilities/reader-mobile.json');
+  const ohos = readCapability('src-tauri/capabilities/ohos.json');
 
-// The Tauri v2 fs plugin merges every fs allow list into one global scope, so
-// default.json and ohos.json must agree on all of them — not just fs:scope.
-// Compare sorted-by-path entry lists (order-independent).
-for (const identifier of FS_LIST_PERMISSIONS) {
-  test(`default.json and ohos.json ${identifier} allow lists are identical`, () => {
-    const getList = (file) => {
-      const capability = readCapability(file);
-      const permission = capability.permissions.find(
-        (p) => typeof p === 'object' && p.identifier === identifier
-      );
-      assert.ok(permission, `${file} must declare ${identifier}`);
-      return (permission.allow ?? [])
-        .map((e) => e.path)
-        .filter((p) => p !== undefined)
-        .sort();
-    };
-    const [defaultFile, ohosFile] = CAPABILITY_FILES;
-    assert.deepEqual(getList(defaultFile), getList(ohosFile));
-  });
-}
+  assert.deepEqual(main.windows, ['main']);
+  assert.deepEqual(reader.windows, ['reader-*', 'moke-home-*']);
+  assert.deepEqual(reader.platforms, ['linux', 'macOS', 'windows']);
+  assert.deepEqual(mobileReader.windows, ['main']);
+  assert.deepEqual(mobileReader.platforms, ['android', 'iOS']);
+  assert.deepEqual(ohos.windows, ['main']);
+
+  for (const capability of [main, reader, mobileReader, ohos]) {
+    assert.ok(!capability.windows.includes('*'));
+  }
+});
+
+test('base Tauri config activates only host and reader capabilities', () => {
+  assert.deepEqual(readTauriConfig().app.security.capabilities, [
+    'default',
+    'reader',
+    'reader-mobile',
+  ]);
+  assert.ok(
+    !readTauriConfig().app.security.capabilities.includes('ohos'),
+    'the broad single-WebView OHOS capability must not merge into desktop main',
+  );
+});
+
+test('desktop and mobile reader variants grant the same reader operations', () => {
+  const desktop = readCapability('src-tauri/capabilities/reader.json');
+  const mobile = readCapability('src-tauri/capabilities/reader-mobile.json');
+  assert.deepEqual(mobile.permissions, desktop.permissions);
+});
+
+test('main window does not inherit reader-only plugins', () => {
+  const main = readCapability('src-tauri/capabilities/default.json');
+  const identifiers = new Set(main.permissions.map(permissionIdentifier));
+  for (const readerOnly of [
+    'dialog:default',
+    'clipboard-manager:allow-write-text',
+    'clipboard-manager:allow-read-text',
+    'device-info:default',
+    'turso:default',
+    'native-tts:default',
+    'native-bridge:default',
+    'websocket:default',
+  ]) {
+    assert.ok(!identifiers.has(readerOnly), `main must not grant ${readerOnly}`);
+  }
+});
+
+test('reader windows can read Moke books but cannot write the books directory', () => {
+  for (const file of [
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const capability = readCapability(file);
+    const readPaths = permissionPaths(findPermission(capability, 'fs:read-files'));
+    const readDirPaths = permissionPaths(findPermission(capability, 'fs:allow-read-dir'));
+    const writePaths = permissionPaths(findPermission(capability, 'fs:write-all'));
+
+    assert.ok(readPaths.includes('$APPDATA/books/**'));
+    assert.ok(readDirPaths.includes('$APPDATA/books'));
+    assert.ok(writePaths.length > 0, 'Readest must retain its private settings/cache writes');
+    assert.ok(
+      writePaths.every((path) => !path.startsWith('$APPDATA/books')),
+      `${file} must keep Moke books read-only`,
+    );
+  }
+});
+
+test('reader capabilities preserve settings, RSS, and updater operations', () => {
+  const privateFiles = [
+    '$APPCONFIG/settings.json',
+    '$APPCONFIG/settings.json.bak',
+    '$APPCONFIG/feeds.json',
+    '$APPCONFIG/feeds.json.bak',
+  ];
+
+  for (const file of [
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const capability = readCapability(file);
+    const readPaths = permissionPaths(findPermission(capability, 'fs:read-files'));
+    const writePaths = permissionPaths(findPermission(capability, 'fs:write-all'));
+    for (const path of privateFiles) {
+      assert.ok(readPaths.includes(path), `${file} must read ${path}`);
+      assert.ok(writePaths.includes(path), `${file} must write ${path}`);
+    }
+    assert.ok(capability.permissions.includes('updater:default'));
+    for (const unusedPermission of [
+      'clipboard-manager:allow-read-text',
+      'core:window:allow-center',
+      'core:window:allow-hide',
+    ]) {
+      assert.ok(!capability.permissions.includes(unusedPermission));
+    }
+  }
+});
+
+test('main filesystem writes are limited to downloaded books', () => {
+  const main = readCapability('src-tauri/capabilities/default.json');
+  const writePermissions = new Set([
+    'fs:allow-mkdir',
+    'fs:allow-open',
+    'fs:allow-write',
+    'fs:allow-remove',
+  ]);
+  const paths = main.permissions
+    .filter((permission) => writePermissions.has(permissionIdentifier(permission)))
+    .flatMap(permissionPaths);
+
+  assert.ok(paths.length > 0);
+  assert.ok(paths.every((path) => path === '$APPDATA/books' || path.startsWith('$APPDATA/books/')));
+});
+
+test('reader capabilities retain random-access file reads', () => {
+  for (const file of [
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const capability = readCapability(file);
+    assert.ok(findPermission(capability, 'fs:read-files'));
+  }
+  assert.ok(
+    readCapability('src-tauri/capabilities/ohos.json').permissions.includes('fs:allow-seek'),
+  );
+});
+
+test('production capabilities contain no remote origin grants', () => {
+  for (const file of PRODUCTION_CAPABILITY_FILES) {
+    const capability = readCapability(file);
+    assert.equal(capability.remote, undefined, `${file} must be local-only in release builds`);
+  }
+});
+
+test('OHOS dev capability differs only by its development server origins', () => {
+  const production = readCapability('src-tauri/capabilities/ohos.json');
+  const development = readCapability(DEV_OHOS_CAPABILITY);
+  const { remote, ...developmentBase } = development;
+
+  assert.deepEqual(developmentBase, production);
+  assert.deepEqual(remote.urls, [
+    'http://*:3000/**',
+    'https://*:3000/**',
+    'http://*:3001/**',
+    'https://*:3001/**',
+  ]);
+});
+
+test('HTTP access remains scheme-scoped for user-configured Talebook servers', () => {
+  for (const file of [
+    'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const permission = findPermission(readCapability(file), 'http:default');
+    const urls = permission.allow.map((entry) => entry.url).sort();
+    assert.deepEqual(urls, ['http://**', 'https://**']);
+  }
+});
