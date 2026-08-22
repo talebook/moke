@@ -59,17 +59,28 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    fn internal_error(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: 500,
+            code,
+            message: message.into(),
+        }
+    }
 }
 
 impl From<String> for ApiError {
     fn from(message: String) -> Self {
-        Self::bad_request("BAD_REQUEST", message)
+        // String errors propagated from storage, permissions and Tauri are
+        // host failures by default. Client validation must choose an explicit
+        // 4xx constructor at the boundary where its semantics are known.
+        Self::internal_error("INTERNAL_ERROR", message)
     }
 }
 
 impl From<&str> for ApiError {
     fn from(message: &str) -> Self {
-        Self::bad_request("BAD_REQUEST", message)
+        Self::internal_error("INTERNAL_ERROR", message)
     }
 }
 
@@ -105,7 +116,7 @@ pub(crate) struct PendingCommands {
 pub(crate) enum ReceiptMatch {
     Active { request_id: String },
     Late { request_id: String },
-    SourceMismatch,
+    SourceMismatch { target_window: String },
     Unknown,
 }
 
@@ -143,7 +154,12 @@ impl PendingCommands {
         }
     }
 
-    pub(crate) fn retire(&mut self, correlation_id: &str) {
+    /// Atomically claim timeout ownership for an active command.
+    ///
+    /// `true` means the timeout won and the command was retired. `false`
+    /// means a delivery already removed the command and sent its result while
+    /// holding the same registry lock.
+    pub(crate) fn retire(&mut self, correlation_id: &str) -> bool {
         if let Some(command) = self.active_by_correlation.remove(correlation_id) {
             self.remove_key_if_current(&command.key, correlation_id);
             self.retired_by_correlation.insert(
@@ -153,7 +169,9 @@ impl PendingCommands {
                     expires_at: Instant::now() + RETIRED_COMMAND_TTL,
                 },
             );
+            return true;
         }
+        false
     }
 
     pub(crate) fn deliver(
@@ -166,7 +184,9 @@ impl PendingCommands {
 
         if let Some(command) = self.active_by_correlation.get(correlation_id) {
             if command.key.target_window != source_window {
-                return ReceiptMatch::SourceMismatch;
+                return ReceiptMatch::SourceMismatch {
+                    target_window: command.key.target_window.clone(),
+                };
             }
         }
         if let Some(command) = self.active_by_correlation.remove(correlation_id) {
@@ -178,7 +198,9 @@ impl PendingCommands {
 
         if let Some(command) = self.retired_by_correlation.get(correlation_id) {
             if command.key.target_window != source_window {
-                return ReceiptMatch::SourceMismatch;
+                return ReceiptMatch::SourceMismatch {
+                    target_window: command.key.target_window.clone(),
+                };
             }
         }
         if let Some(command) = self.retired_by_correlation.remove(correlation_id) {
@@ -201,6 +223,10 @@ impl PendingCommands {
         self.retired_by_correlation
             .retain(|_, command| command.expires_at > now);
     }
+}
+
+pub(crate) fn is_internal_request_id(request_id: &str) -> bool {
+    request_id.starts_with(INTERNAL_REQUEST_ID_PREFIX)
 }
 
 // ---------------------------------------------------------------------------
@@ -333,14 +359,14 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
 
     // Token 认证
     if let Err(e) = authenticate(&ctx, ext_name.as_deref(), ext_token.as_deref()) {
-        let response =
-            tiny_http::Response::from_string(serde_json::json!({"error": e}).to_string())
-                .with_status_code(401)
-                .with_header(cors_header)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
-                );
+        let response = tiny_http::Response::from_string(
+            serde_json::json!({"code": "AUTH_FAILED", "error": e}).to_string(),
+        )
+        .with_status_code(401)
+        .with_header(cors_header)
+        .with_header(
+            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+        );
         let _ = request.respond(response);
         return;
     }
@@ -455,7 +481,7 @@ fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
 fn parse_command_wait(payload: &serde_json::Value) -> Result<(Option<String>, u64), ApiError> {
     let request_id = match payload.get("request_id") {
         Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
-            Some(value.to_string())
+            Some(value.trim().to_string())
         }
         Some(serde_json::Value::Null) | None => None,
         Some(_) => {
@@ -533,6 +559,7 @@ fn build_command_result_response(request_id: &str, receipt: &serde_json::Value) 
             "request_id": request_id,
             "success": false,
             "error": "阅读器返回了无效的命令回执",
+            "result": receipt,
         })
         .to_string(),
     }
@@ -593,10 +620,16 @@ fn handle_reader(
                 }
 
                 let (request_id, wait_ms) = parse_command_wait(&payload)?;
+                if let Some(rid) = &request_id {
+                    payload["request_id"] = serde_json::Value::String(rid.clone());
+                }
                 let result_rx = if wait_ms > 0 {
-                    let rid = request_id
-                        .as_ref()
-                        .expect("parse_command_wait 已校验 request_id");
+                    let rid = request_id.as_ref().ok_or_else(|| {
+                        ApiError::bad_request(
+                            "MISSING_REQUEST_ID",
+                            "wait_ms 大于 0 时必须提供非空 request_id",
+                        )
+                    })?;
                     let (tx, rx) = std::sync::mpsc::channel::<serde_json::Value>();
                     let key = PendingCommandKey {
                         extension_name: ext_name.to_string(),
@@ -628,17 +661,28 @@ fn handle_reader(
                     return match rx.recv_timeout(Duration::from_millis(wait_ms)) {
                         Ok(result) => Ok(build_command_result_response(&rid, &result)),
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            ctx.pending_commands.lock().unwrap().retire(&correlation_id);
-                            Ok(serde_json::json!({
-                                "sent": true,
-                                "request_id": rid,
-                                "timed_out": true,
-                            })
-                            .to_string())
+                            let timeout_won =
+                                ctx.pending_commands.lock().unwrap().retire(&correlation_id);
+                            if timeout_won {
+                                Ok(serde_json::json!({
+                                    "sent": true,
+                                    "request_id": rid,
+                                    "timed_out": true,
+                                })
+                                .to_string())
+                            } else {
+                                match rx.try_recv() {
+                                    Ok(result) => Ok(build_command_result_response(&rid, &result)),
+                                    Err(error) => Err(ApiError::internal_error(
+                                        "COMMAND_WAIT_STATE_ERROR",
+                                        format!("等待阅读器回执时状态不一致: {error}"),
+                                    )),
+                                }
+                            }
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                             ctx.pending_commands.lock().unwrap().cancel(&correlation_id);
-                            Err(ApiError::bad_request(
+                            Err(ApiError::internal_error(
                                 "COMMAND_WAIT_CANCELLED",
                                 "等待阅读器回执时通道已关闭",
                             ))
@@ -652,7 +696,7 @@ fn handle_reader(
                 }
                 return Ok(response.to_string());
             } else {
-                return Err(format!("阅读器窗口「{label}」不存在").into());
+                return Err(ApiError::not_found(format!("阅读器窗口「{label}」不存在")));
             }
         }
     }
@@ -662,8 +706,8 @@ fn handle_reader(
 
 /// POST /api/v1/extension/sidebar/add
 fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
-    let data: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    let data: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
     // 转发为 Tauri event，前端 Sidebar 监听此事件动态添加
     ctx.app_handle
@@ -675,8 +719,8 @@ fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> A
 
 /// POST /api/v1/extension/page/register
 fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
-    let data: serde_json::Value =
-        serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    let data: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
     ctx.app_handle
         .emit("ext:page:register", &data)
@@ -706,8 +750,10 @@ fn handle_ext_storage(
 
     let key = url.strip_prefix("/api/v1/extension/storage/").unwrap_or("");
     if key.is_empty() {
-        return Err("缺少 key".into());
+        return Err(ApiError::bad_request("MISSING_STORAGE_KEY", "缺少 key"));
     }
+    super::storage::validate_key(key)
+        .map_err(|message| ApiError::bad_request("INVALID_STORAGE_KEY", message))?;
 
     let ext_dir = ctx.extensions_dir.join(ext_name);
 
@@ -717,9 +763,12 @@ fn handle_ext_storage(
             Ok(serde_json::json!({"key": key, "value": value}).to_string())
         }
         &tiny_http::Method::Put => {
-            let data: serde_json::Value =
-                serde_json::from_str(body).map_err(|e| format!("JSON 解析失败: {e}"))?;
-            let value = data["value"].as_str().ok_or("缺少 value 字段")?;
+            let data: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+                ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}"))
+            })?;
+            let value = data["value"]
+                .as_str()
+                .ok_or_else(|| ApiError::bad_request("MISSING_VALUE", "缺少 value 字段"))?;
             super::storage::set(&ext_dir, key, value)?;
             Ok(serde_json::json!({"key": key, "stored": true}).to_string())
         }
@@ -727,7 +776,7 @@ fn handle_ext_storage(
             super::storage::delete(&ext_dir, key)?;
             Ok(serde_json::json!({"deleted": true}).to_string())
         }
-        _ => Err("不支持的方法".into()),
+        _ => Err(ApiError::bad_request("UNSUPPORTED_METHOD", "不支持的方法")),
     }
 }
 
@@ -858,7 +907,9 @@ mod tests {
 
         assert_eq!(
             pending.deliver(&correlation_id, "reader-two", receipt.clone()),
-            ReceiptMatch::SourceMismatch
+            ReceiptMatch::SourceMismatch {
+                target_window: "reader-one".into()
+            }
         );
         assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
         assert_eq!(
@@ -881,7 +932,7 @@ mod tests {
             old_rx.recv_timeout(Duration::from_millis(1)),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         );
-        pending.retire(&old_id);
+        assert!(pending.retire(&old_id));
 
         let (new_tx, new_rx) = mpsc::channel();
         let new_id = pending
@@ -911,6 +962,45 @@ mod tests {
             }
         );
         assert_eq!(new_rx.recv().unwrap()["result"], "new");
+    }
+
+    #[test]
+    fn timeout_and_delivery_have_a_single_registry_winner() {
+        let mut pending = PendingCommands::default();
+
+        let (timed_out_tx, timed_out_rx) = mpsc::channel();
+        let timed_out_id = pending
+            .register(key("extension-a", "reader-one", "timed-out"), timed_out_tx)
+            .unwrap();
+        assert!(pending.retire(&timed_out_id));
+        assert_eq!(
+            pending.deliver(
+                &timed_out_id,
+                "reader-one",
+                serde_json::json!({"success": true}),
+            ),
+            ReceiptMatch::Late {
+                request_id: "timed-out".into()
+            }
+        );
+        assert_eq!(timed_out_rx.try_recv(), Err(TryRecvError::Disconnected));
+
+        let (delivered_tx, delivered_rx) = mpsc::channel();
+        let delivered_id = pending
+            .register(key("extension-a", "reader-one", "delivered"), delivered_tx)
+            .unwrap();
+        assert_eq!(
+            pending.deliver(
+                &delivered_id,
+                "reader-one",
+                serde_json::json!({"success": true, "result": "on-time"}),
+            ),
+            ReceiptMatch::Active {
+                request_id: "delivered".into()
+            }
+        );
+        assert!(!pending.retire(&delivered_id));
+        assert_eq!(delivered_rx.try_recv().unwrap()["result"], "on-time");
     }
 
     #[test]
@@ -945,7 +1035,7 @@ mod tests {
         assert_eq!(too_large.code, "WAIT_MS_TOO_LARGE");
         assert_eq!(
             parse_command_wait(&serde_json::json!({
-                "request_id": "r1",
+                "request_id": "  r1  ",
                 "wait_ms": MAX_COMMAND_WAIT_MS,
             }))
             .unwrap(),
@@ -958,6 +1048,19 @@ mod tests {
         let error = ApiError::not_found("未知路径");
         assert_eq!(error.status, 404);
         assert_eq!(error.code, "NOT_FOUND");
+    }
+
+    #[test]
+    fn string_errors_default_to_internal_server_errors() {
+        let error = ApiError::from("storage failed".to_string());
+        assert_eq!(error.status, 500);
+        assert_eq!(error.code, "INTERNAL_ERROR");
+    }
+
+    #[test]
+    fn internal_request_ids_are_recognized() {
+        assert!(is_internal_request_id("moke-pending:123"));
+        assert!(!is_internal_request_id("extension-request"));
     }
 
     #[test]
@@ -1007,6 +1110,17 @@ mod tests {
                 "success": false,
                 "error": "No active reader view",
             })
+        );
+
+        let invalid: serde_json::Value = serde_json::from_str(&build_command_result_response(
+            "r3",
+            &serde_json::json!({"command": "legacy", "value": 42}),
+        ))
+        .unwrap();
+        assert_eq!(invalid["success"], false);
+        assert_eq!(
+            invalid["result"],
+            serde_json::json!({"command": "legacy", "value": 42})
         );
     }
 }

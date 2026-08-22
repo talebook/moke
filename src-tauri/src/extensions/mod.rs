@@ -484,11 +484,21 @@ fn ext_reader_event(
                 | api_server::ReceiptMatch::Late { request_id } => {
                     data["request_id"] = serde_json::Value::String(request_id);
                 }
-                api_server::ReceiptMatch::SourceMismatch => {
-                    return Err(format!(
-                        "忽略来自窗口「{}」的命令回执：来源与目标窗口不一致",
-                        source_window.label()
-                    ));
+                api_server::ReceiptMatch::SourceMismatch { target_window } => {
+                    log::warn!(
+                        "[ext] 忽略来自窗口「{}」的命令回执：目标窗口为「{}」",
+                        source_window.label(),
+                        target_window
+                    );
+                    return Ok(());
+                }
+                api_server::ReceiptMatch::Unknown
+                    if api_server::is_internal_request_id(&correlation_id) =>
+                {
+                    log::warn!("[ext] 忽略未知的内部命令关联 ID");
+                    if let Some(object) = data.as_object_mut() {
+                        object.remove("request_id");
+                    }
                 }
                 api_server::ReceiptMatch::Unknown => {}
             }
