@@ -26,6 +26,7 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
+    "fs:create-app-specific-dirs",
     {
       "identifier": "fs:read-files",
       "allow": [
@@ -42,12 +43,16 @@
       ]
     },
     {
-      "identifier": "fs:allow-read-dir",
+      "identifier": "fs:read-dirs",
       "allow": [
         { "path": "$APPDATA/books" },
         { "path": "$APPDATA/books/**" },
         { "path": "$APPDATA/Readest" },
         { "path": "$APPDATA/Readest/**" },
+        { "path": "$APPCONFIG/settings.json" },
+        { "path": "$APPCONFIG/settings.json.bak" },
+        { "path": "$APPCONFIG/feeds.json" },
+        { "path": "$APPCONFIG/feeds.json.bak" },
         { "path": "$APPCACHE/**" },
         { "path": "$TEMP/shared" },
         { "path": "$TEMP/shared/**" }

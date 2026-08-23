@@ -178,7 +178,7 @@ test('reader windows can read Moke books but cannot write the books directory', 
   ]) {
     const capability = readCapability(file);
     const readPaths = permissionPaths(findPermission(capability, 'fs:read-files'));
-    const readDirPaths = permissionPaths(findPermission(capability, 'fs:allow-read-dir'));
+    const readDirPaths = permissionPaths(findPermission(capability, 'fs:read-dirs'));
     const writePaths = permissionPaths(findPermission(capability, 'fs:write-all'));
 
     assert.ok(readPaths.includes('$APPDATA/books/**'));
@@ -188,6 +188,33 @@ test('reader windows can read Moke books but cannot write the books directory', 
       writePaths.every((path) => !path.startsWith('$APPDATA/books')),
       `${file} must keep Moke books read-only`,
     );
+  }
+});
+
+test('reader startup can inspect scoped paths and create app-private base directories', () => {
+  const manifests = JSON.parse(
+    readFileSync(join(repoRoot, 'src-tauri/gen/schemas/acl-manifests.json'), 'utf8'),
+  );
+  const fsPermissions = manifests.fs.permissions;
+
+  assert.ok(fsPermissions['read-dirs'].commands.allow.includes('exists'));
+  assert.ok(fsPermissions['read-dirs'].commands.allow.includes('read_dir'));
+  assert.ok(fsPermissions['create-app-specific-dirs'].commands.allow.includes('mkdir'));
+  assert.ok(!fsPermissions['create-app-specific-dirs'].commands.allow.includes('write_file'));
+  assert.ok(!fsPermissions['create-app-specific-dirs'].commands.allow.includes('remove'));
+
+  for (const file of [
+    'src-tauri/capabilities/reader.json',
+    'src-tauri/capabilities/reader-mobile.json',
+  ]) {
+    const capability = readCapability(file);
+    const identifiers = new Set(capability.permissions.map(permissionIdentifier));
+    const metadataPaths = permissionPaths(findPermission(capability, 'fs:read-dirs'));
+
+    assert.ok(identifiers.has('fs:create-app-specific-dirs'));
+    assert.ok(metadataPaths.includes('$APPCONFIG/settings.json'));
+    assert.ok(metadataPaths.includes('$APPDATA/Readest'));
+    assert.ok(metadataPaths.includes('$APPDATA/Readest/**'));
   }
 });
 
