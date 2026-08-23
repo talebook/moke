@@ -68,12 +68,11 @@ fn moke_runtime_platform() -> &'static str {
     std::env::consts::OS
 }
 
-/// Performs a full-document navigation inside the current OpenHarmony WebView.
-/// ArkWeb cannot reliably execute Next.js App Router's RSC navigation over
-/// the custom `tauri://` scheme, and Moke/Readest are separate Next apps.
-/// Other platforms use normal browser navigation and do not register this
-/// privileged command.
-#[cfg(target_env = "ohos")]
+/// Performs a full-document navigation inside the current Android/OpenHarmony
+/// WebView. Browser navigation is unreliable when crossing between the bundled
+/// Moke and Readest Next apps on these runtimes. The command accepts only
+/// same-origin absolute paths and is not compiled for desktop or iOS.
+#[cfg(any(target_env = "ohos", target_os = "android"))]
 #[tauri::command]
 fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
     if !path.starts_with('/') || path.starts_with("//") {
@@ -525,7 +524,7 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
-        #[cfg(target_env = "ohos")]
+        #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
         moke_record_downloaded_book,
         moke_remove_downloaded_book,

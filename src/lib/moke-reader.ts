@@ -3,7 +3,8 @@ import type { ReadingProgressPayload } from './reading-progress';
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
 
-export const requiresMokeNavigate = (platform: string): boolean => platform === 'ohos';
+export const requiresMokeNavigate = (platform: string): boolean =>
+  platform === 'ohos' || platform === 'android';
 
 /**
  * Android/iOS render the main WebView edge-to-edge, so Moke's controls need
@@ -162,10 +163,11 @@ export function isSafeAppNavigationPath(href: string): boolean {
  *
  * ArkWeb cannot reliably execute Next.js App Router RSC navigation over the
  * custom `tauri://` scheme, and URL params across pages are unreliable there
- * (see the welcome page). OHOS therefore uses the narrowly registered native
- * `moke_navigate` command. Android/iOS still need a real document load when
- * crossing between the separate Moke and Readest Next apps, but can use the
- * browser navigation API without exposing a native navigation command.
+ * (see the welcome page). OHOS and Android therefore use the narrowly
+ * registered native `moke_navigate` command. Android WebView can otherwise
+ * leave the bundled reader on a blank document when browser navigation crosses
+ * between the separate Moke and Readest Next apps. iOS can use the browser
+ * navigation API.
  */
 export async function navigateFullDocument(
   href: string,

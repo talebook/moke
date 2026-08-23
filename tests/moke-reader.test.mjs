@@ -25,9 +25,9 @@ test('OHOS uses the single-WebView reader flow', () => {
   assert.equal(isSingleWebviewRuntime('windows'), false);
 });
 
-test('only OpenHarmony exposes the native full-document navigation command', () => {
+test('Android and OpenHarmony use native full-document navigation', () => {
   assert.equal(requiresMokeNavigate('ohos'), true);
-  assert.equal(requiresMokeNavigate('android'), false);
+  assert.equal(requiresMokeNavigate('android'), true);
   assert.equal(requiresMokeNavigate('ios'), false);
   assert.equal(requiresMokeNavigate('linux'), false);
   assert.equal(requiresMokeNavigate('windows'), false);
