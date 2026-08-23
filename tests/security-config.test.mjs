@@ -140,14 +140,14 @@ test('embedded reader stylesheet hosts remain available without extra hosts', ()
   ].sort());
 });
 
-test('moke_navigate is compiled and registered only for OpenHarmony', () => {
+test('moke_navigate is compiled and registered only for Android and OpenHarmony', () => {
   const source = readFileSync(join(repoRoot, 'src-tauri/src/lib.rs'), 'utf8');
   assert.match(
     source,
-    /#\[cfg\(target_env = "ohos"\)\]\s*#\[tauri::command\]\s*fn moke_navigate/,
+    /#\[cfg\(any\(target_env = "ohos", target_os = "android"\)\)\]\s*#\[tauri::command\]\s*fn moke_navigate/,
   );
   assert.match(
     source,
-    /#\[cfg\(target_env = "ohos"\)\]\s*moke_navigate,/,
+    /#\[cfg\(any\(target_env = "ohos", target_os = "android"\)\)\]\s*moke_navigate,/,
   );
 });
