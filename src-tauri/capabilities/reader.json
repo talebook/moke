@@ -47,6 +47,8 @@
     {
       "identifier": "fs:read-dirs",
       "allow": [
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCACHE" },
         { "path": "$APPDATA/books" },
         { "path": "$APPDATA/books/**" },
         { "path": "$APPDATA/Readest" },

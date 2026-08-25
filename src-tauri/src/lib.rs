@@ -892,11 +892,13 @@ mod fs_scope_tests {
         assert!(!p.matches_path_with(Path::new("/home/u/AppDataX/evil"), opts));
     }
 
-    // Every `$VAR/**` entry in the committed capability files must keep the
-    // bare `$VAR` root out of scope. Parse the real production/dev files and
-    // exercise the same matching `is_allowed` performs.
+    // Bare app-directory roots stay out of scope except for the reader's two
+    // metadata-only roots. NativeAppService checks these roots with `exists`
+    // before writing root-level settings/cache files; no write permission is
+    // granted for either root. Parse the committed files and exercise the same
+    // matching `is_allowed` performs.
     #[test]
-    fn capability_fs_allow_entries_keep_bare_roots_out_of_scope() {
+    fn capability_fs_allow_entries_grant_only_required_bare_roots() {
         let opts = tauri_match_options();
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let files = [
@@ -941,11 +943,17 @@ mod fs_scope_tests {
                         Some("$TEMP") => "/temp",
                         _ => continue,
                     };
+                    let is_reader_capability = file.ends_with("capabilities/reader.json")
+                        || file.ends_with("capabilities/reader-mobile.json");
+                    let is_required_metadata_root = is_reader_capability
+                        && id == "fs:read-dirs"
+                        && matches!(path, "$APPCONFIG" | "$APPCACHE");
                     let p = Pattern::new(&resolved).unwrap_or_else(|e| {
                         panic!("bad glob {resolved} in {} ({id}): {e}", file.display())
                     });
                     assert!(
-                        !p.matches_path_with(Path::new(bare_root), opts),
+                        is_required_metadata_root
+                            || !p.matches_path_with(Path::new(bare_root), opts),
                         "{} {id} allow path {path} matches bare root {bare_root}",
                         file.display()
                     );
