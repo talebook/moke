@@ -62,7 +62,18 @@ function hasParentDirTraversal(path) {
 function isRestrictedToPrivateDirs(path) {
   if (hasParentDirTraversal(path)) return false;
   return PRIVATE_BASES.some(
-    (prefix) => path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\`),
+    (prefix) =>
+      path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}\\`),
+  );
+}
+
+function isApprovedAppDirectoryRoot(file, identifier, path) {
+  return (
+    ['src-tauri/capabilities/reader.json', 'src-tauri/capabilities/reader-mobile.json'].includes(
+      file,
+    ) &&
+    identifier === 'fs:read-dirs' &&
+    ['$APPCONFIG', '$APPCACHE'].includes(path)
   );
 }
 
@@ -74,9 +85,12 @@ for (const file of ALL_CAPABILITY_FILES) {
     assert.deepEqual(offenders, []);
   });
 
-  test(`${file} does not grant an app-directory root`, () => {
+  test(`${file} grants only required app-directory roots`, () => {
     const offenders = collectFsOpenerAllowEntries(readCapability(file))
-      .filter(({ path }) => PRIVATE_BASES.includes(path))
+      .filter(
+        ({ identifier, path }) =>
+          PRIVATE_BASES.includes(path) && !isApprovedAppDirectoryRoot(file, identifier, path),
+      )
       .map(({ identifier, path }) => `${identifier}: ${path}`);
     assert.deepEqual(offenders, []);
   });
@@ -212,6 +226,8 @@ test('reader startup can inspect scoped paths and create app-private base direct
     const metadataPaths = permissionPaths(findPermission(capability, 'fs:read-dirs'));
 
     assert.ok(identifiers.has('fs:create-app-specific-dirs'));
+    assert.ok(metadataPaths.includes('$APPCONFIG'));
+    assert.ok(metadataPaths.includes('$APPCACHE'));
     assert.ok(metadataPaths.includes('$APPCONFIG/settings.json'));
     assert.ok(metadataPaths.includes('$APPDATA/Readest'));
     assert.ok(metadataPaths.includes('$APPDATA/Readest/**'));
