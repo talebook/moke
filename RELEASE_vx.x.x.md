@@ -1,11 +1,12 @@
-# Moke v1.0.9
+# Moke v1.0.10
 
-这是从 `v1.0.2` 升级到 `v1.0.9` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.8` 的全部代码更改。
+这是从 `v1.0.2` 升级到 `v1.0.10` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.9` 的全部代码更改。
 
 ## 内嵌阅读器
 
 - 将内嵌 Readest 升级到 `v0.12.1`，随后同步到最新上游版本，并更新 foliate-js 与 PDF 资源适配。
 - 修复 Android 内嵌阅读器无法检查应用配置、缓存和私有目录而启动白屏的问题。
+- 修复 Android 打开书籍时本地文件分片请求悬空、阅读器一直停留在加载动画的问题。
 - 修复 Android 单 WebView 阅读器的进入、返回和原生导航流程，并允许阅读器更新窗口标题。
 - 保留进入和退出阅读器时的应用切换动画。
 - Readest 原生服务初始化失败时显示具体错误和重试入口，同时保留右下角调试面板按钮。
@@ -40,9 +41,9 @@
 
 | 平台 | 安装包 |
 |---|---|
-| Windows | `Moke_1.0.9_x64_en-US.msi` / `.exe` |
-| macOS | `Moke_1.0.9_aarch64.dmg` |
-| Linux | `Moke_1.0.9_amd64.AppImage` / `.deb` |
+| Windows | `Moke_1.0.10_x64_en-US.msi` / `.exe` |
+| macOS | `Moke_1.0.10_aarch64.dmg` |
+| Linux | `Moke_1.0.10_amd64.AppImage` / `.deb` |
 | Android | `moke-android-release.apk` |
 | iOS/iPadOS | `Moke.ipa`（自签名安装） |
 | OpenHarmony（鸿蒙） | `entry-default-unsigned.hap`（alpha，未签名，可能需要自签名安装） |
@@ -55,4 +56,4 @@
 
 遇到问题或建议请提交 [GitHub Issues](https://github.com/talebook/moke/issues)。安全漏洞请通过[私密报告](https://github.com/talebook/moke/security/advisories/new)提交。
 
-**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.9
+**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.10
