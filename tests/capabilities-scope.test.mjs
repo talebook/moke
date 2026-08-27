@@ -72,7 +72,7 @@ function isApprovedAppDirectoryRoot(file, identifier, path) {
     ['src-tauri/capabilities/reader.json', 'src-tauri/capabilities/reader-mobile.json'].includes(
       file,
     ) &&
-    identifier === 'fs:read-dirs' &&
+    ['fs:read-dirs', 'fs:allow-mkdir'].includes(identifier) &&
     ['$APPCONFIG', '$APPCACHE'].includes(path)
   );
 }
@@ -205,7 +205,7 @@ test('reader windows can read Moke books but cannot write the books directory', 
   }
 });
 
-test('reader startup can inspect scoped paths and create app-private base directories', () => {
+test('reader startup can inspect and create only the required app-private base directories', () => {
   const manifests = JSON.parse(
     readFileSync(join(repoRoot, 'src-tauri/gen/schemas/acl-manifests.json'), 'utf8'),
   );
@@ -213,9 +213,9 @@ test('reader startup can inspect scoped paths and create app-private base direct
 
   assert.ok(fsPermissions['read-dirs'].commands.allow.includes('exists'));
   assert.ok(fsPermissions['read-dirs'].commands.allow.includes('read_dir'));
-  assert.ok(fsPermissions['create-app-specific-dirs'].commands.allow.includes('mkdir'));
-  assert.ok(!fsPermissions['create-app-specific-dirs'].commands.allow.includes('write_file'));
-  assert.ok(!fsPermissions['create-app-specific-dirs'].commands.allow.includes('remove'));
+  assert.ok(fsPermissions['allow-mkdir'].commands.allow.includes('mkdir'));
+  assert.ok(!fsPermissions['allow-mkdir'].commands.allow.includes('write_file'));
+  assert.ok(!fsPermissions['allow-mkdir'].commands.allow.includes('remove'));
 
   for (const file of [
     'src-tauri/capabilities/reader.json',
@@ -224,8 +224,13 @@ test('reader startup can inspect scoped paths and create app-private base direct
     const capability = readCapability(file);
     const identifiers = new Set(capability.permissions.map(permissionIdentifier));
     const metadataPaths = permissionPaths(findPermission(capability, 'fs:read-dirs'));
+    const mkdirPaths = permissionPaths(findPermission(capability, 'fs:allow-mkdir'));
+    const writePaths = permissionPaths(findPermission(capability, 'fs:write-all'));
 
-    assert.ok(identifiers.has('fs:create-app-specific-dirs'));
+    assert.ok(!identifiers.has('fs:create-app-specific-dirs'));
+    assert.deepEqual(mkdirPaths, ['$APPCONFIG', '$APPCACHE']);
+    assert.ok(!writePaths.includes('$APPCONFIG'));
+    assert.ok(!writePaths.includes('$APPCACHE'));
     assert.ok(metadataPaths.includes('$APPCONFIG'));
     assert.ok(metadataPaths.includes('$APPCACHE'));
     assert.ok(metadataPaths.includes('$APPCONFIG/settings.json'));

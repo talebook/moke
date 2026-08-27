@@ -26,7 +26,13 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-destroy",
     "core:webview:allow-create-webview-window",
-    "fs:create-app-specific-dirs",
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPCONFIG" },
+        { "path": "$APPCACHE" }
+      ]
+    },
     {
       "identifier": "fs:read-files",
       "allow": [

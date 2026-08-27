@@ -1,6 +1,6 @@
-# Moke v1.0.12
+# Moke v1.0.13
 
-这是从 `v1.0.2` 升级到 `v1.0.12` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.11` 的全部代码更改。
+这是从 `v1.0.2` 升级到 `v1.0.13` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.12` 的全部代码更改。
 
 ## 内嵌阅读器
 
@@ -12,6 +12,10 @@
 - 保留进入和退出阅读器时的应用切换动画。
 - Readest 原生服务初始化失败时显示具体错误和重试入口，同时保留右下角调试面板按钮。
 - 修复 Android 原生整页导航与 Zustand 状态恢复的竞态：已开启调试面板时，进入 Readest 后右下角按钮不再因过期的 `mokeDebug=0` 而消失。
+- 修复 Windows 内嵌 Readest 创建应用配置目录时权限范围不匹配，导致 `settings.json` 无法保存的问题；仅允许在 `$APPCONFIG` 与 `$APPCACHE` 根目录执行 `mkdir`，未扩大文件写入、删除或重命名范围。
+- 为 Moke 嵌入模式补齐 LocalSend 状态初始化及全部 9 个命令注册，修复 `localsend_stop` 等命令在 Windows 上提示未找到的问题。
+- 调试面板不再记录 React/Next 启动脚本产生的已知 `<script>` 框架提示，并在读取持久化历史及同步日志时过滤同一条旧记录；其他真实 `console.error` 仍正常保留。
+- 补充 AppConfig/AppCache 精确目录权限、嵌入宿主 LocalSend 命令一致性及调试日志过滤的回归测试。
 - 修复调试 IPC 递归、窗口创建降级时阅读进度丢失，以及标注定位与进度事件关联问题。
 - 保留阅读进度、标注同步、调试日志和 Moke 本地模式等定制功能。
 
@@ -43,9 +47,9 @@
 
 | 平台 | 安装包 |
 |---|---|
-| Windows | `Moke_1.0.12_x64_en-US.msi` / `.exe` |
-| macOS | `Moke_1.0.12_aarch64.dmg` |
-| Linux | `Moke_1.0.12_amd64.AppImage` / `.deb` |
+| Windows | `Moke_1.0.13_x64_en-US.msi` / `.exe` |
+| macOS | `Moke_1.0.13_aarch64.dmg` |
+| Linux | `Moke_1.0.13_amd64.AppImage` / `.deb` |
 | Android | `moke-android-release.apk` |
 | iOS/iPadOS | `Moke.ipa`（自签名安装） |
 | OpenHarmony（鸿蒙） | `entry-default-unsigned.hap`（alpha，未签名，可能需要自签名安装） |
@@ -58,4 +62,4 @@
 
 遇到问题或建议请提交 [GitHub Issues](https://github.com/talebook/moke/issues)。安全漏洞请通过[私密报告](https://github.com/talebook/moke/security/advisories/new)提交。
 
-**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.12
+**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.13
