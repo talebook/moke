@@ -1,75 +1,77 @@
 'use client';
 
-import { useEffect, useRef, useState, type ImgHTMLAttributes } from 'react';
+import { useEffect, useState, type ImgHTMLAttributes } from 'react';
 import { fetchImageObjectUrl } from '@/lib/api';
-
-const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+import { useServerStore } from '@/lib/store/server';
 
 interface AuthImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, 'src'> {
-  /** 完整的图片 URL（已通过 resolveServerAssetUrl 拼好） */
+  /** 图片 URL；相对地址始终以当前书库地址为基准解析。 */
   src: string;
   /** 加载失败时渲染的回退内容（如占位封面） */
   fallback?: React.ReactNode;
+  /** 明确允许无凭据加载公网 CDN / 网络书源封面。 */
+  allowPublicCrossOrigin?: boolean;
 }
 
 /**
  * 带认证的图片组件。
  *
- * - Web 端：服务器与前端同源，cookie 会自动随 <img> 发送，直接用原生 <img>。
- * - Tauri 端：前端在 tauri:// 协议下，与 http(s):// 服务器跨源，<img> 不会带 session，
- *   会 401。因此改用 fetchImageObjectUrl 走带认证的 tauriFetch 拉取后转 blob URL。
+ * 所有平台都先通过安全加载器做协议、来源、重定向、大小和像素限制，再把经过
+ * 校验的字节转成 object URL。只有书库同源请求可以携带 session；跨源必须由
+ * 调用点显式允许且始终匿名。
  */
-export function AuthImage({ src, fallback, alt = '', ...imgProps }: AuthImageProps) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
+export function AuthImage({
+  src,
+  fallback,
+  allowPublicCrossOrigin = false,
+  alt = '',
+  onError,
+  ...imgProps
+}: AuthImageProps) {
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const loadKey = `${serverUrl}\n${allowPublicCrossOrigin ? 'public' : 'same'}\n${src}`;
+  const [loaded, setLoaded] = useState<{ key: string; objectUrl: string } | null>(null);
   const [failed, setFailed] = useState(false);
-  const currentObjectUrl = useRef<string | null>(null);
 
   useEffect(() => {
-    // 每次换源都重置失败标记（不区分平台）：
-    // web 模式下 effect 会在平台分支提前 return，若不先重置，src 更换后
-    // failed 仍为 true，一直显示占位封面。
     setFailed(false);
-    if (!isTauriApp || !src) return;
+    if (!serverUrl || !src) return;
 
-    let cancelled = false;
+    let disposed = false;
+    let ownedObjectUrl: string | null = null;
 
-    fetchImageObjectUrl(src)
+    fetchImageObjectUrl(src, { serverUrl, allowPublicCrossOrigin })
       .then((url) => {
-        if (cancelled) {
+        if (disposed) {
           URL.revokeObjectURL(url);
           return;
         }
-        // 释放上一张
-        if (currentObjectUrl.current) URL.revokeObjectURL(currentObjectUrl.current);
-        currentObjectUrl.current = url;
-        setObjectUrl(url);
+        ownedObjectUrl = url;
+        setLoaded({ key: loadKey, objectUrl: url });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!disposed) setFailed(true);
       });
 
     return () => {
-      cancelled = true;
+      disposed = true;
+      if (ownedObjectUrl) URL.revokeObjectURL(ownedObjectUrl);
     };
-  }, [src]);
+  }, [allowPublicCrossOrigin, loadKey, serverUrl, src]);
 
-  // 组件卸载时释放最后一张 blob
-  useEffect(() => {
-    return () => {
-      if (currentObjectUrl.current) URL.revokeObjectURL(currentObjectUrl.current);
-    };
-  }, []);
-
-  // Web 端：直接用原生 <img>（同源自动带 cookie）
-  if (!isTauriApp) {
-    if (!src || failed) return <>{fallback ?? null}</>;
+  if (failed || !src || loaded?.key !== loadKey) return <>{fallback ?? null}</>;
+  return (
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={alt} onError={() => setFailed(true)} {...imgProps} />;
-  }
-
-  // Tauri 端
-  if (failed || !src) return <>{fallback ?? null}</>;
-  if (!objectUrl) return <>{fallback ?? null}</>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={objectUrl} alt={alt} {...imgProps} />;
+    <img
+      src={loaded.objectUrl}
+      alt={alt}
+      onError={(event) => {
+        URL.revokeObjectURL(loaded.objectUrl);
+        setLoaded(null);
+        setFailed(true);
+        onError?.(event);
+      }}
+      {...imgProps}
+    />
+  );
 }

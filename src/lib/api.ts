@@ -24,6 +24,11 @@ import {
   type UserInfoResponse,
 } from '@/lib/server-session';
 import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
+import {
+  fetchCoverBytes,
+  MAX_COVER_DIMENSION,
+  MAX_COVER_PIXELS,
+} from '@/lib/cover-image-core';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
@@ -126,47 +131,173 @@ export async function request(url: string | URL, options?: RequestInit): Promise
   return attachSafeJsonReader(response);
 }
 
-/**
- * 通过带认证的 request 获取图片资源，返回可直接用于 <img src> 的 object URL。
- *
- * 为什么需要它：在 Tauri 桌面端，前端运行在自定义协议（tauri://localhost），
- * 与 http(s):// 服务器跨源。<img src> 由 WebView 直接发起，绕过 tauriFetch 插件，
- * 也拿不到登录后由 Rust 侧 cookie jar 维护的 session，因此会 401。
- * 这里改为用 request()（Tauri 下走 tauriFetch、自动带认证）拉取字节再转 blob。
- *
- * 调用方负责在不再使用时 URL.revokeObjectURL 释放。
- */
-export async function fetchImageObjectUrl(imageUrl: string): Promise<string> {
-  if (!/^https?:\/\//i.test(imageUrl)) {
-    throw new Error('image.url.invalid');
-  }
-  const startedAt = Date.now();
-  debugLog('info', 'image', `→ GET ${imageUrl}`);
+export interface FetchImageObjectUrlOptions {
+  /** Configured Talebook origin. Relative covers resolve against this URL. */
+  serverUrl: string;
+  /** Explicit policy switch for credential-free, publicly routed CDN/source covers. */
+  allowPublicCrossOrigin?: boolean;
+}
+
+const COVER_TIMEOUT_MS = 12_000;
+const COVER_FAILURE_COOLDOWN_MS = 30_000;
+const coverLoads = new Map<string, Promise<Blob>>();
+const coverFailureUntil = new Map<string, number>();
+
+function binaryResponse(bytes: Uint8Array): Response {
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return new Response(copy, { status: 200 });
+}
+
+function ipcBytes(value: ArrayBuffer | Uint8Array | number[]): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (Array.isArray(value)) return Uint8Array.from(value);
+  throw new Error('image.body.invalid');
+}
+
+function coverLogUrl(value: string, serverUrl: string): string {
   try {
-    const response = await request(imageUrl, { credentials: 'include' });
-    if (!response.ok) {
-      debugLog(
-        'error',
-        'image',
-        `✗ ${response.status} 封面/图片加载失败 ${imageUrl} (${Date.now() - startedAt}ms)`,
-        response.status === 401 ? '未授权：登录会话可能未携带或已失效' : `HTTP ${response.status}`,
-      );
-      throw new Error(`image.http.${response.status}`);
-    }
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    debugLog(
-      'success',
-      'image',
-      `← 图片加载成功 ${imageUrl} (${Date.now() - startedAt}ms)`,
-      { type: blob.type, size: blob.size },
-    );
-    return objectUrl;
-  } catch (e) {
-    const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    debugLog('error', 'image', `✗ 图片加载异常 ${imageUrl}`, errMsg);
-    throw e;
+    const url = new URL(value, serverUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return '[invalid cover URL]';
   }
+}
+
+async function verifyBrowserDecode(blob: Blob): Promise<void> {
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob).catch(() => {
+      throw new Error('image.decode.invalid');
+    });
+    try {
+      if (
+        bitmap.width > MAX_COVER_DIMENSION ||
+        bitmap.height > MAX_COVER_DIMENSION ||
+        bitmap.width * bitmap.height > MAX_COVER_PIXELS
+      ) {
+        throw new Error('image.dimensions.exceeded');
+      }
+    } finally {
+      bitmap.close();
+    }
+    return;
+  }
+
+  // Older WebViews do not expose createImageBitmap. Decode once through an
+  // off-DOM image and revoke its short-lived URL on every completion path.
+  if (typeof Image !== 'function') return;
+  const decodeUrl = URL.createObjectURL(blob);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        if (
+          image.naturalWidth > MAX_COVER_DIMENSION ||
+          image.naturalHeight > MAX_COVER_DIMENSION ||
+          image.naturalWidth * image.naturalHeight > MAX_COVER_PIXELS
+        ) {
+          reject(new Error('image.dimensions.exceeded'));
+          return;
+        }
+        resolve();
+      };
+      image.onerror = () => reject(new Error('image.decode.invalid'));
+      image.src = decodeUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(decodeUrl);
+  }
+}
+
+async function fetchImageBlob(
+  imageUrl: string,
+  { serverUrl, allowPublicCrossOrigin = false }: FetchImageObjectUrlOptions,
+): Promise<Blob> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), COVER_TIMEOUT_MS);
+  const startedAt = Date.now();
+  debugLog('info', 'image', `→ GET ${coverLogUrl(imageUrl, serverUrl)}`);
+
+  try {
+    const result = await fetchCoverBytes(
+      { imageUrl, libraryUrl: serverUrl, allowPublicCrossOrigin },
+      {
+        fetchLibrary: (url) => request(url, {
+          credentials: 'include',
+          redirect: 'manual',
+          signal: controller.signal,
+          // Consumed by plugin-http; native fetch safely ignores the extra key.
+          maxRedirections: 0,
+        } as RequestInit & { maxRedirections: number }),
+        fetchPublic: async (url) => {
+          if (isTauriApp) {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const value = await invoke<ArrayBuffer | Uint8Array | number[]>('moke_fetch_public_cover', {
+              imageUrl: url,
+            });
+            return binaryResponse(ipcBytes(value));
+          }
+          return fetch(url, {
+            credentials: 'omit',
+            redirect: 'manual',
+            referrerPolicy: 'no-referrer',
+            signal: controller.signal,
+            headers: { Accept: 'image/webp,image/png,image/jpeg,image/gif;q=0.8' },
+          });
+        },
+      },
+    );
+    const blob = new Blob([result.bytes], { type: result.contentType });
+    await verifyBrowserDecode(blob);
+    debugLog('success', 'image', `← 图片加载成功 ${coverLogUrl(result.finalUrl, serverUrl)} (${Date.now() - startedAt}ms)`, {
+      type: blob.type,
+      size: blob.size,
+      width: result.info.width,
+      height: result.info.height,
+    });
+    return blob;
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    debugLog('error', 'image', `✗ 图片加载异常 ${coverLogUrl(imageUrl, serverUrl)}`, detail);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Load every book cover through one bounded policy gate and return an object
+ * URL. Same-library requests may use the session cookie; explicitly allowed
+ * cross-origin requests are credential-free and, on Tauri, DNS-pinned by the
+ * native public-cover command. Callers own and must revoke the returned URL.
+ * Concurrent mounts share one download and failures cool down briefly to
+ * avoid virtualized-list/remount retry storms.
+ */
+export async function fetchImageObjectUrl(
+  imageUrl: string,
+  options: FetchImageObjectUrlOptions,
+): Promise<string> {
+  const key = `${options.serverUrl}\n${options.allowPublicCrossOrigin === true ? 'public' : 'same'}\n${imageUrl}`;
+  const blockedUntil = coverFailureUntil.get(key) ?? 0;
+  if (blockedUntil > Date.now()) throw new Error('image.retry_later');
+  if (blockedUntil) coverFailureUntil.delete(key);
+
+  let load = coverLoads.get(key);
+  if (!load) {
+    load = fetchImageBlob(imageUrl, options);
+    coverLoads.set(key, load);
+    void load.then(
+      () => coverFailureUntil.delete(key),
+      () => {
+        coverFailureUntil.set(key, Date.now() + COVER_FAILURE_COOLDOWN_MS);
+        if (coverFailureUntil.size > 256) {
+          coverFailureUntil.delete(coverFailureUntil.keys().next().value ?? key);
+        }
+      },
+    ).finally(() => coverLoads.delete(key));
+  }
+  const blob = await load;
+  return URL.createObjectURL(blob);
 }
 
 export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: string }> {

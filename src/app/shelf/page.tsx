@@ -107,6 +107,7 @@ function BookCard({
           {coverUrl ? (
             <AuthImage
               src={coverUrl}
+              allowPublicCrossOrigin
               alt={book.title}
               className="book-cover-media w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
               loading={priority ? 'eager' : 'lazy'}
@@ -161,6 +162,7 @@ function BookCard({
         {coverUrl ? (
           <AuthImage
             src={coverUrl}
+            allowPublicCrossOrigin
             alt={book.title}
             className="w-full h-full object-cover"
             loading={priority ? 'eager' : 'lazy'}
@@ -548,4 +550,3 @@ export default function ShelfPage() {
     </DesktopLayout>
   );
 }
-

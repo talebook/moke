@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, ArrowLeft, BookOpen, CheckCircle2, Loader2, Save } from 'lucide-react';
 import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
+import { AuthImage } from '@/components/ui/AuthImage';
 import { getErrorMessage, MokeApiError } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import {
@@ -170,7 +171,13 @@ function NetworkBookContent() {
               <div className="w-full overflow-hidden rounded-[24px] border border-amber-950/10 bg-white book-cover-shadow md:w-[220px]">
                 <div className="relative flex aspect-[2/3] items-center justify-center bg-muted/60">
                   {coverUrl ? (
-                    <img src={coverUrl} alt={book.name || '封面'} className="h-full w-full object-cover" />
+                    <AuthImage
+                      src={coverUrl}
+                      allowPublicCrossOrigin
+                      alt={book.name || '封面'}
+                      className="h-full w-full object-cover"
+                      fallback={<BookOpen className="h-16 w-16 text-muted-foreground/40" />}
+                    />
                   ) : (
                     <BookOpen className="h-16 w-16 text-muted-foreground/40" />
                   )}

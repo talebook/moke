@@ -788,6 +788,7 @@ export default function LibraryPage() {
                         {coverUrl ? (
                           <AuthImage
                             src={coverUrl}
+                            allowPublicCrossOrigin
                             alt={book.title}
                             className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             loading={index === 0 ? 'eager' : 'lazy'}
@@ -827,6 +828,7 @@ export default function LibraryPage() {
                         {coverUrl ? (
                           <AuthImage
                             src={coverUrl}
+                            allowPublicCrossOrigin
                             alt={book.title}
                             className="w-full h-full object-cover"
                             loading={index === 0 ? 'eager' : 'lazy'}
@@ -1179,12 +1181,18 @@ function NetworkBookGrid({
             <>
               <div className="book-cover-motion relative w-full overflow-hidden rounded-[18px] bg-white book-cover-shadow ring-1 ring-black/5 transition-all duration-300 ease-out group-hover:-translate-y-1.5" style={{ aspectRatio: '2/3' }}>
                 {coverUrl ? (
-                  <img
+                  <AuthImage
                     src={coverUrl}
+                    allowPublicCrossOrigin
                     alt={title}
                     className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     loading={idx === 0 ? 'eager' : 'lazy'}
                     fetchPriority={idx === 0 ? 'high' : 'auto'}
+                    fallback={
+                      <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
+                        <span className="text-foreground/20 text-2xl font-bold font-serif">{title[0]}</span>
+                      </div>
+                    }
                   />
                 ) : (
                   <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
@@ -1215,12 +1223,18 @@ function NetworkBookGrid({
           <>
             <div className="book-list-cover-motion h-[72px] w-12 rounded-md overflow-hidden shadow-card shrink-0 flex items-center justify-center relative sm:h-[84px] sm:w-14">
               {coverUrl ? (
-                <img
+                <AuthImage
                   src={coverUrl}
+                  allowPublicCrossOrigin
                   alt={title}
                   className="w-full h-full object-cover"
                   loading={idx === 0 ? 'eager' : 'lazy'}
                   fetchPriority={idx === 0 ? 'high' : 'auto'}
+                  fallback={
+                    <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
+                      <span className="text-foreground/30 text-xs font-bold font-serif">{title[0]}</span>
+                    </div>
+                  }
                 />
               ) : (
                 <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
