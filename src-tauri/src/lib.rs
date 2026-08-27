@@ -645,9 +645,7 @@ pub fn run() {
             #[cfg(debug_assertions)]
             _app.add_capability(reader_dev_remote_capability()?)?;
 
-            // 初始化阅读器相关的进程内状态（如 Discord Rich Presence 客户端）。
-            // readestlib 只在桌面目标暴露 manage_reader_state（OHOS 上被 cfg 排除）。
-            #[cfg(not(target_env = "ohos"))]
+            // 初始化阅读器相关的进程内状态（如 LocalSend 与 Discord Rich Presence）。
             readestlib::manage_reader_state(_app.handle());
 
             // 初始化拓展系统（REST+WS 服务器，仅桌面端；OHOS 上曾导致主线程阻塞）。
@@ -893,10 +891,10 @@ mod fs_scope_tests {
     }
 
     // Bare app-directory roots stay out of scope except for the reader's two
-    // metadata-only roots. NativeAppService checks these roots with `exists`
-    // before writing root-level settings/cache files; no write permission is
-    // granted for either root. Parse the committed files and exercise the same
-    // matching `is_allowed` performs.
+    // metadata and mkdir roots. NativeAppService checks these roots with
+    // `exists` and creates them before writing root-level settings/cache files.
+    // The mkdir-only grant must not broaden remove/rename/write access. Parse
+    // the committed files and exercise the same matching `is_allowed` performs.
     #[test]
     fn capability_fs_allow_entries_grant_only_required_bare_roots() {
         let opts = tauri_match_options();
@@ -945,15 +943,14 @@ mod fs_scope_tests {
                     };
                     let is_reader_capability = file.ends_with("capabilities/reader.json")
                         || file.ends_with("capabilities/reader-mobile.json");
-                    let is_required_metadata_root = is_reader_capability
-                        && id == "fs:read-dirs"
+                    let is_required_reader_root = is_reader_capability
+                        && matches!(id, "fs:read-dirs" | "fs:allow-mkdir")
                         && matches!(path, "$APPCONFIG" | "$APPCACHE");
                     let p = Pattern::new(&resolved).unwrap_or_else(|e| {
                         panic!("bad glob {resolved} in {} ({id}): {e}", file.display())
                     });
                     assert!(
-                        is_required_metadata_root
-                            || !p.matches_path_with(Path::new(bare_root), opts),
+                        is_required_reader_root || !p.matches_path_with(Path::new(bare_root), opts),
                         "{} {id} allow path {path} matches bare root {bare_root}",
                         file.display()
                     );
