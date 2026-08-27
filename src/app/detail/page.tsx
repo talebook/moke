@@ -13,7 +13,7 @@ import {
   endOfflineDownload,
 } from '@/lib/offline-download';
 import { useServerStore } from '@/lib/store/server';
-import { useDeveloperStore } from '@/lib/store/developer';
+import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
@@ -393,7 +393,7 @@ function DetailContent() {
           const href = buildEmbeddedReaderUrl({
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
-            debugPanel: useDeveloperStore.getState().showDebugPanel,
+            debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
             // The explicit navigation id lets the reader skip only startup and
@@ -421,7 +421,7 @@ function DetailContent() {
             await invoke('open_reader', {
               filePath: record.filePath,
               eink: useSettingsStore.getState().eink,
-              debugPanel: useDeveloperStore.getState().showDebugPanel,
+              debugPanel: getDebugPanelLaunchState(),
               mokeBookId: String(book.id),
               restoreProgress,
             });

@@ -16,7 +16,7 @@ import {
 } from '@/lib/moke-reader';
 import { createBoundedRetryCache } from '@/lib/bounded-retry-cache';
 import { shouldPreventNativeAppZoomShortcut } from '@/lib/native-app-zoom';
-import { useDeveloperStore } from '@/lib/store/developer';
+import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { NativeBackNavigation } from './NativeBackNavigation';
 import { PrivacyConsentGate } from './PrivacyConsentGate';
@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     let cleanup: (() => void) | undefined;
     void installDebugLogBridge({
       source: 'moke',
-      getPanelVisible: () => useDeveloperStore.getState().showDebugPanel,
+      getPanelVisible: getDebugPanelLaunchState,
     }).then((uninstall) => {
       if (disposed) uninstall();
       else cleanup = uninstall;

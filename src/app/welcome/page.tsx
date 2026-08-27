@@ -6,7 +6,7 @@ import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { logErrorMetadata } from '@/lib/api-log';
 import { useServerStore } from '@/lib/store/server';
-import { useDeveloperStore } from '@/lib/store/developer';
+import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
 import { debugLog } from '@/lib/debug-log';
@@ -118,7 +118,7 @@ export default function WelcomePage() {
     try {
       await openEmbeddedReaderHome({
         eink: useSettingsStore.getState().eink,
-        debugPanel: useDeveloperStore.getState().showDebugPanel,
+        debugPanel: getDebugPanelLaunchState(),
         serverUrl: useServerStore.getState().serverUrl,
         navigate: (href) => router.push(href),
       });
