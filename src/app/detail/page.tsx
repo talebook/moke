@@ -17,6 +17,7 @@ import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/develop
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
+import { isInvalidCertificateAllowed } from '@/lib/transport-security';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
 import {
@@ -399,6 +400,10 @@ function DetailContent() {
             // The explicit navigation id lets the reader skip only startup and
             // annotation relocations; genuine page turns still sync directly.
             serverUrl: useServerStore.getState().serverUrl,
+            allowInvalidCertificate: isInvalidCertificateAllowed(
+              useServerStore.getState().serverUrl,
+              useServerStore.getState().insecureTlsAllowedOrigins,
+            ),
           });
 
           // Navigation replaces this WebView and destroys the current JS

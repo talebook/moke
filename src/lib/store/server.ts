@@ -18,6 +18,7 @@ import {
   type PersistedServerCapabilities,
   type ServerCapabilities,
 } from '../server-capabilities.ts';
+import { normalizeHttpsOrigin } from '../transport-security.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
 export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
@@ -34,6 +35,14 @@ const safeLocalStorage: StateStorage = {
   removeItem: safeRemoveLocalStorageItem,
 };
 
+function normalizeAllowedTlsOrigins(origins: unknown): string[] {
+  if (!Array.isArray(origins)) return [];
+  return [...new Set(origins.flatMap((value) => {
+    const origin = typeof value === 'string' ? normalizeHttpsOrigin(value) : null;
+    return origin ? [origin] : [];
+  }))];
+}
+
 function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): ServerCapabilities {
   return {
     ...invalidateServerCapabilities(capabilities),
@@ -46,6 +55,8 @@ interface ServerState {
   serverUrl: string;
   serverTitle: string;
   capabilities: ServerCapabilities;
+  /** Explicit, revocable invalid-certificate grants, scoped to exact HTTPS origins. */
+  insecureTlsAllowedOrigins: string[];
   protocol: 'http' | 'https';
   host: string;
   port: string;
@@ -54,6 +65,8 @@ interface ServerState {
   token: string;
   user: ReaderInfo | null;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
+  allowInvalidCertificateFor: (serverUrl: string) => void;
+  revokeInvalidCertificateFor: (serverUrl: string) => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string) => void;
@@ -87,6 +100,7 @@ export const useServerStore = create<ServerState>()(
       serverUrl: readPersistedServerUrl(),
       serverTitle: '',
       capabilities: DEFAULT_SERVER_CAPABILITIES,
+      insecureTlsAllowedOrigins: [],
       protocol: 'http',
       host: '',
       port: '8080',
@@ -97,6 +111,22 @@ export const useServerStore = create<ServerState>()(
       setServer: (protocol, host, port) => {
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
         set({ serverUrl: url, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
+      },
+      allowInvalidCertificateFor: (serverUrl) => {
+        const origin = normalizeHttpsOrigin(serverUrl);
+        if (!origin) return;
+        set((state) => ({
+          insecureTlsAllowedOrigins: state.insecureTlsAllowedOrigins.includes(origin)
+            ? state.insecureTlsAllowedOrigins
+            : [...state.insecureTlsAllowedOrigins, origin],
+        }));
+      },
+      revokeInvalidCertificateFor: (serverUrl) => {
+        const origin = normalizeHttpsOrigin(serverUrl);
+        if (!origin) return;
+        set((state) => ({
+          insecureTlsAllowedOrigins: state.insecureTlsAllowedOrigins.filter((item) => item !== origin),
+        }));
       },
       setConnected: (token, user) => {
         set((state) => ({
@@ -136,7 +166,23 @@ export const useServerStore = create<ServerState>()(
         }));
       },
       disconnect: () => {
-        set({ serverUrl: '', serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
+        set((state) => {
+          const origin = normalizeHttpsOrigin(state.serverUrl);
+          return {
+            serverUrl: '',
+            serverTitle: '',
+            capabilities: DEFAULT_SERVER_CAPABILITIES,
+            insecureTlsAllowedOrigins: origin
+              ? state.insecureTlsAllowedOrigins.filter((item) => item !== origin)
+              : state.insecureTlsAllowedOrigins,
+            protocol: 'http',
+            host: '',
+            port: '8080',
+            isConnected: false,
+            token: '',
+            user: null,
+          };
+        });
       },
     }),
     {
@@ -153,6 +199,9 @@ export const useServerStore = create<ServerState>()(
           capabilities: mergePersistedServerCapabilities(
             currentState.capabilities,
             persistedCapabilities,
+          ),
+          insecureTlsAllowedOrigins: normalizeAllowedTlsOrigins(
+            persisted.insecureTlsAllowedOrigins,
           ),
           hasHydrated: true,
         };

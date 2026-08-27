@@ -189,9 +189,15 @@ test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {
   const options = buildTauriRequestInit({ method: 'POST', credentials: 'include' });
   assert.equal(options.method, 'POST');
   assert.equal(options.credentials, 'include');
-  assert.equal(options.maxRedirections, 5);
+  assert.equal(options.maxRedirections, 0);
   assert.deepEqual(options.danger, {
+    acceptInvalidCerts: false,
+    acceptInvalidHostnames: false,
+  });
+
+  const explicitlyAuthorized = buildTauriRequestInit({}, true);
+  assert.deepEqual(explicitlyAuthorized.danger, {
     acceptInvalidCerts: true,
-    acceptInvalidHostnames: true,
+    acceptInvalidHostnames: false,
   });
 });

@@ -16,10 +16,24 @@ import { APP_VERSION } from '@/lib/app-version';
 import { getMokeRuntimePlatform, openEmbeddedReaderHome } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
+import { isCleartextHttpUrl, isInvalidCertificateAllowed } from '@/lib/transport-security';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, user, disconnect, logout } = useServerStore();
+  const {
+    serverTitle,
+    serverUrl,
+    user,
+    insecureTlsAllowedOrigins,
+    revokeInvalidCertificateFor,
+    disconnect,
+    logout,
+  } = useServerStore();
+  const usesCleartextHttp = isCleartextHttpUrl(serverUrl);
+  const allowsInvalidCertificate = isInvalidCertificateAllowed(
+    serverUrl,
+    insecureTlsAllowedOrigins,
+  );
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const eink = useSettingsStore((s) => s.eink);
@@ -121,6 +135,7 @@ export default function SettingsPage() {
         eink: useSettingsStore.getState().eink,
         debugPanel: getDebugPanelLaunchState(),
         serverUrl,
+        allowInvalidCertificate: allowsInvalidCertificate,
         navigate: (href) => router.push(href),
       });
     } catch (error) {
@@ -162,6 +177,27 @@ export default function SettingsPage() {
             <SettingsRow label="连接服务器" value={serverUrl} />
             <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
             <SettingsRow label="服务器版本" value={serverVersion} />
+            {usesCleartextHttp && (
+              <StaticInfoRow
+                icon={ShieldAlert}
+                label="明文 HTTP 连接"
+                description="登录凭据、Cookie、书籍和阅读进度可能被同一网络中的其他人窃取或篡改。建议改用 HTTPS。"
+              />
+            )}
+            {allowsInvalidCertificate && (
+              <>
+                <StaticInfoRow
+                  icon={ShieldAlert}
+                  label="已允许无效 HTTPS 证书"
+                  description="此豁免只作用于当前服务器的证书链；主机名仍会校验。连接可能遭到中间人攻击。"
+                />
+                <ActionRow
+                  icon={ShieldCheck}
+                  label="恢复严格证书校验"
+                  onClick={() => revokeInvalidCertificateFor(serverUrl)}
+                />
+              </>
+            )}
             <ActionRow
               icon={PlugZap}
               label="断开连接"

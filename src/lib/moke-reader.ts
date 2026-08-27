@@ -234,9 +234,20 @@ export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): stri
  * be treated by readest as "server configured" when it only checks for the
  * param's presence. Shared by both embedded-reader URL builders.
  */
-function setServerUrlParam(params: URLSearchParams, serverUrl?: string): void {
+function setServerUrlParam(
+  params: URLSearchParams,
+  serverUrl?: string,
+  allowInvalidCertificate = false,
+): void {
   if (serverUrl) {
     params.set('mokeServerUrl', serverUrl);
+    try {
+      if (allowInvalidCertificate && new URL(serverUrl).protocol === 'https:') {
+        params.set('mokeAllowInvalidCertificate', '1');
+      }
+    } catch {
+      // The caller's existing URL validation owns malformed server errors.
+    }
   }
 }
 
@@ -244,10 +255,12 @@ export function buildEmbeddedReaderHomeUrl({
   eink,
   debugPanel = false,
   serverUrl,
+  allowInvalidCertificate = false,
 }: {
   eink: boolean;
   debugPanel?: boolean;
   serverUrl?: string;
+  allowInvalidCertificate?: boolean;
 }): string {
   const params = new URLSearchParams({
     moke: '1',
@@ -255,7 +268,7 @@ export function buildEmbeddedReaderHomeUrl({
     mokeDebug: debugPanel ? '1' : '0',
   });
 
-  setServerUrlParam(params, serverUrl);
+  setServerUrlParam(params, serverUrl, allowInvalidCertificate);
 
   return `/readest/?${params.toString()}`;
 }
@@ -291,6 +304,7 @@ export async function openEmbeddedReaderHome({
   eink,
   debugPanel = false,
   serverUrl,
+  allowInvalidCertificate = false,
   navigate,
   platformOverride,
   windowFactory,
@@ -298,6 +312,7 @@ export async function openEmbeddedReaderHome({
   eink: boolean;
   debugPanel?: boolean;
   serverUrl?: string;
+  allowInvalidCertificate?: boolean;
   navigate: (href: string) => void;
   platformOverride?: string;
   windowFactory?: ReaderHomeWindowFactory;
@@ -347,6 +362,7 @@ export async function openEmbeddedReaderHome({
     eink,
     debugPanel,
     serverUrl: includeServerUrl ? serverUrl : undefined,
+    allowInvalidCertificate: includeServerUrl && allowInvalidCertificate,
   });
 
   if (!isTauri) {
@@ -390,7 +406,12 @@ export async function openEmbeddedReaderHome({
     console.warn('Falling back to current-window embedded reader navigation:', error);
     // The main-window ReaderProgressProvider is unmounted by this navigation,
     // so the reader must take over progress saving in the fallback path.
-    navigate(buildEmbeddedReaderHomeUrl({ eink, debugPanel, serverUrl }));
+    navigate(buildEmbeddedReaderHomeUrl({
+      eink,
+      debugPanel,
+      serverUrl,
+      allowInvalidCertificate,
+    }));
   }
 }
 
@@ -401,6 +422,7 @@ export function buildEmbeddedReaderUrl({
   mokeBookId,
   restoreProgress,
   serverUrl,
+  allowInvalidCertificate = false,
 }: {
   filePath: string;
   eink: boolean;
@@ -408,6 +430,7 @@ export function buildEmbeddedReaderUrl({
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
   serverUrl?: string;
+  allowInvalidCertificate?: boolean;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
@@ -418,7 +441,7 @@ export function buildEmbeddedReaderUrl({
     mokeReturnTo: '/library',
   });
 
-  setServerUrlParam(params, serverUrl);
+  setServerUrlParam(params, serverUrl, allowInvalidCertificate);
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));

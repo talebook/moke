@@ -113,6 +113,23 @@ test('游客登录后立即失效乐观标注能力并重新确认', () => {
   useServerStore.getState().disconnect();
 });
 
+test('无效证书授权按 HTTPS origin 隔离且断开连接时撤销', () => {
+  useServerStore.setState({
+    serverUrl: '',
+    insecureTlsAllowedOrigins: [],
+  });
+
+  useServerStore.getState().allowInvalidCertificateFor('https://books.example.com/path');
+  useServerStore.getState().allowInvalidCertificateFor('http://plain.example.com');
+  assert.deepEqual(useServerStore.getState().insecureTlsAllowedOrigins, [
+    'https://books.example.com',
+  ]);
+
+  useServerStore.getState().setServer('https', 'books.example.com', '443');
+  useServerStore.getState().disconnect();
+  assert.deepEqual(useServerStore.getState().insecureTlsAllowedOrigins, []);
+});
+
 test('同一已确认用户不破坏缓存，换号与退出会失效能力', () => {
   const firstUser = reader(1);
   const checkedAt = Date.now();

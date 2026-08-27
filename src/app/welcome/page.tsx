@@ -13,14 +13,20 @@ import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openEmbeddedReaderHome } from '@/lib/moke-reader';
+import { isCleartextHttpUrl, isInvalidCertificateAllowed } from '@/lib/transport-security';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { setServer } = useServerStore();
+  const {
+    setServer,
+    allowInvalidCertificateFor,
+    revokeInvalidCertificateFor,
+  } = useServerStore();
   const [serverUrl, setServerUrl] = useState('');
+  const [allowInvalidCertificate, setAllowInvalidCertificate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
@@ -49,11 +55,11 @@ export default function WelcomePage() {
 
   const normalizeServerUrl = (value: string) => {
     const input = value.trim();
-    if (!input) {
-      throw new Error('empty');
-    }
+    if (!input) throw new Error('empty');
 
-    const url = new URL(input.startsWith('http') ? input : `http://${input}`);
+    const url = new URL(/^https?:\/\//i.test(input) ? input : `http://${input}`);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('protocol');
+    if (url.username || url.password) throw new Error('credentials');
     return {
       protocol: url.protocol.replace(':', '') as 'http' | 'https',
       host: url.hostname,
@@ -62,15 +68,45 @@ export default function WelcomePage() {
     };
   };
 
+  let previewOrigin = '';
+  try {
+    previewOrigin = normalizeServerUrl(serverUrl).origin;
+  } catch {
+    previewOrigin = '';
+  }
+  const previewUsesHttp = isCleartextHttpUrl(previewOrigin);
+  const previewUsesHttps = previewOrigin.startsWith('https://');
+
   const handleConnect = async (value: string) => {
     setError('');
     setLoading(true);
+    let grantedOrigin = '';
 
     try {
       const parsed = normalizeServerUrl(value);
+      if (parsed.protocol === 'http') {
+        revokeInvalidCertificateFor(parsed.origin);
+        const confirmed = window.confirm(
+          '此服务器使用明文 HTTP。登录凭据、Cookie、书籍和阅读进度可能被窃取或篡改。仍要连接吗？',
+        );
+        if (!confirmed) return;
+      } else if (allowInvalidCertificate) {
+        const confirmed = window.confirm(
+          '允许无效证书会降低 HTTPS 安全性，并可能使此服务器连接遭到中间人攻击。豁免仅限当前服务器，且不会关闭主机名校验。仍要授权吗？',
+        );
+        if (!confirmed) return;
+        allowInvalidCertificateFor(parsed.origin);
+        grantedOrigin = parsed.origin;
+      } else {
+        // A connection attempt without the explicit checkbox always restores
+        // strict validation, including stale grants from an interrupted flow.
+        revokeInvalidCertificateFor(parsed.origin);
+      }
+
       const result = await validateServerConnection(parsed.origin);
 
       if (result.err !== 'ok') {
+        if (grantedOrigin) revokeInvalidCertificateFor(grantedOrigin);
         logErrorMetadata('WelcomePage validateServerConnection failed', result);
         setError(result.msg || '服务器校验失败');
         return;
@@ -79,6 +115,7 @@ export default function WelcomePage() {
       const welcome = await checkWelcomeRequirement(parsed.origin);
 
       if (welcome.err !== 'ok') {
+        if (grantedOrigin) revokeInvalidCertificateFor(grantedOrigin);
         logErrorMetadata('WelcomePage checkWelcomeRequirement failed', welcome);
         setError(welcome.msg || '访问码状态检查失败');
         return;
@@ -106,6 +143,7 @@ export default function WelcomePage() {
         router.push('/shelf');
       }
     } catch (e) {
+      if (grantedOrigin) revokeInvalidCertificateFor(grantedOrigin);
       console.error('[WelcomePage] connect exception:', e);
       setError('请输入正确的服务器地址');
     } finally {
@@ -120,6 +158,10 @@ export default function WelcomePage() {
         eink: useSettingsStore.getState().eink,
         debugPanel: getDebugPanelLaunchState(),
         serverUrl: useServerStore.getState().serverUrl,
+        allowInvalidCertificate: isInvalidCertificateAllowed(
+          useServerStore.getState().serverUrl,
+          useServerStore.getState().insecureTlsAllowedOrigins,
+        ),
         navigate: (href) => router.push(href),
       });
     } catch (e) {
@@ -178,7 +220,10 @@ export default function WelcomePage() {
                 type="text"
                 placeholder="http://192.168.1.100:8080"
                 value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
+                onChange={(e) => {
+                  setServerUrl(e.target.value);
+                  setAllowInvalidCertificate(false);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     handleConnect(serverUrl);
@@ -186,6 +231,24 @@ export default function WelcomePage() {
                 }}
                 className="w-full h-11 px-4 rounded-2xl border border-amber-950/10 bg-white/65 shadow-sm text-foreground text-sm outline-none transition-colors duration-150 focus:ring-2 focus:ring-ring focus:border-ring"
               />
+              {previewUsesHttp && (
+                <p className="mt-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive">
+                  明文 HTTP 不保护登录凭据、Cookie、书籍或阅读进度。连接前会再次要求确认。
+                </p>
+              )}
+              {previewUsesHttps && (
+                <label className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive">
+                  <input
+                    type="checkbox"
+                    checked={allowInvalidCertificate}
+                    onChange={(event) => setAllowInvalidCertificate(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    我明确授权当前服务器使用无效/自签名证书。我理解这会降低 TLS 安全性并可能遭到中间人攻击；主机名不匹配仍会被拒绝。
+                  </span>
+                </label>
+              )}
             </div>
 
             <button

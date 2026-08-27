@@ -12,7 +12,12 @@ import {
   readApiJson,
   readJsonResponse,
   resolveAppPlatform,
+  MAX_SECURE_REDIRECTS,
 } from '@/lib/api-core';
+import {
+  buildSecureRedirectRequest,
+  isInvalidCertificateAllowed,
+} from '@/lib/transport-security';
 import {
   classifyOfflineRangeResponse,
   hasEpubCentralDirectory,
@@ -95,11 +100,38 @@ export async function request(url: string | URL, options?: RequestInit): Promise
   try {
     if (isTauriApp) {
       const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-      // Tauri 桌面端：使用插件 fetch。需要显式放宽以兼容自建 Talebook 服务器：
-      // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
-      // - maxRedirections: 跟随登录后的重定向（与浏览器行为一致）
-      response = await tauriFetch(urlStr, buildTauriRequestInit(options) as any);
+      const { insecureTlsAllowedOrigins } = (await import('@/lib/store/server')).useServerStore.getState();
+      let requestUrl = urlStr;
+      let requestOptions = options ?? {};
+
+      // Follow redirects ourselves. This prevents a per-origin certificate
+      // exemption or credential-bearing headers from silently crossing into a
+      // different origin inside the native HTTP client.
+      for (let redirectCount = 0; ; redirectCount += 1) {
+        response = await tauriFetch(
+          requestUrl,
+          buildTauriRequestInit(
+            requestOptions,
+            isInvalidCertificateAllowed(requestUrl, insecureTlsAllowedOrigins),
+          ) as any,
+        );
+        const next = buildSecureRedirectRequest(
+          requestUrl,
+          response.status,
+          response.headers.get('location'),
+          requestOptions,
+        );
+        if (!next) break;
+        if (redirectCount >= MAX_SECURE_REDIRECTS) {
+          await cancelResponseBodyQuietly(response);
+          throw new Error('redirect.too_many');
+        }
+        await cancelResponseBodyQuietly(response);
+        requestUrl = next.url;
+        requestOptions = next.options;
+      }
     } else {
+      // Browser fetch applies the platform's certificate and redirect policy.
       response = await fetch(url, options);
     }
   } catch (e) {

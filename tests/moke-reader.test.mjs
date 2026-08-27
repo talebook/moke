@@ -192,7 +192,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
       eink: true,
       debugPanel: true,
       mokeBookId: '14',
-      serverUrl: 'http://192.168.1.5:8080',
+      serverUrl: 'https://self-signed.example:8443',
+      allowInvalidCertificate: true,
       restoreProgress: {
         schema: 'moke.readest.progress.v1',
         reader: 'readest',
@@ -213,7 +214,8 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(url.searchParams.get('mokeDebug'), '1');
   assert.equal(url.searchParams.get('mokeBookId'), '14');
   assert.equal(url.searchParams.get('mokeReturnTo'), '/library');
-  assert.equal(url.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+  assert.equal(url.searchParams.get('mokeServerUrl'), 'https://self-signed.example:8443');
+  assert.equal(url.searchParams.get('mokeAllowInvalidCertificate'), '1');
   assert.deepEqual(JSON.parse(url.searchParams.get('mokeRestoreProgress')), {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
@@ -246,7 +248,8 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
     buildEmbeddedReaderHomeUrl({
       eink: true,
       debugPanel: true,
-      serverUrl: 'http://192.168.1.5:8080',
+      serverUrl: 'https://self-signed.example:8443',
+      allowInvalidCertificate: true,
     }),
     'https://moke.invalid',
   );
@@ -254,7 +257,8 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
   assert.equal(mobile.searchParams.get('moke'), '1');
   assert.equal(mobile.searchParams.get('mokeEink'), '1');
   assert.equal(mobile.searchParams.get('mokeDebug'), '1');
-  assert.equal(mobile.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+  assert.equal(mobile.searchParams.get('mokeServerUrl'), 'https://self-signed.example:8443');
+  assert.equal(mobile.searchParams.get('mokeAllowInvalidCertificate'), '1');
 
   // Desktop: callers omit serverUrl, so no mokeServerUrl is emitted and the
   // main window's ReaderProgressProvider is the single saver (no duplicate

@@ -1,3 +1,5 @@
+import { MAX_SECURE_REDIRECTS } from './transport-security.ts';
+
 export type AppPlatform = 'tauri' | 'web';
 
 type ApiEnvelope = {
@@ -34,12 +36,18 @@ export function isAbsoluteHttpUrl(url: string): boolean {
   return /^https?:\/\//i.test(url);
 }
 
-export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
+export function buildTauriRequestInit(
+  options?: RequestInit,
+  allowInvalidCertificate = false,
+): TauriRequestInit {
   const init = { ...(options ?? {}) } as TauriRequestInit;
-  init.maxRedirections = 5;
+  // Redirects are followed manually by request(), so transport policy and
+  // sensitive-header stripping are re-evaluated for every hop.
+  init.maxRedirections = 0;
   init.danger = {
-    acceptInvalidCerts: true,
-    acceptInvalidHostnames: true,
+    acceptInvalidCerts: allowInvalidCertificate,
+    // Self-signed authorization never authorizes a wrong hostname.
+    acceptInvalidHostnames: false,
   };
   // 默认 8 秒连接超时：服务器不可达时 reqwest 默认 TCP 超时长达 30 秒+，
   // 会让"连接书库"等操作长时间卡在等待。显式传入的 connectTimeout
@@ -47,6 +55,8 @@ export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
   if (!init.connectTimeout) init.connectTimeout = 8_000;
   return init;
 }
+
+export { MAX_SECURE_REDIRECTS };
 
 /** 二进制响应禁用透明压缩，避免部分 NAS/反向代理在正文解压阶段中断。 */
 export function buildTauriBinaryHeaders(headers?: HeadersInit): Headers {
