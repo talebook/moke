@@ -5,6 +5,11 @@
   "display_name": "阅读统计",
   "description": "示例拓展：展示阅读时长、进度和翻页统计",
   "author": "Moke 开发团队",
+  "publisher": {
+    "id": "app.moke",
+    "name": "Moke 开发团队",
+    "source": "https://github.com/talebook/moke/tree/main/packages/moke-ext/examples/reading-stats"
+  },
 
   "entry": {
     "ui_port": 0,

@@ -62,6 +62,28 @@ export default function validate() {
     passed++;
   }
 
+  // Publisher identity and immutable distribution source.
+  total++;
+  if (m.publisher === undefined) {
+    ok('publisher: (legacy unsigned extension; native backend will be blocked)');
+    passed++;
+  } else if (typeof m.publisher !== 'object' || m.publisher === null) {
+    fail('publisher: must be an object');
+  } else if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(m.publisher.id ?? '')) {
+    fail('publisher.id: invalid');
+  } else if (typeof m.publisher.name !== 'string' || !m.publisher.name.trim() || m.publisher.name.length > 128) {
+    fail('publisher.name: required string (max 128 chars)');
+  } else if (typeof m.publisher.source !== 'string' || !(
+    m.publisher.source.startsWith('https://')
+    || m.publisher.source.startsWith('http://127.0.0.1')
+    || m.publisher.source.startsWith('http://localhost')
+  )) {
+    fail('publisher.source: must be HTTPS (localhost is allowed for development)');
+  } else {
+    ok(`publisher: ${m.publisher.name} (${m.publisher.id}) from ${m.publisher.source}`);
+    passed++;
+  }
+
   // Permissions
   total++;
   if (!Array.isArray(m.permissions)) { fail('permissions: must be an array'); }
@@ -80,7 +102,10 @@ export default function validate() {
       const hasBackend = m.entry.backend && typeof m.entry.backend === 'object';
       if (hasBackend) {
         const exe = m.entry.backend.executable;
-        if (!exe || typeof exe !== 'string' || exe.includes('/') || exe.includes('\\') || exe.includes('..')) {
+        const lowerExe = typeof exe === 'string' ? exe.toLowerCase() : '';
+        const reservedExe = ['signature.json', 'storage.json', 'uninstall.exe', 'installer.nsi'].includes(lowerExe)
+          || lowerExe.endsWith('-setup.exe');
+        if (!exe || typeof exe !== 'string' || exe.includes('/') || exe.includes('\\') || exe.includes('..') || reservedExe) {
           fail('entry.backend.executable: must be a plain filename (no path separators)');
         } else if (!hasUi) {
           fail('entry: backend requires ui_port to be set (even if 0 for auto-assign)');
@@ -112,7 +137,7 @@ export default function validate() {
   }
 
   // Unknown fields
-  const known = ['name','version','api_version','display_name','description','author','entry','sidebar','permissions','lucide_icons'];
+  const known = ['name','version','api_version','display_name','description','author','publisher','entry','sidebar','permissions','lucide_icons'];
   const unknownFields = Object.keys(m).filter(k => !known.includes(k));
   if (unknownFields.length) {
     fail(`Unknown fields: ${unknownFields.join(', ')} (will be rejected by Moke)`);

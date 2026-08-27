@@ -23,6 +23,8 @@ glob = "0.3"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22"
+ring = "0.17"
 sysinfo = "0.34.2"
 tauri = { path = "../vendor/tauri/crates/tauri", default-features = false, features = [
   "wry",

@@ -252,7 +252,16 @@ fn authenticate_and_subscribe(
     {
         let enabled_map = enabled.lock().unwrap();
         match enabled_map.get(&ext_name) {
-            Some(ext) if ext.token == token => { /* OK */ }
+            Some(ext)
+                if ext.token == token
+                    && ext
+                        .permissions
+                        .iter()
+                        .any(|permission| permission == "reader.events.subscribe") =>
+            { /* OK */ }
+            Some(ext) if ext.token == token => {
+                return Err("拓展未获准 reader.events.subscribe 权限".into())
+            }
             _ => return Err("token 无效或拓展未启用".into()),
         }
     }

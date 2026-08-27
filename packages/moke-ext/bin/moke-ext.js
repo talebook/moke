@@ -16,6 +16,7 @@ Usage: moke-ext <command> [options]
 Commands:
   init <name>      Create a new extension project
   build            Build the extension for distribution
+  sign             Sign dist/ with an Ed25519 publisher key
   dev              Start development server for current extension
   package          Package extension as NSIS installer
   validate         Validate manifest.json
@@ -28,6 +29,7 @@ Examples:
   moke-ext init reading-stats     Create a new extension
   moke-ext validate               Check manifest.json
   moke-ext build                  Build dist/
+  moke-ext sign --key publisher.pem --key-id release-2026
   moke-ext package                Create reading-stats-setup.exe
 `;
 
