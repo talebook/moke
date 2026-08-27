@@ -5,7 +5,7 @@
 Moke 拓展是安装在 `%APPDATA%\com.moke.client\extensions\{name}\` 下的独立程序，
 通过主程序提供的 **本地 HTTP API**（REST + WebSocket）与主程序交互。
 
-拓展可以使用**任意编程语言**开发——只要它能发送 HTTP 请求。
+拓展可以使用**任意编程语言**开发——只要后端进程能发送 HTTP 请求。宿主凭据不会提供给浏览器 UI。
 
 ## 快速开始
 
@@ -69,9 +69,9 @@ my-extension/
 
 ## API 参考
 
-### REST API — `http://127.0.0.1:19555`
+### REST API — 会话级随机回环端口
 
-所有请求需携带：
+Moke 启动拓展后端时通过 `MOKE_API_PORT` 环境变量传入本次会话的端口。不要硬编码端口。所有请求需携带：
 ```
 X-Extension-Name: my-extension
 X-Extension-Token: {token}    // 启用拓展时由主程序分配
@@ -168,7 +168,9 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 失败时 `success` 为 `false`，并带 `error` 字段说明原因（如 `No active reader view`）。
 
-### WebSocket 事件 — `ws://127.0.0.1:19556`
+### WebSocket 事件 — 会话级随机回环端口
+
+端口由 `MOKE_WS_PORT` 环境变量传入拓展后端。不要硬编码端口。
 
 **连接流程:**
 
@@ -212,9 +214,7 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 ### 纯前端拓展
 
-最简单的类型，只有一个 `manifest.json` + `ui/index.html`。
-前端通过 fetch/WebSocket 调用主程序 API。
-适合：仪表盘、统计面板、简单工具。
+只有 `manifest.json` + `ui/index.html`，适合不需要宿主 API 的静态页面。浏览器 UI 不会收到宿主 token，也不能直接调用宿主 REST/WS；需要宿主数据时必须增加后端，由同源 UI 调用自己的后端，再由后端使用环境变量中的会话凭据访问宿主。
 
 ### 带后端的拓展
 
@@ -226,6 +226,13 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 不声明 `entry`，没有 UI。仅通过 WebSocket 订阅事件做后台处理。
 适合：自动同步标注、阅读数据上报、系统钩子。
+
+## 安全迁移（会话端口与凭据）
+
+- 已经从 `MOKE_API_PORT`、`MOKE_WS_PORT` 和 `MOKE_EXT_TOKEN` 读取配置的后端无需改调用格式；端口和 token 现在每次 Moke 启动都会更新。
+- 硬编码 `19555` / `19556` 的后端必须改读对应端口环境变量。
+- 旧版直接在 UI 中获取 token、连接宿主 REST/WS 的拓展必须迁移为「UI → 同源拓展后端 → 宿主」；不得用扩大 CORS 或把 token 返回给 UI 的方式兼容。
+- Moke 首次读取旧 `runtime.json` 时会忽略其中的 token、生成新会话 token，并立即重写文件移除明文凭据；启用状态和拓展端口保持不变。
 
 ## 分发
 
@@ -252,9 +259,9 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 ## 安全注意事项
 
-1. **不要硬编码 token**：token 由主程序在启用时分配，应通过环境变量或文件读取
+1. **token 仅限后端环境变量**：只从 `MOKE_EXT_TOKEN` 读取，不得写入文件、日志、HTML、浏览器响应或前端脚本
 2. **后端程序只用纯文件名**：manifest 中 `executable` 不能包含路径，防止路径穿越攻击
-3. **网络请求走主程序代理**：不要直接连接 Talebook 服务器，通过 API Server 代理以确保认证
+3. **端口使用环境变量**：从 `MOKE_API_PORT` / `MOKE_WS_PORT` 读取本次会话随机端口；浏览器 UI 只调用自己的同源后端
 4. **权限最小化**：只声明拓展真正需要的权限
 5. **iframe sandbox**：拓展 UI 运行在 `<iframe sandbox="allow-scripts allow-forms">` 中，能力受限
 
@@ -262,5 +269,5 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 1. 打开 Moke 开发者选项（关于页连点版本号 8 次）
 2. 开启调试面板（查看实时日志）
-3. 检查 API Server 是否运行: `curl http://127.0.0.1:19555/api/v1/info`
+3. 在拓展后端日志中确认已读取有效的 `MOKE_API_PORT` / `MOKE_WS_PORT`（不要记录 token）
 4. 检查拓展目录: `%APPDATA%\com.moke.client\extensions\`
