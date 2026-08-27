@@ -60,4 +60,30 @@ export const useDeveloperStore = create<DeveloperState>()(
   )
 );
 
+/**
+ * Resolve the value carried into a new embedded-reader document.
+ *
+ * Android replaces the current WebView document. A click can happen while the
+ * persisted Zustand store is still hydrating, so also consult the durable
+ * value instead of allowing a transient in-memory false to hide the panel.
+ */
+export function getDebugPanelLaunchState(
+  storage?: Pick<Storage, 'getItem'>,
+): boolean {
+  if (useDeveloperStore.getState().showDebugPanel) return true;
+  const target = storage ?? (typeof window !== 'undefined' ? window.localStorage : undefined);
+  if (!target) return false;
+  try {
+    const value: unknown = JSON.parse(target.getItem('moke-developer-storage') || '{}');
+    const state = value && typeof value === 'object' ? (value as { state?: unknown }).state : null;
+    return !!(
+      state &&
+      typeof state === 'object' &&
+      (state as { showDebugPanel?: unknown }).showDebugPanel === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 export { UNLOCK_THRESHOLD };

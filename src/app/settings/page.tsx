@@ -7,7 +7,7 @@ import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
-import { useDeveloperStore } from '@/lib/store/developer';
+import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import type { ThemeMode } from '@/lib/store/settings';
 import { cn } from '@/lib/utils';
@@ -119,7 +119,7 @@ export default function SettingsPage() {
     try {
       await openEmbeddedReaderHome({
         eink: useSettingsStore.getState().eink,
-        debugPanel: useDeveloperStore.getState().showDebugPanel,
+        debugPanel: getDebugPanelLaunchState(),
         serverUrl,
         navigate: (href) => router.push(href),
       });

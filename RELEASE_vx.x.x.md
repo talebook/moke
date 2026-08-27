@@ -1,6 +1,6 @@
-# Moke v1.0.11
+# Moke v1.0.12
 
-这是从 `v1.0.2` 升级到 `v1.0.11` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.10` 的全部代码更改。
+这是从 `v1.0.2` 升级到 `v1.0.12` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.11` 的全部代码更改。
 
 ## 内嵌阅读器
 
@@ -11,6 +11,7 @@
 - 修复 Android 单 WebView 阅读器的进入、返回和原生导航流程，并允许阅读器更新窗口标题。
 - 保留进入和退出阅读器时的应用切换动画。
 - Readest 原生服务初始化失败时显示具体错误和重试入口，同时保留右下角调试面板按钮。
+- 修复 Android 原生整页导航与 Zustand 状态恢复的竞态：已开启调试面板时，进入 Readest 后右下角按钮不再因过期的 `mokeDebug=0` 而消失。
 - 修复调试 IPC 递归、窗口创建降级时阅读进度丢失，以及标注定位与进度事件关联问题。
 - 保留阅读进度、标注同步、调试日志和 Moke 本地模式等定制功能。
 
@@ -42,9 +43,9 @@
 
 | 平台 | 安装包 |
 |---|---|
-| Windows | `Moke_1.0.11_x64_en-US.msi` / `.exe` |
-| macOS | `Moke_1.0.11_aarch64.dmg` |
-| Linux | `Moke_1.0.11_amd64.AppImage` / `.deb` |
+| Windows | `Moke_1.0.12_x64_en-US.msi` / `.exe` |
+| macOS | `Moke_1.0.12_aarch64.dmg` |
+| Linux | `Moke_1.0.12_amd64.AppImage` / `.deb` |
 | Android | `moke-android-release.apk` |
 | iOS/iPadOS | `Moke.ipa`（自签名安装） |
 | OpenHarmony（鸿蒙） | `entry-default-unsigned.hap`（alpha，未签名，可能需要自签名安装） |
@@ -57,4 +58,4 @@
 
 遇到问题或建议请提交 [GitHub Issues](https://github.com/talebook/moke/issues)。安全漏洞请通过[私密报告](https://github.com/talebook/moke/security/advisories/new)提交。
 
-**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.11
+**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.12
