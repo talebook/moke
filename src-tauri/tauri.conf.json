@@ -61,9 +61,22 @@
             "$RESOURCE/**",
             "$APPDATA/**/*",
             "$APPCACHE/**/*",
-            "$TEMP/**/*"
+            "$TEMP/readest/**/*"
           ],
-          "deny": []
+          "deny": [
+            "$APPDATA/moke-downloads.json",
+            "$APPDATA/moke-downloads.json.tmp",
+            "$APPDATA/download-directory.json",
+            "$APPDATA/download-directory.json.tmp",
+            "$APPDATA/settings.json",
+            "$APPDATA/settings.json.bak",
+            "$APPDATA/feeds.json",
+            "$APPDATA/feeds.json.bak",
+            "$APPCONFIG/settings.json",
+            "$APPCONFIG/settings.json.bak",
+            "$APPCONFIG/feeds.json",
+            "$APPCONFIG/feeds.json.bak"
+          ]
         }
       }
     }

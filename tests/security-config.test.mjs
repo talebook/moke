@@ -102,6 +102,23 @@ test('production and development CSPs do not allow unregistered customprotocol U
   }
 });
 
+test('asset protocol keeps temporary and sensitive application data out of reach', () => {
+  const { allow, deny } = security.assetProtocol.scope;
+  assert.ok(!allow.includes('$TEMP/**/*'));
+  assert.ok(!allow.includes('$TEMP/**'));
+  assert.ok(allow.some((path) => path.startsWith('$TEMP/readest/')));
+  assert.ok(!allow.some((path) => path.startsWith('**/')), 'asset roots must stay anchored');
+
+  for (const path of [
+    '$APPDATA/moke-downloads.json',
+    '$APPDATA/download-directory.json',
+    '$APPCONFIG/settings.json',
+    '$APPCONFIG/feeds.json',
+  ]) {
+    assert.ok(deny.includes(path), `${path} must be explicitly denied`);
+  }
+});
+
 test('production script hosts are limited to shipped runtime loaders', () => {
   const scripts = sources(security.csp, 'script-src');
   assert.deepEqual([...scripts].sort(), [
