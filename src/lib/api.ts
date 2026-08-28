@@ -69,7 +69,11 @@ async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob>
   return blob;
 }
 
-export async function request(url: string | URL, options?: RequestInit): Promise<Response> {
+export async function request(
+  url: string | URL,
+  options?: RequestInit,
+  diagnostics?: { expectedStatuses?: readonly number[] },
+): Promise<Response> {
   const urlStr = url.toString();
   const method = (options?.method || 'GET').toUpperCase();
 
@@ -115,7 +119,8 @@ export async function request(url: string | URL, options?: RequestInit): Promise
   }
 
   const elapsed = Date.now() - startedAt;
-  const level = response.ok ? 'success' : 'error';
+  const expectedStatus = diagnostics?.expectedStatuses?.includes(response.status) === true;
+  const level = response.ok ? 'success' : expectedStatus ? 'info' : 'error';
   debugLog(level, 'request', `← ${response.status} ${method} ${urlStr} (${elapsed}ms)`, {
     status: response.status,
     contentType: response.headers.get('content-type'),
@@ -524,21 +529,24 @@ export async function streamBookDownload(
   const headers = new Headers();
   if (requestedOffset > 0) headers.set('Range', `bytes=${requestedOffset}-`);
 
-  const fetchDownload = (requestHeaders: Headers) => request(url, {
-    ...(isTauriApp
-      ? ({
-          method: 'GET',
-          headers: buildTauriBinaryHeaders(requestHeaders),
-          connectTimeout: 30_000,
-          signal: options.signal,
-        } as any)
-      : { credentials: 'include', signal: options.signal, headers: requestHeaders }),
-  });
+  const fetchDownload = (requestHeaders: Headers) => request(
+    url,
+    {
+      ...(isTauriApp
+        ? ({
+            method: 'GET',
+            headers: buildTauriBinaryHeaders(requestHeaders),
+            connectTimeout: 30_000,
+            signal: options.signal,
+          } as any)
+        : { credentials: 'include', signal: options.signal, headers: requestHeaders }),
+    },
+    requestHeaders.has('Range') ? { expectedStatuses: [416] } : undefined,
+  );
   let response = await fetchDownload(headers);
-  if (!response.ok) throw new Error(`http.${response.status}`);
-
   let contentRange = parseContentRange(response.headers.get('content-range'));
   let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
+  if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
   if (rangeMode === 'retry-full') {
     await cancelResponseBodyQuietly(response);
     await options.onRangeReset?.();

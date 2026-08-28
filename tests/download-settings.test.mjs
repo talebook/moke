@@ -14,6 +14,7 @@ const settingsSource = readSource('../src/app/settings/page.tsx');
 const downloadsSource = readSource('../src/app/downloads/page.tsx');
 const appShellSource = readSource('../src/components/providers/AppShell.tsx');
 const tauriSource = readSource('../src-tauri/src/lib.rs');
+const offlineBooksSource = readSource('../src/lib/offline-books.ts');
 const packageJson = JSON.parse(readSource('../package.json'));
 
 test('下载管理仅保留设置入口，不占用侧边栏或底边栏', () => {
@@ -56,4 +57,20 @@ test('磁盘空间统计使用慢速轮询而非跟随下载进度刷新', () =>
 test('已完成下载不再显示进度条和 100% 的传输明细', () => {
   assert.match(downloadsSource, /item\.status !== 'completed' \? \(/);
   assert.match(downloadsSource, /文件大小 \{formatBytes\(item\.record\?\.size \?\? item\.downloadedBytes\)\}/);
+});
+
+test('删除下载文件优先使用受原生索引约束的路径', () => {
+  assert.match(tauriSource, /fn moke_delete_downloaded_book_file/);
+  assert.match(tauriSource, /find\(\|book\| book\.id == id\)/);
+  assert.match(tauriSource, /moke_delete_downloaded_book_file,/);
+  assert.match(offlineBooksSource, /invoke\('moke_delete_downloaded_book_file', \{ id: record\.id \}\)/);
+  assert.doesNotMatch(tauriSource, /fn moke_delete_downloaded_book_file\([^)]*path:\s*String/);
+});
+
+test('打开和定位下载文件不向主窗口开放任意 opener 路径', () => {
+  const mainCapability = JSON.parse(readSource('../src-tauri/capabilities/default.json'));
+  assert.ok(!mainCapability.permissions.includes('opener:allow-open-path'));
+  assert.match(tauriSource, /fn moke_open_downloaded_book/);
+  assert.match(tauriSource, /fn moke_reveal_downloaded_book/);
+  assert.match(downloadsSource, /invoke\('moke_reveal_downloaded_book', \{ id: item\.record\.id \}\)/);
 });

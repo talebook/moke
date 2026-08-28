@@ -100,6 +100,10 @@ export function classifyOfflineRangeResponse(
   contentRange: ReturnType<typeof parseContentRange>,
 ): OfflineRangeResponseMode {
   if (requestedOffset > 0) {
+    // A stale/complete partial file can be beyond the server's current
+    // representation. HTTP 416 is recoverable by truncating it and retrying
+    // once without Range.
+    if (status === 416) return 'retry-full';
     if (status !== 206) return 'restart';
     return contentRange?.start === requestedOffset ? 'resume' : 'retry-full';
   }

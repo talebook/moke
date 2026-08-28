@@ -216,6 +216,8 @@ test('Range 响应只接受合法 Content-Range', () => {
   assert.equal(parseContentRange(null), null);
   assert.equal(classifyOfflineRangeResponse(100, 206, parseContentRange('bytes 100-199/300')), 'resume');
   assert.equal(classifyOfflineRangeResponse(100, 200, null), 'restart');
+  assert.equal(classifyOfflineRangeResponse(100, 416, null), 'retry-full');
+  assert.equal(classifyOfflineRangeResponse(100, 500, null), 'restart');
   assert.equal(classifyOfflineRangeResponse(100, 206, null), 'retry-full');
   assert.equal(classifyOfflineRangeResponse(0, 206, null), 'invalid');
   assert.equal(classifyOfflineRangeResponse(0, 206, parseContentRange('bytes 0-299/300')), 'full');

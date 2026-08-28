@@ -189,10 +189,10 @@ export default function DownloadsPage() {
   }, [refresh, toast]);
 
   const openLocation = async (item: OfflineDownloadItem) => {
-    if (!item.record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
+    if (!item.record || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
     try {
-      const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
-      await revealItemInDir(item.record.filePath);
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('moke_reveal_downloaded_book', { id: item.record.id });
     } catch { toast('当前平台无法打开文件所在位置', 'error'); }
   };
 

@@ -441,7 +441,7 @@ function DetailContent() {
 
         if (useSettingsStore.getState().readerPreference === 'system' && !targetAnnotation) {
           await openAndRecordBookRead({
-            open: () => openBookWithSystemDefault(record.filePath!),
+            open: () => openBookWithSystemDefault(record.id),
             onOpened: () => setOpeningReader(false),
             record: () => recordBookRead(request, serverUrl, book.id),
             onRecordError: (error) => {

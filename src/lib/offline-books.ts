@@ -313,6 +313,26 @@ async function removeDiskFile(target: OfflineFsPath): Promise<void> {
   }
 }
 
+async function removeStoredBookFile(record: OfflineBookRecord): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('moke_delete_downloaded_book_file', { id: record.id });
+    return;
+  } catch (nativeError) {
+    // Compatibility fallback for an already-running/older Tauri backend and
+    // for legacy records that predate the native downloaded-books index.
+    debugLog(
+      'warn',
+      'download',
+      '原生删除离线书籍失败，尝试文件权限回退',
+      nativeError instanceof Error ? nativeError.message : String(nativeError),
+    );
+  }
+
+  const target = await storedOfflineFsPath(record);
+  if (target) await removeDiskFile(target);
+}
+
 export async function syncOfflineDownloadState(serverUrl: string, bookId: string, downloaded: boolean): Promise<void> {
   const { request } = await import('@/lib/api');
   const response = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
@@ -335,8 +355,7 @@ export async function deleteOfflineBook(
 
   for (const record of records) {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
-      const target = await storedOfflineFsPath(record);
-      if (target) await removeDiskFile(target);
+      await removeStoredBookFile(record);
     }
     await deleteRecordOnly(record.id);
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
@@ -430,10 +449,13 @@ async function openOfflineBookFile(input: {
   const file = await open(partialTarget.operationPath, {
     write: true,
     create: true,
-    append: position > 0,
     truncate: position === 0,
     ...fsPathOptions(partialTarget),
   });
+  // Windows append-only handles may reject truncate(0) with ERROR_ACCESS_DENIED.
+  // Use an ordinary writable handle and explicitly seek to the resume offset so
+  // the same handle can be reset when the server answers Range with HTTP 416.
+  if (position > 0) await file.seek(position, 0);
   const writer: OfflineFileWriter = {
     get position() { return position; },
     async write(data) { await file.write(data); position += data.length; },

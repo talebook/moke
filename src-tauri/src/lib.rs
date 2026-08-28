@@ -270,6 +270,81 @@ fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String>
     write_moke_downloads(&app, &books)
 }
 
+fn indexed_downloaded_book_path(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    let _guard = MOKE_DOWNLOADS_INDEX_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let books = read_moke_downloads(app)?;
+    let book = books
+        .iter()
+        .find(|book| book.id == id)
+        .ok_or_else(|| "downloaded book is not present in the native index".to_string())?;
+
+    // Never accept a frontend-supplied path. The durable native index is
+    // written only after validating the selected custom root and relative
+    // path, so deletion remains limited to an approved download location.
+    if let Some(root) = &book.storage_root {
+        if book
+            .relative_path
+            .as_deref()
+            .and_then(safe_relative_path)
+            .is_none()
+        {
+            return Err("custom downloaded book path is not safe".into());
+        }
+        let approved = read_download_directory(app)?
+            .and_then(|path| path.canonicalize().ok())
+            .ok_or_else(|| "custom download directory is not approved".to_string())?;
+        let indexed_root = PathBuf::from(root)
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if indexed_root != approved {
+            return Err("custom download path is outside the approved directory".into());
+        }
+    } else if let Some(relative_path) = &book.relative_path {
+        if safe_relative_path(relative_path).is_none() {
+            return Err("downloaded book path is not safe".into());
+        }
+    } else if safe_relative_path(&book.file_name)
+        .filter(|path| path.components().count() == 1)
+        .is_none()
+    {
+        return Err("downloaded book filename is not safe".into());
+    }
+
+    downloaded_book_path(app, book)
+}
+
+#[tauri::command]
+fn moke_delete_downloaded_book_file(app: AppHandle, id: String) -> Result<(), String> {
+    let path = indexed_downloaded_book_path(&app, &id)?;
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed to delete downloaded book file: {error}")),
+    }
+}
+
+#[tauri::command]
+fn moke_open_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let path = indexed_downloaded_book_path(&app, &id)?;
+    app.opener()
+        .open_path(path.to_string_lossy().into_owned(), None::<String>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn moke_reveal_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let path = indexed_downloaded_book_path(&app, &id)?;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>, String> {
     // Tauri's folder picker is desktop-only. Keep it out of every mobile
@@ -536,6 +611,9 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
         moke_record_downloaded_book,
+        moke_delete_downloaded_book_file,
+        moke_open_downloaded_book,
+        moke_reveal_downloaded_book,
         moke_remove_downloaded_book,
         moke_select_download_directory,
         moke_reset_download_directory,
