@@ -36,7 +36,9 @@ export function isAbsoluteHttpUrl(url: string): boolean {
 
 export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
   const init = { ...(options ?? {}) } as TauriRequestInit;
-  init.maxRedirections = 5;
+  // Security-sensitive callers (covers) opt into manual redirect handling so
+  // every destination can be revalidated before a request is sent.
+  if (!Number.isInteger(init.maxRedirections)) init.maxRedirections = 5;
   init.danger = {
     acceptInvalidCerts: true,
     acceptInvalidHostnames: true,

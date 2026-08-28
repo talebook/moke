@@ -510,6 +510,7 @@ function DetailContent() {
                 {coverUrl ? (
                   <AuthImage
                     src={coverUrl}
+                    allowPublicCrossOrigin
                     alt={book.title}
                     className="w-full h-full object-cover"
                     fallback={<BookOpen className="w-16 h-16 text-muted-foreground/40" />}

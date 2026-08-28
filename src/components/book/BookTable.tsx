@@ -126,6 +126,7 @@ function TinyCover({ title, src }: { title: string; src: string }) {
   return (
     <AuthImage
       src={src}
+      allowPublicCrossOrigin
       alt={title}
       className="w-6 h-9 rounded-sm object-cover shrink-0"
       loading="lazy"
@@ -144,6 +145,7 @@ function MobileCover({ title, src }: { title: string; src: string }) {
   return (
     <AuthImage
       src={src}
+      allowPublicCrossOrigin
       alt={title}
       className="h-[72px] w-12 shrink-0 rounded-md object-cover shadow-sm"
       loading="lazy"

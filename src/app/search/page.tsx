@@ -418,6 +418,7 @@ function SearchContent() {
                         {coverUrl ? (
                           <AuthImage
                             src={coverUrl}
+                            allowPublicCrossOrigin
                             alt={book.title}
                             className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             loading="lazy"
@@ -460,6 +461,7 @@ function SearchContent() {
                       {coverUrl ? (
                         <AuthImage
                           src={coverUrl}
+                          allowPublicCrossOrigin
                           alt={book.title}
                           className="w-full h-full object-cover"
                           loading="lazy"

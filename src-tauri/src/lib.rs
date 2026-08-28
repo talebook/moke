@@ -1,3 +1,4 @@
+mod cover_fetch;
 /// Moke 桌面客户端入口。
 ///
 /// 阅读器（readest）的 Rust 后端通过 `readestlib` 以库形式编译进本应用：
@@ -524,6 +525,7 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
+        cover_fetch::moke_fetch_public_cover,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
         moke_record_downloaded_book,

@@ -214,6 +214,7 @@ export default function UserHistoryPage() {
                     {coverUrl ? (
                       <AuthImage
                         src={coverUrl}
+                        allowPublicCrossOrigin
                         alt={item.title}
                         className="w-full h-full object-cover"
                         loading="lazy"
