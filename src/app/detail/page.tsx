@@ -170,7 +170,7 @@ function DetailContent() {
     try {
       if (offlineMode) {
         const localRecords = (await listOfflineBooks(serverUrl || undefined)).filter((item) => item.bookId === id);
-        const record = localRecords[0];
+        const record = localRecords.find((item) => item.coverDataUrl) ?? localRecords[0];
         if (!record) throw new Error('book.offline.missing');
         if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
         setOfflineRecord(record);
@@ -178,6 +178,7 @@ function DetailContent() {
           id: record.bookId,
           title: record.title,
           author: record.author,
+          img: record.coverDataUrl,
           files: localRecords.map((item) => ({ format: item.format, size: item.size })),
           state: { download: 1 },
         });
@@ -335,6 +336,7 @@ function DetailContent() {
               author: authorNames.join('、'),
               inShelf,
               format: selectedFormat,
+              coverUrl,
               onProgress,
               onTransfer,
               signal,

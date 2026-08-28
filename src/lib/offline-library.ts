@@ -4,6 +4,7 @@ export interface OfflineLibraryBook {
   id: string;
   title: string;
   author?: string;
+  img?: string;
   files: Array<{ format: string; size: number }>;
   timestamp: number;
 }
@@ -14,6 +15,7 @@ export function buildOfflineLibrary(records: readonly OfflineBookRecord[]): Offl
     const key = `${record.serverUrl}::${record.bookId}`;
     const existing = books.get(key);
     if (existing) {
+      if (!existing.img && record.coverDataUrl) existing.img = record.coverDataUrl;
       if (!existing.files.some((file) => file.format === record.format)) {
         existing.files.push({ format: record.format, size: record.size });
       }
@@ -24,6 +26,7 @@ export function buildOfflineLibrary(records: readonly OfflineBookRecord[]): Offl
       id: record.bookId,
       title: record.title,
       author: record.author,
+      ...(record.coverDataUrl ? { img: record.coverDataUrl } : {}),
       files: [{ format: record.format, size: record.size }],
       timestamp: Math.floor(record.updatedAt / 1000),
     });

@@ -317,6 +317,7 @@ export default function ShelfPage() {
         title: book.title,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: true,
+        coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
         format,
       });
       toast(`《${book.title}》已下载`);
@@ -395,6 +396,7 @@ export default function ShelfPage() {
             title: book.title,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: true,
+            coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
             format,
           });
           ok++;

@@ -22,6 +22,7 @@ export interface OfflineBookRecord {
   format: string;
   title: string;
   author?: string;
+  coverDataUrl?: string;
   inShelf?: boolean;
   fileName: string;
   mimeType: string;
@@ -360,7 +361,7 @@ export async function deleteOfflineBook(
 
 export async function saveOfflineBook(input: {
   serverUrl: string; bookId: string; title: string; fileName: string; mimeType: string; blob: Blob;
-  format?: string; author?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null;
+  format?: string; author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null;
 }): Promise<void> {
   const fileName = sanitizeOfflineFileName(input.fileName);
   const format = normalizeOfflineFormat(input.format || fileName.split('.').pop() || 'epub');
@@ -537,7 +538,7 @@ export function shouldPreserveOfflinePartial(error: unknown, enabled?: boolean):
 
 export async function saveOfflineBookStream(input: {
   serverUrl: string; bookId: string; title: string; fileName: string; mimeType: string; format?: string;
-  author?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnFailure?: boolean;
+  author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnFailure?: boolean;
   write: (writer: OfflineFileWriter) => Promise<string | void | { mimeType?: string; size?: number; sourceSignature?: string }>;
 }): Promise<void> {
   const fileName = sanitizeOfflineFileName(input.fileName);
@@ -568,6 +569,7 @@ export async function saveOfflineBookStream(input: {
       mimeType: details.mimeType || input.mimeType,
       size,
       sourceSignature: details.sourceSignature || input.sourceSignature,
+      coverDataUrl: input.coverDataUrl ?? previous?.coverDataUrl,
       filePath: target.filePath,
       relativePath,
       storageRoot: input.downloadDirectory || undefined,
@@ -602,7 +604,7 @@ export async function saveOfflineBookStream(input: {
 
 async function commitOfflineBookRecord(input: {
   serverUrl: string; bookId: string; format: string; title: string; fileName: string; mimeType: string;
-  author?: string; inShelf?: boolean; size?: number; blob?: Blob; updatedAt?: number; sourceSignature?: string; filePath?: string; relativePath?: string;
+  author?: string; coverDataUrl?: string; inShelf?: boolean; size?: number; blob?: Blob; updatedAt?: number; sourceSignature?: string; filePath?: string; relativePath?: string;
   storageRoot?: string;
 }): Promise<void> {
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -613,6 +615,7 @@ async function commitOfflineBookRecord(input: {
     format: normalizeOfflineFormat(input.format),
     title: input.title,
     author: input.author,
+    coverDataUrl: input.coverDataUrl,
     inShelf: input.inShelf,
     fileName: input.fileName,
     mimeType: input.mimeType,

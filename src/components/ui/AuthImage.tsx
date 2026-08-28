@@ -29,7 +29,7 @@ export function AuthImage({ src, fallback, alt = '', ...imgProps }: AuthImagePro
     // web 模式下 effect 会在平台分支提前 return，若不先重置，src 更换后
     // failed 仍为 true，一直显示占位封面。
     setFailed(false);
-    if (!isTauriApp || !src) return;
+    if (!isTauriApp || !src || /^(blob:|data:)/i.test(src)) return;
 
     let cancelled = false;
 
@@ -61,7 +61,7 @@ export function AuthImage({ src, fallback, alt = '', ...imgProps }: AuthImagePro
   }, []);
 
   // Web 端：直接用原生 <img>（同源自动带 cookie）
-  if (!isTauriApp) {
+  if (!isTauriApp || /^(blob:|data:)/i.test(src)) {
     if (!src || failed) return <>{fallback ?? null}</>;
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={src} alt={alt} onError={() => setFailed(true)} {...imgProps} />;

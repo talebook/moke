@@ -11,6 +11,7 @@ export async function startManagedOfflineBookDownload(input: {
   bookId: string;
   title: string;
   author?: string;
+  coverUrl?: string;
   inShelf?: boolean;
   format: string;
 }): Promise<void> {

@@ -230,6 +230,7 @@ function SearchContent() {
         title: book.title,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: Boolean(book.state?.wants),
+        coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
         format,
       });
       toast(`《${book.title}》已下载`);
@@ -335,6 +336,7 @@ function SearchContent() {
             title: book.title,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: Boolean(book.state?.wants),
+            coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
             format,
           });
           ok++;

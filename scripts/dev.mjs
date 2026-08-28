@@ -5,12 +5,15 @@ import path from 'node:path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
-// Keep Moke on Tauri's configured dev URL (3000). Without an explicit port,
-// Readest starts first on 3000 and forces Moke onto 3001, reversing the
-// embedded-reader proxy topology.
-const reader = spawn('pnpm', ['--filter', '@readest/readest-app', 'dev', '--port', '3001'], {
-  cwd: path.join(root, 'readest'),
-  shell: true,
+const readerRoot = path.join(root, 'readest', 'apps', 'readest-app');
+const readerNext = path.join(readerRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
+const mokeNext = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
+
+// Run Next directly instead of through `pnpm --filter ... dev`. On Windows,
+// terminating that pnpm wrapper during a normal Tauri shutdown reports the
+// child's -1 status as ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL / 4294967295.
+const reader = spawn(process.execPath, ['--env-file=.env.tauri', readerNext, 'dev', '--turbo', '--port', '3001'], {
+  cwd: readerRoot,
   stdio: 'inherit',
   env: {
     ...process.env,
@@ -18,18 +21,27 @@ const reader = spawn('pnpm', ['--filter', '@readest/readest-app', 'dev', '--port
   },
 });
 
-const moke = spawn('pnpm', ['dev'], {
+const moke = spawn(process.execPath, ['--env-file=.env.tauri', mokeNext, 'dev', '--turbo'], {
   cwd: root,
-  shell: true,
   stdio: 'inherit',
 });
 
-function cleanup() {
-  reader.kill();
-  moke.kill();
-  process.exit();
+let shuttingDown = false;
+
+function cleanup(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (reader.exitCode === null) reader.kill();
+  if (moke.exitCode === null) moke.kill();
+  process.exitCode = exitCode;
 }
 
-process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
-process.on('exit', cleanup);
+reader.on('exit', (code, signal) => {
+  if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));
+});
+moke.on('exit', (code, signal) => {
+  if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));
+});
+
+process.on('SIGINT', () => cleanup(0));
+process.on('SIGTERM', () => cleanup(0));
