@@ -35,7 +35,7 @@ interface SelectProps {
  * Custom Select styled to match the right-click context menu
  * (border-amber-950/10, white/95, soft shadow, amber-50/60 hover).
  * Anchored to the trigger; flips up if there's no room below.
- * Closes on Esc / outside click / scroll / option select.
+ * Closes on Esc / outside click / page or ancestor scroll / option select.
  */
 export function Select({
   value,
@@ -53,7 +53,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; minWidth: number } | null>(null);
 
   // Esc to close
   useEffect(() => {
@@ -78,10 +78,15 @@ export function Select({
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
 
-  // Close on scroll (any ancestor; native <select> behaves similarly)
+  // Close when the page or an ancestor scrolls so the fixed panel does not
+  // drift away from its trigger. Scrolling the panel itself must keep it open.
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => setOpen(false);
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
+      setOpen(false);
+    };
     window.addEventListener('scroll', onScroll, true);
     return () => window.removeEventListener('scroll', onScroll, true);
   }, [open]);
@@ -92,30 +97,42 @@ export function Select({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const width = Math.max(rect.width, minPanelWidth ?? 130);
+    const minWidth = Math.max(rect.width, minPanelWidth ?? 130);
     let left = rect.left;
     // Keep panel within viewport horizontally
     const pad = 8;
-    if (left + width > window.innerWidth - pad) {
-      left = Math.max(pad, window.innerWidth - pad - width);
+    if (left + minWidth > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - pad - minWidth);
     }
-    setPos({ left, top: rect.bottom + 6, width });
+    setPos({ left, top: rect.bottom + 6, minWidth });
   }, [open, minPanelWidth]);
 
-  // Flip up if no room below
+  // Keep the content-sized panel within the viewport, and flip it up if there
+  // is no room below. Long options can expand the panel beyond the trigger.
   useLayoutEffect(() => {
     if (!open || !pos || !panelRef.current) return;
     const rect = panelRef.current.getBoundingClientRect();
     const pad = 8;
+    let left = pos.left;
+    let top = pos.top;
+
+    if (rect.right > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - pad - rect.width);
+    }
+
     if (rect.bottom > window.innerHeight - pad) {
       const trigger = triggerRef.current;
       if (trigger) {
         const tr = trigger.getBoundingClientRect();
         const flipped = tr.top - rect.height - 6;
         if (flipped >= pad) {
-          setPos({ ...pos, top: flipped });
+          top = flipped;
         }
       }
+    }
+
+    if (left !== pos.left || top !== pos.top) {
+      setPos({ ...pos, left, top });
     }
   }, [open, pos]);
 
@@ -165,8 +182,8 @@ export function Select({
         <div
           ref={panelRef}
           role="listbox"
-          style={{ left: pos.left, top: pos.top, width: pos.width }}
-          className="fixed z-50 max-h-[60vh] overflow-y-auto rounded-xl border border-amber-950/10 bg-white/95 backdrop-blur shadow-[0_18px_45px_-20px_rgba(74,57,35,0.55)] no-scrollbar"
+          style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth }}
+          className="fixed z-50 w-max max-w-[calc(100vw-1rem)] max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-amber-950/10 bg-white/95 backdrop-blur shadow-[0_18px_45px_-20px_rgba(74,57,35,0.55)] no-scrollbar"
           onMouseDown={(e) => e.stopPropagation()}
         >
           {options.length === 0 ? (
@@ -189,7 +206,7 @@ export function Select({
                   isSelected && 'bg-amber-50/40',
                 )}
               >
-                <span className="flex-1 whitespace-nowrap">{opt.label}</span>
+                <span className="min-w-0 flex-1 whitespace-normal break-words">{opt.label}</span>
                 {isSelected && <Check className="w-3.5 h-3.5 shrink-0 text-primary" />}
               </button>
             );

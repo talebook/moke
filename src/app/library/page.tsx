@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Search, ArrowLeft, Loader2 } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -21,7 +22,7 @@ import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { useToast } from '@/lib/toast';
-import { BookOpen, Check, Download, ListChecks } from 'lucide-react';
+import { BookOpen, Check, Download, ListChecks, X } from 'lucide-react';
 
 interface BookItem {
   id: string | number;
@@ -78,6 +79,9 @@ const colors = [
   'bg-gradient-to-br from-gray-200 to-gray-300',
   'bg-gradient-to-br from-neutral-200 to-neutral-300',
 ];
+
+const TAG_DROPDOWN_LIMIT = 12;
+const MORE_TAGS_VALUE = '__moke_more_tags__';
 
 function getColorIndex(str: unknown) {
   const s = String(str ?? '');
@@ -735,7 +739,7 @@ export default function LibraryPage() {
           <div className="shrink-0 border-b border-amber-950/10 bg-white/25 px-4 py-3 sm:px-6 md:px-8 md:py-4">
             <div className="flex items-center gap-4 overflow-x-auto rounded-3xl app-card px-4 py-3 md:gap-6">
               <FilterSelect label="格式" value={selectedFormat} options={['全部', 'EPUB', 'PDF', 'MOBI', 'TXT', 'AZW3']} onChange={(v) => updateFilter('format', v)} />
-              <FilterSelect label="标签" value={selectedTag} options={tagOptions} onChange={(v) => updateFilter('tag', v)} />
+              <TagFilterSelect value={selectedTag} options={tagOptions} onChange={(v) => updateFilter('tag', v)} />
             </div>
           </div>
 
@@ -1259,5 +1263,134 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
         options={options.map((o) => ({ value: o, label: o }))}
       />
     </div>
+  );
+}
+
+function TagFilterSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
+  const [showAllTags, setShowAllTags] = useState(false);
+  const hasMoreTags = options.length > TAG_DROPDOWN_LIMIT;
+  const compactTags = hasMoreTags
+    ? Array.from(new Set([
+        ...options.slice(0, TAG_DROPDOWN_LIMIT),
+        ...(options.includes(value) ? [value] : []),
+      ]))
+    : options;
+  const selectOptions = [
+    ...compactTags.map((tag) => ({ value: tag, label: tag })),
+    ...(hasMoreTags ? [{ value: MORE_TAGS_VALUE, label: '更多标签…' }] : []),
+  ];
+
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <span className="text-xs shrink-0 text-muted-foreground">标签</span>
+        <Select
+          value={value}
+          onChange={(nextValue) => {
+            if (nextValue === MORE_TAGS_VALUE) {
+              setShowAllTags(true);
+              return;
+            }
+            onChange(nextValue);
+          }}
+          options={selectOptions}
+        />
+      </div>
+
+      {showAllTags && (
+        <TagPickerDialog
+          value={value}
+          options={options}
+          onSelect={onChange}
+          onClose={() => setShowAllTags(false)}
+        />
+      )}
+    </>
+  );
+}
+
+function TagPickerDialog({
+  value,
+  options,
+  onSelect,
+  onClose,
+}: {
+  value: string;
+  options: string[];
+  onSelect: (value: string) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 sm:items-center sm:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="all-tags-title"
+        className="flex max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-amber-950/10 px-5 py-4 sm:px-6">
+          <div>
+            <h2 id="all-tags-title" className="text-base font-semibold text-foreground">全部标签</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">共 {options.length} 个选项</p>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭全部标签"
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-amber-950/10 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 grid-cols-2 gap-2 overflow-y-auto overscroll-contain p-4 sm:grid-cols-3 sm:gap-3 sm:p-6">
+          {options.map((tag) => {
+            const isSelected = tag === value;
+            return (
+              <button
+                key={tag}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => {
+                  onSelect(tag);
+                  onClose();
+                }}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-colors',
+                  isSelected
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-amber-950/10 bg-white/70 text-foreground hover:bg-muted/60',
+                )}
+              >
+                <span className="min-w-0 flex-1 break-words">{tag}</span>
+                {isSelected && <Check className="h-3.5 w-3.5 shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
