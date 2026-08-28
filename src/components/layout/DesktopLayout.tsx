@@ -14,17 +14,17 @@ export function DesktopLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh overflow-hidden app-warm-bg">
       <Sidebar />
-      <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:ml-[220px] lg:pb-0">
+      <div className="moke-route-content flex-1 min-w-0 h-full flex flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:ml-[220px] lg:pb-0">
         {children}
       </div>
       <TabBar />
       <UpdateChecker />
       {toast && (
-        <div className="fixed top-[calc(1rem+var(--moke-top-safe-area,0px))] left-1/2 z-[130] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2">
+        <div className="fixed top-[calc(1rem+var(--moke-top-safe-area,0px))] left-1/2 z-[1000] w-[min(400px,calc(100vw-2rem))] -translate-x-1/2">
           <div className={`flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border ${
             type === 'error'
-              ? 'bg-destructive/10 border-destructive/30 text-destructive'
-              : 'bg-primary/10 border-primary/30 text-foreground'
+              ? 'bg-destructive border-destructive text-destructive-foreground'
+              : 'bg-background border-border text-foreground'
           }`}>
             {type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> : <Info className="w-4 h-4 shrink-0 mt-0.5" />}
             <p className="text-sm flex-1">{toast}</p>

@@ -30,6 +30,9 @@ export function Sidebar() {
   ];
 
   // 拓展侧边栏项
+  const visibleNavItems = navItems.filter((item) => !item.hidden);
+  const activeNavIndex = visibleNavItems.findIndex((item) => pathname === item.href);
+
   const extNavItems = sidebarExts.map((ext) => ({
     href: `/extensions/view?name=${ext.name}`,
     icon: Package,
@@ -50,17 +53,27 @@ export function Sidebar() {
         </span>
       </div>
 
-      <nav className="flex-1 flex flex-col gap-1 px-3 pt-4 overflow-y-auto">
-        {navItems.filter((i) => !i.hidden).map((item) => {
+      <nav className="flex-1 flex flex-col px-3 pt-4 overflow-y-auto">
+        <div className="relative flex flex-col gap-1">
+          <div
+            aria-hidden="true"
+            className={cn(
+              'moke-sidebar-active-indicator pointer-events-none absolute inset-x-0 top-0 h-10 rounded-lg bg-white/10 transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
+              activeNavIndex >= 0 ? 'opacity-100' : 'opacity-0',
+            )}
+            style={{ transform: `translateY(${Math.max(activeNavIndex, 0) * 44}px)` }}
+          />
+        {visibleNavItems.map((item) => {
           const isActive = pathname === item.href;
           return (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-150',
+                'relative z-[1] flex h-10 items-center gap-3 px-3 rounded-lg text-sm font-medium transition-colors duration-150',
                 isActive
-                  ? 'bg-white/10 text-primary-foreground'
+                  ? 'text-primary-foreground'
                   : 'text-white/55 hover:text-white hover:bg-white/5'
               )}
             >
@@ -69,6 +82,7 @@ export function Sidebar() {
             </Link>
           );
         })}
+        </div>
 
         {/* 拓展分隔 & 拓展导航项 */}
         {extNavItems.length > 0 && (

@@ -94,6 +94,11 @@ test('Android 状态栏任务在 Activity 销毁竞态中安全退出', () => {
 
 test('Android 返回先渲染上一页，再只把当前页向右划出', () => {
   assert.match(backNavigationSource, /document\.startViewTransition/);
+  assert.match(backNavigationSource, /startViewTransition\?\.bind\(document\)/);
+  assert.match(backNavigationSource, /startDesktopBackTransition/);
+  assert.match(backNavigationSource, /\.moke-route-content/);
+  assert.match(backNavigationSource, /pathnameRef\.current = pathname/);
+  assert.match(backNavigationSource, /NativeBackTransitionController\(pathnameRef\.current/);
   assert.match(backNavigationSource, /controllerRef\.current\?\.pathnameChanged\(pathname\)/);
   assert.match(globalStyles, /::view-transition-old\(root\)[\s\S]*animation-name: moke-native-back-exit/);
   assert.match(globalStyles, /::view-transition-new\(root\)[\s\S]*animation: none/);

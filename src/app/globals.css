@@ -461,6 +461,11 @@
   }
 }
 
+[data-eink='true'] .moke-sidebar-active-indicator,
+[data-eink='true'] .moke-tab-active-indicator {
+  transition: none !important;
+}
+
 /* Moke and the embedded Readest frontend are separate same-origin documents.
    Cross-document opt-in is necessarily document-wide, so layout.tsx skips all
    transitions except mobile Readest -> Moke exits. Suppress the browser's

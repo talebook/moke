@@ -37,6 +37,8 @@ export function shouldAnimateNativeBack(
   motionReduced: boolean,
   viewTransitionSupported: boolean,
 ): boolean {
+  // Desktop uses a content-scoped Web Animation instead of WebView2's broken
+  // document.startViewTransition implementation.
   const nativeRuntime = runtimePlatform === 'android'
     || runtimePlatform === 'ios'
     || runtimePlatform === 'ohos'
@@ -164,13 +166,14 @@ export class NativeBackTransitionController {
     }
 
     this.dependencies.setTransitionActive(true);
+    const destinationCommitted = new Promise<void>((resolve) => {
+      active.resolveUpdate = resolve;
+    });
     try {
       active.transition = this.dependencies.startViewTransition(() => {
         if (this.destroyed || this.active !== active) return Promise.resolve();
         this.ensureNavigation(active);
-        return new Promise<void>((resolve) => {
-          active.resolveUpdate = resolve;
-        });
+        return destinationCommitted;
       });
     } catch {
       // startViewTransition can synchronously throw while another document
@@ -179,6 +182,11 @@ export class NativeBackTransitionController {
       this.finish(active);
       return;
     }
+
+    // Do not depend on the WebView invoking the transition update callback.
+    // Some Windows WebView2 versions expose startViewTransition but can leave
+    // that callback pending, which previously swallowed every BACK request.
+    this.ensureNavigation(active);
 
     active.timerId = this.scheduleTimeout(() => {
       if (this.active !== active) return;

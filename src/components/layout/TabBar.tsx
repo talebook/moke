@@ -20,10 +20,21 @@ export function TabBar() {
       ? { href: '/settings', icon: Settings, label: '设置' }
       : { href: '/user', icon: User, label: '我的' },
   ];
+  const activeTabIndex = tabs.findIndex(
+    (tab) => pathname === tab.href || pathname.startsWith(`${tab.href}/`),
+  );
 
   return (
     <nav className="moke-tab-bar fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-12px_36px_-28px_rgba(74,57,35,0.65)] backdrop-blur lg:hidden">
-      <div className="grid h-14 grid-cols-3">
+      <div className="relative grid h-14 grid-cols-3">
+        <div
+          aria-hidden="true"
+          className={cn(
+            'moke-tab-active-indicator pointer-events-none absolute inset-y-1 w-[calc(33.333333%-0.5rem)] rounded-xl bg-primary/10 transition-[left,opacity] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
+            activeTabIndex >= 0 ? 'opacity-100' : 'opacity-0',
+          )}
+          style={{ left: `calc(${Math.max(activeTabIndex, 0)} * 33.333333% + 0.25rem)` }}
+        />
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
@@ -32,8 +43,9 @@ export function TabBar() {
               key={tab.href}
               replace
               href={tab.href}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-0.5 px-1 transition-colors duration-150',
+                'relative z-[1] flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-0.5 px-1 transition-colors duration-150',
                 isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
               )}
             >

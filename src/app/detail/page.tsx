@@ -101,10 +101,16 @@ function DetailContent() {
   const summary = bookSummaryText(book?.comments || book?.description);
   const activeServerUrl = offlineRecord?.serverUrl || serverUrl;
   const downloadKey = activeServerUrl && id ? makeOfflineBookKey(activeServerUrl, id, selectedFormat) : '';
-  const primaryFile = book?.files?.[0];
-  const fileFormats = Array.from(new Set(
-    book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
-  ));
+  const bookFiles = Array.from(
+    new Map(
+      (book?.files ?? [])
+        .map((file) => ({ ...file, format: file.format.trim().toLowerCase() }))
+        .filter((file) => file.format)
+        .map((file) => [file.format, file] as const),
+    ).values(),
+  );
+  const primaryFile = bookFiles[0];
+  const fileFormats = bookFiles.map((file) => file.format.toUpperCase());
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
   const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
 
@@ -581,11 +587,11 @@ function DetailContent() {
                     {downloading ? `下载中 ${downloadProgress}%` : openingReader ? '打开中' : downloaded ? '阅读' : '下载'}
                   </span>
                 </button>
-                {book.files && book.files.length > 1 && !downloaded && (
+                {bookFiles.length > 1 && !downloaded && (
                   <div className="mt-3 w-full md:w-[220px]">
                     <div className="flex flex-wrap gap-1.5">
-                      {book.files.map((f) => {
-                        const fmt = f.format.toLowerCase();
+                      {bookFiles.map((f) => {
+                        const fmt = f.format;
                         const isActive = selectedFormat === fmt;
                         return (
                           <button

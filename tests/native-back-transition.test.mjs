@@ -61,7 +61,7 @@ function normalTransition() {
   };
 }
 
-test('返回动画在支持 View Transition 且未减动效的 Tauri 桌面和移动平台启用', () => {
+test('返回动画在移动端使用 View Transition、桌面端使用内容动画', () => {
   assert.equal(shouldAnimateNativeBack('android', false, true), true);
   assert.equal(shouldAnimateNativeBack('ios', false, true), true);
   assert.equal(shouldAnimateNativeBack('ohos', false, true), true);
@@ -159,6 +159,7 @@ test('被 skip 且未执行 update callback 时仍执行返回并可继续处理
   }), '/detail');
 
   harness.controller.requestBack();
+  assert.deepEqual(harness.navigations, ['/library']);
   await flushPromises();
   harness.controller.requestBack();
   await flushPromises();
@@ -194,4 +195,26 @@ test('显式 target 等于当前 pathname 不持锁，下一次 BACK 仍生效',
 
   assert.deepEqual(harness.navigations, ['/detail', '/library']);
   assert.deepEqual(harness.activeStates, [false, true, false]);
+});
+
+test('桌面无动画模式从详情返回后再次进入详情仍可返回', () => {
+  const navigations = [];
+  const createController = (pathname) => new NativeBackTransitionController(pathname, {
+    navigate: (target) => navigations.push(target),
+    canAnimate: () => false,
+    startViewTransition: () => {
+      throw new Error('desktop must not start a view transition');
+    },
+    setTransitionActive: () => undefined,
+  });
+
+  let controller = createController('/detail');
+  controller.requestBack();
+  assert.deepEqual(navigations, ['/library']);
+  controller.destroy();
+
+  // Mirrors a provider effect recreated by a new Next router identity.
+  controller = createController('/detail');
+  controller.requestBack();
+  assert.deepEqual(navigations, ['/library', '/library']);
 });
