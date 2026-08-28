@@ -7,6 +7,7 @@ import {
   buildTauriBinaryHeaders,
   buildTauriRequestInit,
   cancelResponseBodyQuietly,
+  drainResponseBodyQuietly,
   getErrorMessage,
   isAbsoluteHttpUrl,
   readApiJson,
@@ -179,6 +180,21 @@ test('Range 降级重试前会取消未消费的首个响应体', async () => {
   await assert.doesNotReject(cancelResponseBodyQuietly({
     body: { cancel: async () => { throw new Error('already closed'); } },
   }));
+});
+
+test('HTTP 416 正文会顺序排空而不是取消原生响应资源', async () => {
+  let reads = 0;
+  let cancellations = 0;
+  await drainResponseBodyQuietly({
+    body: {
+      getReader: () => ({
+        read: async () => ({ done: ++reads === 2, value: new Uint8Array() }),
+      }),
+      cancel: async () => { cancellations += 1; },
+    },
+  });
+  assert.equal(reads, 2);
+  assert.equal(cancellations, 0);
 });
 
 test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {

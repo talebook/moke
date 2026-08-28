@@ -6,6 +6,8 @@ import test from 'node:test';
 
 import { cleanBuildArtifacts } from '../scripts/clean-build-artifacts.mjs';
 
+const toPosixPath = (value) => value.replaceAll('\\', '/');
+
 test('Rust dev profile avoids the large incremental object cache', () => {
   const cargoConfig = readFileSync(new URL('../src-tauri/.cargo/config.toml', import.meta.url), 'utf8');
 
@@ -33,7 +35,7 @@ test('default cleanup removes frontend outputs and Rust incremental caches', () 
   createFile(root, 'src-tauri/target/x86_64-pc-windows-msvc/debug/incremental/moke/cache');
   createFile(root, 'src-tauri/target/debug/deps/libmoke.rlib');
 
-  const removed = cleanBuildArtifacts({ projectRoot: root });
+  const removed = cleanBuildArtifacts({ projectRoot: root }).map(toPosixPath);
 
   assert.deepEqual(removed.sort(), [
     '.next',
@@ -53,7 +55,7 @@ test('full cleanup also removes the complete Rust target directory', () => {
   const root = mkdtempSync(path.join(os.tmpdir(), 'moke-build-clean-full-'));
   createFile(root, 'src-tauri/target/release/moke');
 
-  const removed = cleanBuildArtifacts({ projectRoot: root, removeRustTarget: true });
+  const removed = cleanBuildArtifacts({ projectRoot: root, removeRustTarget: true }).map(toPosixPath);
 
   assert.deepEqual(removed, ['src-tauri/target']);
   assert.equal(existsSync(path.join(root, 'src-tauri/target')), false);

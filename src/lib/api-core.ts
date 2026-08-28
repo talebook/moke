@@ -59,6 +59,21 @@ export async function cancelResponseBodyQuietly(response: Pick<Response, 'body'>
   try { await response.body?.cancel(); } catch { /* disposal must not mask the retry */ }
 }
 
+/**
+ * Drain a small response body without cancelling its native stream resource.
+ * Tauri HTTP starts pulling eagerly; cancelling an HTTP 416 body can race that
+ * pull and make both paths release the same resource ID.
+ */
+export async function drainResponseBodyQuietly(response: Pick<Response, 'body'>): Promise<void> {
+  try {
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    while (!(await reader.read()).done) { /* discard */ }
+  } catch {
+    // Disposal errors must not mask the full-download retry.
+  }
+}
+
 export function getErrorMessage(error: unknown, fallback = '操作失败，请稍后重试。') {
   if (error instanceof MokeApiError) return error.message || fallback;
   if (error instanceof Error) {

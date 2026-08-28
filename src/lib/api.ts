@@ -6,6 +6,7 @@ import {
   buildTauriBinaryHeaders,
   buildTauriRequestInit,
   cancelResponseBodyQuietly,
+  drainResponseBodyQuietly,
   getErrorMessage,
   isAbsoluteHttpUrl,
   MokeApiError,
@@ -548,7 +549,11 @@ export async function streamBookDownload(
   let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
   if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
   if (rangeMode === 'retry-full') {
-    await cancelResponseBodyQuietly(response);
+    if (response.status === 416) {
+      await drainResponseBodyQuietly(response);
+    } else {
+      await cancelResponseBodyQuietly(response);
+    }
     await options.onRangeReset?.();
     response = await fetchDownload(new Headers());
     if (!response.ok) throw new Error(`http.${response.status}`);

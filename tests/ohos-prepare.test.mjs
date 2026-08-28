@@ -21,6 +21,7 @@ import {
 } from '../scripts/ohos-prepare-core.mjs';
 
 const patchDir = fileURLToPath(new URL('../scripts/ohos-ability-patch', import.meta.url));
+const toPosixPath = (value) => value.replaceAll('\\', '/');
 
 const UNPATCHED_MAIN_PAGE = `@Entry({ routeName: "RustAbility" })
 @Component
@@ -57,7 +58,7 @@ function makeFakePackage(ohosRoot, roots) {
 }
 
 test('packageRootsFor 搜索顺序优先 entry/oh_modules（与 CI 断言一致）', () => {
-  assert.deepEqual(packageRootsFor('/gen/ohos'), [
+  assert.deepEqual(packageRootsFor('/gen/ohos').map(toPosixPath), [
     '/gen/ohos/entry/oh_modules',
     '/gen/ohos/oh_modules',
   ]);

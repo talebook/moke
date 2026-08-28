@@ -188,6 +188,7 @@ function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') 
         }
         if (command === 'plugin:fs|exists') return false;
         if (command === 'plugin:fs|mkdir'
+          || command === 'plugin:fs|ftruncate'
           || command === 'plugin:fs|rename'
           || command === 'plugin:fs|remove'
           || command === 'plugin:resources|close') return null;
@@ -385,7 +386,7 @@ test('Tauri 默认下载目录的所有文件操作都使用 AppData 相对路�
   const { calls, indexedDB, recordedBooks } = installTauriOfflineStore();
 
   await saveOfflineBookStream({
-    serverUrl: 'https://beta.rexliao.cn',
+    serverUrl: 'https://books.example.test',
     bookId: '10',
     title: '西游记',
     fileName: '西游记.epub',
@@ -421,17 +422,45 @@ test('Tauri 默认下载目录的所有文件操作都使用 AppData 相对路�
   }
   assert.equal(recordedBooks.length, 1);
   assert.match(
-    indexedDB.records.get('https://beta.rexliao.cn::10::epub').filePath,
+    indexedDB.records.get('https://books.example.test::10::epub').filePath,
     /^\/data\/user\/0\/org\.houheya\.moke\/books\//,
   );
   assert.match(recordedBooks[0].relativePath, /^books\//);
+});
+
+test('Windows 续传使用可截断写句柄并显式定位到断点', async () => {
+  const { calls } = installTauriOfflineStore();
+
+  await saveOfflineBookStream({
+    serverUrl: 'https://books.example.test',
+    bookId: '10',
+    title: '续传测试',
+    fileName: '续传测试.pdf',
+    mimeType: 'application/pdf',
+    format: 'pdf',
+    resume: true,
+    write: async (writer) => {
+      assert.equal(writer.position, 26);
+      await writer.truncate();
+      assert.equal(writer.position, 0);
+      await writer.write(new Uint8Array([1]));
+      return { size: 1 };
+    },
+  });
+
+  const openCall = calls.find(({ command }) => command === 'plugin:fs|open');
+  assert.equal(openCall.args.options.write, true);
+  assert.equal(openCall.args.options.append, undefined);
+  assert.equal(openCall.args.options.truncate, false);
+  assert.ok(calls.some(({ command, args }) => command === 'plugin:fs|seek' && args.offset === 26));
+  assert.ok(calls.some(({ command }) => command === 'plugin:fs|ftruncate'));
 });
 
 test('Tauri 自定义下载目录继续使用已授权的绝对路径', async () => {
   const { calls, indexedDB, recordedBooks } = installTauriOfflineStore();
 
   await saveOfflineBookStream({
-    serverUrl: 'https://beta.rexliao.cn',
+    serverUrl: 'https://books.example.test',
     bookId: '10',
     title: '西游记',
     fileName: '西游记.pdf',
@@ -457,7 +486,7 @@ test('Tauri 自定义下载目录继续使用已授权的绝对路径', async ()
   }
   assert.equal(recordedBooks[0].storageRoot, '/storage/emulated/0/Moke');
   assert.match(
-    indexedDB.records.get('https://beta.rexliao.cn::10::pdf').filePath,
+    indexedDB.records.get('https://books.example.test::10::pdf').filePath,
     /^\/storage\/emulated\/0\/Moke\//,
   );
 });
