@@ -37,6 +37,51 @@ pnpm copy:reader    # fallback copy of readest/out/readest → out/readest
 The root test suite uses Node's built-in test runner. The embedded `readest/apps/readest-app` has its
 own larger test suite and its own `CLAUDE.md` — consult that file before touching reader code.
 
+## Release publishing
+
+When a user asks you to publish a version, follow these rules strictly:
+
+1. **Ask before publishing:** explicitly ask the user whether this is a `dev` or `release`
+   publication. Do not infer the channel, and do not change version files, create or push a tag, or
+   create or edit the GitHub Release until the user confirms one of those two choices.
+2. **Version/tag:** treat the user's requested version as the base version. For `dev`, append exactly
+   `-dev` (for example, a requested `v1.0.13` becomes `v1.0.13-dev`). For `release`, use the requested
+   version unchanged (for example, `v1.0.13`). Never publish both channels from one confirmation.
+3. **Title and prerelease state:** a stable release is titled `Moke vX.Y.Z` and must not be marked as
+   a prerelease. A dev release is titled `Moke Dev vX.Y.Z` and **must** be marked as a GitHub
+   prerelease; its tag remains `vX.Y.Z-dev`.
+4. **Release notes:** use the exact structure below. Replace the bracketed change placeholders with
+   the actual highlights, replace every `x.x.x` with the artifact version, and replace the changelog
+   endpoints with the previous and new tags. Do not leave placeholders in a published release.
+
+```markdown
+新增
+
+- [内容1]
+- [内容2]
+
+## 下载
+
+| 平台              | 安装包                                               |
+| --------------- | ------------------------------------------------- |
+| Windows         | `Moke_x.x.x_x64_en-US.msi` / `.exe`               |
+| macOS           | `Moke_x.x.x_aarch64.dmg`                          |
+| Linux           | `Moke_x.x.x_amd64.AppImage` / `.deb`              |
+| Android         | `moke-android-release.apk`                        |
+| iOS/iPadOS      | `Moke.ipa`（自签名安装）                                 |
+| OpenHarmony（鸿蒙） | `entry-default-unsigned.hap`（alpha，未签名，可能需要自签名安装） |
+
+> 系统要求：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+ / HarmonyOS NEXT 5.0+（API 12）
+
+> ⚠️ OpenHarmony（鸿蒙）HAP 目前为 **alpha 版本**，Bug 较多，仅建议在测试设备上体验；安装包未签名，可能需要自签名安装。
+
+## 反馈
+
+遇到问题或建议请提交 [GitHub Issues](https://github.com/talebook/moke/issues)。安全漏洞请通过[私密报告](https://github.com/talebook/moke/security/advisories/new)提交。
+
+**Full Changelog**: [https://github.com/talebook/moke/compare/vx.x.x...vx.x.x](https://github.com/talebook/moke/compare/vx.x.x...vx.x.x)
+```
+
 ### Build-environment gotcha (Windows + WSL)
 
 The **Bash tool runs in WSL2 Linux and has no cargo/node/pnpm**, while Read/Edit/Glob/Grep operate
