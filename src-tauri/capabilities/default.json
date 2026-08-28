@@ -62,6 +62,7 @@
       ]
     },
     "os:default",
+    "opener:allow-open-path",
     "process:allow-exit",
     "process:allow-restart",
     "updater:default"

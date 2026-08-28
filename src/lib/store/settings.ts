@@ -5,6 +5,8 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 
 export type ResolvedTheme = 'light' | 'dark';
 
+export type ReaderPreference = 'embedded' | 'system';
+
 /**
  * Single source of truth for resolving a ThemeMode into the actual theme.
  * Used by the layout effect, the settings page, and (as an inlined copy) the
@@ -28,6 +30,9 @@ interface SettingsState {
   /** Desktop-only directory explicitly selected by the user; null uses AppData/books. */
   downloadDirectory: string | null;
   setDownloadDirectory: (path: string | null) => void;
+  /** Desktop app used to open downloaded books. */
+  readerPreference: ReaderPreference;
+  setReaderPreference: (readerPreference: ReaderPreference) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -39,6 +44,8 @@ export const useSettingsStore = create<SettingsState>()(
       setTheme: (v) => set({ theme: v }),
       downloadDirectory: null,
       setDownloadDirectory: (downloadDirectory) => set({ downloadDirectory }),
+      readerPreference: 'embedded',
+      setReaderPreference: (readerPreference) => set({ readerPreference }),
     }),
     { name: 'moke-settings' }
   )

@@ -19,6 +19,11 @@ export async function openOfflineBook(
     throw new Error('book.offline.desktop_only');
   }
 
+  if (useSettingsStore.getState().readerPreference === 'system') {
+    await openBookWithSystemDefault(record.filePath);
+    return;
+  }
+
   let restoreProgress = null;
   try {
     restoreProgress = await fetchReadingProgress(record.bookId);
@@ -46,4 +51,13 @@ export async function openOfflineBook(
 
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('open_reader', common);
+}
+
+export async function openBookWithSystemDefault(filePath: string): Promise<void> {
+  if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+    throw new Error('book.offline.desktop_only');
+  }
+
+  const { openPath } = await import('@tauri-apps/plugin-opener');
+  await openPath(filePath);
 }

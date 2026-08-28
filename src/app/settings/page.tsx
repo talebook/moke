@@ -3,19 +3,20 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2, MonitorCog } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
-import type { ThemeMode } from '@/lib/store/settings';
+import type { ReaderPreference, ThemeMode } from '@/lib/store/settings';
 import { cn } from '@/lib/utils';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
 import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
+import { Select } from '@/components/ui/Select';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -24,6 +25,8 @@ export default function SettingsPage() {
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
   const setDownloadDirectory = useSettingsStore((s) => s.setDownloadDirectory);
+  const readerPreference = useSettingsStore((s) => s.readerPreference);
+  const setReaderPreference = useSettingsStore((s) => s.setReaderPreference);
   const [directorySupported, setDirectorySupported] = useState<boolean | null>(null);
   const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
@@ -198,6 +201,12 @@ export default function SettingsPage() {
             )}
           </SettingsSection>
 
+          {directorySupported && (
+            <SettingsSection title="阅读" description="选择打开已下载书籍时使用的阅读器">
+              <ReaderPreferenceRow value={readerPreference} onChange={setReaderPreference} />
+            </SettingsSection>
+          )}
+
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
             <SettingsRow label="应用版本" value={APP_VERSION} />
             <UpdateSection />
@@ -267,6 +276,33 @@ function SettingsRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-3xl transition-colors hover:bg-muted/60">
       <span className="text-sm font-medium text-foreground shrink-0">{label}</span>
       <span className="text-sm text-muted-foreground truncate text-right">{value}</span>
+    </div>
+  );
+}
+
+function ReaderPreferenceRow({ value, onChange }: { value: ReaderPreference; onChange: (value: ReaderPreference) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-3xl transition-colors hover:bg-muted/60">
+      <div className="flex items-start gap-3.5 min-w-0">
+        <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
+          <MonitorCog className="w-4 h-4" />
+        </div>
+        <div className="min-w-0 py-0.5">
+          <p className="text-sm font-medium text-foreground">选择阅读器</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">系统默认应用不会同步阅读进度与笔记</p>
+        </div>
+      </div>
+      <Select
+        value={value}
+        onChange={(next) => onChange(next as ReaderPreference)}
+        options={[
+          { value: 'embedded', label: '内嵌 Readest' },
+          { value: 'system', label: '系统默认应用' },
+        ]}
+        aria-label="选择阅读器"
+        minPanelWidth={160}
+        className="shrink-0"
+      />
     </div>
   );
 }

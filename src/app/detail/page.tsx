@@ -41,7 +41,7 @@ import {
   type BookAnnotation,
 } from '@/lib/annotations';
 import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
-import { openOfflineBook } from '@/lib/open-offline-book';
+import { openBookWithSystemDefault, openOfflineBook } from '@/lib/open-offline-book';
 
 interface BookDetail {
   id: string;
@@ -438,6 +438,19 @@ function DetailContent() {
           };
         }
         const currentPlatform = await getMokeRuntimePlatform();
+
+        if (useSettingsStore.getState().readerPreference === 'system' && !targetAnnotation) {
+          await openAndRecordBookRead({
+            open: () => openBookWithSystemDefault(record.filePath!),
+            onOpened: () => setOpeningReader(false),
+            record: () => recordBookRead(request, serverUrl, book.id),
+            onRecordError: (error) => {
+              console.warn('Book opened in the system app, but the read record could not be saved:', error);
+              setMessage('书籍已打开，但阅读记录同步失败。');
+            },
+          });
+          return;
+        }
 
         if (isSingleWebviewRuntime(currentPlatform)) {
           const href = buildEmbeddedReaderUrl({
