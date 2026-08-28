@@ -44,13 +44,27 @@ When a user asks you to publish a version, follow these rules strictly:
 1. **Ask before publishing:** explicitly ask the user whether this is a `dev` or `release`
    publication. Do not infer the channel, and do not change version files, create or push a tag, or
    create or edit the GitHub Release until the user confirms one of those two choices.
-2. **Version/tag:** treat the user's requested version as the base version. For `dev`, append exactly
-   `-dev` (for example, a requested `v1.0.13` becomes `v1.0.13-dev`). For `release`, use the requested
-   version unchanged (for example, `v1.0.13`). Never publish both channels from one confirmation.
-3. **Title and prerelease state:** a stable release is titled `Moke vX.Y.Z` and must not be marked as
+2. **Check remote collisions first:** after the channel is confirmed, refresh and inspect the remote
+   tags and GitHub Releases; never rely only on stale local tags. Treat the user's requested
+   `vX.Y.Z` as the base version. If a stable `vX.Y.Z` tag or Release already exists, tell the user it
+   has already been released and stop. Increment only the patch component by `0.0.1` (for example,
+   `v1.0.13` becomes `v1.0.14`) and explicitly ask whether to publish that next version as `dev`
+   (`v1.0.14-dev`) or `release` (`v1.0.14`). Do not continue until the user chooses.
+3. **Choose the dev tag:** when no stable release exists for the base version, the first dev tag is
+   exactly `vX.Y.Z-dev`. If that tag already exists, automatically use the first available numbered
+   suffix: `vX.Y.Z-dev-1`, then `vX.Y.Z-dev-2`, `vX.Y.Z-dev-3`, and so on. Check both remote tags and
+   GitHub Releases when finding the first available suffix; no extra confirmation is needed for this
+   automatic dev suffix.
+4. **Choose the release tag:** for `release`, use the requested base version unchanged, such as
+   `v1.0.13`. Never publish both channels from one confirmation.
+5. **Update `package.json`:** every publication must update the root `package.json` `version` to the
+   final chosen tag without its leading `v` before creating the tag or GitHub Release. For example,
+   use `1.0.13`, `1.0.13-dev`, or `1.0.13-dev-2`. Commit and push that version change, then point the
+   release tag at that exact commit. Never publish when `package.json` and the final tag disagree.
+6. **Title and prerelease state:** a stable release is titled `Moke vX.Y.Z` and must not be marked as
    a prerelease. A dev release is titled `Moke Dev vX.Y.Z` and **must** be marked as a GitHub
-   prerelease; its tag remains `vX.Y.Z-dev`.
-4. **Release notes:** use the exact structure below. Replace the bracketed change placeholders with
+   prerelease; its tag is the final `vX.Y.Z-dev` or `vX.Y.Z-dev-N` chosen above.
+7. **Release notes:** use the exact structure below. Replace the bracketed change placeholders with
    the actual highlights, replace every `x.x.x` with the artifact version, and replace the changelog
    endpoints with the previous and new tags. Do not leave placeholders in a published release.
 
