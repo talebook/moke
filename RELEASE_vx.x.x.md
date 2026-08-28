@@ -1,58 +1,27 @@
-# Moke v1.0.14
+新增
 
-这是从 `v1.0.2` 升级到 `v1.0.14` 的累计版本，包含此前 `v1.0.3` 至 `v1.0.13` 的全部代码更改。
-
-## 内嵌阅读器
-
-- 将内嵌 Readest 升级到 `v0.12.1`，随后同步到最新上游版本，并更新 foliate-js 与 PDF 资源适配。
-- 修复 Android 内嵌阅读器无法检查应用配置、缓存和私有目录而启动白屏的问题。
-- 修复 Android 打开书籍时本地文件分片请求悬空、阅读器一直停留在加载动画的问题。
-- 为 Android 书籍分片响应、超时、异常头信息、并发范围读取和初始化失败补充回归测试；协议异常时不再无限等待。
-- 修复 Android 单 WebView 阅读器的进入、返回和原生导航流程，并允许阅读器更新窗口标题。
-- 保留进入和退出阅读器时的应用切换动画。
-- Readest 原生服务初始化失败时显示具体错误和重试入口，同时保留右下角调试面板按钮。
-- 修复 Android 原生整页导航与 Zustand 状态恢复的竞态：已开启调试面板时，进入 Readest 后右下角按钮不再因过期的 `mokeDebug=0` 而消失。
-- 修复 Android 内嵌阅读器启动上下文被 `next/script` 延后执行的问题；调试开关现会在客户端模块启动前同步注入，确保阅读页右下角调试按钮显示。
-- 修复 Windows 内嵌 Readest 创建应用配置目录时权限范围不匹配，导致 `settings.json` 无法保存的问题；仅允许在 `$APPCONFIG` 与 `$APPCACHE` 根目录执行 `mkdir`，未扩大文件写入、删除或重命名范围。
-- 为 Moke 嵌入模式补齐 LocalSend 状态初始化及全部 9 个命令注册，修复 `localsend_stop` 等命令在 Windows 上提示未找到的问题。
-- 调试面板不再记录 React/Next 启动脚本产生的已知 `<script>` 框架提示，并在读取持久化历史及同步日志时过滤同一条旧记录；其他真实 `console.error` 仍正常保留。
-- 补充 AppConfig/AppCache 精确目录权限、嵌入宿主 LocalSend 命令一致性及调试日志过滤的回归测试。
-- 修复调试 IPC 递归、窗口创建降级时阅读进度丢失，以及标注定位与进度事件关联问题。
-- 保留阅读进度、标注同步、调试日志和 Moke 本地模式等定制功能。
-
-## 离线下载与阅读记录
-
-- 新增离线下载管理中心，支持暂停、继续、删除、断点恢复、多格式书籍和任务状态持久化。
-- 修复 IndexedDB 升级、异常退出恢复、磁盘文件索引恢复和重复下载状态问题。
-- Tauri 默认下载改用 AppData 相对路径，并稳定二进制、Range 和大文件下载流程。
-- 修复阅读记录请求的超时、响应清理和失败生命周期，避免成功打开被误报为失败。
-- 游客模式不再请求需要登录的书籍标注接口。
-
-## 标注、扩展与内容处理
-
-- 统一 Talebook 与 Moke 标注来源、客户端标识和响应契约。
-- 加固标注能力探测、缓存、重试、导航完成事件和迟到监听清理。
-- 修复扩展命令 `request_id` 关联、响应契约和并发请求隔离。
-- 加固书籍简介的 HTML 转纯文本处理、异常恢复及恶意标签过滤。
-- 阻止服务端验证码和电子书内容中的非预期脚本执行。
-
-## 平台体验与安全
-
-- 统一并本地化 Windows、Linux、macOS、Android、iOS/iPadOS 的应用名称和发布产物名称。
-- 修复 Android 状态栏恢复、返回手势状态、分屏安全区和应用外壳缩放问题。
-- 优化移动端低高度隐私弹窗、长书库标题和侧边栏图标显示。
-- 收紧 Tauri capabilities、CSP、asset protocol 与文件系统访问范围，保持 Moke 下载书籍目录只读。
-- 升级存在安全告警的前端与 Rust 依赖，并减少安装包和中间构建产物体积。
+- 新增离线下载管理中心，支持暂停、继续、删除、断点恢复、多格式书籍及任务状态持久化，并修复异常退出、磁盘索引恢复和重复下载问题。
+- 内嵌 Readest 升级至最新上游版本，更新 foliate-js 与 PDF 资源适配，并保留阅读进度、标注同步、调试日志和 Moke 本地模式等定制功能。
+- 修复 Android 内嵌阅读器启动白屏、本地文件分片请求悬空、加载动画不结束、原生导航返回及调试面板状态恢复问题。
+- 修复 Windows 内嵌阅读器应用配置目录权限和 LocalSend 命令注册问题，确保设置保存及本地传输服务正常工作。
+- 完善 Android 书籍分片响应、超时、异常头信息、并发范围读取和初始化失败的回归覆盖，协议异常时不再无限等待。
+- 加固阅读记录、阅读进度和标注能力探测流程，修复请求超时、监听清理、导航完成事件、缓存重试及游客模式接口调用问题。
+- 统一 Talebook 与 Moke 标注来源、客户端标识和响应契约，并修复扩展命令 `request_id` 关联、响应契约及并发请求隔离。
+- 新增跨 Moke 与 Readest 的调试日志持久化和同步能力，过滤框架噪声，同时保留真实错误信息。
+- 加固书籍简介、验证码和服务端内容处理，避免恶意标签、非预期脚本执行及敏感响应日志泄露。
+- 统一 Windows、Linux、macOS、Android、iOS/iPadOS 的应用名称和发布产物名称，并完善 OpenHarmony 构建支持。
+- 优化移动端状态栏、返回手势、分屏安全区、低高度隐私弹窗、长书库标题、侧边栏图标及应用缩放体验。
+- 收紧 Tauri capabilities、CSP、asset protocol 与文件系统访问范围，升级存在安全告警的依赖，并减少安装包和中间构建产物体积。
 
 ## 下载
 
-| 平台 | 安装包 |
-|---|---|
-| Windows | `Moke_1.0.14_x64_en-US.msi` / `.exe` |
-| macOS | `Moke_1.0.14_aarch64.dmg` |
-| Linux | `Moke_1.0.14_amd64.AppImage` / `.deb` |
-| Android | `moke-android-release.apk` |
-| iOS/iPadOS | `Moke.ipa`（自签名安装） |
+| 平台              | 安装包                                               |
+| --------------- | ------------------------------------------------- |
+| Windows         | `Moke_1.1.0_x64_en-US.msi` / `.exe`               |
+| macOS           | `Moke_1.1.0_aarch64.dmg`                          |
+| Linux           | `Moke_1.1.0_amd64.AppImage` / `.deb`              |
+| Android         | `moke-android-release.apk`                        |
+| iOS/iPadOS      | `Moke.ipa`（自签名安装）                                 |
 | OpenHarmony（鸿蒙） | `entry-default-unsigned.hap`（alpha，未签名，可能需要自签名安装） |
 
 > 系统要求：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+ / HarmonyOS NEXT 5.0+（API 12）
@@ -63,4 +32,4 @@
 
 遇到问题或建议请提交 [GitHub Issues](https://github.com/talebook/moke/issues)。安全漏洞请通过[私密报告](https://github.com/talebook/moke/security/advisories/new)提交。
 
-**Full Changelog**: https://github.com/talebook/moke/compare/v1.0.2...v1.0.14
+**Full Changelog**: [https://github.com/talebook/moke/compare/v1.0.2...v1.1.0](https://github.com/talebook/moke/compare/v1.0.2...v1.1.0)
