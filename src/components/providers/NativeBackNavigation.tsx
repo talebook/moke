@@ -24,7 +24,9 @@ function shouldAnimateBack(): boolean {
   } catch {
     // Storage can be unavailable during restricted/custom-scheme startup.
   }
-  const runtimePlatform = root.dataset.mokeRuntimePlatform || persistedRuntimePlatform;
+  const runtimePlatform = root.dataset.mokeRuntimePlatform
+    || persistedRuntimePlatform
+    || (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? 'desktop' : 'web');
   const motionReduced = root.dataset.eink === 'true'
     || window.matchMedia(
       '(prefers-reduced-motion: reduce), (update: slow), (max-color: 1)',
@@ -36,7 +38,7 @@ function shouldAnimateBack(): boolean {
   );
 }
 
-/** Receives mobile native BACK events and serializes animated route changes. */
+/** Receives page/native BACK requests and serializes animated route changes. */
 export function NativeBackNavigation() {
   const router = useRouter();
   const pathname = usePathname();

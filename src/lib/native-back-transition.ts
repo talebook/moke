@@ -24,6 +24,7 @@ type BackRequest = {
 
 type ActiveRequest = BackRequest & {
   navigateStarted: boolean;
+  destinationCommitted: boolean;
   resolveUpdate?: () => void;
   timerId?: TimerId;
   transition?: NativeBackViewTransition;
@@ -36,10 +37,14 @@ export function shouldAnimateNativeBack(
   motionReduced: boolean,
   viewTransitionSupported: boolean,
 ): boolean {
-  const mobile = runtimePlatform === 'android'
+  const nativeRuntime = runtimePlatform === 'android'
     || runtimePlatform === 'ios'
-    || runtimePlatform === 'ohos';
-  return mobile && !motionReduced && viewTransitionSupported;
+    || runtimePlatform === 'ohos'
+    || runtimePlatform === 'windows'
+    || runtimePlatform === 'macos'
+    || runtimePlatform === 'linux'
+    || runtimePlatform === 'desktop';
+  return nativeRuntime && !motionReduced && viewTransitionSupported;
 }
 
 /**
@@ -73,15 +78,22 @@ export class NativeBackTransitionController {
     const previousPathname = this.pathname;
     this.pathname = pathname;
     const active = this.active;
-    if (active && pathname !== active.from) {
-      this.resolveUpdate(active);
-      if (pathname !== active.target) {
+    if (active) {
+      if (pathname === active.target) {
+        active.destinationCommitted = true;
+        this.resolveUpdate(active);
+      } else if (pathname !== active.from || active.destinationCommitted) {
         // A route other than the active BACK target is a manual navigation.
+        // Returning to `from` after the target already committed is also a
+        // new forward navigation (for example, immediately reopening a book
+        // while the previous 260ms exit animation is still finishing).
         // It supersedes queued BACK requests and becomes the sole source of
         // truth for future planning.
         this.queue.length = 0;
         this.plannedPathname = pathname;
-        this.routeStack = trackNativeRoute(pathname, []);
+        this.routeStack = pathname === active.from && active.destinationCommitted
+          ? trackNativeRoute(pathname, this.routeStack)
+          : trackNativeRoute(pathname, []);
         try {
           active.transition?.skipTransition();
         } catch {
@@ -140,7 +152,7 @@ export class NativeBackTransitionController {
     const request = this.queue.shift();
     if (!request) return;
 
-    const active: ActiveRequest = { ...request, navigateStarted: false };
+    const active: ActiveRequest = { ...request, navigateStarted: false, destinationCommitted: false };
     this.active = active;
 
     // Replacing the current pathname cannot produce a committed destination

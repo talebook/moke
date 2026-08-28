@@ -475,8 +475,7 @@
   mix-blend-mode: normal;
 }
 
-/* Android BACK is handled inside the single Tauri WebView, so it does not get
-   the Activity transition that a native multi-screen app would receive. The
+/* Moke BACK is handled inside a Tauri WebView on both desktop and mobile. The
    View Transition snapshots put the already-rendered parent page underneath
    the current page, then animate only the current page out to the right. */
 html.moke-native-back-transition::view-transition-old(root),

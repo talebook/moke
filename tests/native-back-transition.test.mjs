@@ -61,11 +61,14 @@ function normalTransition() {
   };
 }
 
-test('返回动画仅在支持 View Transition 且未减动效的移动平台启用', () => {
+test('返回动画在支持 View Transition 且未减动效的 Tauri 桌面和移动平台启用', () => {
   assert.equal(shouldAnimateNativeBack('android', false, true), true);
   assert.equal(shouldAnimateNativeBack('ios', false, true), true);
   assert.equal(shouldAnimateNativeBack('ohos', false, true), true);
-  assert.equal(shouldAnimateNativeBack('windows', false, true), false);
+  assert.equal(shouldAnimateNativeBack('windows', false, true), true);
+  assert.equal(shouldAnimateNativeBack('macos', false, true), true);
+  assert.equal(shouldAnimateNativeBack('linux', false, true), true);
+  assert.equal(shouldAnimateNativeBack('desktop', false, true), true);
   assert.equal(shouldAnimateNativeBack('web', false, true), false);
   assert.equal(shouldAnimateNativeBack('android', true, true), false);
   assert.equal(shouldAnimateNativeBack('android', false, false), false);
@@ -110,6 +113,30 @@ test('动画期间手动导航会取消排队 BACK 并重建规划状态', async
 
   harness.controller.requestBack();
   assert.deepEqual(harness.navigations, ['/library', '/shelf']);
+});
+
+test('返回目标提交后立即重进原页面，第二次返回不会被旧动画锁吞掉', async () => {
+  const first = normalTransition();
+  const second = normalTransition();
+  const transitions = [first, second];
+  const harness = createHarness((update) => transitions.shift().start(update), '/shelf');
+  harness.controller.pathnameChanged('/detail');
+
+  harness.controller.requestBack();
+  assert.deepEqual(harness.navigations, ['/shelf']);
+
+  // Parent commits, but the first visual transition has not finished yet.
+  harness.controller.pathnameChanged('/shelf');
+  harness.controller.pathnameChanged('/detail');
+  assert.equal(first.skipped, 1);
+
+  harness.controller.requestBack();
+  assert.deepEqual(harness.navigations, ['/shelf', '/shelf']);
+
+  harness.controller.pathnameChanged('/shelf');
+  second.finished.resolve();
+  await flushPromises();
+  assert.deepEqual(harness.navigations, ['/shelf', '/shelf']);
 });
 
 test('startViewTransition 同步抛错后回退导航并释放锁', () => {
