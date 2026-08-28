@@ -102,6 +102,33 @@ jobs:
         run: |
           rustup target add aarch64-apple-ios
 
+      # Tauri generates project.yml in-process, but the localization prepare step
+      # regenerates the Xcode project after adding .lproj resources. Install an
+      # exact XcodeGen release instead of relying on the macOS runner's PATH.
+      - name: Install pinned XcodeGen
+        if: matrix.platform == 'ios'
+        shell: bash
+        env:
+          XCODEGEN_VERSION: 2.46.0
+          XCODEGEN_SHA256: 4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/xcodegen.zip"
+          EXTRACT_DIR="$RUNNER_TEMP/xcodegen-download"
+          PREFIX="$RUNNER_TEMP/xcodegen-$XCODEGEN_VERSION"
+          trap 'rm -f "$ARCHIVE"; rm -rf "$EXTRACT_DIR"' EXIT
+          rm -f "$ARCHIVE"
+          rm -rf "$EXTRACT_DIR" "$PREFIX"
+          curl --fail --location --retry 3 \
+            --output "$ARCHIVE" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $ARCHIVE" | shasum -a 256 --check
+          unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+          mkdir -p "$PREFIX"
+          PREFIX="$PREFIX" "$EXTRACT_DIR/xcodegen/install.sh"
+          echo "$PREFIX/bin" >> "$GITHUB_PATH"
+          "$PREFIX/bin/xcodegen" --version
+
       - name: Install OpenHarmony Rust targets
         if: matrix.platform == 'ohos'
         run: |
