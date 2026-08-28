@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import {
   NATIVE_BACK_TRANSITION_TIMEOUT_MS,
@@ -72,6 +74,15 @@ test('返回动画在移动端使用 View Transition、桌面端使用内容动�
   assert.equal(shouldAnimateNativeBack('web', false, true), false);
   assert.equal(shouldAnimateNativeBack('android', true, true), false);
   assert.equal(shouldAnimateNativeBack('android', false, false), false);
+});
+
+test('默认浏览器计时器绑定全局接收者，避免 WebView2 Illegal invocation', () => {
+  const source = readFileSync(
+    fileURLToPath(new URL('../src/lib/native-back-transition.ts', import.meta.url)),
+    'utf8',
+  );
+  assert.match(source, /setTimeout\.bind\(globalThis\)/);
+  assert.match(source, /clearTimeout\.bind\(globalThis\)/);
 });
 
 test('快速两次 BACK 排队退两级，不吞掉第二次事件', async () => {

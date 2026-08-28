@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { useServerStore } from '@/lib/store/server';
 import { useExtensionStore } from '@/lib/store/extensions';
 
+let previousSidebarTabIndex: number | null = null;
+
 export function Sidebar() {
   const pathname = usePathname();
   const { serverTitle, user, offlineMode } = useServerStore();
@@ -32,6 +34,16 @@ export function Sidebar() {
   // 拓展侧边栏项
   const visibleNavItems = navItems.filter((item) => !item.hidden);
   const activeNavIndex = visibleNavItems.findIndex((item) => pathname === item.href);
+  const [indicatorIndex, setIndicatorIndex] = useState(
+    previousSidebarTabIndex ?? Math.max(activeNavIndex, 0),
+  );
+
+  useEffect(() => {
+    if (activeNavIndex < 0) return;
+    previousSidebarTabIndex = activeNavIndex;
+    const frame = window.requestAnimationFrame(() => setIndicatorIndex(activeNavIndex));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeNavIndex]);
 
   const extNavItems = sidebarExts.map((ext) => ({
     href: `/extensions/view?name=${ext.name}`,
@@ -61,7 +73,7 @@ export function Sidebar() {
               'moke-sidebar-active-indicator pointer-events-none absolute inset-x-0 top-0 h-10 rounded-lg bg-white/10 transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
               activeNavIndex >= 0 ? 'opacity-100' : 'opacity-0',
             )}
-            style={{ transform: `translateY(${Math.max(activeNavIndex, 0) * 44}px)` }}
+            style={{ transform: `translateY(${indicatorIndex * 44}px)` }}
           />
         {visibleNavItems.map((item) => {
           const isActive = pathname === item.href;

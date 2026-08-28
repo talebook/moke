@@ -70,8 +70,11 @@ export class NativeBackTransitionController {
     this.dependencies = dependencies;
     this.plannedPathname = pathname;
     this.routeStack = trackNativeRoute(pathname, []);
-    this.scheduleTimeout = dependencies.setTimeout ?? globalThis.setTimeout;
-    this.cancelTimeout = dependencies.clearTimeout ?? globalThis.clearTimeout;
+    // Browser timer functions require the Window/Worker global as receiver in
+    // WebView2. Storing them and later calling through this controller would
+    // otherwise use the controller as `this` and throw "Illegal invocation".
+    this.scheduleTimeout = dependencies.setTimeout ?? globalThis.setTimeout.bind(globalThis);
+    this.cancelTimeout = dependencies.clearTimeout ?? globalThis.clearTimeout.bind(globalThis);
   }
 
   pathnameChanged(pathname: string): void {

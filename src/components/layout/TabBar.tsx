@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bookmark, Library, Settings, User } from 'lucide-react';
@@ -10,6 +11,8 @@ const primaryTabs = [
   { href: '/shelf', icon: Bookmark, label: '书架' },
   { href: '/library', icon: Library, label: '书库' },
 ];
+
+let previousBottomTabIndex: number | null = null;
 
 export function TabBar() {
   const pathname = usePathname();
@@ -23,6 +26,16 @@ export function TabBar() {
   const activeTabIndex = tabs.findIndex(
     (tab) => pathname === tab.href || pathname.startsWith(`${tab.href}/`),
   );
+  const [indicatorIndex, setIndicatorIndex] = useState(
+    previousBottomTabIndex ?? Math.max(activeTabIndex, 0),
+  );
+
+  useEffect(() => {
+    if (activeTabIndex < 0) return;
+    previousBottomTabIndex = activeTabIndex;
+    const frame = window.requestAnimationFrame(() => setIndicatorIndex(activeTabIndex));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabIndex]);
 
   return (
     <nav className="moke-tab-bar fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-12px_36px_-28px_rgba(74,57,35,0.65)] backdrop-blur lg:hidden">
@@ -33,7 +46,7 @@ export function TabBar() {
             'moke-tab-active-indicator pointer-events-none absolute inset-y-1 w-[calc(33.333333%-0.5rem)] rounded-xl bg-primary/10 transition-[left,opacity] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
             activeTabIndex >= 0 ? 'opacity-100' : 'opacity-0',
           )}
-          style={{ left: `calc(${Math.max(activeTabIndex, 0)} * 33.333333% + 0.25rem)` }}
+          style={{ left: `calc(${indicatorIndex} * 33.333333% + 0.25rem)` }}
         />
         {tabs.map((tab) => {
           const Icon = tab.icon;
