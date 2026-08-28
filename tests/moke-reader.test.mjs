@@ -287,7 +287,10 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
 
 test('desktop reader-home keeps exactly one progress saver across window outcomes', async () => {
   const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  const originalWarn = console.warn;
+  const warnings = [];
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  console.warn = (...args) => warnings.push(args);
 
   const run = async (outcome) => {
     const windowUrls = [];
@@ -346,7 +349,14 @@ test('desktop reader-home keeps exactly one progress saver across window outcome
         );
       }
     }
+
+    assert.equal(warnings.length, 2);
+    for (const [message, error] of warnings) {
+      assert.equal(message, 'Falling back to current-window embedded reader navigation:');
+      assert.ok(error instanceof Error);
+    }
   } finally {
+    console.warn = originalWarn;
     if (previousPlatform === undefined) {
       delete process.env.NEXT_PUBLIC_APP_PLATFORM;
     } else {
