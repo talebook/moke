@@ -37,3 +37,4 @@ src-tauri/bin/readest-*
 # reference checkout, not part of client build
 CODE_NEED/
 tsconfig.tsbuildinfo
+.pnpm-store/

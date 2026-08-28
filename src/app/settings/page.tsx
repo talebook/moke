@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
+import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -22,10 +22,6 @@ export default function SettingsPage() {
   const { serverTitle, serverUrl, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
-  const eink = useSettingsStore((s) => s.eink);
-  const setEink = useSettingsStore((s) => s.setEink);
-  const theme = useSettingsStore((s) => s.theme);
-  const setTheme = useSettingsStore((s) => s.setTheme);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
   const setDownloadDirectory = useSettingsStore((s) => s.setDownloadDirectory);
   const [directorySupported, setDirectorySupported] = useState<boolean | null>(null);
@@ -194,6 +190,12 @@ export default function SettingsPage() {
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
             <SettingsRow label="应用版本" value={APP_VERSION} />
             <UpdateSection />
+            <SettingsLinkRow
+              icon={Palette}
+              label="主题与显示"
+              description="管理外观主题与墨水屏模式"
+              href="/settings/appearance"
+            />
             <ActionRow
               icon={BookOpen}
               label="打开内嵌阅读器"
@@ -210,18 +212,6 @@ export default function SettingsPage() {
               label="隐私政策"
               description="查看 Moke 如何处理和保护相关信息"
               href="/privacy"
-            />
-            <ToggleRow
-              icon={Settings2}
-              label="墨水屏模式"
-              description="关闭模糊与渐变效果，提升电子墨水屏可读性"
-              checked={eink}
-              onChange={setEink}
-            />
-            <ThemeRow
-              value={theme}
-              onChange={setTheme}
-              disabled={eink}
             />
           </SettingsSection>
 
@@ -261,7 +251,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
         <h2 className="text-sm font-semibold text-foreground tracking-tight">{title}</h2>
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
-      <div className="divide-y divide-amber-950/10 rounded-[28px] app-glass p-1 transition-all duration-300 hover:bg-white/70">{children}</div>
+      <div className="divide-y divide-amber-950/10 rounded-[28px] app-glass p-1 shadow-sm transition-all duration-300 hover:bg-white/70">{children}</div>
     </section>
   );
 }
@@ -295,7 +285,7 @@ function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { i
     return content;
   }
 
-  return <Link href={href}>{content}</Link>;
+  return <Link href={href} className="block rounded-xl">{content}</Link>;
 }
 
 function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typeof User; label: string; tone?: 'default' | 'danger'; onClick: () => void }) {
