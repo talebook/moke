@@ -69,7 +69,7 @@ When a user asks you to publish a version, follow these rules strictly:
    endpoints with the previous and new tags. Do not leave placeholders in a published release.
 
 ```markdown
-新增
+## 新增
 
 - [内容1]
 - [内容2]
