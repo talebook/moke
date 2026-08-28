@@ -24,6 +24,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Checkout Readest submodule for contract tests
+        run: git submodule update --init readest
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
