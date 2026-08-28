@@ -1171,7 +1171,7 @@ function NetworkBookGrid({
             ? authorRaw.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
             : '';
         const coverUrl = book.cover_url || book.img || book.thumb;
-        const ci = getColorIndex(title + idx);
+        const coverSeed = `${title}:${idx}`;
         const href =
           book.source_id != null && book.book_url ? buildNetworkBookHref(book.source_id, book.book_url) : '';
         // 书源未提供 book_url 时没有可打开的详情页：让普通点击给出提示而不是死卡片。
@@ -1196,9 +1196,7 @@ function NetworkBookGrid({
                     fetchPriority={idx === 0 ? 'high' : 'auto'}
                   />
                 ) : (
-                  <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
-                    <span className="text-foreground/20 text-2xl font-bold font-serif">{title[0]}</span>
-                  </div>
+                  <BookCoverFallback title={title} seed={coverSeed} className="book-cover-media" textClassName="text-2xl" />
                 )}
                 <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
                 <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
@@ -1232,9 +1230,7 @@ function NetworkBookGrid({
                   fetchPriority={idx === 0 ? 'high' : 'auto'}
                 />
               ) : (
-                <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
-                  <span className="text-foreground/30 text-xs font-bold font-serif">{title[0]}</span>
-                </div>
+                <BookCoverFallback title={title} seed={coverSeed} textClassName="text-xs" />
               )}
             </div>
             <div className="flex-1 min-w-0">
