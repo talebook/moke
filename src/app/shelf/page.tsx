@@ -412,7 +412,7 @@ export default function ShelfPage() {
   const submitShelfSearch = () => {
     const query = shelfSearchQ.trim();
     if (!query) return;
-    router.push(`/search?q=${encodeURIComponent(query)}`);
+    router.push(`/search?scope=shelf&q=${encodeURIComponent(query)}`);
   };
 
   return (

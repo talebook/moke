@@ -349,7 +349,7 @@ export default function LibraryPage() {
 
   const submitActiveSearch = () => {
     if (activeTab === 'local') {
-      if (searchQ.trim()) router.push(`/search?q=${encodeURIComponent(searchQ.trim())}`);
+      if (searchQ.trim()) router.push(`/search?scope=library&q=${encodeURIComponent(searchQ.trim())}`);
     } else {
       doNetworkSearch(networkSearchQ);
     }

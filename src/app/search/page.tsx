@@ -48,6 +48,8 @@ function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { serverUrl, offlineMode } = useServerStore();
+  const searchScope = searchParams.get('scope') === 'shelf' ? 'shelf' : 'library';
+  const isShelfScope = searchScope === 'shelf';
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [results, setResults] = useState<BookItem[]>([]);
@@ -94,20 +96,37 @@ function SearchContent() {
     try {
       if (offlineMode) {
         const normalized = term.toLocaleLowerCase('zh-CN');
-        const records = await listOfflineBooks(serverUrl || undefined);
+        const records = (await listOfflineBooks(serverUrl || undefined))
+          .filter((record) => !isShelfScope || record.inShelf === true);
         if (seq !== searchSeqRef.current) return;
         setResults(buildOfflineLibrary(records)
           .filter((record) => `${record.title} ${record.author || ''}`.toLocaleLowerCase('zh-CN').includes(normalized)));
         return;
       }
-      const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
+      const res = await request(
+        isShelfScope
+          ? `${serverUrl}/api/shelf`
+          : `${serverUrl}/api/search?name=${encodeURIComponent(term)}`,
+        { credentials: 'include' },
+      );
       const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。', ['ok', 'user.need_login']);
       if (data.err === 'user.need_login') {
         router.push('/login');
         return;
       }
       if (seq !== searchSeqRef.current) return;
-      if (data.err === 'ok') setResults(data.books || data.items || []);
+      if (data.err === 'ok') {
+        const books = data.books || data.items || [];
+        if (isShelfScope) {
+          const normalized = term.toLocaleLowerCase('zh-CN');
+          setResults(books.filter((book) => {
+            const authors = book.author || book.authors?.map((author) => author.name).join('、') || '';
+            return `${book.title} ${authors}`.toLocaleLowerCase('zh-CN').includes(normalized);
+          }));
+        } else {
+          setResults(books);
+        }
+      }
     } catch (error) {
       if (seq !== searchSeqRef.current) return;
       setResults([]);
@@ -335,8 +354,8 @@ function SearchContent() {
       <div className="flex h-full min-h-0 flex-col">
         <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:flex-row md:items-center md:px-8 md:py-5">
           <div className="shrink-0">
-            <p className="text-xs font-medium text-primary/80">探索书库</p>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">搜索</h1>
+            <p className="text-xs font-medium text-primary/80">{isShelfScope ? '当前书架' : '探索书库'}</p>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">{isShelfScope ? '搜索书架' : '搜索书库'}</h1>
           </div>
           <div className="hidden flex-1 md:block" />
 
@@ -346,7 +365,7 @@ function SearchContent() {
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="search"
-                  placeholder="搜索书籍"
+                  placeholder={isShelfScope ? '搜索书架中的书籍' : '搜索全部书籍'}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
