@@ -362,7 +362,7 @@ test('OHOS dev capability differs only by its development server origins', () =>
   ]);
 });
 
-test('HTTP access remains scheme-scoped for user-configured Talebook servers', () => {
+test('HTTP access remains scheme-scoped and allows arbitrary server ports', () => {
   for (const file of [
     'src-tauri/capabilities/default.json',
     'src-tauri/capabilities/reader.json',
@@ -370,6 +370,6 @@ test('HTTP access remains scheme-scoped for user-configured Talebook servers', (
   ]) {
     const permission = findPermission(readCapability(file), 'http:default');
     const urls = permission.allow.map((entry) => entry.url).sort();
-    assert.deepEqual(urls, ['http://**', 'https://**']);
+    assert.deepEqual(urls, ['http://**:**', 'https://**:**']);
   }
 });
