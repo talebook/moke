@@ -68,7 +68,7 @@ export default function AppearanceSettingsPage() {
                       disabled={eink}
                       onClick={() => setTheme(option.value)}
                       className={cn(
-                        'relative flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
+                        'relative flex items-start gap-3 rounded-[20px] border px-4 py-3 text-left transition-colors',
                         selected ? 'border-foreground bg-background' : 'border-transparent hover:bg-muted/60',
                         eink && 'cursor-not-allowed opacity-50',
                       )}
@@ -91,7 +91,7 @@ export default function AppearanceSettingsPage() {
                 <p className="mt-0.5 text-xs text-muted-foreground">针对不同显示设备优化视觉效果</p>
               </div>
               <div className="rounded-[28px] app-glass p-1 shadow-sm">
-                <div className="flex items-center justify-between gap-4 rounded-xl px-4 py-3 hover:bg-muted/60">
+                <div className="flex items-center justify-between gap-4 rounded-3xl px-4 py-3 hover:bg-muted/60">
                   <div className="flex min-w-0 items-start gap-3.5">
                     <div className="shrink-0 rounded-lg border border-amber-950/10 bg-white/60 p-2 text-muted-foreground eink-bordered">
                       <Settings2 className="h-4 w-4" />

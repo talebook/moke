@@ -258,7 +258,7 @@ function SettingsSection({ title, description, children }: { title: string; desc
 
 function SettingsRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-xl transition-colors hover:bg-muted/60">
+    <div className="flex items-center justify-between gap-4 px-4 py-3.5 rounded-3xl transition-colors hover:bg-muted/60">
       <span className="text-sm font-medium text-foreground shrink-0">{label}</span>
       <span className="text-sm text-muted-foreground truncate text-right">{value}</span>
     </div>
@@ -267,7 +267,7 @@ function SettingsRow({ label, value }: { label: string; value: string }) {
 
 function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { icon: typeof User; label: string; description: string; href: string; disabled?: boolean }) {
   const content = (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-all duration-200 group ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/80 active:scale-[0.99]'}`}>
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-3xl transition-all duration-200 group ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/80 active:scale-[0.99]'}`}>
       <div className="flex items-start gap-3.5 min-w-0">
         <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground group-hover:text-primary group-hover:border-primary/20 transition-colors duration-200 shrink-0">
           <Icon className="w-4 h-4" />
@@ -285,14 +285,14 @@ function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { i
     return content;
   }
 
-  return <Link href={href} className="block rounded-xl">{content}</Link>;
+  return <Link href={href} className="block rounded-3xl">{content}</Link>;
 }
 
 function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typeof User; label: string; tone?: 'default' | 'danger'; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
+      className={`w-full flex items-center justify-between px-4 py-3 rounded-3xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
     >
       <div className="flex items-center gap-3.5 min-w-0">
         <div className={`p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered shrink-0 transition-colors duration-200 ${tone === 'danger' ? 'group-hover:border-destructive/20 group-hover:text-destructive' : 'group-hover:text-primary'}`}>
@@ -352,7 +352,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
   };
 
   return (
-    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors ${disabled ? 'opacity-60' : 'hover:bg-muted/60'}`}>
+    <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-3xl transition-colors ${disabled ? 'opacity-60' : 'hover:bg-muted/60'}`}>
       <div className="flex items-start gap-3.5 min-w-0">
         <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
           {effectiveDark ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
@@ -406,7 +406,7 @@ function ThemeRow({ value, onChange, disabled }: { value: ThemeMode; onChange: (
 
 function ToggleRow({ icon: Icon, label, description, checked, onChange }: { icon: typeof User; label: string; description: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl transition-colors hover:bg-muted/60">
+    <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-3xl transition-colors hover:bg-muted/60">
       <div className="flex items-start gap-3.5 min-w-0">
         <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
           <Icon className="w-4 h-4" />
@@ -466,7 +466,7 @@ function UpdateSection() {
   const isBusy = status === 'checking' || status === 'downloading' || status === 'installing' || status === 'restarting';
 
   return (
-    <div className="px-4 py-3.5 rounded-xl">
+    <div className="px-4 py-3.5 rounded-3xl">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-start gap-3.5 min-w-0">
           <div className="p-2 rounded-lg bg-white/60 border border-amber-950/10 eink-bordered text-muted-foreground shrink-0">
