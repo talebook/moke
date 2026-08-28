@@ -10,7 +10,7 @@ import { useExtensionStore } from '@/lib/store/extensions';
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { serverTitle, user } = useServerStore();
+  const { serverTitle, user, offlineMode } = useServerStore();
   const { extensions, loaded, loadExtensions, getSidebarExtensions } = useExtensionStore();
   const [sidebarExts, setSidebarExts] = useState<ReturnType<typeof getSidebarExtensions>>([]);
 
@@ -44,9 +44,9 @@ export function Sidebar() {
         </div>
         <span
           className="min-w-0 flex-1 truncate text-lg font-semibold tracking-tight text-primary-foreground"
-          title={serverTitle || '墨客'}
+          title={offlineMode ? '墨客 · 离线模式' : (serverTitle || '墨客')}
         >
-          {serverTitle || '墨客'}
+          {offlineMode ? '墨客 · 离线' : (serverTitle || '墨客')}
         </span>
       </div>
 
@@ -102,7 +102,11 @@ export function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-white/10">
-        {user ? (
+        {offlineMode ? (
+          <Link href="/welcome" className="flex items-center justify-center rounded-lg bg-white/10 px-3 py-2.5 text-sm text-primary-foreground hover:bg-white/15">
+            连接服务器
+          </Link>
+        ) : user ? (
           <Link
             href="/user"
             className={cn(

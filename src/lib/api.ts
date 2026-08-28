@@ -79,8 +79,8 @@ export async function request(url: string | URL, options?: RequestInit): Promise
     debugLog(
       'error',
       'request',
-      `✗ ${method} ${urlStr} —— 缺少服务器地址前缀！serverUrl 为空`,
-      '说明连接信息未正确保存。请回到欢迎页重新输入服务器地址再试。',
+      `Request rejected: ${method} ${urlStr}; missing absolute server URL`,
+      'Connection information is unavailable.',
     );
     throw new Error('server.url.missing');
   }

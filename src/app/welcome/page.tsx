@@ -6,20 +6,18 @@ import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { logErrorMetadata } from '@/lib/api-log';
 import { useServerStore } from '@/lib/store/server';
-import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
-import { useSettingsStore } from '@/lib/store/settings';
+import { useDeveloperStore } from '@/lib/store/developer';
 import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
 import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { openEmbeddedReaderHome } from '@/lib/moke-reader';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { setServer } = useServerStore();
+  const { setServer, enterOfflineMode } = useServerStore();
   const [serverUrl, setServerUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -113,19 +111,9 @@ export default function WelcomePage() {
     }
   };
 
-  const handleOpenReaderHome = async () => {
-    setError('');
-    try {
-      await openEmbeddedReaderHome({
-        eink: useSettingsStore.getState().eink,
-        debugPanel: getDebugPanelLaunchState(),
-        serverUrl: useServerStore.getState().serverUrl,
-        navigate: (href) => router.push(href),
-      });
-    } catch (e) {
-      console.error('[WelcomePage] open embedded reader failed:', e);
-      setError('打开阅读器失败');
-    }
+  const handleEnterOfflineMode = () => {
+    enterOfflineMode();
+    router.push('/shelf');
   };
 
   const handleCopyDemoLink = async () => {
@@ -216,17 +204,17 @@ export default function WelcomePage() {
             </button>
 
             <button
-              data-dom-id="btn-open-reader"
-              onClick={handleOpenReaderHome}
+              data-dom-id="btn-offline-mode"
+              onClick={handleEnterOfflineMode}
               disabled={loading}
               className="mt-3 inline-flex items-center justify-center gap-2 w-full h-11 rounded-2xl text-sm font-medium border border-amber-950/10 bg-white/35 text-foreground cursor-pointer transition hover:bg-white/55 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <BookOpen className="h-4 w-4" />
-              打开内嵌阅读器
+              进入离线模式
             </button>
 
             <p className="mt-5 text-xs text-center text-muted-foreground leading-relaxed">
-              连接到你的 Talebook 服务器以开始使用 · 数据完全由你掌控
+              可连接 Talebook 同步书库，也可使用已下载内容离线阅读
             </p>
           </div>
 

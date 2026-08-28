@@ -23,3 +23,11 @@ test('复制成功提示会在短暂展示后自动复位', () => {
   assert.match(welcomeSource, /setDemoLinkCopied\(false\)/);
   assert.match(welcomeSource, /copyFeedbackTimerRef\.current\s*=\s*setTimeout/);
 });
+
+test('连接页默认书库入口进入 Moke 离线模式而不是 Readest 书库', () => {
+  assert.match(welcomeSource, /data-dom-id="btn-offline-mode"/);
+  assert.match(welcomeSource, /enterOfflineMode\(\)/);
+  assert.match(welcomeSource, /router\.push\('\/shelf'\)/);
+  assert.match(welcomeSource, /进入离线模式/);
+  assert.doesNotMatch(welcomeSource, /openEmbeddedReaderHome/);
+});

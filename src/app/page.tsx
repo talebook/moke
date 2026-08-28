@@ -7,11 +7,11 @@ import { navigateFullDocument } from '@/lib/moke-reader';
 
 export default function HomePage() {
   const router = useRouter();
-  const { serverUrl, hasHydrated } = useServerStore();
+  const { serverUrl, offlineMode, hasHydrated } = useServerStore();
 
   useEffect(() => {
     if (!hasHydrated) return;
-    const target = serverUrl ? '/shelf' : '/welcome';
+    const target = serverUrl || offlineMode ? '/shelf' : '/welcome';
     // On single-WebView runtimes (OHOS), App Router's RSC navigation over the
     // custom scheme can leave this page stuck on its blank loading spinner.
     // Use the native full-document navigation there; fall back to the router.
@@ -22,7 +22,7 @@ export default function HomePage() {
       router.replace(target);
     }, 1500);
     return () => window.clearTimeout(timer);
-  }, [hasHydrated, serverUrl, router]);
+  }, [hasHydrated, offlineMode, serverUrl, router]);
 
   return (
     <div className="flex h-screen items-center justify-center bg-background">

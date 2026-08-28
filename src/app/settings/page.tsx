@@ -7,19 +7,19 @@ import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
-import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
+import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import type { ThemeMode } from '@/lib/store/settings';
 import { cn } from '@/lib/utils';
 import { useUpdateStore } from '@/lib/store/update';
 import { APP_VERSION } from '@/lib/app-version';
-import { getMokeRuntimePlatform, openEmbeddedReaderHome } from '@/lib/moke-reader';
+import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, user, disconnect, logout } = useServerStore();
+  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, leaveOfflineMode, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
@@ -44,7 +44,7 @@ export default function SettingsPage() {
     let cancelled = false;
 
     // serverUrl 为空时（如已断开连接），不发起请求，避免无前缀 URL 报错
-    if (!serverUrl) {
+    if (!serverUrl || offlineMode) {
       setServerVersion('未连接');
       return;
     }
@@ -67,11 +67,16 @@ export default function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [serverUrl]);
+  }, [offlineMode, serverUrl]);
 
   const handleDisconnect = () => {
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
+    router.push('/welcome');
+  };
+
+  const handleConnectServer = () => {
+    leaveOfflineMode();
     router.push('/welcome');
   };
 
@@ -111,18 +116,9 @@ export default function SettingsPage() {
     } catch { showToast('恢复默认目录失败', 'error'); }
   };
 
-  const handleOpenReaderHome = async () => {
-    try {
-      await openEmbeddedReaderHome({
-        eink: useSettingsStore.getState().eink,
-        debugPanel: getDebugPanelLaunchState(),
-        serverUrl,
-        navigate: (href) => router.push(href),
-      });
-    } catch (error) {
-      console.error('Failed to open embedded reader:', error);
-      showToast('打开阅读器失败', 'error');
-    }
+  const handleEnterOfflineMode = () => {
+    enterOfflineMode();
+    router.push('/shelf');
   };
 
   return (
@@ -135,7 +131,7 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-8">
-          {user && (
+          {!offlineMode && user && (
             <SettingsSection title="账户" description="管理登录状态与个人信息入口">
               <SettingsRow label="当前账户" value={user.name || user.username} />
               <SettingsRow label="用户名" value={user.username} />
@@ -154,19 +150,34 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
-          <SettingsSection title="连接与数据" description="查看服务器信息与管理当前连接">
-            <SettingsRow label="连接服务器" value={serverUrl} />
-            <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
-            <SettingsRow label="服务器版本" value={serverVersion} />
-            <ActionRow
-              icon={PlugZap}
-              label="断开连接"
-              tone="danger"
-              onClick={handleDisconnect}
-            />
+          <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
+            {offlineMode ? (
+              <ActionRow
+                icon={PlugZap}
+                label="连接服务器"
+                onClick={handleConnectServer}
+              />
+            ) : (
+              <>
+              <SettingsRow label="连接服务器" value={serverUrl} />
+              <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
+              <SettingsRow label="服务器版本" value={serverVersion} />
+              <ActionRow
+                icon={PlugZap}
+                label="断开连接"
+                tone="danger"
+                onClick={handleDisconnect}
+              />
+              </>
+            )}
           </SettingsSection>
 
-          <SettingsSection title="离线下载" description="管理离线文件与存储位置">
+          <SettingsSection title="离线书库" description="进入离线模式并管理本地书籍与存储位置">
+            {!offlineMode && <ActionRow
+              icon={BookOpen}
+              label="进入离线模式"
+              onClick={handleEnterOfflineMode}
+            />}
             <SettingsLinkRow
               icon={Download}
               label="下载管理"
@@ -195,11 +206,6 @@ export default function SettingsPage() {
               label="主题与显示"
               description="管理外观主题与墨水屏模式"
               href="/settings/appearance"
-            />
-            <ActionRow
-              icon={BookOpen}
-              label="打开内嵌阅读器"
-              onClick={handleOpenReaderHome}
             />
             <SettingsLinkRow
               icon={BookOpen}

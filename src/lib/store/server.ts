@@ -43,6 +43,7 @@ function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): Ser
 }
 
 interface ServerState {
+  offlineMode: boolean;
   serverUrl: string;
   serverTitle: string;
   capabilities: ServerCapabilities;
@@ -54,6 +55,8 @@ interface ServerState {
   token: string;
   user: ReaderInfo | null;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
+  enterOfflineMode: () => void;
+  leaveOfflineMode: () => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string) => void;
@@ -84,6 +87,7 @@ function readPersistedServerUrl(): string {
 export const useServerStore = create<ServerState>()(
   persist(
     (set) => ({
+      offlineMode: false,
       serverUrl: readPersistedServerUrl(),
       serverTitle: '',
       capabilities: DEFAULT_SERVER_CAPABILITIES,
@@ -96,8 +100,10 @@ export const useServerStore = create<ServerState>()(
       user: null,
       setServer: (protocol, host, port) => {
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
-        set({ serverUrl: url, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
+        set({ serverUrl: url, offlineMode: false, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
       },
+      enterOfflineMode: () => set({ offlineMode: true, isConnected: false }),
+      leaveOfflineMode: () => set({ offlineMode: false }),
       setConnected: (token, user) => {
         set((state) => ({
           isConnected: true,
@@ -136,7 +142,7 @@ export const useServerStore = create<ServerState>()(
         }));
       },
       disconnect: () => {
-        set({ serverUrl: '', serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
+        set({ serverUrl: '', offlineMode: false, serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
       },
     }),
     {

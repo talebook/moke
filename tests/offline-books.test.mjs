@@ -277,6 +277,8 @@ test('网页版可以保存并重新读取离线书籍', async () => {
     serverUrl: 'https://a.example',
     bookId: '42',
     title: '测试书籍',
+    author: '测试作者',
+    inShelf: true,
     fileName: '测试:书籍?.epub',
     mimeType: 'application/epub+zip',
     blob,
@@ -287,6 +289,8 @@ test('网页版可以保存并重新读取离线书籍', async () => {
   assert.equal(record.id, 'https://a.example::42::epub');
   assert.equal(record.fileName, '测试_书籍_.epub');
   assert.equal(record.title, '测试书籍');
+  assert.equal(record.author, '测试作者');
+  assert.equal(record.inShelf, true);
   assert.equal(await record.blob.text(), 'book-data');
   assert.equal(record.filePath, undefined);
   assert.equal(typeof record.updatedAt, 'number');

@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen,
 import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
-import { deleteOfflineBook, getOfflineBook, removeOfflinePartial } from '@/lib/offline-books';
+import { deleteOfflineBook, getOfflineBook, listOfflineBooks, removeOfflinePartial, setOfflineBookShelfState, type OfflineBookRecord } from '@/lib/offline-books';
 import {
   beginOfflineDownload,
   downloadAndSaveOfflineBook,
@@ -41,6 +41,7 @@ import {
   type BookAnnotation,
 } from '@/lib/annotations';
 import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
+import { openOfflineBook } from '@/lib/open-offline-book';
 
 interface BookDetail {
   id: string;
@@ -72,8 +73,9 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl, capabilities, user } = useServerStore();
+  const { serverUrl, offlineMode, capabilities, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
+  const [offlineRecord, setOfflineRecord] = useState<OfflineBookRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [metaExpanded, setMetaExpanded] = useState(false);
@@ -97,7 +99,8 @@ function DetailContent() {
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
   const summary = bookSummaryText(book?.comments || book?.description);
-  const downloadKey = serverUrl && id ? makeOfflineBookKey(serverUrl, id, selectedFormat) : '';
+  const activeServerUrl = offlineRecord?.serverUrl || serverUrl;
+  const downloadKey = activeServerUrl && id ? makeOfflineBookKey(activeServerUrl, id, selectedFormat) : '';
   const primaryFile = book?.files?.[0];
   const fileFormats = Array.from(new Set(
     book?.files?.map((file) => file.format.toUpperCase()).filter(Boolean) ?? [],
@@ -116,14 +119,14 @@ function DetailContent() {
       controller.abort();
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
-  }, [id]);
+  }, [id, offlineMode, serverUrl]);
 
   useEffect(() => {
     let cancelled = false;
 
     const checkOffline = async () => {
       try {
-        const record = await getOfflineBook(serverUrl, id!, selectedFormat);
+        const record = await getOfflineBook(activeServerUrl, id!, selectedFormat);
         if (!cancelled) {
           setDownloaded(Boolean(record));
         }
@@ -134,14 +137,14 @@ function DetailContent() {
       }
     };
 
-    if (serverUrl && id) {
+    if (activeServerUrl && id) {
       checkOffline();
     }
 
     return () => {
       cancelled = true;
     };
-  }, [id, selectedFormat, serverUrl]);
+  }, [activeServerUrl, id, selectedFormat]);
 
   useEffect(() => {
     if (!downloadKey) return;
@@ -159,6 +162,24 @@ function DetailContent() {
     const seq = ++loadBookSeqRef.current;
     setLoading(true);
     try {
+      if (offlineMode) {
+        const localRecords = (await listOfflineBooks(serverUrl || undefined)).filter((item) => item.bookId === id);
+        const record = localRecords[0];
+        if (!record) throw new Error('book.offline.missing');
+        if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
+        setOfflineRecord(record);
+        setBook({
+          id: record.bookId,
+          title: record.title,
+          author: record.author,
+          files: localRecords.map((item) => ({ format: item.format, size: item.size })),
+          state: { download: 1 },
+        });
+        setSelectedFormat(record.format);
+        setDownloaded(true);
+        setInShelf(localRecords.some((item) => item.inShelf === true));
+        return;
+      }
       const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include', signal: controller.signal });
       const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。', ['ok', 'user.need_login']);
       if (data.err === 'user.need_login') {
@@ -235,6 +256,17 @@ function DetailContent() {
     setMessage('');
 
     try {
+      if (offlineMode) {
+        await setOfflineBookShelfState(activeServerUrl, String(book.id), nextInShelf);
+        setInShelf(nextInShelf);
+        setOfflineRecord((current) => current ? { ...current, inShelf: nextInShelf } : current);
+        setBook((current) => current ? {
+          ...current,
+          state: { ...current.state, wants: nextInShelf },
+        } : current);
+        setMessage(nextInShelf ? '已加入离线书架。' : '已移出离线书架。');
+        return;
+      }
       const res = await request(`${serverUrl}/api/book/${book.id}/shelf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,6 +286,8 @@ function DetailContent() {
       }
 
       setInShelf(nextInShelf);
+      void setOfflineBookShelfState(serverUrl, String(book.id), nextInShelf)
+        .catch((error) => console.warn('Failed to cache offline shelf state:', error));
       setBook((current) => current ? {
         ...current,
         state: { ...current.state, wants: nextInShelf },
@@ -292,6 +326,8 @@ function DetailContent() {
               serverUrl,
               bookId: String(book.id),
               title: book.title,
+              author: authorNames.join('、'),
+              inShelf,
               format: selectedFormat,
               onProgress,
               onTransfer,
@@ -371,14 +407,20 @@ function DetailContent() {
     };
 
     try {
-      const record = await getOfflineBook(serverUrl, id!, selectedFormat);
+      const record = offlineMode && offlineRecord?.format === selectedFormat
+        ? offlineRecord
+        : await getOfflineBook(activeServerUrl, id!, selectedFormat);
       if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+        if (offlineMode) {
+          await openOfflineBook(record, router.push);
+          return;
+        }
         // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
         // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
         // 只需替换打包资源，无需改动这里的调用方式。
         let restoreProgress = targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : await fetchReadingProgress(book.id);
+          : await fetchReadingProgress(book.id).catch(() => null);
         if (targetAnnotation && restoreProgress) {
           annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
           restoreProgress = {
@@ -455,8 +497,8 @@ function DetailContent() {
     setMessage('');
 
     try {
-      const result = await deleteOfflineBook(serverUrl, String(book.id), selectedFormat);
-      await removeOfflineDownloadSnapshot(makeOfflineBookKey(serverUrl, String(book.id), selectedFormat));
+      const result = await deleteOfflineBook(activeServerUrl, String(book.id), selectedFormat);
+      await removeOfflineDownloadSnapshot(makeOfflineBookKey(activeServerUrl, String(book.id), selectedFormat));
       setDownloaded(false);
       setDownloadProgress(0);
       setShowDeleteConfirm(false);
@@ -689,7 +731,7 @@ function DetailContent() {
           </div>
         </div>
 
-        {shouldRequestBookAnnotations(Boolean(user)) && (
+        {!offlineMode && shouldRequestBookAnnotations(Boolean(user)) && (
           <AnnotationPanel
             key={String(book.id)}
             bookId={String(book.id)}

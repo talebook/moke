@@ -13,7 +13,7 @@ const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { serverUrl, hasHydrated, capabilities, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  const { serverUrl, offlineMode, hasHydrated, capabilities, setServerTitle, setUser, setServerCapabilities } = useServerStore();
   const [discoveryServerUrl, capabilitiesCheckedAt] = getServerDiscoveryInputs(serverUrl, capabilities);
 
   // 拓展管理页面是本地功能，不需要连接服务器
@@ -23,15 +23,16 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!hasHydrated) return;
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
-    if (!serverUrl) {
+    if (!serverUrl && !offlineMode) {
       // Use full-document navigation on single-WebView runtimes (OHOS) to avoid
       // getting stuck on the blank loading screen when RSC navigation fails.
       navigateFullDocument('/welcome', router.replace);
     }
-  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, pathname, serverUrl, router]);
+  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
 
   useEffect(() => {
     if (!hasHydrated) return;
+    if (offlineMode) return;
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!discoveryServerUrl) return;
 
@@ -108,7 +109,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, pathname, router, setServerCapabilities, setServerTitle, setUser]);
+  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
 
   return <>{children}</>;
 }

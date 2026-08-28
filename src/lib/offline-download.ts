@@ -11,6 +11,8 @@ export interface DownloadOfflineBookOptions {
   serverUrl: string;
   bookId: string;
   title: string;
+  author?: string;
+  inShelf?: boolean;
   format: string;
   onProgress?: (progress: number) => void;
   onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;

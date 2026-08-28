@@ -20,9 +20,12 @@ import { Select } from '@/components/ui/Select';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
+import { listOfflineBooks } from '@/lib/offline-books';
+import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { useToast } from '@/lib/toast';
 import { BookOpen, Check, Download, ListChecks, X } from 'lucide-react';
+import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
   id: string | number;
@@ -35,6 +38,7 @@ interface BookItem {
   pubdate?: string;
   files?: Array<{ format: string; size?: number }>;
   timestamp?: number;
+  state?: { wants?: boolean | number };
 }
 
 interface NavTag {
@@ -72,24 +76,11 @@ interface NetworkBook {
   source_name?: string;
 }
 
-const colors = [
-  'bg-gradient-to-br from-slate-200 to-slate-300',
-  'bg-gradient-to-br from-stone-200 to-stone-300',
-  'bg-gradient-to-br from-zinc-200 to-zinc-300',
-  'bg-gradient-to-br from-gray-200 to-gray-300',
-  'bg-gradient-to-br from-neutral-200 to-neutral-300',
-];
-
 const TAG_DROPDOWN_LIMIT = 12;
 const MORE_TAGS_VALUE = '__moke_more_tags__';
 
-function getColorIndex(str: unknown) {
-  const s = String(str ?? '');
-  return Math.abs(s.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % colors.length;
-}
-
 export default function LibraryPage() {
-  const { serverUrl } = useServerStore();
+  const { serverUrl, offlineMode } = useServerStore();
   const router = useRouter();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
@@ -171,17 +162,28 @@ export default function LibraryPage() {
   // ── Local tab effects ────────────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab === 'local') loadBooks(currentPage);
-  }, [serverUrl, activeTab, currentPage, selectedFormat, selectedTag]);
+  }, [serverUrl, offlineMode, activeTab, currentPage, selectedFormat, selectedTag]);
 
   useEffect(() => {
     if (!serverUrl) return;
     loadTags();
-  }, [serverUrl]);
+  }, [serverUrl, offlineMode]);
 
   const loadBooks = async (page: number) => {
     const seq = ++booksSeqRef.current;
     setLocalLoading(true);
     try {
+      if (offlineMode) {
+        const records = await listOfflineBooks(serverUrl || undefined);
+        const localBooks: BookItem[] = buildOfflineLibrary(records);
+        const filtered = selectedFormat === '全部'
+          ? localBooks
+          : localBooks.filter((book) => book.files?.[0]?.format.toLowerCase() === selectedFormat.toLowerCase());
+        if (seq !== booksSeqRef.current) return;
+        setBooks(filtered.slice((page - 1) * pageSize, page * pageSize));
+        setTotal(filtered.length);
+        return;
+      }
       const params = new URLSearchParams({
         start: String((page - 1) * pageSize),
         size: String(pageSize),
@@ -203,6 +205,10 @@ export default function LibraryPage() {
   };
 
   const loadTags = async () => {
+    if (offlineMode) {
+      setTagOptions(['全部']);
+      return;
+    }
     try {
       const res = await request(`${serverUrl}/api/book/nav`, { credentials: 'include' });
       const data = await res.json();
@@ -217,8 +223,12 @@ export default function LibraryPage() {
 
   // ── Online tab effects ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (activeTab === 'online' && networkSources.length === 0) loadNetworkSources();
-  }, [activeTab, serverUrl]);
+    if (!offlineMode && activeTab === 'online' && networkSources.length === 0) loadNetworkSources();
+  }, [activeTab, offlineMode, serverUrl]);
+
+  useEffect(() => {
+    if (offlineMode && activeTab !== 'local') setActiveTab('local');
+  }, [activeTab, offlineMode]);
 
   useEffect(() => {
     if (selectedSourceId !== null) {
@@ -451,6 +461,8 @@ export default function LibraryPage() {
         serverUrl,
         bookId: id,
         title: book.title,
+        author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+        inShelf: Boolean(book.state?.wants),
         format,
       });
       toast(`《${book.title}》已下载`);
@@ -622,6 +634,8 @@ export default function LibraryPage() {
             serverUrl,
             bookId: id,
             title: book.title,
+            author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+            inShelf: Boolean(book.state?.wants),
             format,
           });
           ok++;
@@ -720,10 +734,10 @@ export default function LibraryPage() {
             onClick={() => setActiveTab('local')}
             className={cn('py-3 text-sm transition-colors duration-200', activeTab === 'local' ? 'text-foreground font-medium' : 'text-muted-foreground')}
           >本地</button>
-          <button
+          {!offlineMode && <button
             onClick={() => setActiveTab('online')}
             className={cn('py-3 text-sm transition-colors duration-200', activeTab === 'online' ? 'text-foreground font-medium' : 'text-muted-foreground')}
-          >在线</button>
+          >在线</button>}
           <div
             className="absolute bottom-0 h-[2px] rounded-full bg-foreground transition-all duration-300 ease-out"
             style={{ left: activeTab === 'local' ? '0' : '52px', width: '28px' }}
@@ -769,7 +783,6 @@ export default function LibraryPage() {
                   const authorName = book.author || book.authors?.[0]?.name || '';
                   const bookId = String(book.id);
                   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
-                  const ci = getColorIndex(bookId);
                   const selected = selectedIds.has(bookId);
                   // Build interaction handlers: batch mode toggles selection; otherwise
                   // right-click / long-press opens the context menu.
@@ -797,15 +810,11 @@ export default function LibraryPage() {
                             loading={index === 0 ? 'eager' : 'lazy'}
                             fetchPriority={index === 0 ? 'high' : 'auto'}
                             fallback={
-                              <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
-                                <span className="text-foreground/20 text-2xl font-bold font-serif">{book.title[0]}</span>
-                              </div>
+                              <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media" textClassName="text-2xl" />
                             }
                           />
                         ) : (
-                          <div className={cn('book-cover-media w-full h-full flex items-center justify-center', colors[ci])}>
-                            <span className="text-foreground/20 text-2xl font-bold font-serif">{book.title[0]}</span>
-                          </div>
+                          <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media" textClassName="text-2xl" />
                         )}
                         <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
                         <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
@@ -836,15 +845,11 @@ export default function LibraryPage() {
                             loading={index === 0 ? 'eager' : 'lazy'}
                             fetchPriority={index === 0 ? 'high' : 'auto'}
                             fallback={
-                              <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
-                                <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
-                              </div>
+                              <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
                             }
                           />
                         ) : (
-                          <div className={cn('w-full h-full flex items-center justify-center', colors[ci])}>
-                            <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
-                          </div>
+                          <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0">

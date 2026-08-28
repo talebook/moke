@@ -10,6 +10,8 @@ export async function startManagedOfflineBookDownload(input: {
   serverUrl: string;
   bookId: string;
   title: string;
+  author?: string;
+  inShelf?: boolean;
   format: string;
 }): Promise<void> {
   const format = input.format.toLowerCase();

@@ -16,9 +16,12 @@ import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookCon
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
+import { listOfflineBooks } from '@/lib/offline-books';
+import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
+import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
   id: string | number;
@@ -60,14 +63,6 @@ function BookCard({
   const bookId = String(book.id);
   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
   const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
-  const colors = [
-    'from-emerald-800/20 via-teal-700/15 to-cyan-700/20',
-    'from-amber-700/20 via-yellow-600/15 to-orange-700/20',
-    'from-slate-700/20 via-gray-600/15 to-zinc-700/20',
-    'from-rose-700/20 via-red-600/15 to-pink-700/20',
-    'from-indigo-700/20 via-blue-600/15 to-purple-700/20',
-  ];
-  const ci = Math.abs(bookId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)) % colors.length;
 
   // Build the interaction props based on mode.
   // - batchMode=true: any click (incl. right-click / long-press) toggles selection.
@@ -112,19 +107,11 @@ function BookCard({
               loading={priority ? 'eager' : 'lazy'}
               fetchPriority={priority ? 'high' : 'auto'}
               fallback={
-                <div className={cn('book-cover-media w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
-                  <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
-                    {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
-                  </span>
-                </div>
+                <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media transition-transform duration-500 ease-out group-hover:scale-105" textClassName="text-2xl" />
               }
             />
           ) : (
-            <div className={cn('book-cover-media w-full h-full flex items-center justify-center bg-gradient-to-br transition-transform duration-500 ease-out group-hover:scale-105', colors[ci])}>
-              <span className="text-white/75 text-lg font-bold font-serif px-3 text-center leading-tight drop-shadow-sm">
-                {book.title.length > 4 ? book.title.slice(0, 4) : book.title}
-              </span>
-            </div>
+            <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media transition-transform duration-500 ease-out group-hover:scale-105" textClassName="text-2xl" />
           )}
           <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
           <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
@@ -166,19 +153,11 @@ function BookCard({
             loading={priority ? 'eager' : 'lazy'}
             fetchPriority={priority ? 'high' : 'auto'}
             fallback={
-              <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
-                <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
-                  {book.title.length > 2 ? book.title.slice(0, 2) : book.title}
-                </span>
-              </div>
+              <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
             }
           />
         ) : (
-          <div className={cn('w-full h-full flex items-center justify-center bg-gradient-to-br', colors[ci])}>
-            <span className="text-white/70 text-xs font-bold font-serif px-1 text-center leading-tight">
-              {book.title.length > 2 ? book.title.slice(0, 2) : book.title}
-            </span>
-          </div>
+          <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
         )}
       </div>
       <div className="flex-1 min-w-0">
@@ -193,7 +172,7 @@ function BookCard({
 }
 
 export default function ShelfPage() {
-  const { serverUrl } = useServerStore();
+  const { serverUrl, offlineMode } = useServerStore();
   const router = useRouter();
   const toast = useToast((s) => s.show);
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -216,12 +195,20 @@ export default function ShelfPage() {
 
   useEffect(() => {
     loadBooks();
-  }, [serverUrl]);
+  }, [offlineMode, serverUrl]);
 
   const loadBooks = async () => {
     setLoading(true);
     setRequiresLogin(false);
     try {
+      if (offlineMode) {
+        const records = await listOfflineBooks(serverUrl || undefined);
+        setBooks(buildOfflineLibrary(records.filter((record) => record.inShelf === true)).map((record) => ({
+          ...record,
+          state: { download: 1 },
+        })));
+        return;
+      }
       const res = await request(`${serverUrl}/api/shelf`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[] }>(res, '书架列表解析失败。', ['ok', 'user.need_login']);
 
@@ -328,6 +315,8 @@ export default function ShelfPage() {
         serverUrl,
         bookId: id,
         title: book.title,
+        author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+        inShelf: true,
         format,
       });
       toast(`《${book.title}》已下载`);
@@ -404,6 +393,8 @@ export default function ShelfPage() {
             serverUrl,
             bookId: id,
             title: book.title,
+            author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+            inShelf: true,
             format,
           });
           ok++;
@@ -459,14 +450,14 @@ export default function ShelfPage() {
                 </button>
               </div>
               <div className="flex items-center justify-end gap-2">
-                <Link
+                {!offlineMode && <Link
                   href="/user/history"
                   aria-label="查看历史记录"
                   title="查看历史记录"
                   className="shrink-0 flex items-center justify-center w-10 h-10 rounded-2xl border border-amber-950/10 bg-white/70 eink-bordered text-muted-foreground eink:text-black shadow-sm transition hover:text-foreground hover:bg-white hover:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
                 >
                   <History className="w-4 h-4" />
-                </Link>
+                </Link>}
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
@@ -548,4 +539,3 @@ export default function ShelfPage() {
     </DesktopLayout>
   );
 }
-

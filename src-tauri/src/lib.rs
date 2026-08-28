@@ -39,6 +39,10 @@ struct MokeDownloadedBook {
     server_url: String,
     book_id: String,
     title: String,
+    #[serde(default)]
+    author: Option<String>,
+    #[serde(default)]
+    in_shelf: Option<bool>,
     file_name: String,
     #[serde(default)]
     relative_path: Option<String>,
@@ -54,6 +58,7 @@ struct MokeDownloadedBookResponse {
     #[serde(flatten)]
     book: MokeDownloadedBook,
     file_path: String,
+    file_size: u64,
 }
 
 /// `tauri-plugin-os` reports OpenHarmony as Linux because the Rust target uses
@@ -462,6 +467,7 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
             Ok(path) if path.is_file() => {
                 result.push(MokeDownloadedBookResponse {
                     file_path: path.to_string_lossy().into_owned(),
+                    file_size: path.metadata().map(|metadata| metadata.len()).unwrap_or_default(),
                     book: book.clone(),
                 });
                 retained.push(book);
@@ -505,6 +511,8 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
                     server_url: String::new(),
                     book_id: String::new(),
                     title,
+                    author: None,
+                    in_shelf: None,
                     file_name,
                     relative_path: None,
                     storage_root: None,
@@ -512,6 +520,7 @@ fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookRe
                     updated_at,
                 },
                 file_path: path.to_string_lossy().into_owned(),
+                file_size: entry.metadata().map(|metadata| metadata.len()).unwrap_or_default(),
             });
         }
     }
@@ -735,6 +744,8 @@ mod download_storage_tests {
             server_url: "https://books.test".into(),
             book_id: "1".into(),
             title: "Book".into(),
+            author: None,
+            in_shelf: None,
             file_name: "book.epub".into(),
             relative_path: Some("books/server/1/epub/book.epub".into()),
             storage_root: Some(r"D:\Books".into()),

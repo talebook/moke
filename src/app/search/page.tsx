@@ -16,9 +16,12 @@ import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookCon
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
+import { listOfflineBooks } from '@/lib/offline-books';
+import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
+import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
   id: string | number;
@@ -31,6 +34,7 @@ interface BookItem {
   pubdate?: string;
   files?: Array<{ format: string; size?: number }>;
   timestamp?: number;
+  state?: { wants?: boolean | number };
 }
 
 const FORMAT_FILTERS = ['全部', 'EPUB', 'PDF', 'MOBI', 'TXT'] as const;
@@ -43,7 +47,7 @@ function hasFormat(book: BookItem, filter: string) {
 function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { serverUrl } = useServerStore();
+  const { serverUrl, offlineMode } = useServerStore();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
   const [query, setQuery] = useState(searchParams.get('q') || '');
   const [results, setResults] = useState<BookItem[]>([]);
@@ -88,6 +92,14 @@ function SearchContent() {
     setLoading(true);
     setSearched(true);
     try {
+      if (offlineMode) {
+        const normalized = term.toLocaleLowerCase('zh-CN');
+        const records = await listOfflineBooks(serverUrl || undefined);
+        if (seq !== searchSeqRef.current) return;
+        setResults(buildOfflineLibrary(records)
+          .filter((record) => `${record.title} ${record.author || ''}`.toLocaleLowerCase('zh-CN').includes(normalized)));
+        return;
+      }
       const res = await request(`${serverUrl}/api/search?name=${encodeURIComponent(term)}`, { credentials: 'include' });
       const data = await readApiJson<{ err?: string; msg?: string; books?: BookItem[]; items?: BookItem[] }>(res, '搜索结果解析失败。', ['ok', 'user.need_login']);
       if (data.err === 'user.need_login') {
@@ -197,6 +209,8 @@ function SearchContent() {
         serverUrl,
         bookId: id,
         title: book.title,
+        author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+        inShelf: Boolean(book.state?.wants),
         format,
       });
       toast(`《${book.title}》已下载`);
@@ -300,6 +314,8 @@ function SearchContent() {
             serverUrl,
             bookId: id,
             title: book.title,
+            author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
+            inShelf: Boolean(book.state?.wants),
             format,
           });
           ok++;
@@ -422,15 +438,11 @@ function SearchContent() {
                             className="book-cover-media w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             loading="lazy"
                             fallback={
-                              <div className="book-cover-media w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                                <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
-                              </div>
+                              <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media" textClassName="text-xl" />
                             }
                           />
                         ) : (
-                          <div className="book-cover-media w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                            <span className="text-foreground/25 text-xl font-bold font-serif">{book.title[0]}</span>
-                          </div>
+                          <BookCoverFallback title={book.title} seed={bookId} className="book-cover-media" textClassName="text-xl" />
                         )}
                         <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/18 to-transparent opacity-80" />
                         <div className="absolute inset-y-0 left-0 w-[10%] bg-gradient-to-r from-black/18 via-black/4 to-transparent mix-blend-multiply" />
@@ -464,15 +476,11 @@ function SearchContent() {
                           className="w-full h-full object-cover"
                           loading="lazy"
                           fallback={
-                            <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                              <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
-                            </div>
+                            <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
                           }
                         />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                          <span className="text-foreground/30 text-xs font-bold font-serif">{book.title[0]}</span>
-                        </div>
+                        <BookCoverFallback title={book.title} seed={bookId} textClassName="text-xs" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
