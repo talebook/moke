@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
@@ -48,28 +49,45 @@ const reader = spawn(process.execPath, [readerNext, 'dev', '--turbo', '--port', 
   }),
 });
 
-const moke = spawn(process.execPath, [mokeNext, 'dev', '--turbo'], {
-  cwd: root,
-  stdio: 'inherit',
-  env: devEnv(root),
-});
-
 let shuttingDown = false;
+let moke;
 
 function cleanup(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   if (reader.exitCode === null) reader.kill();
-  if (moke.exitCode === null) moke.kill();
+  if (moke?.exitCode === null) moke.kill();
   process.exitCode = exitCode;
 }
 
 reader.on('exit', (code, signal) => {
   if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));
 });
-moke.on('exit', (code, signal) => {
-  if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));
-});
 
 process.on('SIGINT', () => cleanup(0));
 process.on('SIGTERM', () => cleanup(0));
+
+async function waitForReader(url) {
+  console.log('正在等待 Readest 首次编译完成…');
+  while (!shuttingDown) {
+    try {
+      const response = await fetch(url);
+      await response.arrayBuffer();
+      return true;
+    } catch {
+      await delay(250);
+    }
+  }
+  return false;
+}
+
+if (await waitForReader('http://localhost:3001/readest/reader')) {
+  moke = spawn(process.execPath, [mokeNext, 'dev', '--turbo'], {
+    cwd: root,
+    stdio: 'inherit',
+    env: devEnv(root),
+  });
+  moke.on('exit', (code, signal) => {
+    if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));
+  });
+}

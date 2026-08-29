@@ -10,6 +10,12 @@ test('开发编排直接启动 Next，正常关闭不经过 pnpm 失败包装', 
   assert.match(source, /readEnvFile\(path\.join\(directory, '\.env\.tauri'\)\)/);
   assert.match(source, /env: devEnv\(readerRoot/);
   assert.match(source, /env: devEnv\(root\)/);
+  assert.match(source, /await waitForReader\('http:\/\/localhost:3001\/readest\/reader'\)/);
+  assert.ok(
+    source.indexOf("await waitForReader('http://localhost:3001/readest/reader')") <
+      source.indexOf('moke = spawn(process.execPath'),
+    '应先完成 Reader 首次编译，再启动 Moke 开发服务',
+  );
   assert.doesNotMatch(source, /spawn\('pnpm'/);
   assert.match(source, /process\.on\('SIGTERM', \(\) => cleanup\(0\)\)/);
 });
