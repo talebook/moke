@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard } from '../clipboard.ts';
 
 // ponytail: state machine mirrors cc-haha but without DesktopHost abstraction
 // (Moke is Tauri-only). Proxy settings skipped — add when LAN users need them.
@@ -69,18 +69,16 @@ interface UpdateStore {
   simulateUpdate: () => Promise<void>;
 }
 
-// ponytail: flag to skip real Tauri APIs when simulating
-let fake = false;
-
 type UpdaterMod = typeof import('@tauri-apps/plugin-updater');
 type ProcessMod = typeof import('@tauri-apps/plugin-process');
 type UpdateObj = NonNullable<Awaited<ReturnType<UpdaterMod['check']>>>;
 
-let pending: UpdateObj | null = null;
-let downloading = false;
-let downloaded = false;
-let watchdog: ReturnType<typeof setTimeout> | null = null;
-let startupDone = false;
+export interface UpdateStoreDependencies {
+  importUpdater: () => Promise<UpdaterMod | null>;
+  importProcess: () => Promise<ProcessMod | null>;
+  resolvePlatform: () => Promise<'desktop' | 'mobile'>;
+  sleep: (delayMs: number) => Promise<void>;
+}
 
 async function importUpdater(): Promise<UpdaterMod | null> {
   try { return await import('@tauri-apps/plugin-updater'); } catch { return null; }
@@ -102,7 +100,25 @@ async function resolvePlatform(): Promise<'desktop' | 'mobile'> {
   }
 }
 
-export const useUpdateStore = create<UpdateStore>((set, get) => ({
+const defaultDependencies: UpdateStoreDependencies = {
+  importUpdater,
+  importProcess,
+  resolvePlatform,
+  sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+};
+
+export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = {}) {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  // ponytail: flag to skip real Tauri APIs when simulating
+  let fake = false;
+  let pending: UpdateObj | null = null;
+  let downloading = false;
+  let downloaded = false;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let startupDone = false;
+  let checkInFlight: Promise<void> | null = null;
+
+  return create<UpdateStore>((set, get) => ({
   status: 'idle',
   availableVersion: null,
   releaseNotes: null,
@@ -116,80 +132,99 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
 
   initialize: async () => {
     if (startupDone || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
+    // Claim initialization before platform detection so concurrent mounts cannot
+    // schedule more than one automatic update check.
+    startupDone = true;
+
     // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
     // 官方不支持移动端，需要运行时平台检测区分。
-    const runtimePlatform = await resolvePlatform();
+    const runtimePlatform = await dependencies.resolvePlatform();
     set({ platform: runtimePlatform });
-    startupDone = true;
 
     // 移动端不自动检查（避免启动即弹浏览器），由用户在设置页点击跳转 release。
     if (runtimePlatform === 'mobile') return;
 
-    await new Promise((r) => setTimeout(r, 5000));
+    await dependencies.sleep(5000);
     try { await get().checkForUpdates(); } catch { /* silent */ }
   },
 
-  checkForUpdates: async () => {
-    // 平台未缓存时先检测（initialize 尚未完成时点击也能正确跳转）。
-    let platform = get().platform;
-    if (!platform) {
-      platform = await resolvePlatform();
-      set({ platform });
-    }
-    // 移动端：没有内置 updater，复制下载链接让用户去浏览器手动下载。
-    if (platform === 'mobile') {
-      await get().copyReleaseUrl();
-      return;
-    }
+  checkForUpdates: () => {
+    if (checkInFlight) return checkInFlight;
 
-    const updater = await importUpdater();
-    if (!updater) return;
-    if (downloading) return;
-
-    set({ status: 'checking', error: null });
-
-    try {
-      // Close previous pending update
-      if (pending) {
-        try { await pending.close(); } catch { /* best effort */ }
-        pending = null;
-        downloaded = false;
+    // Defer the implementation to a microtask so checkInFlight is assigned
+    // before platform detection or any other asynchronous work can begin.
+    const flight = Promise.resolve().then(async () => {
+      // 平台未缓存时先检测（initialize 尚未完成时点击也能正确跳转）。
+      let platform = get().platform;
+      if (!platform) {
+        platform = await dependencies.resolvePlatform();
+        set({ platform });
       }
-
-      const update = await updater.check();
-      if (!update) {
-        writeDismissed(null);
-        set({
-          status: 'up-to-date',
-          availableVersion: null,
-          releaseNotes: null,
-          checkedAt: Date.now(),
-          error: null,
-          shouldPrompt: false,
-        });
+      // 移动端：没有内置 updater，复制下载链接让用户去浏览器手动下载。
+      if (platform === 'mobile') {
+        await get().copyReleaseUrl();
         return;
       }
 
-      // Ignore if not newer than current
-      const current = update.currentVersion;
-      if (current && !isNewer(update.version, current)) {
-        try { await update.close(); } catch { /* best effort */ }
-        writeDismissed(null);
-        set({
-          status: 'up-to-date',
-          availableVersion: null,
-          releaseNotes: null,
-          checkedAt: Date.now(),
-          error: null,
-          shouldPrompt: false,
-        });
-        return;
-      }
+      const updater = await dependencies.importUpdater();
+      if (!updater) return;
+      if (downloading) return;
 
-      pending = update;
+      set({ status: 'checking', error: null });
 
-      // Already dismissed this version → don't prompt, don't download
-      if (readDismissed() === update.version) {
+      try {
+        // Close previous pending update
+        if (pending) {
+          try { await pending.close(); } catch { /* best effort */ }
+          pending = null;
+          downloaded = false;
+        }
+
+        const update = await updater.check();
+        if (!update) {
+          writeDismissed(null);
+          set({
+            status: 'up-to-date',
+            availableVersion: null,
+            releaseNotes: null,
+            checkedAt: Date.now(),
+            error: null,
+            shouldPrompt: false,
+          });
+          return;
+        }
+
+        // Ignore if not newer than current
+        const current = update.currentVersion;
+        if (current && !isNewer(update.version, current)) {
+          try { await update.close(); } catch { /* best effort */ }
+          writeDismissed(null);
+          set({
+            status: 'up-to-date',
+            availableVersion: null,
+            releaseNotes: null,
+            checkedAt: Date.now(),
+            error: null,
+            shouldPrompt: false,
+          });
+          return;
+        }
+
+        pending = update;
+
+        // Already dismissed this version → don't prompt, don't download
+        if (readDismissed() === update.version) {
+          set({
+            status: 'available',
+            availableVersion: update.version,
+            releaseNotes: update.body ?? null,
+            checkedAt: Date.now(),
+            error: null,
+            shouldPrompt: false,
+          });
+          return;
+        }
+
         set({
           status: 'available',
           availableVersion: update.version,
@@ -198,77 +233,74 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
           error: null,
           shouldPrompt: false,
         });
-        return;
-      }
 
-      set({
-        status: 'available',
-        availableVersion: update.version,
-        releaseNotes: update.body ?? null,
-        checkedAt: Date.now(),
-        error: null,
-        shouldPrompt: false,
-      });
+        // Auto-download (don't install yet — user decides when to restart)
+        downloading = true;
+        set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: null });
 
-      // Auto-download (don't install yet — user decides when to restart)
-      downloading = true;
-      set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: null });
+        let contentLength: number | null = null;
+        let bytesDownloaded = 0;
 
-      let contentLength: number | null = null;
-      let bytesDownloaded = 0;
-
-      try {
-        await update.download((event) => {
-          switch (event.event) {
-            case 'Started':
-              contentLength = event.data.contentLength ?? null;
-              set({ totalBytes: contentLength });
-              break;
-            case 'Progress':
-              bytesDownloaded += event.data.chunkLength;
-              set({
-                downloadedBytes: bytesDownloaded,
-                progressPercent: contentLength
+        try {
+          await update.download((event) => {
+            switch (event.event) {
+              case 'Started':
+                contentLength = event.data.contentLength ?? null;
+                set({ totalBytes: contentLength });
+                break;
+              case 'Progress': {
+                bytesDownloaded = Math.max(bytesDownloaded + event.data.chunkLength, bytesDownloaded);
+                const progressPercent = contentLength
                   ? Math.min(Math.round((bytesDownloaded / contentLength) * 100), 100)
-                  : 0,
-              });
-              break;
-            case 'Finished':
-              set({ progressPercent: 100 });
-              break;
-          }
-        });
+                  : 0;
+                set({
+                  downloadedBytes: Math.max(get().downloadedBytes, bytesDownloaded),
+                  progressPercent: Math.max(get().progressPercent, progressPercent),
+                });
+                break;
+              }
+              case 'Finished':
+                set({ progressPercent: 100 });
+                break;
+            }
+          });
 
-        downloaded = true;
-        set({
-          status: 'downloaded',
-          progressPercent: 100,
-          shouldPrompt: true,
-          error: null,
-        });
+          downloaded = true;
+          set({
+            status: 'downloaded',
+            progressPercent: 100,
+            shouldPrompt: true,
+            error: null,
+          });
+        } catch (e) {
+          set({
+            status: 'available',
+            error: e instanceof Error ? e.message : String(e),
+            shouldPrompt: true,
+          });
+        } finally {
+          downloading = false;
+        }
       } catch (e) {
         set({
-          status: 'available',
+          status: 'error',
           error: e instanceof Error ? e.message : String(e),
-          shouldPrompt: true,
+          checkedAt: Date.now(),
         });
-      } finally {
-        downloading = false;
       }
-    } catch (e) {
-      set({
-        status: 'error',
-        error: e instanceof Error ? e.message : String(e),
-        checkedAt: Date.now(),
-      });
-    }
+    }).finally(() => {
+      if (checkInFlight === flight) checkInFlight = null;
+    });
+
+    checkInFlight = flight;
+    return flight;
   },
 
   installUpdate: async () => {
     // 平台未缓存时先检测，避免移动端误走内置 updater。
     let platform = get().platform;
     if (!platform) {
-      platform = await resolvePlatform();
+      platform = await dependencies.resolvePlatform();
       set({ platform });
     }
     // 移动端：复制下载链接，由用户去浏览器手动下载安装（没有内置安装流程）。
@@ -298,8 +330,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       return;
     }
 
-    const updater = await importUpdater();
-    const process = await importProcess();
+    const updater = await dependencies.importUpdater();
+    const process = await dependencies.importProcess();
     if (!updater || !process) return;
 
     if (!pending) {
@@ -322,15 +354,17 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
               contentLength = event.data.contentLength ?? null;
               set({ totalBytes: contentLength });
               break;
-            case 'Progress':
-              bytesDownloaded += event.data.chunkLength;
+            case 'Progress': {
+              bytesDownloaded = Math.max(bytesDownloaded + event.data.chunkLength, bytesDownloaded);
+              const progressPercent = contentLength
+                ? Math.min(Math.round((bytesDownloaded / contentLength) * 100), 100)
+                : 0;
               set({
-                downloadedBytes: bytesDownloaded,
-                progressPercent: contentLength
-                  ? Math.min(Math.round((bytesDownloaded / contentLength) * 100), 100)
-                  : 0,
+                downloadedBytes: Math.max(get().downloadedBytes, bytesDownloaded),
+                progressPercent: Math.max(get().progressPercent, progressPercent),
               });
               break;
+            }
             case 'Finished':
               set({ progressPercent: 100 });
               break;
@@ -404,4 +438,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
 
     set({ status: 'downloaded', progressPercent: 100, shouldPrompt: true });
   },
-}));
+  }));
+}
+
+export const useUpdateStore = createUpdateStore();
