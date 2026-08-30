@@ -4,6 +4,7 @@ import type { OfflineBookRecord } from '@/lib/offline-books';
 import { getDebugPanelLaunchState } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
+import { prepareEmbeddedBookOpen } from '@/lib/book-read';
 import {
   buildEmbeddedReaderUrl,
   getMokeRuntimePlatform,
@@ -24,21 +25,27 @@ export async function openOfflineBook(
     return;
   }
 
-  let restoreProgress = null;
-  try {
-    restoreProgress = await fetchReadingProgress(record.bookId);
-  } catch {
-    // Opening a local book must remain available while the server is offline.
-  }
-
-  const platform = await getMokeRuntimePlatform();
+  const prepared = await prepareEmbeddedBookOpen({
+    loadRecord: async () => record,
+    loadProgress: async () => {
+      try {
+        return await fetchReadingProgress(record.bookId);
+      } catch {
+        // Opening a local book must remain available while the server is offline.
+        return null;
+      }
+    },
+    loadPlatform: getMokeRuntimePlatform,
+  });
   const common = {
     filePath: record.filePath,
     eink: useSettingsStore.getState().eink,
     debugPanel: getDebugPanelLaunchState(),
-    mokeBookId: record.bookId,
-    restoreProgress,
+    mokeBookId: prepared.record.bookId,
+    restoreProgress: prepared.restoreProgress,
   };
+
+  const platform = prepared.platform;
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(

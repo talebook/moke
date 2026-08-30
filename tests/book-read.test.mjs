@@ -3,9 +3,17 @@ import assert from 'node:assert/strict';
 
 import {
   openAndRecordBookRead,
-  recordAndOpenBookRead,
+  prepareEmbeddedBookOpen,
   recordBookRead,
 } from '../src/lib/book-read.ts';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function fakeResponse({
   body = '',
@@ -22,6 +30,76 @@ function fakeResponse({
     arrayBuffer: async () => encoded.buffer,
   };
 }
+
+test('内嵌阅读器并行准备本地记录、进度与平台，移动端记录不等待进度', async () => {
+  const events = [];
+  const record = deferred();
+  const progress = deferred();
+  const platform = deferred();
+  const beforeOpen = deferred();
+
+  const pending = prepareEmbeddedBookOpen({
+    loadRecord: async () => {
+      events.push('record:start');
+      return record.promise;
+    },
+    loadProgress: async () => {
+      events.push('progress:start');
+      return progress.promise;
+    },
+    loadPlatform: async () => {
+      events.push('platform:start');
+      return platform.promise;
+    },
+    beforeSingleWebviewOpen: async (loadedRecord, loadedPlatform) => {
+      events.push(`before:${loadedRecord.id}:${loadedPlatform}`);
+      await beforeOpen.promise;
+    },
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['record:start', 'progress:start', 'platform:start']);
+
+  record.resolve({ id: 'book-1' });
+  platform.resolve('android');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, [
+    'record:start',
+    'progress:start',
+    'platform:start',
+    'before:book-1:android',
+  ]);
+
+  progress.resolve({ location: 'chapter-2' });
+  let settled = false;
+  void pending.then(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, '全文档导航前仍需等待已开始的阅读记录请求');
+
+  beforeOpen.resolve();
+  assert.deepEqual(await pending, {
+    record: { id: 'book-1' },
+    restoreProgress: { location: 'chapter-2' },
+    platform: 'android',
+  });
+});
+
+test('桌面内嵌阅读器跳过导航前记录，但仍并行收集启动上下文', async () => {
+  let beforeOpenCalls = 0;
+  const result = await prepareEmbeddedBookOpen({
+    loadRecord: async () => ({ id: 'book-2' }),
+    loadProgress: async () => null,
+    loadPlatform: async () => 'windows',
+    beforeSingleWebviewOpen: async () => { beforeOpenCalls += 1; },
+  });
+
+  assert.equal(beforeOpenCalls, 0);
+  assert.deepEqual(result, {
+    record: { id: 'book-2' },
+    restoreProgress: null,
+    platform: 'windows',
+  });
+});
 
 test('阅读器成功打开后通过 Talebook 阅读路由持久化一次记录', async () => {
   const events = [];
@@ -79,24 +157,6 @@ test('桌面阅读器打开后立即释放 UI 状态再同步记录', async () =
   });
 
   assert.deepEqual(events, ['opened', 'unlocked', 'recorded']);
-});
-
-test('单 WebView 在导航前记录，记录失败仍继续打开阅读器', async () => {
-  const events = [];
-  const errors = [];
-
-  await recordAndOpenBookRead({
-    record: async () => {
-      events.push('recorded');
-      throw new Error('network failed');
-    },
-    open: async () => events.push('opened'),
-    onRecordError: (error) => errors.push(error),
-  });
-
-  assert.deepEqual(events, ['recorded', 'opened']);
-  assert.equal(errors.length, 1);
-  assert.match(errors[0].message, /network failed/);
 });
 
 test('会话失效被重定向到登录页时不误报记录成功', async () => {

@@ -1,3 +1,5 @@
+import { isSingleWebviewRuntime } from './moke-reader.ts';
+
 type RequestLike = (url: string, init?: RequestInit) => Promise<Response>;
 const READ_RECORD_TIMEOUT_MS = 10_000;
 /**
@@ -162,6 +164,43 @@ export async function recordBookRead(
   }
 }
 
+/**
+ * Start the independent reader-launch prerequisites together. On mobile the
+ * read-history request starts as soon as the local record and runtime are
+ * known, instead of waiting for the unrelated progress fetch. The returned
+ * preparation still waits for that best-effort write before a full-document
+ * navigation destroys the Moke WebView.
+ */
+export async function prepareEmbeddedBookOpen<TRecord, TProgress>({
+  loadRecord,
+  loadProgress,
+  loadPlatform,
+  beforeSingleWebviewOpen,
+}: {
+  loadRecord: () => Promise<TRecord>;
+  loadProgress: () => Promise<TProgress>;
+  loadPlatform: () => Promise<string>;
+  beforeSingleWebviewOpen?: (record: TRecord, platform: string) => Promise<void>;
+}): Promise<{ record: TRecord; restoreProgress: TProgress; platform: string }> {
+  const recordPromise = Promise.resolve().then(loadRecord);
+  const progressPromise = Promise.resolve().then(loadProgress);
+  const platformPromise = Promise.resolve().then(loadPlatform);
+  const beforeOpenPromise = beforeSingleWebviewOpen
+    ? Promise.all([recordPromise, platformPromise]).then(([record, platform]) => {
+        if (!isSingleWebviewRuntime(platform)) return undefined;
+        return beforeSingleWebviewOpen(record, platform);
+      })
+    : Promise.resolve();
+
+  const [record, restoreProgress, platform] = await Promise.all([
+    recordPromise,
+    progressPromise,
+    platformPromise,
+    beforeOpenPromise,
+  ]);
+  return { record, restoreProgress, platform };
+}
+
 export async function openAndRecordBookRead({
   open,
   record,
@@ -180,22 +219,4 @@ export async function openAndRecordBookRead({
   } catch (error) {
     onRecordError?.(error);
   }
-}
-
-/** Record first when opening replaces the current WebView and destroys this page. */
-export async function recordAndOpenBookRead({
-  record,
-  open,
-  onRecordError,
-}: {
-  record: () => Promise<void>;
-  open: () => Promise<void>;
-  onRecordError?: (error: unknown) => void;
-}): Promise<void> {
-  try {
-    await record();
-  } catch (error) {
-    onRecordError?.(error);
-  }
-  await open();
 }
