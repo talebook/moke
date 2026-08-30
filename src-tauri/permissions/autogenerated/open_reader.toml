@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-reader"
+description = "Enables the open_reader command without any pre-configured scope."
+commands.allow = ["open_reader"]
+
+[[permission]]
+identifier = "deny-open-reader"
+description = "Denies the open_reader command without any pre-configured scope."
+commands.deny = ["open_reader"]

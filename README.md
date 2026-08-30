@@ -34,10 +34,25 @@
 
 下载的书籍存储在本地，在书架页面可以离线打开阅读。
 
+## Reader 开发与构建
+
+Reader 是独立递归子模块。全新检出后执行：
+
+```bash
+git submodule update --init --recursive
+pnpm install --frozen-lockfile
+cd readest && pnpm install --frozen-lockfile && cd ..
+pnpm build:reader
+```
+
+产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
+
+真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅限 localhost 的可选 WebDriver 插件；该 feature 不得用于发布构建。经过脱敏的环境、命令轮廓与实测结果见子模块的 `docs/E2E_EVIDENCE.md`。
+
 ## 相关链接
 
 - [Talebook 服务器](https://github.com/talebook/talebook) — 自托管电子书服务端，Moke 的数据来源
-- [readest](https://github.com/readest/readest) — 内嵌的专业电子书阅读器
+- [readest-reader](https://github.com/hehetoshang/readest-reader) — 从 Readest 抽离、按 `moke.readest.embed.v1` 契约集成的专业阅读器
 - [报告 Bug](../../issues) — 发现 Bug？请告诉我们
 - [参与贡献](CONTRIBUTING.md) — 开发者贡献指南
 

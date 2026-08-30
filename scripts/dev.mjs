@@ -30,10 +30,10 @@ function readEnvFile(filePath) {
   return env;
 }
 
-function devEnv(directory, overrides = {}) {
+function devEnv(directory, envFile = '.env.tauri', overrides = {}) {
   return {
     ...process.env,
-    ...readEnvFile(path.join(directory, '.env.tauri')),
+    ...readEnvFile(path.join(directory, envFile)),
     ...overrides,
   };
 }
@@ -44,7 +44,7 @@ function devEnv(directory, overrides = {}) {
 const reader = spawn(process.execPath, [readerNext, 'dev', '--turbo', '--port', '3001'], {
   cwd: readerRoot,
   stdio: 'inherit',
-  env: devEnv(readerRoot, {
+  env: devEnv(readerRoot, '.env.moke-reader', {
     NEXT_PUBLIC_EMBEDDED_BASE_PATH: '/readest',
   }),
 });
@@ -85,7 +85,7 @@ if (await waitForReader('http://localhost:3001/readest/reader')) {
   moke = spawn(process.execPath, [mokeNext, 'dev', '--turbo'], {
     cwd: root,
     stdio: 'inherit',
-    env: devEnv(root),
+    env: devEnv(root, '.env.tauri'),
   });
   moke.on('exit', (code, signal) => {
     if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));

@@ -11,20 +11,28 @@
     {
       "identifier": "fs:allow-exists",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
-        { "path": "$APPDATA/books" },
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books"
+        },
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-open",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     "fs:allow-read",
@@ -32,38 +40,51 @@
     {
       "identifier": "fs:allow-stat",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-write",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     "fs:allow-ftruncate",
     {
       "identifier": "fs:allow-remove",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-rename",
       "allow": [
-        { "path": "$APPDATA/books/**" }
+        {
+          "path": "$APPDATA/books/**"
+        }
       ]
     },
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "http://**:**" },
-        { "url": "https://**:**" }
+        {
+          "url": "http://**:**"
+        },
+        {
+          "url": "https://**:**"
+        }
       ]
     },
     "os:default",
     "process:allow-exit",
     "process:allow-restart",
-    "updater:default"
+    "updater:default",
+    "allow-open-reader"
   ]
 }

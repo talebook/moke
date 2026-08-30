@@ -2517,6 +2517,306 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the allow_paths_in_scopes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-allow-paths-in-scopes",
+          "markdownDescription": "Enables the allow_paths_in_scopes command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-book-presence",
+          "markdownDescription": "Enables the clear_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clip_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clip-url",
+          "markdownDescription": "Enables the clip_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-file",
+          "markdownDescription": "Enables the download_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_reader_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-reader-event",
+          "markdownDescription": "Enables the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the extract_epub_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-extract-epub-cover-full",
+          "markdownDescription": "Enables the extract_epub_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the extract_mobi_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-extract-mobi-cover-full",
+          "markdownDescription": "Enables the extract_mobi_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_executable_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-executable-dir",
+          "markdownDescription": "Enables the get_executable_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_announce command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-announce",
+          "markdownDescription": "Enables the localsend_announce command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_cancel_receive command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-cancel-receive",
+          "markdownDescription": "Enables the localsend_cancel_receive command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_cancel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-cancel-send",
+          "markdownDescription": "Enables the localsend_cancel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_get_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-get-status",
+          "markdownDescription": "Enables the localsend_get_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_list_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-list-devices",
+          "markdownDescription": "Enables the localsend_list_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-respond",
+          "markdownDescription": "Enables the localsend_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_send_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-send-files",
+          "markdownDescription": "Enables the localsend_send_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-start",
+          "markdownDescription": "Enables the localsend_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-stop",
+          "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-reader",
+          "markdownDescription": "Enables the open_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_epub_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-epub-full",
+          "markdownDescription": "Enables the parse_epub_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_epub_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-epub-metadata",
+          "markdownDescription": "Enables the parse_epub_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_mobi_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-mobi-metadata",
+          "markdownDescription": "Enables the parse_mobi_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-dir",
+          "markdownDescription": "Enables the read_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_server command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-server",
+          "markdownDescription": "Enables the start_server command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-book-presence",
+          "markdownDescription": "Enables the update_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upload_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upload-file",
+          "markdownDescription": "Enables the upload_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the allow_paths_in_scopes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-allow-paths-in-scopes",
+          "markdownDescription": "Denies the allow_paths_in_scopes command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-book-presence",
+          "markdownDescription": "Denies the clear_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clip_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clip-url",
+          "markdownDescription": "Denies the clip_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-file",
+          "markdownDescription": "Denies the download_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_reader_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-reader-event",
+          "markdownDescription": "Denies the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the extract_epub_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-extract-epub-cover-full",
+          "markdownDescription": "Denies the extract_epub_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the extract_mobi_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-extract-mobi-cover-full",
+          "markdownDescription": "Denies the extract_mobi_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_executable_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-executable-dir",
+          "markdownDescription": "Denies the get_executable_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_announce command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-announce",
+          "markdownDescription": "Denies the localsend_announce command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_cancel_receive command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-cancel-receive",
+          "markdownDescription": "Denies the localsend_cancel_receive command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_cancel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-cancel-send",
+          "markdownDescription": "Denies the localsend_cancel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_get_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-get-status",
+          "markdownDescription": "Denies the localsend_get_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_list_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-list-devices",
+          "markdownDescription": "Denies the localsend_list_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-respond",
+          "markdownDescription": "Denies the localsend_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_send_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-send-files",
+          "markdownDescription": "Denies the localsend_send_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-start",
+          "markdownDescription": "Denies the localsend_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-stop",
+          "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-reader",
+          "markdownDescription": "Denies the open_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_epub_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-epub-full",
+          "markdownDescription": "Denies the parse_epub_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_epub_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-epub-metadata",
+          "markdownDescription": "Denies the parse_epub_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_mobi_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-mobi-metadata",
+          "markdownDescription": "Denies the parse_mobi_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-dir",
+          "markdownDescription": "Denies the read_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_server command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-server",
+          "markdownDescription": "Denies the start_server command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-book-presence",
+          "markdownDescription": "Denies the update_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upload_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upload-file",
+          "markdownDescription": "Denies the upload_file command without any pre-configured scope."
+        },
+        {
           "description": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n",
           "type": "string",
           "const": "clipboard-manager:default",
@@ -7981,6 +8281,12 @@
           "type": "string",
           "const": "updater:deny-install",
           "markdownDescription": "Denies the install command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin",
+          "type": "string",
+          "const": "webdriver:default",
+          "markdownDescription": "Default permissions for the plugin"
         },
         {
           "description": "Allows connecting and sending data to a WebSocket server\n#### This default permission set includes:\n\n- `allow-connect`\n- `allow-send`",

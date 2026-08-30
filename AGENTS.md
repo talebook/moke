@@ -159,21 +159,18 @@ Tauri APIs.
 
 ### The `readest/` reader (`readest/apps/readest-app`)
 
-A near-complete copy of the [readest](https://github.com/readest/readest) reader, integrated as a
-**separate Next.js frontend**: it builds with `basePath:/readest` and `distDir:../../out/readest` into
-the *same* `out/` directory, so Tauri's `frontendDist: "../out"` ships both apps. In dev the reader
-runs on port 3001 (`localhost:3001/reader`); in a build it's served at `/readest/reader`. Moke builds
-**only readest's frontend, never its `src-tauri` `run()`** (that's why `default-features=false`).
+The Reader-only [readest-reader](https://github.com/hehetoshang/readest-reader) repository is
+integrated as a **separate Next.js frontend**: it builds with `basePath:/readest` and
+`distDir:../../out/readest`. In dev it runs at `http://localhost:3001/readest/reader`; in a build it
+is bundled at `/readest/reader`. Moke uses only the static Reader frontend and the embeddable
+`readestlib` API (`default-features=false`).
 
-`readest/` is a **git submodule** pointing at the fork
-[hehetoshang/readest](https://github.com/hehetoshang/readest) (it was briefly flattened into a plain
-folder on 2026-06-29, but is a submodule again — the `readest` entry in `.gitmodules` and the
-`160000` gitlink are authoritative). To change reader code, commit on a branch inside the
-`readest/` submodule checkout and push it to the fork, then bump the submodule gitlink in this
-repo on the same PR. Do **not** propose merging the two apps into one package.json/single build:
-that was evaluated and rejected (113+57 deps, `@/*` alias clash, `app/{library,opds,user}`
-route-segment collisions). The reader depends on the workspace package `vendor/foliate-js` and
-cannot be lifted out on its own.
+`readest/` is a git submodule; the `.gitmodules` entry and `160000` gitlink are authoritative. Its
+compatibility boundary is `moke.readest.embed.v1` in `readest/contract/moke-reader.v1.json`. Change
+Reader code through a PR in that repository, then bump the gitlink in a coordinated Moke PR. Keep
+the apps as separate workspaces: Moke owns Talebook/library/auth flows while Reader owns rendering.
+The Reader repository carries its own pinned recursive
+`vendor/{foliate-js,simplecc-wasm,js-mdict}` submodules.
 
 ### `CODE_NEED/talebook/`
 
@@ -190,8 +187,9 @@ live in the submodules `vendor/foliate-js` and `vendor/simplecc-wasm` and are no
 After pulling submodules (`git submodule update --init --recursive`), run:
 
 ```bash
-cd readest/apps/readest-app
-pnpm setup-vendors
+cd readest
+pnpm install --frozen-lockfile
+pnpm setup:vendors
 ```
 
 This populates `public/vendor/{pdfjs,simplecc,jieba}`. Without it, `pnpm build:reader` fails with

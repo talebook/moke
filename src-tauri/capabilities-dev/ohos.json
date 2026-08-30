@@ -65,88 +65,196 @@
     {
       "identifier": "fs:allow-read",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-write",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-write-file",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$APPDATA/**" },
-        { "path": "$APPCONFIG/**" },
-        { "path": "$APPCACHE/**" },
-        { "path": "$APPLOG/**" },
-        { "path": "$TEMP/**" }
+        {
+          "path": "$APPDATA/**"
+        },
+        {
+          "path": "$APPCONFIG/**"
+        },
+        {
+          "path": "$APPCACHE/**"
+        },
+        {
+          "path": "$APPLOG/**"
+        },
+        {
+          "path": "$TEMP/**"
+        }
       ]
     },
     {
       "identifier": "fs:scope-appdata-recursive",
-      "allow": [{ "path": "$APPDATA/**/*" }]
+      "allow": [
+        {
+          "path": "$APPDATA/**/*"
+        }
+      ]
     },
     {
       "identifier": "fs:scope-appconfig-recursive",
-      "allow": [{ "path": "$APPCONFIG/**/*" }]
+      "allow": [
+        {
+          "path": "$APPCONFIG/**/*"
+        }
+      ]
     },
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "http://*" },
-        { "url": "https://*" },
-        { "url": "http://*/**" },
-        { "url": "https://*/**" },
-        { "url": "http://*:*/**" },
-        { "url": "https://*:*/**" }
+        {
+          "url": "http://*"
+        },
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*/**"
+        },
+        {
+          "url": "https://*/**"
+        },
+        {
+          "url": "http://*:*/**"
+        },
+        {
+          "url": "https://*:*/**"
+        }
       ]
     },
     {
       "identifier": "http:allow-fetch",
       "allow": [
-        { "url": "http://**" },
-        { "url": "https://**" }
+        {
+          "url": "http://**"
+        },
+        {
+          "url": "https://**"
+        }
       ]
-    }
+    },
+    "allow-start-server",
+    "allow-download-file",
+    "allow-upload-file",
+    "allow-get-executable-dir",
+    "allow-allow-paths-in-scopes",
+    "allow-read-dir",
+    "allow-parse-epub-metadata",
+    "allow-extract-epub-cover-full",
+    "allow-parse-epub-full",
+    "allow-parse-mobi-metadata",
+    "allow-extract-mobi-cover-full",
+    "allow-update-book-presence",
+    "allow-clear-book-presence",
+    "allow-clip-url",
+    "allow-localsend-start",
+    "allow-localsend-stop",
+    "allow-localsend-get-status",
+    "allow-localsend-list-devices",
+    "allow-localsend-announce",
+    "allow-localsend-respond",
+    "allow-localsend-cancel-receive",
+    "allow-localsend-send-files",
+    "allow-localsend-cancel-send",
+    "allow-ext-reader-event"
   ]
 }

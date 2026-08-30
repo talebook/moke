@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-reader-event"
+description = "Enables the ext_reader_event command without any pre-configured scope."
+commands.allow = ["ext_reader_event"]
+
+[[permission]]
+identifier = "deny-ext-reader-event"
+description = "Denies the ext_reader_event command without any pre-configured scope."
+commands.deny = ["ext_reader_event"]

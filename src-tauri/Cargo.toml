@@ -11,6 +11,9 @@ edition = "2021"
 name = "moke_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
+[features]
+reader-e2e = ["tauri-plugin-webdriver"]
+
 [build-dependencies]
 tauri-build = { path = "../vendor/tauri/crates/tauri-build", features = [] }
 
@@ -35,6 +38,7 @@ tauri-plugin-http = { version = "=2.5.9", features = ["cookies", "dangerous-sett
 tauri-plugin-os = "=2.3.2"
 tauri-plugin-shell = "=2.3.5"
 tauri-plugin-opener = "=2.5.4"
+tauri-plugin-webdriver = { version = "0.2", optional = true }
 
 # Reader plugins — compiled unconditionally so the reader works on OHOS
 # (matching how readest standalone builds).

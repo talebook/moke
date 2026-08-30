@@ -680,6 +680,11 @@ pub fn run() {
         // read doesn't reject IPC.
         .plugin(tauri_plugin_deep_link::init());
 
+    // Explicit opt-in only: this opens a localhost automation endpoint and
+    // must never be present in production bundles.
+    #[cfg(feature = "reader-e2e")]
+    let builder = builder.plugin(tauri_plugin_webdriver::init());
+
     #[cfg(not(target_env = "ohos"))]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
