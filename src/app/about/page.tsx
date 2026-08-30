@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { ArrowLeft, BookOpen, Coffee, ExternalLink, HeartHandshake, Info, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, BookOpen, Coffee, Crown, ExternalLink, HeartHandshake, Info, Sparkles, X } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { APP_VERSION } from '@/lib/app-version';
 import { requestAnimatedBack } from '@/lib/native-back';
+import { sponsors } from './sponsors';
 
 interface Contributor {
   id: string;
@@ -224,6 +225,25 @@ export default function AboutPage() {
                 </div>
               ))}
             </div>
+          </section>
+
+          <section className="rounded-[32px] app-glass p-6 transition-all duration-300 hover:bg-white/70">
+            <div className="flex items-center gap-2 mb-4 text-foreground">
+              <Crown className="w-5 h-5 text-amber-500" />
+              <h3 className="text-lg font-semibold">赞助名单</h3>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sponsors.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/50 backdrop-blur-xs px-4 py-3 transition-all duration-300 hover:bg-muted/80 hover:shadow-md"
+                >
+                  <span className="text-sm font-semibold text-foreground truncate">{s.name}</span>
+                  <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">{s.amount}</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">感谢每一位赞助者的支持与鼓励，名单将持续更新 💛</p>
           </section>
         </div>
       </div>
