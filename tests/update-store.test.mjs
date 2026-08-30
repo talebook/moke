@@ -17,7 +17,27 @@ function settleAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-function makeUpdate(download) {
+function useMemoryLocalStorage() {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    },
+  });
+  return () => {
+    if (previous) {
+      Object.defineProperty(globalThis, 'localStorage', previous);
+    } else {
+      delete globalThis.localStorage;
+    }
+  };
+}
+
+function makeUpdate(download, overrides = {}) {
   return {
     version: '1.2.0',
     currentVersion: '1.1.0',
@@ -25,6 +45,7 @@ function makeUpdate(download) {
     download,
     close: async () => {},
     install: async () => {},
+    ...overrides,
   };
 }
 
@@ -178,50 +199,161 @@ test('手动检查在启动延时内完成后跳过后续自动检查', async ()
   }
 });
 
-test('已下载的更新在后续手动检查中复用', async () => {
+test('后续检查仍查询 updater，但同版本复用已下载包', async () => {
   let checkCalls = 0;
   let downloadCalls = 0;
-  let closeCalls = 0;
-  const update = {
-    ...makeUpdate(async () => { downloadCalls += 1; }),
-    close: async () => { closeCalls += 1; },
-  };
+  let firstCloseCalls = 0;
+  let duplicateCloseCalls = 0;
+  const firstUpdate = makeUpdate(
+    async () => { downloadCalls += 1; },
+    { close: async () => { firstCloseCalls += 1; } },
+  );
+  const duplicateUpdate = makeUpdate(
+    async () => { downloadCalls += 1; },
+    { close: async () => { duplicateCloseCalls += 1; } },
+  );
   const store = createDesktopStore(async () => ({
     check: async () => {
       checkCalls += 1;
-      return update;
+      return checkCalls === 1 ? firstUpdate : duplicateUpdate;
+    },
+  }));
+  const restoreLocalStorage = useMemoryLocalStorage();
+
+  try {
+    await store.getState().checkForUpdates();
+    store.getState().dismissPrompt();
+    store.setState({ checkedAt: 1 });
+    await store.getState().checkForUpdates();
+
+    assert.equal(checkCalls, 2);
+    assert.equal(downloadCalls, 1);
+    assert.equal(firstCloseCalls, 0);
+    assert.equal(duplicateCloseCalls, 1);
+    assert.equal(store.getState().status, 'downloaded');
+    assert.equal(store.getState().shouldPrompt, false);
+    assert.ok(store.getState().checkedAt > 1);
+  } finally {
+    restoreLocalStorage();
+  }
+});
+
+test('已下载后检查到更新版本会关闭旧包并下载新包', async () => {
+  let checkCalls = 0;
+  let firstDownloadCalls = 0;
+  let nextDownloadCalls = 0;
+  let firstCloseCalls = 0;
+  const firstUpdate = makeUpdate(
+    async () => { firstDownloadCalls += 1; },
+    { close: async () => { firstCloseCalls += 1; } },
+  );
+  const nextUpdate = makeUpdate(
+    async () => { nextDownloadCalls += 1; },
+    { version: '1.3.0' },
+  );
+  const store = createDesktopStore(async () => ({
+    check: async () => {
+      checkCalls += 1;
+      return checkCalls === 1 ? firstUpdate : nextUpdate;
     },
   }));
 
   await store.getState().checkForUpdates();
   await store.getState().checkForUpdates();
 
-  assert.equal(checkCalls, 1);
-  assert.equal(downloadCalls, 1);
-  assert.equal(closeCalls, 0);
+  assert.equal(checkCalls, 2);
+  assert.equal(firstDownloadCalls, 1);
+  assert.equal(nextDownloadCalls, 1);
+  assert.equal(firstCloseCalls, 1);
+  assert.equal(store.getState().availableVersion, '1.3.0');
   assert.equal(store.getState().status, 'downloaded');
 });
 
-test('自动下载进行中调用 installUpdate 不会并发下载同一更新', async () => {
+test('自动下载进行中调用 installUpdate 会等待下载后继续安装', async () => {
   const downloadStarted = deferred();
   const finishDownload = deferred();
   let downloadCalls = 0;
-  const update = makeUpdate(async () => {
-    downloadCalls += 1;
-    downloadStarted.resolve();
-    await finishDownload.promise;
+  let installCalls = 0;
+  let relaunchCalls = 0;
+  const update = makeUpdate(
+    async () => {
+      downloadCalls += 1;
+      downloadStarted.resolve();
+      await finishDownload.promise;
+    },
+    { install: async () => { installCalls += 1; } },
+  );
+  const store = createUpdateStore({
+    importUpdater: async () => ({ check: async () => update }),
+    importProcess: async () => ({
+      relaunch: async () => {
+        relaunchCalls += 1;
+        throw new Error('test relaunch');
+      },
+    }),
+    resolvePlatform: async () => 'desktop',
+    sleep: async () => {},
   });
-  const store = createDesktopStore(async () => ({ check: async () => update }));
 
   const automaticDownload = store.getState().checkForUpdates();
   await downloadStarted.promise;
-  await store.getState().installUpdate();
+  let installationSettled = false;
+  const installation = store.getState().installUpdate().then(() => {
+    installationSettled = true;
+  });
+  await settleAsyncWork();
+
   assert.equal(downloadCalls, 1);
+  assert.equal(installCalls, 0);
+  assert.equal(installationSettled, false);
 
   finishDownload.resolve();
-  await automaticDownload;
+  await Promise.all([automaticDownload, installation]);
   assert.equal(downloadCalls, 1);
+  assert.equal(installCalls, 1);
+  assert.equal(relaunchCalls, 1);
   assert.equal(store.getState().status, 'downloaded');
+  assert.match(store.getState().error, /test relaunch/);
+});
+
+test('initialize 准备失败后允许后续调用重试', async () => {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  let platformCalls = 0;
+  let sleepCalls = 0;
+  let checkCalls = 0;
+  const store = createUpdateStore({
+    resolvePlatform: async () => {
+      platformCalls += 1;
+      return 'desktop';
+    },
+    sleep: async () => {
+      sleepCalls += 1;
+      if (sleepCalls === 1) throw new Error('startup sleep failed');
+    },
+    importUpdater: async () => ({
+      check: async () => {
+        checkCalls += 1;
+        return null;
+      },
+    }),
+  });
+
+  try {
+    await store.getState().initialize();
+    await store.getState().initialize();
+
+    assert.equal(platformCalls, 2);
+    assert.equal(sleepCalls, 2);
+    assert.equal(checkCalls, 1);
+    assert.equal(store.getState().status, 'up-to-date');
+  } finally {
+    if (previousPlatform === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    } else {
+      process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+    }
+  }
 });
 
 test('无更新时会释放 single-flight，后续检查仍会执行', async () => {

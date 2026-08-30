@@ -73,6 +73,40 @@ interface UpdateStore {
 type UpdaterMod = typeof import('@tauri-apps/plugin-updater');
 type ProcessMod = typeof import('@tauri-apps/plugin-process');
 type UpdateObj = NonNullable<Awaited<ReturnType<UpdaterMod['check']>>>;
+type DownloadEvent = Parameters<NonNullable<Parameters<UpdateObj['download']>[0]>>[0];
+type UpdateStoreSetter = (
+  partial: Partial<UpdateStore> | ((state: UpdateStore) => Partial<UpdateStore>),
+) => void;
+
+function createDownloadHandler(set: UpdateStoreSetter) {
+  let contentLength: number | null = null;
+  let bytesDownloaded = 0;
+
+  return (event: DownloadEvent) => {
+    switch (event.event) {
+      case 'Started':
+        contentLength = event.data.contentLength ?? null;
+        set({ totalBytes: contentLength });
+        break;
+      case 'Progress': {
+        bytesDownloaded += event.data.chunkLength;
+        const nextBytes = bytesDownloaded;
+        const nextPercent = contentLength
+          ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
+          : 0;
+        // Keep shared progress monotonic if callbacks arrive out of order.
+        set((current) => ({
+          downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
+          progressPercent: Math.max(current.progressPercent, nextPercent),
+        }));
+        break;
+      }
+      case 'Finished':
+        set({ progressPercent: 100 });
+        break;
+    }
+  };
+}
 
 export interface UpdateStoreDependencies {
   importUpdater: () => Promise<UpdaterMod | null>;
@@ -113,11 +147,34 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
   // ponytail: flag to skip real Tauri APIs when simulating
   let fake = false;
   let pending: UpdateObj | null = null;
-  let downloading = false;
+  let downloadInFlight: Promise<void> | null = null;
   let downloaded = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   let startupDone = false;
   let checkInFlight: Promise<void> | null = null;
+
+  const downloadUpdate = (update: UpdateObj, set: UpdateStoreSetter): Promise<void> => {
+    if (downloadInFlight) return downloadInFlight;
+
+    const flight = Promise.resolve().then(async () => {
+      set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: null });
+      await update.download(createDownloadHandler(set));
+      if (pending === update) {
+        downloaded = true;
+        set({
+          status: 'downloaded',
+          progressPercent: 100,
+          shouldPrompt: true,
+          error: null,
+        });
+      }
+    }).finally(() => {
+      if (downloadInFlight === flight) downloadInFlight = null;
+    });
+
+    downloadInFlight = flight;
+    return flight;
+  };
 
   return create<UpdateStore>((set, get) => ({
     status: 'idle',
@@ -137,25 +194,27 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
       // schedule more than one automatic update check.
       startupDone = true;
 
-      // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
-      // 官方不支持移动端，需要运行时平台检测区分。
-      const runtimePlatform = await dependencies.resolvePlatform();
-      set({ platform: runtimePlatform });
+      try {
+        // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
+        // 官方不支持移动端，需要运行时平台检测区分。
+        const runtimePlatform = await dependencies.resolvePlatform();
+        set({ platform: runtimePlatform });
 
-      // 移动端不自动检查（避免启动即弹浏览器），由用户在设置页点击跳转 release。
-      if (runtimePlatform === 'mobile') return;
+        // 移动端不自动检查（避免启动即弹浏览器），由用户在设置页点击跳转 release。
+        if (runtimePlatform === 'mobile') return;
 
-      await dependencies.sleep(5000);
-      // A manual check may have completed during the startup delay.
-      if (get().checkedAt !== null) return;
-      try { await get().checkForUpdates(); } catch { /* silent */ }
+        await dependencies.sleep(5000);
+        // A manual check may have completed during the startup delay.
+        if (get().checkedAt !== null) return;
+        await get().checkForUpdates();
+      } catch {
+        // Allow a later mount to retry if startup preparation itself failed.
+        startupDone = false;
+      }
     },
 
     checkForUpdates: () => {
       if (checkInFlight) return checkInFlight;
-      // Keep an already downloaded package for installation instead of checking
-      // and downloading the same release again.
-      if (pending && downloaded && get().status === 'downloaded') return Promise.resolve();
 
       // Defer the implementation to a microtask so checkInFlight is assigned
       // before platform detection or any other asynchronous work can begin.
@@ -174,20 +233,26 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
 
         const updater = await dependencies.importUpdater();
         if (!updater) return;
-        if (downloading) return;
+
+        // A download started by installUpdate owns pending until it settles.
+        if (downloadInFlight) {
+          try { await downloadInFlight; } catch { /* a fresh check may retry */ }
+        }
 
         set({ status: 'checking', error: null });
 
         try {
-          // Close previous pending update
-          if (pending) {
-            try { await pending.close(); } catch { /* best effort */ }
-            pending = null;
-            downloaded = false;
-          }
-
+          const previousPending = pending;
+          const previousDownloaded = downloaded;
           const update = await updater.check();
           if (!update) {
+            if (previousPending) {
+              try { await previousPending.close(); } catch { /* best effort */ }
+            }
+            if (pending === previousPending) {
+              pending = null;
+              downloaded = false;
+            }
             writeDismissed(null);
             set({
               status: 'up-to-date',
@@ -204,6 +269,13 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
           const current = update.currentVersion;
           if (current && !isNewer(update.version, current)) {
             try { await update.close(); } catch { /* best effort */ }
+            if (previousPending && previousPending !== update) {
+              try { await previousPending.close(); } catch { /* best effort */ }
+            }
+            if (pending === previousPending) {
+              pending = null;
+              downloaded = false;
+            }
             writeDismissed(null);
             set({
               status: 'up-to-date',
@@ -216,21 +288,30 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
             return;
           }
 
-          pending = update;
-
-          // Already dismissed this version → don't prompt, don't download
-          if (readDismissed() === update.version) {
+          // Always perform updater.check(), but reuse an already downloaded package
+          // when the server still reports the same version.
+          if (previousPending && previousDownloaded && previousPending.version === update.version) {
+            if (previousPending !== update) {
+              try { await update.close(); } catch { /* best effort */ }
+            }
             set({
-              status: 'available',
+              status: 'downloaded',
               availableVersion: update.version,
-              releaseNotes: update.body ?? null,
+              releaseNotes: update.body ?? previousPending.body ?? null,
               checkedAt: Date.now(),
               error: null,
-              shouldPrompt: false,
+              shouldPrompt: readDismissed() !== update.version,
             });
             return;
           }
 
+          if (previousPending && previousPending !== update) {
+            try { await previousPending.close(); } catch { /* best effort */ }
+          }
+          pending = update;
+          downloaded = false;
+
+          const dismissed = readDismissed() === update.version;
           set({
             status: 'available',
             availableVersion: update.version,
@@ -240,54 +321,18 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
             shouldPrompt: false,
           });
 
+          // Already dismissed this version → don't prompt, don't download
+          if (dismissed) return;
+
           // Auto-download (don't install yet — user decides when to restart)
-          downloading = true;
-          set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: null });
-
-          let contentLength: number | null = null;
-          let bytesDownloaded = 0;
-
           try {
-            await update.download((event) => {
-              switch (event.event) {
-                case 'Started':
-                  contentLength = event.data.contentLength ?? null;
-                  set({ totalBytes: contentLength });
-                  break;
-                case 'Progress': {
-                  bytesDownloaded += event.data.chunkLength;
-                  const nextBytes = bytesDownloaded;
-                  const nextPercent = contentLength
-                    ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
-                    : 0;
-                  // Keep shared progress monotonic if callbacks arrive out of order.
-                  set((current) => ({
-                    downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
-                    progressPercent: Math.max(current.progressPercent, nextPercent),
-                  }));
-                  break;
-                }
-                case 'Finished':
-                  set({ progressPercent: 100 });
-                  break;
-              }
-            });
-
-            downloaded = true;
-            set({
-              status: 'downloaded',
-              progressPercent: 100,
-              shouldPrompt: true,
-              error: null,
-            });
+            await downloadUpdate(update, set);
           } catch (e) {
             set({
               status: 'available',
               error: e instanceof Error ? e.message : String(e),
               shouldPrompt: true,
             });
-          } finally {
-            downloading = false;
           }
         } catch (e) {
           set({
@@ -311,8 +356,6 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
     },
 
     installUpdate: async () => {
-      if (downloading) return;
-
       // 平台未缓存时先检测，避免移动端误走内置 updater。
       let platform = get().platform;
       if (!platform) {
@@ -350,57 +393,30 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
       const process = await dependencies.importProcess();
       if (!updater || !process) return;
 
-      if (!pending) {
-        await get().checkForUpdates();
-        if (!pending) return;
-      }
-      // Re-check after the awaits above so a check-triggered download that
-      // started in the meantime cannot be duplicated by the install path.
-      if (downloading) return;
-
       try {
-        // Download if not yet downloaded
-        if (!downloaded) {
-          downloading = true;
-          set({ status: 'downloading', progressPercent: 0, downloadedBytes: 0, totalBytes: null });
-
-          let contentLength: number | null = null;
-          let bytesDownloaded = 0;
-
-          await pending.download((event) => {
-            switch (event.event) {
-              case 'Started':
-                contentLength = event.data.contentLength ?? null;
-                set({ totalBytes: contentLength });
-                break;
-              case 'Progress': {
-                bytesDownloaded += event.data.chunkLength;
-                const nextBytes = bytesDownloaded;
-                const nextPercent = contentLength
-                  ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
-                  : 0;
-                // Keep shared progress monotonic if callbacks arrive out of order.
-                set((current) => ({
-                  downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
-                  progressPercent: Math.max(current.progressPercent, nextPercent),
-                }));
-                break;
-              }
-              case 'Finished':
-                set({ progressPercent: 100 });
-                break;
-            }
-          });
-
-          downloading = false;
-          downloaded = true;
+        // Preserve an install click made during automatic download. If that
+        // download fails, continue below and retry it through the same helper.
+        if (downloadInFlight) {
+          try { await downloadInFlight; } catch { /* retry below */ }
         }
+
+        if (!pending) {
+          await get().checkForUpdates();
+          if (!pending) return;
+        }
+
+        if (downloadInFlight) {
+          try { await downloadInFlight; } catch { /* retry below */ }
+        }
+
+        const updateToInstall = pending;
+        if (!downloaded) await downloadUpdate(updateToInstall, set);
 
         writeDismissed(null);
 
         set({ status: 'installing', shouldPrompt: false, error: null });
 
-        await pending.install();
+        await updateToInstall.install();
 
         set({ status: 'restarting', progressPercent: 100 });
 
@@ -416,7 +432,6 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
 
         await process.relaunch();
       } catch (e) {
-        downloading = false;
         if (watchdog) { clearTimeout(watchdog); watchdog = null; }
         set({
           status: downloaded ? 'downloaded' : 'available',
