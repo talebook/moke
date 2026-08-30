@@ -452,15 +452,14 @@ function DetailContent() {
         loadRecord,
         loadProgress: async () => targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : fetchReadingProgress(book.id).catch(() => null),
+          : fetchReadingProgress(book.id),
         loadPlatform: getMokeRuntimePlatform,
         beforeSingleWebviewOpen: async (record) => {
           if (!record?.filePath) return;
-          try {
-            await recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS);
-          } catch (error) {
-            console.warn('Read record could not be saved before navigation:', error);
-          }
+          await recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS);
+        },
+        onBeforeSingleWebviewOpenError: (error) => {
+          console.warn('Read record could not be saved before navigation:', error);
         },
       });
       const { record, platform: currentPlatform } = prepared;

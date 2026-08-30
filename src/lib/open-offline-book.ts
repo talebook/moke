@@ -4,7 +4,6 @@ import type { OfflineBookRecord } from '@/lib/offline-books';
 import { getDebugPanelLaunchState } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
-import { prepareEmbeddedBookOpen } from '@/lib/book-read';
 import {
   buildEmbeddedReaderUrl,
   getMokeRuntimePlatform,
@@ -25,27 +24,21 @@ export async function openOfflineBook(
     return;
   }
 
-  const prepared = await prepareEmbeddedBookOpen({
-    loadRecord: async () => record,
-    loadProgress: async () => {
-      try {
-        return await fetchReadingProgress(record.bookId);
-      } catch {
-        // Opening a local book must remain available while the server is offline.
-        return null;
-      }
-    },
-    loadPlatform: getMokeRuntimePlatform,
-  });
+  // Progress recovery and the immutable runtime probe are independent. Offline
+  // library opens intentionally do not write Talebook read history: there may
+  // be no active authenticated server session, and the saved record can belong
+  // to a server other than the currently connected one.
+  const [restoreProgress, platform] = await Promise.all([
+    fetchReadingProgress(record.bookId),
+    getMokeRuntimePlatform(),
+  ]);
   const common = {
     filePath: record.filePath,
     eink: useSettingsStore.getState().eink,
     debugPanel: getDebugPanelLaunchState(),
-    mokeBookId: prepared.record.bookId,
-    restoreProgress: prepared.restoreProgress,
+    mokeBookId: record.bookId,
+    restoreProgress,
   };
-
-  const platform = prepared.platform;
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(

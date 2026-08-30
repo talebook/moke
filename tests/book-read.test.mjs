@@ -101,6 +101,25 @@ test('桌面内嵌阅读器跳过导航前记录，但仍并行收集启动上�
   });
 });
 
+test('移动端导航前记录失败不会阻止阅读器准备完成', async () => {
+  const errors = [];
+  const result = await prepareEmbeddedBookOpen({
+    loadRecord: async () => ({ id: 'book-3' }),
+    loadProgress: async () => ({ location: 'chapter-3' }),
+    loadPlatform: async () => 'android',
+    beforeSingleWebviewOpen: async () => { throw new Error('record failed'); },
+    onBeforeSingleWebviewOpenError: (error) => errors.push(error),
+  });
+
+  assert.deepEqual(result, {
+    record: { id: 'book-3' },
+    restoreProgress: { location: 'chapter-3' },
+    platform: 'android',
+  });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /record failed/);
+});
+
 test('阅读器成功打开后通过 Talebook 阅读路由持久化一次记录', async () => {
   const events = [];
   const requests = [];
