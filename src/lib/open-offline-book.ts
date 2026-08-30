@@ -24,14 +24,14 @@ export async function openOfflineBook(
     return;
   }
 
-  let restoreProgress = null;
-  try {
-    restoreProgress = await fetchReadingProgress(record.bookId);
-  } catch {
-    // Opening a local book must remain available while the server is offline.
-  }
-
-  const platform = await getMokeRuntimePlatform();
+  // Progress recovery and the immutable runtime probe are independent. Offline
+  // library opens intentionally do not write Talebook read history: there may
+  // be no active authenticated server session, and the saved record can belong
+  // to a server other than the currently connected one.
+  const [restoreProgress, platform] = await Promise.all([
+    fetchReadingProgress(record.bookId),
+    getMokeRuntimePlatform(),
+  ]);
   const common = {
     filePath: record.filePath,
     eink: useSettingsStore.getState().eink,

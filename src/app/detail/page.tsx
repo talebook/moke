@@ -25,7 +25,7 @@ import {
   readStateShelfState,
   shouldLoadReadingStateFallback,
 } from '@/lib/book-detail-core';
-import { openAndRecordBookRead, recordAndOpenBookRead, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
+import { openAndRecordBookRead, prepareEmbeddedBookOpen, recordBookRead, READ_RECORD_NAV_TIMEOUT_MS } from '@/lib/book-read';
 import {
   getOfflineDownloadSnapshot,
   removeOfflineDownloadSnapshot,
@@ -415,93 +415,107 @@ function DetailContent() {
     };
 
     try {
-      const record = offlineMode && offlineRecord?.format === selectedFormat
+      const loadRecord = async () => offlineMode && offlineRecord?.format === selectedFormat
         ? offlineRecord
-        : await getOfflineBook(activeServerUrl, id!, selectedFormat);
-      if (record?.filePath && process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
-        if (offlineMode) {
-          await openOfflineBook(record, router.push);
+        : getOfflineBook(activeServerUrl, id!, selectedFormat);
+      if (offlineMode) {
+        const record = await loadRecord();
+        if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+          setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
         }
-        // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
-        // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
-        // 只需替换打包资源，无需改动这里的调用方式。
-        let restoreProgress = targetAnnotation
+        await openOfflineBook(record, router.push);
+        return;
+      }
+
+      const useSystemReader = useSettingsStore.getState().readerPreference === 'system'
+        && !targetAnnotation;
+      if (useSystemReader) {
+        const record = await loadRecord();
+        if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+          setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
+          return;
+        }
+        await openAndRecordBookRead({
+          open: () => openBookWithSystemDefault(record.id),
+          onOpened: () => setOpeningReader(false),
+          record: () => recordBookRead(request, serverUrl, book.id),
+          onRecordError: (error) => {
+            console.warn('Book opened in the system app, but the read record could not be saved:', error);
+            setMessage('书籍已打开，但阅读记录同步失败。');
+          },
+        });
+        return;
+      }
+
+      const prepared = await prepareEmbeddedBookOpen({
+        loadRecord,
+        loadProgress: async () => targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : await fetchReadingProgress(book.id).catch(() => null);
-        if (targetAnnotation && restoreProgress) {
-          annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
-          restoreProgress = {
-            ...restoreProgress,
-            moke_navigation_id: annotationNavigationId,
-            moke_navigation_kind: 'annotation-locate',
-          };
-        }
-        const currentPlatform = await getMokeRuntimePlatform();
+          : fetchReadingProgress(book.id),
+        loadPlatform: getMokeRuntimePlatform,
+        beforeSingleWebviewOpen: async (record) => {
+          if (!record?.filePath) return;
+          await recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS);
+        },
+        onBeforeSingleWebviewOpenError: (error) => {
+          console.warn('Read record could not be saved before navigation:', error);
+        },
+      });
+      const { record, platform: currentPlatform } = prepared;
+      if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
+        setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
+        return;
+      }
+      // 通过统一的 open_reader 命令打开阅读器：阅读器作为打包资源随应用一起
+      // 发布（合为一个应用），并在自己的独立窗口中打开书籍。后续更换阅读器
+      // 只需替换打包资源，无需改动这里的调用方式。
+      let restoreProgress = prepared.restoreProgress;
+      if (targetAnnotation && restoreProgress) {
+        annotationNavigationId = beginAnnotationLocateNavigation(serverUrl, book.id);
+        restoreProgress = {
+          ...restoreProgress,
+          moke_navigation_id: annotationNavigationId,
+          moke_navigation_kind: 'annotation-locate',
+        };
+      }
 
-        if (useSettingsStore.getState().readerPreference === 'system' && !targetAnnotation) {
-          await openAndRecordBookRead({
-            open: () => openBookWithSystemDefault(record.id),
-            onOpened: () => setOpeningReader(false),
-            record: () => recordBookRead(request, serverUrl, book.id),
-            onRecordError: (error) => {
-              console.warn('Book opened in the system app, but the read record could not be saved:', error);
-              setMessage('书籍已打开，但阅读记录同步失败。');
-            },
-          });
-          return;
-        }
+      if (isSingleWebviewRuntime(currentPlatform)) {
+        const href = buildEmbeddedReaderUrl({
+          filePath: record.filePath,
+          eink: useSettingsStore.getState().eink,
+          debugPanel: getDebugPanelLaunchState(),
+          mokeBookId: String(book.id),
+          restoreProgress,
+          // The explicit navigation id lets the reader skip only startup and
+          // annotation relocations; genuine page turns still sync directly.
+          serverUrl: useServerStore.getState().serverUrl,
+        });
+        await openEmbeddedReaderBook(href, router.push, currentPlatform);
+        return;
+      }
 
-        if (isSingleWebviewRuntime(currentPlatform)) {
-          const href = buildEmbeddedReaderUrl({
+      await openAndRecordBookRead({
+        open: async () => {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('open_reader', {
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
             debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
-            // The explicit navigation id lets the reader skip only startup and
-            // annotation relocations; genuine page turns still sync directly.
-            serverUrl: useServerStore.getState().serverUrl,
           });
-
-          // Navigation replaces this WebView and destroys the current JS
-          // context, so dispatch and await the bounded record request first.
-          // Use a short timeout: the record is best-effort and must not hold
-          // up opening the reader for long.
-          await recordAndOpenBookRead({
-            record: () => recordBookRead(request, serverUrl, book.id, READ_RECORD_NAV_TIMEOUT_MS),
-            open: () => openEmbeddedReaderBook(href, router.push, currentPlatform),
-            onRecordError: (error) => {
-              console.warn('Read record could not be saved before navigation:', error);
-            },
-          });
-          return;
-        }
-
-        await openAndRecordBookRead({
-          open: async () => {
-            const { invoke } = await import('@tauri-apps/api/core');
-            await invoke('open_reader', {
-              filePath: record.filePath,
-              eink: useSettingsStore.getState().eink,
-              debugPanel: getDebugPanelLaunchState(),
-              mokeBookId: String(book.id),
-              restoreProgress,
-            });
-          },
-          // The independent reader window is already usable. Release the
-          // visible loading state now, while openingReaderRef continues to
-          // block duplicate opens until the record request settles.
-          onOpened: () => setOpeningReader(false),
-          record: () => recordBookRead(request, serverUrl, book.id),
-          onRecordError: (error) => {
-            console.warn('Reader opened, but the read record could not be saved:', error);
-            setMessage('书籍已打开，但阅读记录同步失败。');
-          },
-        });
-      } else {
-        setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
-      }
+        },
+        // The independent reader window is already usable. Release the
+        // visible loading state now, while openingReaderRef continues to
+        // block duplicate opens until the record request settles.
+        onOpened: () => setOpeningReader(false),
+        record: () => recordBookRead(request, serverUrl, book.id),
+        onRecordError: (error) => {
+          console.warn('Reader opened, but the read record could not be saved:', error);
+          setMessage('书籍已打开，但阅读记录同步失败。');
+        },
+      });
     } catch (e) {
       if (annotationNavigationId) clearAnnotationLocateProgressSuppression(annotationNavigationId);
       console.error('Failed to open book:', e);
