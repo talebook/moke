@@ -13,8 +13,8 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-async function flushPromises() {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+function settleAsyncWork() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function makeUpdate(download) {
@@ -66,7 +66,7 @@ test('并发 checkForUpdates 共享同一次检查和下载，且进度不倒退
   const first = store.getState().checkForUpdates();
   const second = store.getState().checkForUpdates();
   assert.equal(first, second);
-  await flushPromises();
+  await settleAsyncWork();
   assert.equal(checkCalls, 1);
 
   checking.resolve();
@@ -113,16 +113,16 @@ test('自动检查与手动检查重叠时共享 single-flight，initialize 也�
   try {
     const firstInitialize = store.getState().initialize();
     const secondInitialize = store.getState().initialize();
-    await flushPromises();
+    await settleAsyncWork();
     assert.equal(platformCalls, 1);
     assert.equal(sleepCalls, 1);
 
     const manualCheck = store.getState().checkForUpdates();
-    await flushPromises();
+    await settleAsyncWork();
     assert.equal(checkCalls, 1);
 
     startupDelay.resolve();
-    await flushPromises();
+    await settleAsyncWork();
     assert.equal(checkCalls, 1);
 
     checking.resolve();
@@ -136,6 +136,92 @@ test('自动检查与手动检查重叠时共享 single-flight，initialize 也�
       process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
     }
   }
+});
+
+test('手动检查在启动延时内完成后跳过后续自动检查', async () => {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  const startupDelay = deferred();
+  let checkCalls = 0;
+  let downloadCalls = 0;
+  const update = makeUpdate(async () => { downloadCalls += 1; });
+  const store = createUpdateStore({
+    resolvePlatform: async () => 'desktop',
+    sleep: async () => { await startupDelay.promise; },
+    importUpdater: async () => ({
+      check: async () => {
+        checkCalls += 1;
+        return update;
+      },
+    }),
+  });
+
+  try {
+    const initialization = store.getState().initialize();
+    await settleAsyncWork();
+
+    await store.getState().checkForUpdates();
+    assert.equal(checkCalls, 1);
+    assert.equal(downloadCalls, 1);
+    assert.equal(store.getState().status, 'downloaded');
+
+    startupDelay.resolve();
+    await initialization;
+    assert.equal(checkCalls, 1);
+    assert.equal(downloadCalls, 1);
+  } finally {
+    if (previousPlatform === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    } else {
+      process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+    }
+  }
+});
+
+test('已下载的更新在后续手动检查中复用', async () => {
+  let checkCalls = 0;
+  let downloadCalls = 0;
+  let closeCalls = 0;
+  const update = {
+    ...makeUpdate(async () => { downloadCalls += 1; }),
+    close: async () => { closeCalls += 1; },
+  };
+  const store = createDesktopStore(async () => ({
+    check: async () => {
+      checkCalls += 1;
+      return update;
+    },
+  }));
+
+  await store.getState().checkForUpdates();
+  await store.getState().checkForUpdates();
+
+  assert.equal(checkCalls, 1);
+  assert.equal(downloadCalls, 1);
+  assert.equal(closeCalls, 0);
+  assert.equal(store.getState().status, 'downloaded');
+});
+
+test('自动下载进行中调用 installUpdate 不会并发下载同一更新', async () => {
+  const downloadStarted = deferred();
+  const finishDownload = deferred();
+  let downloadCalls = 0;
+  const update = makeUpdate(async () => {
+    downloadCalls += 1;
+    downloadStarted.resolve();
+    await finishDownload.promise;
+  });
+  const store = createDesktopStore(async () => ({ check: async () => update }));
+
+  const automaticDownload = store.getState().checkForUpdates();
+  await downloadStarted.promise;
+  await store.getState().installUpdate();
+  assert.equal(downloadCalls, 1);
+
+  finishDownload.resolve();
+  await automaticDownload;
+  assert.equal(downloadCalls, 1);
+  assert.equal(store.getState().status, 'downloaded');
 });
 
 test('无更新时会释放 single-flight，后续检查仍会执行', async () => {
