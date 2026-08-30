@@ -249,14 +249,16 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
                 set({ totalBytes: contentLength });
                 break;
               case 'Progress': {
-                bytesDownloaded = Math.max(bytesDownloaded + event.data.chunkLength, bytesDownloaded);
-                const progressPercent = contentLength
-                  ? Math.min(Math.round((bytesDownloaded / contentLength) * 100), 100)
+                bytesDownloaded += event.data.chunkLength;
+                const nextBytes = bytesDownloaded;
+                const nextPercent = contentLength
+                  ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
                   : 0;
-                set({
-                  downloadedBytes: Math.max(get().downloadedBytes, bytesDownloaded),
-                  progressPercent: Math.max(get().progressPercent, progressPercent),
-                });
+                // Keep shared progress monotonic if callbacks arrive out of order.
+                set((current) => ({
+                  downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
+                  progressPercent: Math.max(current.progressPercent, nextPercent),
+                }));
                 break;
               }
               case 'Finished':
@@ -355,14 +357,16 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
               set({ totalBytes: contentLength });
               break;
             case 'Progress': {
-              bytesDownloaded = Math.max(bytesDownloaded + event.data.chunkLength, bytesDownloaded);
-              const progressPercent = contentLength
-                ? Math.min(Math.round((bytesDownloaded / contentLength) * 100), 100)
+              bytesDownloaded += event.data.chunkLength;
+              const nextBytes = bytesDownloaded;
+              const nextPercent = contentLength
+                ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
                 : 0;
-              set({
-                downloadedBytes: Math.max(get().downloadedBytes, bytesDownloaded),
-                progressPercent: Math.max(get().progressPercent, progressPercent),
-              });
+              // Keep shared progress monotonic if callbacks arrive out of order.
+              set((current) => ({
+                downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
+                progressPercent: Math.max(current.progressPercent, nextPercent),
+              }));
               break;
             }
             case 'Finished':
