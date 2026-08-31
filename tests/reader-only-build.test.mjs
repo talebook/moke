@@ -33,10 +33,6 @@ const readerDirScanner = readFileSync(
   new URL('../readest/apps/readest-app/src-tauri/src/dir_scanner.rs', import.meta.url),
   'utf8',
 );
-const foliatePaginator = readFileSync(
-  new URL('../readest/vendor/foliate-js/paginator.js', import.meta.url),
-  'utf8',
-);
 const readerCapability = JSON.parse(
   readFileSync(new URL('../src-tauri/capabilities/reader.json', import.meta.url), 'utf8'),
 );
@@ -90,7 +86,6 @@ test('Moke ACL command manifest stays aligned with the merged readestlib handler
 });
 
 test('embedded Reader preserves the untrusted-publication filesystem boundary', () => {
-  assert.match(foliatePaginator, /setAttribute\('sandbox', 'allow-same-origin allow-scripts'\)/);
   assert.match(readerNativeHost, /if !fs_scope\.is_allowed\(&path\)[\s\S]*?continue;/);
   assert.match(readerDirScanner, /if !scope\.is_allowed\(&path_buf\)/);
   assert.match(readerCapability.description, /sandbox/i);

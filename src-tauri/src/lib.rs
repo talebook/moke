@@ -1070,7 +1070,10 @@ mod fs_scope_tests {
 
         assert_eq!(dev["identifier"], "reader-dev-remote");
         assert_eq!(dev["local"], false);
-        assert_eq!(dev["remote"]["urls"][0], "http://localhost:3001/**");
+        assert_eq!(
+            dev["remote"]["urls"][0],
+            "http://localhost:3001/readest/**"
+        );
         assert_eq!(dev["windows"], reader["windows"]);
         assert_eq!(dev["permissions"], reader["permissions"]);
     }
