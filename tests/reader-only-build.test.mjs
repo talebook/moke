@@ -32,6 +32,7 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   assert.equal(contract.progressApi.credentials, 'include');
   assert.ok(contract.readerEvents.includes('reader:error'));
   assert.match(rootPackage.scripts['build:reader'], /build:moke-reader/);
+  assert.equal(rootPackage.scripts['dev:reader'], 'cd readest && pnpm dev');
   assert.match(readerPackage.scripts['build:moke-reader'], /build:reader/);
   assert.match(readerPackage.scripts['build:reader'], /\.env\.moke-reader/);
   assert.match(nextConfig, /pageExtensions: \['moke\.tsx'\]/);
