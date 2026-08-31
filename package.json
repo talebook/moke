@@ -23,8 +23,9 @@
     "clean:build": "node scripts/clean-build-artifacts.mjs",
     "clean:build:full": "node scripts/clean-build-artifacts.mjs --rust",
     "build:reader": "cd readest && pnpm --filter @readest/readest-app build:moke-reader && cd .. && node scripts/strip-reader-sourcemaps.mjs readest/out/readest",
-    "dev:reader": "cd readest && pnpm --filter @readest/readest-app dev",
-    "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\" && node scripts/strip-reader-sourcemaps.mjs out/readest"
+    "dev:reader": "cd readest && pnpm dev",
+    "copy:reader": "node -e \"require('fs').cpSync('readest/out/readest','out/readest',{recursive:true})\" && node scripts/strip-reader-sourcemaps.mjs out/readest",
+    "tauri:reader-e2e": "tauri dev --features reader-e2e"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",

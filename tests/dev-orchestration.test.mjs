@@ -7,10 +7,14 @@ const source = readFileSync(new URL('../scripts/dev.mjs', import.meta.url), 'utf
 test('开发编排直接启动 Next，正常关闭不经过 pnpm 失败包装', () => {
   assert.match(source, /spawn\(process\.execPath/);
   assert.doesNotMatch(source, /--env-file/);
-  assert.match(source, /readEnvFile\(path\.join\(directory, '\.env\.tauri'\)\)/);
-  assert.match(source, /env: devEnv\(readerRoot/);
-  assert.match(source, /env: devEnv\(root\)/);
+  assert.match(source, /readEnvFile\(path\.join\(directory, envFile\)\)/);
+  assert.match(source, /existsSync\(filePath\)/);
+  assert.match(source, /Missing development environment file/);
+  assert.match(source, /git submodule update --init --recursive/);
+  assert.match(source, /env: devEnv\(readerRoot, '\.env\.moke-reader'/);
+  assert.match(source, /env: devEnv\(root, '\.env\.tauri'\)/);
   assert.match(source, /await waitForReader\('http:\/\/localhost:3001\/readest\/reader'\)/);
+  assert.match(source, /if \(!response\.ok\)/);
   assert.ok(
     source.indexOf("await waitForReader('http://localhost:3001/readest/reader')") <
       source.indexOf('moke = spawn(process.execPath'),

@@ -1,6 +1,6 @@
 [submodule "readest"]
 	path = readest
-	url = https://github.com/hehetoshang/readest.git
+	url = https://github.com/hehetoshang/readest-reader.git
 [submodule "tauri"]
 	path = vendor/tauri
 	url = https://github.com/hehetoshang/tauri.git

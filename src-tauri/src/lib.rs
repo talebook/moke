@@ -12,6 +12,18 @@
 ///
 /// 拓展系统：通过 `extensions` 模块管理拓展的发现、生命周期、存储。
 /// 拓展以独立进程方式运行，通过本地 HTTP + WebSocket 与主程序通信。
+
+// The opt-in test feature opens a localhost automation endpoint. Make a
+// release misconfiguration fail at compile time instead of relying only on
+// documentation or the plugin registration cfg below.
+#[cfg(all(feature = "reader-e2e", not(debug_assertions)))]
+compile_error!("reader-e2e must not be enabled in release builds");
+#[cfg(all(
+    feature = "reader-e2e",
+    any(target_os = "android", target_os = "ios", target_env = "ohos")
+))]
+compile_error!("reader-e2e is supported only by desktop development builds");
+
 mod extensions;
 
 // Keep build-script profile routing covered by the normal `cargo test --lib`
@@ -634,7 +646,7 @@ fn reader_dev_remote_capability() -> Result<String, serde_json::Error> {
     capability["description"] = "Development-only remote Readest capability".into();
     capability["local"] = false.into();
     capability["remote"] = serde_json::json!({
-        "urls": ["http://localhost:3001/**"]
+        "urls": ["http://localhost:3001/readest/**"]
     });
     serde_json::to_string(&capability)
 }
@@ -679,6 +691,11 @@ pub fn run() {
         // `get_current` answers null and the frontend's cold-start deep-link
         // read doesn't reject IPC.
         .plugin(tauri_plugin_deep_link::init());
+
+    // Explicit opt-in only: this opens a localhost automation endpoint and
+    // must never be present in production bundles.
+    #[cfg(all(feature = "reader-e2e", debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_webdriver::init());
 
     #[cfg(not(target_env = "ohos"))]
     let builder = builder
@@ -1058,7 +1075,10 @@ mod fs_scope_tests {
 
         assert_eq!(dev["identifier"], "reader-dev-remote");
         assert_eq!(dev["local"], false);
-        assert_eq!(dev["remote"]["urls"][0], "http://localhost:3001/**");
+        assert_eq!(
+            dev["remote"]["urls"][0],
+            "http://localhost:3001/readest/**"
+        );
         assert_eq!(dev["windows"], reader["windows"]);
         assert_eq!(dev["permissions"], reader["permissions"]);
     }
