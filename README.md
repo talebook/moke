@@ -36,18 +36,21 @@
 
 ## Reader 开发与构建
 
-Reader 是独立递归子模块。全新检出后执行：
+Reader 是独立递归子模块。全新检出或从旧 Readest 子模块迁移后执行：
 
 ```bash
+git submodule sync --recursive
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
 cd readest && pnpm install --frozen-lockfile && cd ..
 pnpm build:reader
 ```
 
-产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
+`pnpm build:reader` 会自动执行 Reader 的 `setup-vendors`，生成 PDF.js、SimpleCC 和 Jieba 资源；只启动开发服务器时可先在 `readest/` 执行 `pnpm setup:vendors`。产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
 
-真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅限 localhost 的可选 WebDriver 插件；该 feature 不得用于发布构建。经过脱敏的环境、命令轮廓与实测结果见子模块的 `docs/E2E_EVIDENCE.md`。
+真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。经过脱敏的环境、命令轮廓与实测结果见子模块的 `docs/E2E_EVIDENCE.md`。
+
+Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的 sandbox iframe 内，不能接触顶层 Tauri IPC bridge。桌面 `allow_paths_in_scopes` 只能复用宿主已授权的 `fs_scope`，Moke 的 `open_reader` 也只为 AppData 书籍或文件选择器已授权路径扩展 scope。升级 Foliate、Reader 命令或 capability 时必须保留这些边界并运行 `tests/reader-only-build.test.mjs`。
 
 ## 相关链接
 

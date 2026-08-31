@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "reader-mobile",
-  "description": "Readest capabilities for the Android and iOS single-WebView reader flow.",
+  "description": "Readest top-level UI capabilities for the Android and iOS single-WebView flow; publication content remains sandboxed.",
   "windows": [
     "main"
   ],

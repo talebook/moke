@@ -1,8 +1,12 @@
 mod build_config;
 
-const READER_COMMANDS: &[&str] = &[
+// Keep this list in lockstep with readestlib::reader_invoke_handler. The
+// reader-only contract test parses both lists and fails if the submodule's bare
+// command surface drifts. `ext_reader_event` is the one host-owned command: it
+// is declared here so dedicated Reader windows can receive an explicit ACL
+// grant instead of leaving the Moke extension bridge unmanaged.
+const APP_ACL_COMMANDS: &[&str] = &[
     "open_reader",
-    "ext_reader_event",
     "start_server",
     "download_file",
     "upload_file",
@@ -26,6 +30,8 @@ const READER_COMMANDS: &[&str] = &[
     "localsend_cancel_receive",
     "localsend_send_files",
     "localsend_cancel_send",
+    // Host command implemented in src/extensions/mod.rs, not readestlib.
+    "ext_reader_event",
 ];
 
 fn main() {
@@ -34,7 +40,7 @@ fn main() {
     // Declare that command surface in the embedding host; Reader capabilities
     // can then grant it to both bundled and debug-remote Reader windows.
     let attributes = tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(READER_COMMANDS),
+        tauri_build::AppManifest::new().commands(APP_ACL_COMMANDS),
     );
 
     // Desktop capabilities reference plugins that are unavailable on OHOS, so

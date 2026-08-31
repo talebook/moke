@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -12,6 +12,13 @@ const readerNext = path.join(readerRoot, 'node_modules', 'next', 'dist', 'bin', 
 const mokeNext = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
 
 function readEnvFile(filePath) {
+  if (!existsSync(filePath)) {
+    throw new Error(
+      `Missing development environment file: ${filePath}. ` +
+      'Run `git submodule sync --recursive && git submodule update --init --recursive`, install dependencies, and see README.md "Reader 开发与构建".',
+    );
+  }
+
   const env = {};
   for (const rawLine of readFileSync(filePath, 'utf8').split(/\r?\n/)) {
     const line = rawLine.trim();

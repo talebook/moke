@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "reader",
-  "description": "Readest capabilities for dedicated reader and reader-home windows.",
+  "description": "Readest top-level UI capabilities. Publication content stays in Foliate sandbox frames; path widening reuses only host-authorized fs scope.",
   "windows": [
     "reader-*",
     "moke-home-*"
