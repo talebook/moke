@@ -43,13 +43,28 @@ function appAclCommands(source) {
   return [...block.matchAll(/"([a-z0-9_]+)"/g)].map((match) => match[1]);
 }
 
+function bracketedMacroBody(source, functionName, macroName) {
+  const functionStart = source.indexOf(functionName);
+  assert.notEqual(functionStart, -1, `${functionName} is missing from the Reader native contract`);
+  const macroStart = source.indexOf(macroName, functionStart);
+  assert.notEqual(macroStart, -1, `${functionName} must expose commands through ${macroName}`);
+  const openingBracket = source.indexOf('[', macroStart + macroName.length);
+  assert.notEqual(openingBracket, -1, `${macroName} must use an array-style command body`);
+
+  let depth = 0;
+  for (let index = openingBracket; index < source.length; index += 1) {
+    if (source[index] === '[') depth += 1;
+    if (source[index] !== ']') continue;
+    depth -= 1;
+    if (depth === 0) return source.slice(openingBracket + 1, index);
+  }
+  assert.fail(`${macroName} has an unbalanced command body`);
+}
+
 function readerHandlerCommands(source) {
-  const block = source.match(
-    /pub fn reader_invoke_handler[\s\S]*?tauri::generate_handler!\[([\s\S]*?)\n\s*\]\n}/,
-  )?.[1];
-  assert.ok(block, 'readestlib reader_invoke_handler must remain inspectable');
+  const block = bracketedMacroBody(source, 'pub fn reader_invoke_handler', 'tauri::generate_handler!');
   return [...block.matchAll(/^\s*([a-z_][a-z0-9_:]*)\s*,\s*$/gim)]
-    .map((match) => match[1].split('::').at(-1));
+    .map((match) => match[1].split('::').pop());
 }
 
 test('Moke 构建只暴露独立 Readest Reader 页面', () => {
@@ -75,6 +90,8 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
     tauriHost,
     /cfg\(all\(feature = "reader-e2e", not\(debug_assertions\)\)\)[\s\S]*compile_error!\("reader-e2e must not be enabled in release builds"\)/,
   );
+  assert.match(tauriHost, /reader-e2e is supported only by desktop development builds/);
+  assert.match(tauriHost, /target_env = "ohos"/);
   assert.match(tauriHost, /cfg\(all\(feature = "reader-e2e", debug_assertions\)\)/);
   assert.match(tauriHost, /tauri_plugin_webdriver::init\(\)/);
   assert.match(tauriHost, /http:\/\/localhost:3001\/readest\/\*\*/);

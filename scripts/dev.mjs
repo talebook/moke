@@ -80,6 +80,10 @@ async function waitForReader(url) {
     try {
       const response = await fetch(url);
       await response.arrayBuffer();
+      if (!response.ok) {
+        await delay(250);
+        continue;
+      }
       return true;
     } catch {
       await delay(250);

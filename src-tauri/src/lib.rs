@@ -18,6 +18,11 @@
 // documentation or the plugin registration cfg below.
 #[cfg(all(feature = "reader-e2e", not(debug_assertions)))]
 compile_error!("reader-e2e must not be enabled in release builds");
+#[cfg(all(
+    feature = "reader-e2e",
+    any(target_os = "android", target_os = "ios", target_env = "ohos")
+))]
+compile_error!("reader-e2e is supported only by desktop development builds");
 
 mod extensions;
 

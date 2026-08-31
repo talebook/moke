@@ -46,7 +46,7 @@ cd readest && pnpm install --frozen-lockfile && cd ..
 pnpm build:reader
 ```
 
-`pnpm build:reader` 会自动执行 Reader 的 `setup-vendors`，生成 PDF.js、SimpleCC 和 Jieba 资源；只启动开发服务器时可先在 `readest/` 执行 `pnpm setup:vendors`。产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
+`pnpm build:reader` 会自动执行 Reader app 的 `setup-vendors` 子脚本，生成 PDF.js、SimpleCC 和 Jieba 资源；只启动开发服务器时可先在 `readest/` 执行根脚本 `pnpm setup:vendors`（它会转调上述 app 子脚本）。`.env.moke-reader` 已随 Reader 仓库提交，无需本地创建。产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
 
 真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。经过脱敏的环境、命令轮廓与实测结果见子模块的 `docs/E2E_EVIDENCE.md`。
 
