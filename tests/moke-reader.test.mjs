@@ -193,6 +193,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
       debugPanel: true,
       mokeBookId: '14',
       serverUrl: 'http://192.168.1.5:8080',
+      sourceServerUrl: 'https://books.example',
       restoreProgress: {
         schema: 'moke.readest.progress.v1',
         reader: 'readest',
@@ -214,6 +215,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(url.searchParams.get('mokeBookId'), '14');
   assert.equal(url.searchParams.get('mokeReturnTo'), '/library');
   assert.equal(url.searchParams.get('mokeServerUrl'), 'http://192.168.1.5:8080');
+  assert.equal(url.searchParams.get('mokeSourceServerUrl'), 'https://books.example');
   assert.deepEqual(JSON.parse(url.searchParams.get('mokeRestoreProgress')), {
     schema: 'moke.readest.progress.v1',
     reader: 'readest',
@@ -238,6 +240,7 @@ test('buildEmbeddedReaderUrl preserves the mobile reader launch context', () => 
   assert.equal(empty.searchParams.get('moke'), '1');
   assert.equal(empty.searchParams.get('mokeDebug'), '0');
   assert.equal(empty.searchParams.get('mokeServerUrl'), null);
+  assert.equal(empty.searchParams.get('mokeSourceServerUrl'), null);
 });
 
 test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () => {

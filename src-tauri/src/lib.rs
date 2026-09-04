@@ -645,8 +645,17 @@ fn reader_dev_remote_capability() -> Result<String, serde_json::Error> {
     capability["identifier"] = "reader-dev-remote".into();
     capability["description"] = "Development-only remote Readest capability".into();
     capability["local"] = false.into();
+    // The optional WebDriver plugin reports the attached development document
+    // at its origin root while it drives a secondary window. Broaden only that
+    // compile-time test feature; compile_error! above guarantees it cannot
+    // enter release/mobile bundles. Normal development remains path-scoped.
+    let reader_dev_url = if cfg!(feature = "reader-e2e") {
+        "http://localhost:3001/**"
+    } else {
+        "http://localhost:3001/readest/**"
+    };
     capability["remote"] = serde_json::json!({
-        "urls": ["http://localhost:3001/readest/**"]
+        "urls": [reader_dev_url]
     });
     serde_json::to_string(&capability)
 }

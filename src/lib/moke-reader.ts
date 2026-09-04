@@ -240,6 +240,12 @@ function setServerUrlParam(params: URLSearchParams, serverUrl?: string): void {
   }
 }
 
+function setSourceServerUrlParam(params: URLSearchParams, sourceServerUrl?: string): void {
+  if (sourceServerUrl) {
+    params.set('mokeSourceServerUrl', sourceServerUrl);
+  }
+}
+
 export function buildEmbeddedReaderHomeUrl({
   eink,
   debugPanel = false,
@@ -401,6 +407,7 @@ export function buildEmbeddedReaderUrl({
   mokeBookId,
   restoreProgress,
   serverUrl,
+  sourceServerUrl,
 }: {
   filePath: string;
   eink: boolean;
@@ -408,6 +415,7 @@ export function buildEmbeddedReaderUrl({
   mokeBookId: string;
   restoreProgress: ReadingProgressPayload | null;
   serverUrl?: string;
+  sourceServerUrl?: string;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
@@ -419,6 +427,7 @@ export function buildEmbeddedReaderUrl({
   });
 
   setServerUrlParam(params, serverUrl);
+  setSourceServerUrlParam(params, sourceServerUrl);
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));
