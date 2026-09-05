@@ -46,6 +46,7 @@ import {
   onlineReadingErrorMessage,
   resolveTalebookOnlineSource,
 } from '@/lib/online-reading';
+import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
 
 interface BookDetail {
   id: string;
@@ -433,7 +434,13 @@ function DetailContent() {
 
     try {
       const [source, restoreProgress, currentPlatform] = await Promise.all([
-        resolveTalebookOnlineSource(request, serverUrl, book.id, controller.signal),
+        resolveTalebookOnlineSource(
+          request,
+          serverUrl,
+          book.id,
+          controller.signal,
+          isTauriApp ? tauriRangeFetch : request,
+        ),
         fetchReadingProgress(book.id),
         getMokeRuntimePlatform(),
       ]);
@@ -448,6 +455,7 @@ function DetailContent() {
           restoreProgress,
           serverUrl: useServerStore.getState().serverUrl,
           sourceServerUrl: serverUrl,
+          runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;
@@ -580,6 +588,7 @@ function DetailContent() {
           // The explicit navigation id lets the reader skip only startup and
           // annotation relocations; genuine page turns still sync directly.
           serverUrl: useServerStore.getState().serverUrl,
+          runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;

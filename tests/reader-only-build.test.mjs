@@ -104,8 +104,24 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   );
 });
 
-test('Moke ACL command manifest stays aligned with the merged readestlib handler', () => {
-  const expected = [...new Set([...readerHandlerCommands(readerNativeHost), 'ext_reader_event'])].sort();
+test('Moke ACL command manifest stays aligned with Reader plus the explicit host surface', () => {
+  const mokeHostCommands = [
+    'moke_runtime_platform',
+    'moke_navigate',
+    'moke_record_downloaded_book',
+    'moke_delete_downloaded_book_file',
+    'moke_open_downloaded_book',
+    'moke_reveal_downloaded_book',
+    'moke_remove_downloaded_book',
+    'moke_select_download_directory',
+    'moke_reset_download_directory',
+    'moke_get_download_directory',
+    'moke_download_storage_stats',
+    'moke_list_downloaded_books',
+  ];
+  const expected = [
+    ...new Set([...readerHandlerCommands(readerNativeHost), ...mokeHostCommands, 'ext_reader_event']),
+  ].sort();
   assert.deepEqual([...new Set(appAclCommands(tauriBuild))].sort(), expected);
 });
 

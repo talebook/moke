@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-record-downloaded-book"
+description = "Enables the moke_record_downloaded_book command without any pre-configured scope."
+commands.allow = ["moke_record_downloaded_book"]
+
+[[permission]]
+identifier = "deny-moke-record-downloaded-book"
+description = "Denies the moke_record_downloaded_book command without any pre-configured scope."
+commands.deny = ["moke_record_downloaded_book"]

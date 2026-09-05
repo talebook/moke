@@ -408,6 +408,7 @@ export function buildEmbeddedReaderUrl({
   restoreProgress,
   serverUrl,
   sourceServerUrl,
+  runtimePlatform,
 }: {
   filePath: string;
   eink: boolean;
@@ -416,6 +417,7 @@ export function buildEmbeddedReaderUrl({
   restoreProgress: ReadingProgressPayload | null;
   serverUrl?: string;
   sourceServerUrl?: string;
+  runtimePlatform?: string;
 }): string {
   const params = new URLSearchParams({
     file: filePath,
@@ -428,6 +430,7 @@ export function buildEmbeddedReaderUrl({
 
   setServerUrlParam(params, serverUrl);
   setSourceServerUrlParam(params, sourceServerUrl);
+  if (runtimePlatform) params.set('mokeRuntimePlatform', runtimePlatform);
 
   if (restoreProgress) {
     params.set('mokeRestoreProgress', JSON.stringify(restoreProgress));

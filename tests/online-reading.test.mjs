@@ -62,11 +62,28 @@ function headResponse(overrides = {}) {
   });
 }
 
-test('online source bootstrap is strict and preflights without downloading a body', async () => {
+function rangeResponse({ status = 206, headers = {}, body = new Uint8Array([0x50]) } = {}) {
+  return fakeResponse({
+    status,
+    url: SOURCE,
+    contentType: 'application/epub+zip',
+    headers: {
+      'content-length': '1',
+      'content-range': 'bytes 0-0/10485760',
+      etag: '"epub-one"',
+      ...headers,
+    },
+    body,
+  });
+}
+
+test('online source bootstrap is strict and proves Range with only one body byte', async () => {
   const calls = [];
   const request = async (url, init) => {
     calls.push({ url, init });
-    return calls.length === 1 ? bootstrapResponse() : headResponse();
+    if (calls.length === 1) return bootstrapResponse();
+    if (init?.method === 'HEAD') return headResponse();
+    return rangeResponse();
   };
 
   const source = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
@@ -79,7 +96,7 @@ test('online source bootstrap is strict and preflights without downloading a bod
     etag: '"epub-one"',
     size: 10485760,
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].url, BOOTSTRAP);
   assert.equal(calls[0].init.redirect, 'manual');
   assert.equal(calls[0].init.maxRedirections, 0);
@@ -87,6 +104,9 @@ test('online source bootstrap is strict and preflights without downloading a bod
   assert.equal(calls[1].url, SOURCE);
   assert.equal(calls[1].init.method, 'HEAD');
   assert.equal(calls[1].init.headers['Accept-Encoding'], 'identity');
+  assert.equal(calls[2].url, SOURCE);
+  assert.equal(calls[2].init.method, 'GET');
+  assert.equal(calls[2].init.headers.Range, 'bytes=0-0');
 });
 
 test('bootstrap cannot authorize a different origin, book, path, query or MIME', async () => {
@@ -162,9 +182,25 @@ test('old servers and permission errors produce actionable stable errors', async
   assert.match(onlineReadingErrorMessage(new OnlineReadingError('online.permission_denied')), /权限|下载/);
 });
 
-test('preflight requires exact EPUB MIME, Range, size, ETag and stable URL', async () => {
+test('HEAD differences are tolerated only when the real Range probe is valid', async () => {
+  for (const head of [
+    headResponse({ 'accept-ranges': 'none' }),
+    fakeResponse({ status: 405, url: SOURCE, contentType: 'text/plain' }),
+  ]) {
+    let call = 0;
+    const source = await resolveTalebookOnlineSource(async () => {
+      call += 1;
+      if (call === 1) return bootstrapResponse();
+      if (call === 2) return head;
+      return rangeResponse();
+    }, SERVER, BOOK_ID);
+    assert.equal(source.size, 10485760);
+    assert.equal(source.etag, '"epub-one"');
+  }
+});
+
+test('preflight rejects invalid HEAD metadata before opening Reader', async () => {
   const cases = [
-    [headResponse({ 'accept-ranges': 'none' }), 'online.range_unsupported'],
     [headResponse({ 'content-length': '0' }), 'online.response_invalid'],
     [headResponse({ etag: '' }), 'online.response_invalid'],
     [headResponse({ 'content-encoding': 'gzip' }), 'online.response_invalid'],
@@ -176,6 +212,29 @@ test('preflight requires exact EPUB MIME, Range, size, ETag and stable URL', asy
     let call = 0;
     await assert.rejects(
       resolveTalebookOnlineSource(async () => (++call === 1 ? bootstrapResponse() : head), SERVER, BOOK_ID),
+      (error) => error instanceof OnlineReadingError && error.code === code,
+    );
+  }
+});
+
+test('preflight rejects upstream 200, 416 and malformed 206 range responses', async () => {
+  const cases = [
+    [rangeResponse({ status: 200, body: new Uint8Array(10485760) }), 'online.range_unsupported'],
+    [rangeResponse({ status: 416, headers: { 'content-range': 'bytes */10485760' }, body: '' }), 'online.resource_changed'],
+    [rangeResponse({ headers: { 'content-range': 'bytes 1-1/10485760' } }), 'online.response_invalid'],
+    [rangeResponse({ headers: { 'content-length': '2' } }), 'online.response_invalid'],
+    [rangeResponse({ headers: { etag: '"epub-two"' } }), 'online.resource_changed'],
+  ];
+
+  for (const [probe, code] of cases) {
+    let call = 0;
+    await assert.rejects(
+      resolveTalebookOnlineSource(async () => {
+        call += 1;
+        if (call === 1) return bootstrapResponse();
+        if (call === 2) return headResponse();
+        return probe;
+      }, SERVER, BOOK_ID),
       (error) => error instanceof OnlineReadingError && error.code === code,
     );
   }

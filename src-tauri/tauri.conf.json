@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "capabilities": ["default", "reader", "reader-mobile"],
+      "capabilities": ["default", "reader", "reader-mobile", "reader-android-navigation"],
       "csp": {
         "default-src": "'self' tauri: http://tauri.localhost asset: http://asset.localhost",
         "script-src": "'self' 'unsafe-eval' asset: http://asset.localhost https://static.geetest.com https://us-assets.i.posthog.com",

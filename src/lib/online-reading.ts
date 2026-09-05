@@ -3,6 +3,7 @@ import { MokeApiError, readJsonResponse } from './api-core.ts';
 const EPUB_MIME = 'application/epub+zip';
 const SAFE_REVISION = /^[A-Za-z0-9._~-]{1,128}$/;
 const SAFE_ETAG = /^[^\r\n]{1,256}$/;
+const FIRST_BYTE_CONTENT_RANGE = /^bytes 0-0\/(\d+)$/;
 
 export type OnlineReadingErrorCode =
   | 'online.auth_required'
@@ -190,8 +191,8 @@ function validateBootstrap(
   };
 }
 
-function safeCancel(response: Response): void {
-  void response.body?.cancel().catch(() => undefined);
+async function safeCancel(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 async function drainHeadResponse(response: Response): Promise<void> {
@@ -212,6 +213,7 @@ export async function resolveTalebookOnlineSource(
   serverUrl: string,
   rawBookId: string | number,
   signal?: AbortSignal,
+  rangeRequest: RequestLike = request,
 ): Promise<TalebookOnlineSource> {
   const serverOrigin = parseCurrentServerOrigin(serverUrl);
   const bookId = String(rawBookId);
@@ -236,14 +238,14 @@ export async function resolveTalebookOnlineSource(
         envelope = null;
       }
     } else {
-      safeCancel(bootstrapResponse);
+      await safeCancel(bootstrapResponse);
     }
     throw envelope?.err
       ? errorForBootstrapCode(envelope.err, bootstrapResponse.status)
       : errorForStatus(bootstrapResponse.status, true);
   }
   if (normalizedMime(bootstrapResponse.headers.get('content-type')) !== 'application/json') {
-    safeCancel(bootstrapResponse);
+    await safeCancel(bootstrapResponse);
     throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
   }
 
@@ -272,32 +274,116 @@ export async function resolveTalebookOnlineSource(
     throw new OnlineReadingError('online.network');
   }
   requireExactResponseUrl(head, source.url);
-  if (!head.ok) {
+
+  let headSize: number | null = null;
+  let headEtag: string | null = null;
+  if (head.status === 200) {
+    const headMime = normalizedMime(head.headers.get('content-type'));
+    if (headMime && headMime !== source.mimeType) {
+      await drainHeadResponse(head);
+      throw new OnlineReadingError('online.mime_invalid', head.status);
+    }
+    const contentEncoding = head.headers.get('content-encoding');
+    const contentLength = head.headers.get('content-length');
+    const etag = head.headers.get('etag');
+    if (contentEncoding && contentEncoding.toLowerCase() !== 'identity') {
+      await drainHeadResponse(head);
+      throw new OnlineReadingError('online.response_invalid', head.status);
+    }
+    if (contentLength !== null) {
+      headSize = Number(contentLength);
+      if (!Number.isSafeInteger(headSize) || headSize <= 0) {
+        await drainHeadResponse(head);
+        throw new OnlineReadingError('online.response_invalid', head.status);
+      }
+    }
+    if (etag !== null) {
+      if (!SAFE_ETAG.test(etag)) {
+        await drainHeadResponse(head);
+        throw new OnlineReadingError('online.response_invalid', head.status);
+      }
+      headEtag = etag;
+    }
+  } else if (head.status !== 405 && head.status !== 501) {
     await drainHeadResponse(head);
-    throw errorForStatus(head.status);
+    if (!head.ok) throw errorForStatus(head.status);
+    throw new OnlineReadingError('online.response_invalid', head.status);
   }
-  if (head.status !== 200 || head.headers.get('accept-ranges')?.toLowerCase() !== 'bytes') {
-    await drainHeadResponse(head);
-    throw new OnlineReadingError('online.range_unsupported', head.status);
+  await drainHeadResponse(head);
+
+  // HEAD claims are not enough: the original regression advertised byte
+  // ranges but the Reader's first GET arrived upstream without Range and got
+  // a full 200. Probe one byte through the exact transport Reader will use.
+  // A HEAD-incompatible server is accepted only when this real probe is a
+  // fully valid 206; a full 200 body is cancelled without being downloaded.
+  let probe: Response;
+  try {
+    probe = await rangeRequest(source.url, {
+      ...noRedirectRequest(signal),
+      method: 'GET',
+      headers: {
+        'Accept-Encoding': 'identity',
+        Range: 'bytes=0-0',
+      },
+    });
+  } catch {
+    throw new OnlineReadingError('online.network');
   }
-  if (normalizedMime(head.headers.get('content-type')) !== source.mimeType) {
-    await drainHeadResponse(head);
-    throw new OnlineReadingError('online.mime_invalid', head.status);
+  requireExactResponseUrl(probe, source.url);
+  if (probe.status === 200) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.range_unsupported', probe.status);
   }
-  const contentEncoding = head.headers.get('content-encoding');
-  const size = Number(head.headers.get('content-length'));
-  const etag = head.headers.get('etag');
+  if (probe.status === 416) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.resource_changed', probe.status);
+  }
+  if (!probe.ok) {
+    await safeCancel(probe);
+    throw errorForStatus(probe.status);
+  }
+  if (probe.status !== 206) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.response_invalid', probe.status);
+  }
+  if (normalizedMime(probe.headers.get('content-type')) !== source.mimeType) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.mime_invalid', probe.status);
+  }
+
+  const contentEncoding = probe.headers.get('content-encoding');
+  const contentRange = probe.headers.get('content-range')?.match(FIRST_BYTE_CONTENT_RANGE);
+  const size = Number(contentRange?.[1]);
+  const etag = probe.headers.get('etag');
   if (
     (contentEncoding && contentEncoding.toLowerCase() !== 'identity') ||
+    probe.headers.get('content-length') !== '1' ||
     !Number.isSafeInteger(size) ||
     size <= 0 ||
     !etag ||
     !SAFE_ETAG.test(etag)
   ) {
-    await drainHeadResponse(head);
-    throw new OnlineReadingError('online.response_invalid', head.status);
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.response_invalid', probe.status);
   }
-  await drainHeadResponse(head);
+  if (headSize !== null && headSize !== size) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.resource_changed', probe.status);
+  }
+  if (headEtag !== null && headEtag !== etag) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.resource_changed', probe.status);
+  }
+
+  let firstByte: ArrayBuffer;
+  try {
+    firstByte = await probe.arrayBuffer();
+  } catch {
+    throw new OnlineReadingError('online.network', probe.status);
+  }
+  if (firstByte.byteLength !== 1) {
+    throw new OnlineReadingError('online.response_invalid', probe.status);
+  }
 
   return { ...source, size, etag };
 }

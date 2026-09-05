@@ -8,7 +8,8 @@ test('book detail exposes online and offline actions separately', () => {
   assert.match(detail, /在线阅读/);
   assert.match(detail, /下载后阅读/);
   assert.match(detail, /离线阅读/);
-  assert.match(detail, /resolveTalebookOnlineSource\(request, serverUrl, book\.id/);
+  assert.match(detail, /resolveTalebookOnlineSource\(\s*request,\s*serverUrl,\s*book\.id/);
+  assert.match(detail, /isTauriApp \? tauriRangeFetch : request/);
   assert.match(detail, /filePath: source\.url/);
   assert.match(detail, /mokeSourceServerUrl: serverUrl/);
 });
