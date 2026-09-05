@@ -1,6 +1,7 @@
 import { MokeApiError, readJsonResponse } from './api-core.ts';
 
 const EPUB_MIME = 'application/epub+zip';
+const LEGACY_EPUB_MIME = 'application/octet-stream';
 const SAFE_REVISION = /^[A-Za-z0-9._~-]{1,128}$/;
 const SAFE_ETAG = /^[^\r\n]{1,256}$/;
 const FIRST_BYTE_CONTENT_RANGE = /^bytes 0-0\/(\d+)$/;
@@ -34,12 +35,17 @@ export interface TalebookOnlineSource {
   url: string;
   format: 'epub';
   mimeType: typeof EPUB_MIME;
-  revision: string;
+  /** Null for the fixed legacy download route, whose identity comes from ETag. */
+  revision: string | null;
   etag: string;
   size: number;
 }
 
 type RequestLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+type OnlineSourceCandidate = Omit<TalebookOnlineSource, 'etag' | 'size'> & {
+  responseMimes: readonly string[];
+};
 
 type BootstrapEnvelope = {
   err?: unknown;
@@ -139,7 +145,7 @@ function validateBootstrap(
   data: BootstrapEnvelope,
   serverOrigin: string,
   bookId: string,
-): Omit<TalebookOnlineSource, 'etag' | 'size'> {
+): OnlineSourceCandidate {
   const revision = data.book?.revision;
   const resourceUrl = data.resource?.url;
   if (
@@ -188,7 +194,33 @@ function validateBootstrap(
     format: 'epub',
     mimeType: EPUB_MIME,
     revision,
+    responseMimes: [EPUB_MIME],
   };
+}
+
+/**
+ * Talebook Android streams the fixed download URL into Readium and injects
+ * its authenticated cookie into every request. Talebook has served this URL
+ * since the early 3.x releases; Tornado StaticFileHandler-backed releases
+ * (3.7+) also provide the exact single-range contract Readest needs.
+ *
+ * Keep the route derived from the trusted server/book instead of accepting a
+ * URL from legacy response data. Older releases that ignore Range are still
+ * rejected by the one-byte probe, never buffered as an online fallback.
+ */
+function legacyOnlineSource(serverOrigin: string, bookId: string): OnlineSourceCandidate {
+  return {
+    kind: 'talebook-online',
+    url: `${serverOrigin}/api/book/${bookId}.epub`,
+    format: 'epub',
+    mimeType: EPUB_MIME,
+    revision: null,
+    responseMimes: [EPUB_MIME, LEGACY_EPUB_MIME],
+  };
+}
+
+function sourceAcceptsMime(source: OnlineSourceCandidate, value: string | null): boolean {
+  return source.responseMimes.includes(normalizedMime(value));
 }
 
 async function safeCancel(response: Response): Promise<void> {
@@ -229,9 +261,11 @@ export async function resolveTalebookOnlineSource(
   }
 
   requireExactResponseUrl(bootstrapResponse, bootstrapUrl);
+  const bootstrapMime = normalizedMime(bootstrapResponse.headers.get('content-type'));
+  let source: OnlineSourceCandidate;
   if (!bootstrapResponse.ok) {
     let envelope: BootstrapEnvelope | null = null;
-    if (normalizedMime(bootstrapResponse.headers.get('content-type')) === 'application/json') {
+    if (bootstrapMime === 'application/json') {
       try {
         envelope = await readJsonResponse<BootstrapEnvelope>(bootstrapResponse);
       } catch {
@@ -240,28 +274,38 @@ export async function resolveTalebookOnlineSource(
     } else {
       await safeCancel(bootstrapResponse);
     }
-    throw envelope?.err
-      ? errorForBootstrapCode(envelope.err, bootstrapResponse.status)
-      : errorForStatus(bootstrapResponse.status, true);
-  }
-  if (normalizedMime(bootstrapResponse.headers.get('content-type')) !== 'application/json') {
-    await safeCancel(bootstrapResponse);
-    throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
-  }
 
-  let bootstrap: BootstrapEnvelope;
-  try {
-    bootstrap = await readJsonResponse<BootstrapEnvelope>(bootstrapResponse);
-  } catch (error) {
-    if (error instanceof MokeApiError) {
-      throw new OnlineReadingError('online.response_invalid', error.status);
+    // Servers before the Readest bootstrap endpoint return an unstructured
+    // 404 page here. Follow Talebook Android's fixed EPUB download route, but
+    // only keep it when the real native GET proves exact 206 Range. A newer
+    // server's structured book/format error must never take this downgrade.
+    if (bootstrapResponse.status === 404 && !envelope?.err) {
+      source = legacyOnlineSource(serverOrigin, bookId);
+    } else {
+      throw envelope?.err
+        ? errorForBootstrapCode(envelope.err, bootstrapResponse.status)
+        : errorForStatus(bootstrapResponse.status, true);
     }
-    throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
+  } else {
+    if (bootstrapMime !== 'application/json') {
+      await safeCancel(bootstrapResponse);
+      throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
+    }
+
+    let bootstrap: BootstrapEnvelope;
+    try {
+      bootstrap = await readJsonResponse<BootstrapEnvelope>(bootstrapResponse);
+    } catch (error) {
+      if (error instanceof MokeApiError) {
+        throw new OnlineReadingError('online.response_invalid', error.status);
+      }
+      throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
+    }
+    if (bootstrap.err !== 'ok') {
+      throw errorForBootstrapCode(bootstrap.err, bootstrapResponse.status);
+    }
+    source = validateBootstrap(bootstrap, serverOrigin, bookId);
   }
-  if (bootstrap.err !== 'ok') {
-    throw errorForBootstrapCode(bootstrap.err, bootstrapResponse.status);
-  }
-  const source = validateBootstrap(bootstrap, serverOrigin, bookId);
 
   let head: Response;
   try {
@@ -279,7 +323,7 @@ export async function resolveTalebookOnlineSource(
   let headEtag: string | null = null;
   if (head.status === 200) {
     const headMime = normalizedMime(head.headers.get('content-type'));
-    if (headMime && headMime !== source.mimeType) {
+    if (headMime && !sourceAcceptsMime(source, headMime)) {
       await drainHeadResponse(head);
       throw new OnlineReadingError('online.mime_invalid', head.status);
     }
@@ -346,7 +390,7 @@ export async function resolveTalebookOnlineSource(
     await safeCancel(probe);
     throw new OnlineReadingError('online.response_invalid', probe.status);
   }
-  if (normalizedMime(probe.headers.get('content-type')) !== source.mimeType) {
+  if (!sourceAcceptsMime(source, probe.headers.get('content-type'))) {
     await safeCancel(probe);
     throw new OnlineReadingError('online.mime_invalid', probe.status);
   }
@@ -385,7 +429,15 @@ export async function resolveTalebookOnlineSource(
     throw new OnlineReadingError('online.response_invalid', probe.status);
   }
 
-  return { ...source, size, etag };
+  return {
+    kind: source.kind,
+    url: source.url,
+    format: source.format,
+    mimeType: source.mimeType,
+    revision: source.revision,
+    size,
+    etag,
+  };
 }
 
 export function onlineReadingErrorMessage(error: unknown): string {

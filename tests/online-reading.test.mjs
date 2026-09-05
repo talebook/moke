@@ -11,6 +11,7 @@ const SERVER = 'https://books.example';
 const BOOK_ID = '42';
 const REVISION = 'abc-123';
 const SOURCE = `${SERVER}/read/resource/${BOOK_ID}.epub?revision=${REVISION}`;
+const LEGACY_SOURCE = `${SERVER}/api/book/${BOOK_ID}.epub`;
 const BOOTSTRAP = `${SERVER}/api/book/${BOOK_ID}/reader-bootstrap?engine=readest`;
 
 function fakeResponse({
@@ -49,10 +50,10 @@ function bootstrapResponse(payload = bootstrapPayload()) {
   return fakeResponse({ url: BOOTSTRAP, body: JSON.stringify(payload) });
 }
 
-function headResponse(overrides = {}) {
+function headResponse(overrides = {}, url = SOURCE, contentType = 'application/epub+zip') {
   return fakeResponse({
-    url: SOURCE,
-    contentType: 'application/epub+zip',
+    url,
+    contentType,
     headers: {
       'content-length': '10485760',
       'accept-ranges': 'bytes',
@@ -62,11 +63,17 @@ function headResponse(overrides = {}) {
   });
 }
 
-function rangeResponse({ status = 206, headers = {}, body = new Uint8Array([0x50]) } = {}) {
+function rangeResponse({
+  status = 206,
+  headers = {},
+  body = new Uint8Array([0x50]),
+  url = SOURCE,
+  contentType = 'application/epub+zip',
+} = {}) {
   return fakeResponse({
     status,
-    url: SOURCE,
-    contentType: 'application/epub+zip',
+    url,
+    contentType,
     headers: {
       'content-length': '1',
       'content-range': 'bytes 0-0/10485760',
@@ -155,28 +162,81 @@ test('redirects and invalid current server origins fail closed', async () => {
   }
 });
 
-test('old servers and permission errors produce actionable stable errors', async () => {
-  await assert.rejects(
-    resolveTalebookOnlineSource(
-      async () => fakeResponse({ status: 404, url: BOOTSTRAP, body: 'missing' }),
-      SERVER,
-      BOOK_ID,
-    ),
-    (error) => error instanceof OnlineReadingError && error.code === 'online.server_unsupported',
-  );
+test('pre-bootstrap Talebook falls back to its fixed ranged EPUB route', async () => {
+  const calls = [];
+  const request = async (url, init) => {
+    calls.push({ url, init });
+    if (url === BOOTSTRAP) {
+      return fakeResponse({ status: 404, url: BOOTSTRAP, contentType: 'text/html', body: 'missing' });
+    }
+    if (init?.method === 'HEAD') {
+      return headResponse({}, LEGACY_SOURCE, 'application/octet-stream');
+    }
+    return rangeResponse({ url: LEGACY_SOURCE, contentType: 'application/octet-stream' });
+  };
+
+  const source = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
+  assert.deepEqual(source, {
+    kind: 'talebook-online',
+    url: LEGACY_SOURCE,
+    format: 'epub',
+    mimeType: 'application/epub+zip',
+    revision: null,
+    etag: '"epub-one"',
+    size: 10485760,
+  });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].url, LEGACY_SOURCE);
+  assert.equal(calls[2].init.headers.Range, 'bytes=0-0');
+});
+
+test('legacy fallback never turns a Range-ignoring full response into online reading', async () => {
+  const bodyRead = () => {
+    throw new Error('full legacy body must not be read');
+  };
+  const fullResponse = rangeResponse({
+    status: 200,
+    url: LEGACY_SOURCE,
+    contentType: 'application/octet-stream',
+    headers: { 'content-length': '10485760' },
+    body: new Uint8Array([0x50]),
+  });
+  Object.defineProperty(fullResponse, 'arrayBuffer', { value: bodyRead });
+  let call = 0;
 
   await assert.rejects(
-    resolveTalebookOnlineSource(
-      async () => fakeResponse({
-        status: 403,
-        url: BOOTSTRAP,
-        body: JSON.stringify({ err: 'user.no_permission' }),
-      }),
-      SERVER,
-      BOOK_ID,
-    ),
-    (error) => error instanceof OnlineReadingError && error.code === 'online.permission_denied',
+    resolveTalebookOnlineSource(async () => {
+      call += 1;
+      if (call === 1) {
+        return fakeResponse({ status: 404, url: BOOTSTRAP, contentType: 'text/html' });
+      }
+      if (call === 2) return headResponse({}, LEGACY_SOURCE, 'application/octet-stream');
+      return fullResponse;
+    }, SERVER, BOOK_ID),
+    (error) => error instanceof OnlineReadingError && error.code === 'online.range_unsupported',
   );
+  assert.equal(call, 3);
+});
+
+test('structured bootstrap and permission errors do not downgrade to the download route', async () => {
+  for (const [status, body, code] of [
+    [404, { err: 'book.not_found' }, 'online.not_found'],
+    [403, { err: 'user.no_permission' }, 'online.permission_denied'],
+  ]) {
+    let calls = 0;
+    await assert.rejects(
+      resolveTalebookOnlineSource(
+        async () => {
+          calls += 1;
+          return fakeResponse({ status, url: BOOTSTRAP, body: JSON.stringify(body) });
+        },
+        SERVER,
+        BOOK_ID,
+      ),
+      (error) => error instanceof OnlineReadingError && error.code === code,
+    );
+    assert.equal(calls, 1);
+  }
 
   assert.match(onlineReadingErrorMessage(new OnlineReadingError('online.server_unsupported')), /更新服务器|下载后阅读/);
   assert.match(onlineReadingErrorMessage(new OnlineReadingError('online.permission_denied')), /权限|下载/);

@@ -75,6 +75,11 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   assert.equal(contract.onlineSource.rangeRequired, true);
   assert.equal(contract.onlineSource.redirects, 0);
   assert.deepEqual(contract.onlineSource.formats, ['epub']);
+  assert.equal(contract.onlineSource.legacyPathTemplate, '/api/book/{mokeBookId}.epub');
+  assert.deepEqual(contract.onlineSource.acceptedLegacyResponseMimes, [
+    'application/epub+zip',
+    'application/octet-stream',
+  ]);
   assert.ok(contract.readerEvents.includes('reader:error'));
   assert.match(rootPackage.scripts['build:reader'], /build:moke-reader/);
   assert.equal(rootPackage.scripts['dev:reader'], 'cd readest && pnpm dev');
