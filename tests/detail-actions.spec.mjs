@@ -3,10 +3,24 @@ import { test, expect } from '@playwright/test';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
-async function installTauriHttpMock(page) {
-  await page.addInitScript(({ serverUrl, bookId }) => {
+async function installTauriHttpMock(page, { offlineMode = false } = {}) {
+  await page.addInitScript(({ serverUrl, bookId, offlineMode }) => {
     const requests = new Map();
     const responseBodies = new Map();
+    const httpRequests = [];
+    const nativeOfflineBooks = offlineMode ? [{
+      id: `${serverUrl}::${bookId}::epub`,
+      serverUrl,
+      bookId,
+      title: '离线阅读操作布局测试',
+      author: 'Moke 测试',
+      inShelf: true,
+      fileName: 'offline-layout.epub',
+      mimeType: 'application/epub+zip',
+      updatedAt: Date.now(),
+      filePath: '/tmp/offline-layout.epub',
+      fileSize: 440912,
+    }] : [];
     let nextRid = 1;
     let nextCallbackId = 1;
 
@@ -47,6 +61,7 @@ async function installTauriHttpMock(page) {
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;
           requests.set(rid, args.clientConfig);
+          httpRequests.push(args.clientConfig.url);
           return rid;
         }
         if (command === 'plugin:http|fetch_send') {
@@ -75,7 +90,7 @@ async function installTauriHttpMock(page) {
         if (command === 'plugin:event|listen') return nextRid++;
         if (command === 'plugin:event|unlisten') return null;
         if (command === 'plugin:os|platform') return 'linux';
-        if (command === 'moke_list_downloaded_books') return [];
+        if (command === 'moke_list_downloaded_books') return nativeOfflineBooks;
         return null;
       },
       transformCallback: () => nextCallbackId++,
@@ -83,17 +98,18 @@ async function installTauriHttpMock(page) {
       convertFileSrc: (path) => path,
     };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+    window.__MOKE_TEST_HTTP_REQUESTS__ = httpRequests;
 
     localStorage.setItem('moke-privacy-consent', '2026-08-14');
     localStorage.setItem('moke-server-storage', JSON.stringify({
       state: {
         serverUrl,
-        offlineMode: false,
+        offlineMode,
         protocol: 'https',
         host: 'books.test',
         port: '',
         hasHydrated: true,
-        isConnected: true,
+        isConnected: !offlineMode,
         user: null,
         capabilities: {
           shelfApi: true,
@@ -109,7 +125,7 @@ async function installTauriHttpMock(page) {
       },
       version: 0,
     }));
-  }, { serverUrl: SERVER_URL, bookId: BOOK_ID });
+  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, offlineMode });
 }
 
 for (const viewport of [
@@ -126,7 +142,7 @@ for (const viewport of [
     const download = page.getByTestId('offline-download-action');
     const cover = page.locator('.book-cover-shadow');
     await expect(group).toBeVisible();
-    await expect(online).toHaveText('在线阅读（EPUB）');
+    await expect(online).toHaveText('在线阅读');
     await expect(download).toHaveAttribute('aria-label', '下载后阅读');
     await expect(download).toHaveAttribute('title', '下载后阅读');
     await expect(download).toBeEnabled();
@@ -165,6 +181,46 @@ for (const viewport of [
 
     await page.screenshot({
       path: testInfo.outputPath(`detail-actions-${viewport.name}.png`),
+      fullPage: true,
+    });
+  });
+
+  test(`offline mode exposes only its local reading action on ${viewport.name}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await installTauriHttpMock(page, { offlineMode: true });
+    await page.goto(`http://127.0.0.1:3000/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+
+    const offlineRead = page.getByTestId('offline-read-primary-action');
+    const cover = page.locator('.book-cover-shadow');
+    await expect(offlineRead).toBeVisible();
+    await expect(offlineRead).toHaveText('离线阅读');
+    await expect(offlineRead).toHaveAttribute('aria-busy', 'false');
+    await expect(page.getByTestId('book-primary-action-group')).toHaveCount(0);
+    await expect(page.getByTestId('online-read-action')).toHaveCount(0);
+    await expect(page.getByTestId('offline-download-action')).toHaveCount(0);
+    await offlineRead.focus();
+    await expect(offlineRead).toBeFocused();
+
+    const layout = await page.evaluate(() => {
+      const action = document.querySelector('[data-testid="offline-read-primary-action"]');
+      const coverElement = document.querySelector('.book-cover-shadow');
+      const actionRect = action.getBoundingClientRect();
+      const coverRect = coverElement.getBoundingClientRect();
+      return {
+        actionWidth: actionRect.width,
+        actionHeight: actionRect.height,
+        coverWidth: coverRect.width,
+        httpRequests: window.__MOKE_TEST_HTTP_REQUESTS__.length,
+      };
+    });
+
+    expect(layout.actionWidth).toBeCloseTo(layout.coverWidth, 0);
+    expect(layout.actionHeight).toBe(44);
+    expect(layout.httpRequests).toBe(0);
+    await expect(cover).toBeVisible();
+
+    await page.screenshot({
+      path: testInfo.outputPath(`detail-actions-offline-${viewport.name}.png`),
       fullPage: true,
     });
   });

@@ -24,7 +24,7 @@ test('online opening does not enter the offline download manager', () => {
 
 test('primary actions keep the original width while download is a fixed icon button', () => {
   const groupStart = detail.indexOf('data-testid="book-primary-action-group"');
-  const groupEnd = detail.indexOf('{!onlineFormat &&', groupStart);
+  const groupEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', groupStart);
   assert.ok(groupStart >= 0 && groupEnd > groupStart);
   const group = detail.slice(groupStart, groupEnd);
 
@@ -39,4 +39,25 @@ test('primary actions keep the original width while download is a fixed icon but
   assert.match(group, /<Download className="h-4 w-4" \/>/);
   assert.match(group, /<Loader2 className="h-4 w-4 animate-spin" \/>/);
   assert.match(group, /<HardDrive className="h-4 w-4" \/>/);
+  assert.match(group, /onlineFormat \? '在线阅读' : '暂不支持在线阅读'/);
+  assert.doesNotMatch(group, /在线阅读\$\{bookFiles/);
+});
+
+test('offline mode exposes only the local primary action', () => {
+  const actionsStart = detail.indexOf('{offlineMode ? (');
+  const actionsEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', actionsStart);
+  assert.ok(actionsStart >= 0 && actionsEnd > actionsStart);
+  const actions = detail.slice(actionsStart, actionsEnd);
+
+  assert.match(actions, /data-testid="offline-read-primary-action"/);
+  assert.match(actions, /onClick=\{\(\) => void handleOfflineRead\(\)\}/);
+  assert.match(actions, /openingReader \? '打开中' : '离线阅读'/);
+  assert.ok(actions.indexOf('offline-read-primary-action') < actions.indexOf('book-primary-action-group'));
+
+  const handlerStart = detail.indexOf('const handleOfflineRead');
+  const remoteBranch = detail.indexOf('const useSystemReader', handlerStart);
+  const offlineHandler = detail.slice(handlerStart, remoteBranch);
+  assert.match(offlineHandler, /if \(offlineMode\) \{/);
+  assert.match(offlineHandler, /await openOfflineBook\(record, router\.push\)/);
+  assert.doesNotMatch(offlineHandler, /resolveTalebookOnlineSource|recordBookRead|request\(/);
 });
