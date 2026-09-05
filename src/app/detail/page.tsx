@@ -2,7 +2,7 @@
 
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Download, Loader2, Trash2 } from 'lucide-react';
 import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
@@ -118,6 +118,13 @@ function DetailContent() {
   const primaryFile = bookFiles[0];
   const fileFormats = bookFiles.map((file) => file.format.toUpperCase());
   const onlineFormat = bookFiles.some((file) => file.format === 'epub') ? 'EPUB' : null;
+  const downloadActionLabel = downloading
+    ? `下载中 ${downloadProgress}%`
+    : openingReader && !openingOnline
+      ? '打开中'
+      : downloaded
+        ? '离线阅读'
+        : '下载后阅读';
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
   const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
 
@@ -689,31 +696,46 @@ function DetailContent() {
 
             {isTauriApp ? (
               <>
-                <button
-                  onClick={() => void handleOnlineRead()}
-                  disabled={openingReader || !onlineFormat}
-                  className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 md:mt-6 md:w-[220px]"
+                <div
+                  data-testid="book-primary-action-group"
+                  className="mt-5 flex h-11 w-full flex-nowrap items-stretch gap-2 md:mt-6 md:w-[220px]"
                 >
-                  <BookOpen className="h-4 w-4" />
-                  {openingOnline ? '在线打开中' : onlineFormat ? `在线阅读${bookFiles.length > 1 ? `（${onlineFormat}）` : ''}` : '暂不支持在线阅读'}
-                </button>
-                <button
-                  onClick={() => void (downloaded ? handleOfflineRead() : handleDownload())}
-                  disabled={downloading || openingReader}
-                  className={`relative mt-3 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl border text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:opacity-60 md:w-[220px] ${downloading ? 'border-primary/20 bg-primary/10 text-foreground' : 'border-amber-950/10 bg-white/60 text-foreground hover:bg-muted'}`}
-                >
-                  {downloading && <span className="absolute inset-0 bg-primary/10" />}
-                  {downloading && (
-                    <span
-                      className="absolute inset-y-0 left-0 bg-primary/25 transition-[width] duration-150 ease-out"
-                      style={{ width: `${downloadProgress}%` }}
-                    />
-                  )}
-                  <span className="relative z-10 flex items-center justify-center gap-2">
-                    {downloaded && <HardDrive className="h-4 w-4" />}
-                    {downloading ? `下载中 ${downloadProgress}%` : openingReader && !openingOnline ? '打开中' : downloaded ? '离线阅读' : '下载后阅读'}
-                  </span>
-                </button>
+                  <button
+                    data-testid="online-read-action"
+                    onClick={() => void handleOnlineRead()}
+                    disabled={openingReader || !onlineFormat}
+                    className="inline-flex h-full min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <BookOpen className="h-4 w-4 shrink-0" />
+                    {openingOnline ? '在线打开中' : onlineFormat ? `在线阅读${bookFiles.length > 1 ? `（${onlineFormat}）` : ''}` : '暂不支持在线阅读'}
+                  </button>
+                  <button
+                    data-testid="offline-download-action"
+                    onClick={() => void (downloaded ? handleOfflineRead() : handleDownload())}
+                    disabled={downloading || openingReader}
+                    aria-label={downloadActionLabel}
+                    aria-busy={downloading || (openingReader && !openingOnline)}
+                    title={downloadActionLabel}
+                    className={`relative inline-flex h-full w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border transition-all duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 ${downloading ? 'border-primary/20 bg-primary/10 text-foreground' : 'border-amber-950/10 bg-white/60 text-foreground'}`}
+                  >
+                    {downloading && <span className="absolute inset-0 bg-primary/10" />}
+                    {downloading && (
+                      <span
+                        className="absolute inset-y-0 left-0 bg-primary/25 transition-[width] duration-150 ease-out"
+                        style={{ width: `${downloadProgress}%` }}
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center justify-center" aria-hidden="true">
+                      {downloading || (openingReader && !openingOnline) ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : downloaded ? (
+                        <HardDrive className="h-4 w-4" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                    </span>
+                  </button>
+                </div>
                 {!onlineFormat && (
                   <p className="mt-2 w-full px-1 text-xs leading-relaxed text-muted-foreground md:w-[220px]">
                     当前格式需先下载到本地再阅读。

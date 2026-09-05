@@ -21,3 +21,22 @@ test('online opening does not enter the offline download manager', () => {
   assert.doesNotMatch(onlineHandler, /startOfflineDownload|downloadAndSaveOfflineBook|saveOfflineBook/);
   assert.match(onlineHandler, /onlineReadingErrorMessage/);
 });
+
+test('primary actions keep the original width while download is a fixed icon button', () => {
+  const groupStart = detail.indexOf('data-testid="book-primary-action-group"');
+  const groupEnd = detail.indexOf('{!onlineFormat &&', groupStart);
+  assert.ok(groupStart >= 0 && groupEnd > groupStart);
+  const group = detail.slice(groupStart, groupEnd);
+
+  assert.match(group, /className="mt-5 flex h-11 w-full flex-nowrap items-stretch gap-2 md:mt-6 md:w-\[220px\]"/);
+  assert.match(group, /data-testid="online-read-action"[\s\S]*?onClick=\{\(\) => void handleOnlineRead\(\)\}/);
+  assert.match(group, /data-testid="online-read-action"[\s\S]*?className="[^"]*h-full min-w-0 flex-1[^"]*whitespace-nowrap/);
+  assert.match(group, /data-testid="offline-download-action"[\s\S]*?onClick=\{\(\) => void \(downloaded \? handleOfflineRead\(\) : handleDownload\(\)\)\}/);
+  assert.match(group, /aria-label=\{downloadActionLabel\}/);
+  assert.match(group, /aria-busy=\{downloading \|\| \(openingReader && !openingOnline\)\}/);
+  assert.match(group, /title=\{downloadActionLabel\}/);
+  assert.match(group, /className=\{`[^`]*h-full w-11 shrink-0/);
+  assert.match(group, /<Download className="h-4 w-4" \/>/);
+  assert.match(group, /<Loader2 className="h-4 w-4 animate-spin" \/>/);
+  assert.match(group, /<HardDrive className="h-4 w-4" \/>/);
+});
