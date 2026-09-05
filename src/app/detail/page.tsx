@@ -42,6 +42,10 @@ import {
 } from '@/lib/annotations';
 import { shouldRequestBookAnnotations } from '@/lib/annotation-access';
 import { openBookWithSystemDefault, openOfflineBook } from '@/lib/open-offline-book';
+import {
+  onlineReadingErrorMessage,
+  resolveTalebookOnlineSource,
+} from '@/lib/online-reading';
 
 interface BookDetail {
   id: string;
@@ -86,6 +90,7 @@ function DetailContent() {
   const [deletingDownload, setDeletingDownload] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [openingReader, setOpeningReader] = useState(false);
+  const [openingOnline, setOpeningOnline] = useState(false);
   const [inShelf, setInShelf] = useState(false);
   const [shelfUpdating, setShelfUpdating] = useState(false);
   const [message, setMessage] = useState('');
@@ -95,6 +100,7 @@ function DetailContent() {
   const loadBookSeqRef = useRef(0);
   const loadBookControllerRef = useRef<AbortController | null>(null);
   const openingReaderRef = useRef(false);
+  const onlineOpenControllerRef = useRef<AbortController | null>(null);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -111,6 +117,7 @@ function DetailContent() {
   );
   const primaryFile = bookFiles[0];
   const fileFormats = bookFiles.map((file) => file.format.toUpperCase());
+  const onlineFormat = bookFiles.some((file) => file.format === 'epub') ? 'EPUB' : null;
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
   const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
 
@@ -123,6 +130,7 @@ function DetailContent() {
     loadBook(controller);
     return () => {
       controller.abort();
+      onlineOpenControllerRef.current?.abort();
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
   }, [id, offlineMode, serverUrl]);
@@ -394,6 +402,88 @@ function DetailContent() {
     }
   };
 
+  const handleOnlineRead = async () => {
+    if (!book || !onlineFormat) {
+      setMessage('当前书籍格式暂不支持在线阅读，请下载后阅读。');
+      return;
+    }
+    const openingMessage = '正在连接在线阅读，请稍候。';
+    if (openingReaderRef.current) {
+      setMessage(openingMessage);
+      return;
+    }
+
+    const controller = new AbortController();
+    onlineOpenControllerRef.current?.abort();
+    onlineOpenControllerRef.current = controller;
+    openingReaderRef.current = true;
+    setOpeningReader(true);
+    setOpeningOnline(true);
+    setMessage('');
+
+    const finishOpening = () => {
+      if (onlineOpenControllerRef.current === controller) {
+        onlineOpenControllerRef.current = null;
+      }
+      openingReaderRef.current = false;
+      setOpeningReader(false);
+      setOpeningOnline(false);
+      setMessage((current) => current === openingMessage ? '' : current);
+    };
+
+    try {
+      const [source, restoreProgress, currentPlatform] = await Promise.all([
+        resolveTalebookOnlineSource(request, serverUrl, book.id, controller.signal),
+        fetchReadingProgress(book.id),
+        getMokeRuntimePlatform(),
+      ]);
+      if (controller.signal.aborted) return;
+
+      if (isSingleWebviewRuntime(currentPlatform)) {
+        const href = buildEmbeddedReaderUrl({
+          filePath: source.url,
+          eink: useSettingsStore.getState().eink,
+          debugPanel: getDebugPanelLaunchState(),
+          mokeBookId: String(book.id),
+          restoreProgress,
+          serverUrl: useServerStore.getState().serverUrl,
+          sourceServerUrl: serverUrl,
+        });
+        await openEmbeddedReaderBook(href, router.push, currentPlatform);
+        return;
+      }
+
+      await openAndRecordBookRead({
+        open: async () => {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('open_reader', {
+            filePath: source.url,
+            eink: useSettingsStore.getState().eink,
+            debugPanel: getDebugPanelLaunchState(),
+            mokeBookId: String(book.id),
+            restoreProgress,
+            mokeSourceServerUrl: serverUrl,
+          });
+        },
+        onOpened: () => {
+          setOpeningReader(false);
+          setOpeningOnline(false);
+        },
+        record: () => recordBookRead(request, serverUrl, book.id),
+        onRecordError: (error) => {
+          console.warn('Online book opened, but the read record could not be saved:', error);
+          setMessage('书籍已在线打开，但阅读记录同步失败。');
+        },
+      });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      console.warn('Failed to open online book:', error);
+      setMessage(onlineReadingErrorMessage(error));
+    } finally {
+      finishOpening();
+    }
+  };
+
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (!book) return;
     const openingMessage = '正在打开书籍，请稍候。';
@@ -600,22 +690,35 @@ function DetailContent() {
             {isTauriApp ? (
               <>
                 <button
+                  onClick={() => void handleOnlineRead()}
+                  disabled={openingReader || !onlineFormat}
+                  className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 md:mt-6 md:w-[220px]"
+                >
+                  <BookOpen className="h-4 w-4" />
+                  {openingOnline ? '在线打开中' : onlineFormat ? `在线阅读${bookFiles.length > 1 ? `（${onlineFormat}）` : ''}` : '暂不支持在线阅读'}
+                </button>
+                <button
                   onClick={() => void (downloaded ? handleOfflineRead() : handleDownload())}
                   disabled={downloading || openingReader}
-                  className={`relative mt-5 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl text-sm font-semibold shadow-md transition-all duration-200 active:scale-[0.98] hover:shadow-lg disabled:opacity-100 md:mt-6 md:w-[220px] ${downloading ? 'border border-primary/15 bg-primary/15 text-primary-foreground' : 'bg-primary text-primary-foreground hover:bg-primary/90'}`}
+                  className={`relative mt-3 inline-flex h-11 w-full items-center justify-center overflow-hidden rounded-xl border text-sm font-semibold transition-all duration-200 active:scale-[0.98] disabled:opacity-60 md:w-[220px] ${downloading ? 'border-primary/20 bg-primary/10 text-foreground' : 'border-amber-950/10 bg-white/60 text-foreground hover:bg-muted'}`}
                 >
-                  {downloading && <span className="absolute inset-0 bg-primary/15" />}
+                  {downloading && <span className="absolute inset-0 bg-primary/10" />}
                   {downloading && (
                     <span
-                      className="absolute inset-y-0 left-0 bg-primary transition-[width] duration-150 ease-out"
+                      className="absolute inset-y-0 left-0 bg-primary/25 transition-[width] duration-150 ease-out"
                       style={{ width: `${downloadProgress}%` }}
                     />
                   )}
-                  <span className="relative z-10 flex items-center justify-center gap-2 text-primary-foreground">
-                    {downloaded && <BookOpen className="w-4 h-4" />}
-                    {downloading ? `下载中 ${downloadProgress}%` : openingReader ? '打开中' : downloaded ? '阅读' : '下载'}
+                  <span className="relative z-10 flex items-center justify-center gap-2">
+                    {downloaded && <HardDrive className="h-4 w-4" />}
+                    {downloading ? `下载中 ${downloadProgress}%` : openingReader && !openingOnline ? '打开中' : downloaded ? '离线阅读' : '下载后阅读'}
                   </span>
                 </button>
+                {!onlineFormat && (
+                  <p className="mt-2 w-full px-1 text-xs leading-relaxed text-muted-foreground md:w-[220px]">
+                    当前格式需先下载到本地再阅读。
+                  </p>
+                )}
                 {bookFiles.length > 1 && !downloaded && (
                   <div className="mt-3 w-full md:w-[220px]">
                     <div className="flex flex-wrap gap-1.5">

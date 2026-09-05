@@ -206,6 +206,12 @@ test('Web 与 Tauri 平台分支生成不同的安全请求配置', () => {
   assert.equal(options.method, 'POST');
   assert.equal(options.credentials, 'include');
   assert.equal(options.maxRedirections, 5);
+  assert.equal(
+    buildTauriRequestInit({ maxRedirections: 0 }).maxRedirections,
+    0,
+    'security-sensitive source requests must be able to disable redirects',
+  );
+  assert.equal(buildTauriRequestInit({ maxRedirections: -1 }).maxRedirections, 5);
   assert.deepEqual(options.danger, {
     acceptInvalidCerts: true,
     acceptInvalidHostnames: true,

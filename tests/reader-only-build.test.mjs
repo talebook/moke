@@ -72,6 +72,9 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   assert.equal(contract.id, 'moke.readest.embed.v1');
   assert.equal(contract.readerRoute, '/readest/reader');
   assert.equal(contract.progressApi.credentials, 'include');
+  assert.equal(contract.onlineSource.rangeRequired, true);
+  assert.equal(contract.onlineSource.redirects, 0);
+  assert.deepEqual(contract.onlineSource.formats, ['epub']);
   assert.ok(contract.readerEvents.includes('reader:error'));
   assert.match(rootPackage.scripts['build:reader'], /build:moke-reader/);
   assert.equal(rootPackage.scripts['dev:reader'], 'cd readest && pnpm dev');
@@ -95,6 +98,10 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   assert.match(tauriHost, /cfg\(all\(feature = "reader-e2e", debug_assertions\)\)/);
   assert.match(tauriHost, /tauri_plugin_webdriver::init\(\)/);
   assert.match(tauriHost, /http:\/\/localhost:3001\/readest\/\*\*/);
+  assert.match(
+    tauriHost,
+    /cfg!\(feature = "reader-e2e"\)[\s\S]*http:\/\/localhost:3001\/\*\*/,
+  );
 });
 
 test('Moke ACL command manifest stays aligned with the merged readestlib handler', () => {
