@@ -61,6 +61,6 @@ test('runtime persistence stores enablement metadata but no token field', () => 
   const lifecycle = read('src-tauri/src/extensions/lifecycle.rs');
   const persisted = lifecycle.match(/struct PersistedExtension \{([\s\S]*?)\n\}/)?.[1] ?? '';
   assert.doesNotMatch(persisted, /token/);
-  assert.match(lifecycle, /let session_token = generate_token\(\)/);
-  assert.match(lifecycle, /Permissions::from_mode\(0o600\)/);
+  // Token rotation, actual file permissions, legacy migration and replacement
+  // failure are exercised by the Rust lifecycle tests.
 });

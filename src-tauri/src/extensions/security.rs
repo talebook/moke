@@ -90,6 +90,7 @@ mod tests {
             (
                 "reader-tools".into(),
                 EnabledExtension {
+                    permissions: vec![],
                     token: "session-a".into(),
                     port: 24001,
                     backend: Mutex::new(None),
@@ -98,6 +99,7 @@ mod tests {
             (
                 "headless".into(),
                 EnabledExtension {
+                    permissions: vec![],
                     token: "session-b".into(),
                     port: 0,
                     backend: Mutex::new(None),
@@ -151,6 +153,7 @@ mod tests {
         enabled.insert(
             "duplicate".into(),
             EnabledExtension {
+                permissions: vec![],
                 token: "session-c".into(),
                 port: 24001,
                 backend: Mutex::new(None),

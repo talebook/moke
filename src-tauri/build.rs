@@ -34,14 +34,33 @@ const APP_ACL_COMMANDS: &[&str] = &[
     "ext_reader_event",
 ];
 
+// Privileged extension administration belongs only to the Moke main WebView.
+// Keep it separate from the embedded Reader's command contract above.
+const EXTENSION_ACL_COMMANDS: &[&str] = &[
+    "ext_list_extensions",
+    "ext_prepare_import",
+    "ext_commit_import",
+    "ext_cancel_import",
+    "ext_enable_extension",
+    "ext_disable_extension",
+    "ext_uninstall_extension",
+    "ext_get_api_port",
+    "ext_get_extensions_dir",
+    "ext_diagnostics",
+];
+
 fn main() {
     // Readest's bare app-level commands are linked through a Rust library, so
     // its app ACL manifest cannot propagate like a plugin `links` manifest.
     // Declare that command surface in the embedding host; Reader capabilities
     // can then grant it to both bundled and debug-remote Reader windows.
-    let attributes = tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(APP_ACL_COMMANDS),
+    let commands = Box::leak(
+        [APP_ACL_COMMANDS, EXTENSION_ACL_COMMANDS]
+            .concat()
+            .into_boxed_slice(),
     );
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(commands));
 
     // Desktop capabilities reference plugins that are unavailable on OHOS, so
     // only compile the platform-specific capability. Device dev servers run on

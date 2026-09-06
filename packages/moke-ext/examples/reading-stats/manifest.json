@@ -1,6 +1,6 @@
 {
   "name": "reading-stats",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_version": "1",
   "display_name": "阅读统计",
   "description": "示例拓展：展示阅读时长、进度和翻页统计",

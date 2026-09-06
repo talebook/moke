@@ -31,6 +31,7 @@ export interface ExtensionInfo {
   description: string;
   author: string;
   enabled: boolean;
+  resumePending?: boolean;
   /** 拓展后端端口（仅 enabled 时有效） */
   port: number;
   permissions: string[];
@@ -84,7 +85,7 @@ const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 let extensionsRuntimeChecked = false;
 let extensionsRuntimeAvailable = false;
 
-async function canUseExtensions(): Promise<boolean> {
+export async function canUseExtensions(): Promise<boolean> {
   if (!isTauri) return false;
   if (!extensionsRuntimeChecked) {
     extensionsRuntimeChecked = true;
@@ -120,6 +121,7 @@ interface RawExtension {
   description: string;
   author: string;
   enabled: boolean;
+  resume_pending: boolean;
   port: number;
   permissions: string[];
   sidebar: { label: string; icon: string; order: number } | null;
@@ -150,6 +152,7 @@ function mapExtension(raw: RawExtension): ExtensionInfo {
     description: raw.description,
     author: raw.author,
     enabled: raw.enabled,
+    resumePending: raw.resume_pending,
     port: raw.port,
     permissions: raw.permissions,
     sidebar: raw.sidebar,
@@ -236,3 +239,17 @@ export const useExtensionStore = create<ExtensionState>()((set, get) => ({
 
   getSidebarExtensions: () => getSidebarExtensions(get().extensions),
 }));
+
+export interface ImportPreview { ticket: string; extension: ExtensionInfo }
+export async function prepareExtensionImport(): Promise<ImportPreview | null> {
+  if (!(await canUseExtensions())) throw new Error('ZIP 扩展导入仅支持 Windows、macOS 和 Linux 桌面版');
+  const result = await invokeExt<{ ticket: string; extension: RawExtension } | null>('ext_prepare_import');
+  return result ? { ticket: result.ticket, extension: mapExtension(result.extension) } : null;
+}
+export async function cancelExtensionImport(ticket: string): Promise<void> {
+  await invokeExt('ext_cancel_import', { ticket });
+}
+export async function commitExtensionImport(preview: ImportPreview): Promise<void> {
+  await invokeExt('ext_commit_import', { ticket: preview.ticket, packageDigest: preview.extension.trust.packageDigest });
+  await useExtensionStore.getState().loadExtensions();
+}

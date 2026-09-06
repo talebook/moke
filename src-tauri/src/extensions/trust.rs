@@ -14,7 +14,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const TRUST_FILE: &str = "trust.json";
-const TRUST_TMP_FILE: &str = "trust.tmp";
 const SIGNATURE_FILE: &str = "signature.json";
 const SIGNATURE_CONTEXT: &str = "moke-extension-signature-v1";
 const PACKAGE_CONTEXT: &[u8] = b"moke-extension-package-v1\0";
@@ -131,8 +130,8 @@ pub fn evaluate_installed(
 }
 
 /// Re-evaluate immediately before activation and bind a matching explicit
-/// approval to the current package. This digest check closes the UI/IPC TOCTOU
-/// window: a confirmation for one package cannot enable different bytes.
+/// approval to the current package. This rejects stale UI confirmations, but
+/// does not protect against arbitrary same-user filesystem/process tampering.
 pub fn authorize_activation(
     extensions_dir: &Path,
     ext_dir: &Path,
@@ -144,6 +143,10 @@ pub fn authorize_activation(
 
     if let Some(reason) = &result.public.blocked_reason {
         return Err(format!("拓展安全校验阻断: {reason}"));
+    }
+
+    if approved_digest.is_some_and(|digest| digest != result.public.package_digest) {
+        return Err("确认的包摘要已变化，请重新确认".into());
     }
 
     if result.public.requires_approval
@@ -421,8 +424,12 @@ fn verify_signature(
     if !signature_path.exists() {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(&signature_path)
-        .map_err(|error| format!("无法读取 signature.json: {error}"))?;
+    let mut raw = String::new();
+    File::open(&signature_path)
+        .map_err(|e| e.to_string())?
+        .take(32 * 1024 + 1)
+        .read_to_string(&mut raw)
+        .map_err(|e| e.to_string())?;
     if raw.len() > 32 * 1024 {
         return Err("signature.json 过大".into());
     }
@@ -509,39 +516,42 @@ fn signature_payload(manifest: &Manifest, key_id: &str, package_digest: &str) ->
     )
 }
 
-fn package_digest(ext_dir: &Path) -> Result<String, String> {
+pub(super) fn package_digest(ext_dir: &Path) -> Result<String, String> {
     let mut files = Vec::new();
     collect_package_files(ext_dir, ext_dir, &mut files, 0)?;
-    files.sort();
+    let mut files = files
+        .into_iter()
+        .map(|p| super::package_path::normalized_relative(&p))
+        .collect::<Result<Vec<_>, _>>()?;
+    files.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
 
     let mut package = digest::Context::new(&digest::SHA256);
     package.update(PACKAGE_CONTEXT);
     let mut package_bytes = 0u64;
     for relative in files {
         let full_path = ext_dir.join(&relative);
-        let file_bytes = std::fs::metadata(&full_path)
-            .map_err(|error| format!("无法读取 {} 元数据: {error}", relative.display()))?
-            .len();
-        package_bytes = package_bytes
-            .checked_add(file_bytes)
-            .ok_or_else(|| "拓展包大小溢出".to_string())?;
-        if package_bytes > MAX_PACKAGE_BYTES {
-            return Err("拓展包超过 1 GiB 安全上限".into());
-        }
-        let mut file = File::open(&full_path)
-            .map_err(|error| format!("无法读取 {}: {error}", relative.display()))?;
+        let mut file =
+            File::open(&full_path).map_err(|error| format!("无法读取 {}: {error}", relative))?;
         let mut file_digest = digest::Context::new(&digest::SHA256);
         let mut buffer = [0u8; 64 * 1024];
+        let mut file_bytes = 0u64;
         loop {
             let read = file
                 .read(&mut buffer)
-                .map_err(|error| format!("无法读取 {}: {error}", relative.display()))?;
+                .map_err(|error| format!("无法读取 {}: {error}", relative))?;
             if read == 0 {
                 break;
             }
+            file_bytes += read as u64;
+            if file_bytes > 256 * 1024 * 1024 {
+                return Err("拓展单文件超过 256 MiB".into());
+            }
+            package_bytes += read as u64;
+            if package_bytes > MAX_PACKAGE_BYTES {
+                return Err("拓展包超过 1 GiB 安全上限".into());
+            }
             file_digest.update(&buffer[..read]);
         }
-        let relative = relative.to_string_lossy().replace('\\', "/");
         package.update(relative.as_bytes());
         package.update(b"\0");
         package.update(file_digest.finish().as_ref());
@@ -570,8 +580,11 @@ fn collect_package_files(
             .strip_prefix(root)
             .map_err(|_| "拓展文件逃逸出安装目录".to_string())?
             .to_path_buf();
-        if metadata.file_type().is_symlink() {
-            return Err(format!("拓展包不允许符号链接: {}", relative.display()));
+        if metadata.file_type().is_symlink() || (!metadata.is_file() && !metadata.is_dir()) {
+            return Err(format!(
+                "拓展包不允许链接或特殊文件: {}",
+                relative.display()
+            ));
         }
         if metadata.is_dir() {
             collect_package_files(root, &path, files, depth + 1)?;
@@ -619,20 +632,7 @@ fn load_store(extensions_dir: &Path) -> TrustStore {
 fn save_store(extensions_dir: &Path, store: &TrustStore) -> Result<(), String> {
     let json = serde_json::to_string_pretty(store)
         .map_err(|error| format!("序列化拓展信任记录失败: {error}"))?;
-    let temporary = extensions_dir.join(TRUST_TMP_FILE);
-    let target = extensions_dir.join(TRUST_FILE);
-    std::fs::write(&temporary, json).map_err(|error| format!("写入拓展信任记录失败: {error}"))?;
-    if let Err(error) = std::fs::rename(&temporary, &target) {
-        if target.exists() {
-            std::fs::remove_file(&target)
-                .map_err(|remove_error| format!("替换拓展信任记录失败: {remove_error}"))?;
-            std::fs::rename(&temporary, &target)
-                .map_err(|rename_error| format!("替换拓展信任记录失败: {rename_error}"))?;
-        } else {
-            return Err(format!("保存拓展信任记录失败: {error}"));
-        }
-    }
-    Ok(())
+    super::lifecycle::atomic_write(&extensions_dir.join(TRUST_FILE), json.as_bytes())
 }
 
 fn permission_difference(left: &[String], right: &[String]) -> Vec<String> {
@@ -652,7 +652,7 @@ fn sorted(mut values: Vec<String>) -> Vec<String> {
     values
 }
 
-fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+pub(super) fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
     let parse = |version: &str| -> [u64; 3] {
         let mut parts = version
             .split('.')
@@ -704,6 +704,52 @@ mod tests {
     use ring::rand::SystemRandom;
     use ring::signature::{Ed25519KeyPair, KeyPair};
 
+    #[test]
+    fn verifies_node_signed_golden_package() {
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/signed-extension-v1");
+        let manifest =
+            super::super::discovery::read_and_validate_manifest(&fixture.join("manifest.json"))
+                .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let evaluation = evaluate_installed(root.path(), &fixture, &manifest);
+        assert_eq!(evaluation.signature_status, "unknown_publisher");
+        assert!(evaluation.blocked_reason.is_none());
+        assert!(evaluation.requires_approval);
+    }
+
+    #[test]
+    fn shared_node_rust_digest_vector() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/extension-digest-v1.json"
+        ))
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        for (path, content) in vector["files"].as_object().unwrap() {
+            let dest = root.path().join(path);
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(dest, content.as_str().unwrap()).unwrap();
+        }
+        assert_eq!(
+            package_digest(root.path()).unwrap(),
+            vector["sha256"].as_str().unwrap()
+        );
+        let mut normalized = Vec::new();
+        for path in vector["windows_paths"].as_array().unwrap() {
+            let path = path.as_str().unwrap();
+            #[cfg(windows)]
+            let native = PathBuf::from(path);
+            #[cfg(not(windows))]
+            let native = PathBuf::from(path.replace('\\', "/"));
+            normalized.push(super::super::package_path::normalized_relative(&native).unwrap());
+        }
+        normalized.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+        assert_eq!(
+            serde_json::to_value(normalized).unwrap(),
+            vector["ordered_paths"]
+        );
+    }
+
     fn fixture_dir(label: &str) -> PathBuf {
         let path =
             std::env::temp_dir().join(format!("moke-trust-{label}-{}", uuid::Uuid::new_v4()));
@@ -727,6 +773,11 @@ mod tests {
             entry: backend.then(|| EntryConfig {
                 ui_port: 0,
                 backend: Some(BackendConfig {
+                    targets: vec![format!(
+                        "{}-{}",
+                        std::env::consts::OS,
+                        std::env::consts::ARCH
+                    )],
                     executable: "backend.exe".into(),
                     args: Vec::new(),
                 }),

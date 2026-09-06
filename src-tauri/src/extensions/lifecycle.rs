@@ -36,13 +36,19 @@ pub fn generate_token() -> String {
 }
 
 pub fn allocate_port(next_port: &Arc<AtomicU16>, port_range_start: u16) -> u16 {
-    let port = next_port.fetch_add(1, Ordering::SeqCst);
-    if port > PORT_MAX {
-        next_port.store(port_range_start + 1, Ordering::SeqCst);
-        port_range_start
-    } else {
-        port
+    for _ in 0..(PORT_MAX - PORT_MIN + 1) {
+        let port = next_port.fetch_add(1, Ordering::SeqCst);
+        if port > PORT_MAX {
+            next_port.store(port_range_start, Ordering::SeqCst);
+            continue;
+        }
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return port;
+        }
     }
+    // Binding a probe cannot reserve a port across child spawn; the backend
+    // reports bind failure. Zero signals exhaustion to the caller.
+    0
 }
 
 pub fn reserve_after_port(next_port: &Arc<AtomicU16>, used_port: u16) {
@@ -75,13 +81,11 @@ pub fn start_backend(
     api_port: u16,
     ws_port: u16,
 ) -> Result<std::process::Child, String> {
+    super::installer::validate_binary(ext_dir, backend)?;
     let exe_path = ext_dir.join(&backend.executable);
 
     if !exe_path.is_file() {
-        return Err(format!(
-            "后端可执行文件不存在: {}",
-            exe_path.display()
-        ));
+        return Err(format!("后端可执行文件不存在: {}", exe_path.display()));
     }
     let metadata = std::fs::symlink_metadata(&exe_path)
         .map_err(|e| format!("无法读取后端文件元数据「{}」: {e}", exe_path.display()))?;
@@ -104,6 +108,12 @@ pub fn start_backend(
         .collect();
 
     // 构建最小化环境变量（防止拓展后端继承敏感环境变量）
+    let data_dir = ext_dir
+        .parent()
+        .ok_or("扩展目录无父目录")?
+        .join(".data")
+        .join(ext_dir.file_name().ok_or("扩展目录无名称")?);
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new(&exe_path);
     cmd.args(&args)
         .current_dir(ext_dir)
@@ -115,9 +125,14 @@ pub fn start_backend(
         )
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         // 传递 token 和宿主服务端口，拓展后端可通过环境变量获取
+        .env("MOKE_EXT_DATA_DIR", &data_dir)
         .env("MOKE_EXT_TOKEN", token)
         .env("MOKE_API_PORT", api_port.to_string())
         .env("MOKE_WS_PORT", ws_port.to_string());
+
+    if let Some(legacy) = super::installer::legacy_directory(ext_dir) {
+        cmd.env("MOKE_EXT_LEGACY_DIR", legacy);
+    }
 
     // Windows: 隐藏后端进程窗口
     #[cfg(target_os = "windows")]
@@ -173,31 +188,18 @@ pub fn secure_extensions_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).truncate(true).write(true);
+/// Keep the previous state intact if replacement fails (including Windows sharing violations).
+pub(super) fn atomic_write(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path.parent().ok_or("状态文件缺少父目录")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    temp.write_all(contents).map_err(|e| e.to_string())?;
+    temp.as_file().sync_all().map_err(|e| e.to_string())?;
+    temp.persist(path)
+        .map_err(|e| format!("替换状态失败，旧文件保持不变: {e}"))?;
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .map_err(|error| format!("写入临时状态文件失败: {error}"))?;
-    file.write_all(contents)
-        .map_err(|error| format!("写入临时状态文件失败: {error}"))?;
-    file.sync_all()
-        .map_err(|error| format!("同步临时状态文件失败: {error}"))?;
-    Ok(())
-}
-
-fn restrict_file_permissions(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("限制运行时状态文件权限失败: {error}"))?;
-    }
+    std::fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -208,18 +210,14 @@ pub fn save_runtime_state(
 ) -> Result<(), String> {
     let enabled = enabled_map.lock().unwrap();
 
-    let persisted: HashMap<String, PersistedExtension> = enabled
+    let current: HashMap<String, PersistedExtension> = enabled
         .iter()
-        .map(|(name, ext)| {
-            (
-                name.clone(),
-                PersistedExtension {
-                    port: ext.port,
-                },
-            )
-        })
+        .map(|(name, ext)| (name.clone(), PersistedExtension { port: ext.port }))
         .collect();
 
+    // Preserve desired enablement of extensions that failed closed at startup.
+    let mut persisted = read_desired(extensions_dir);
+    persisted.extend(current);
     let state = RuntimeStateFile { enabled: persisted };
 
     let json =
@@ -227,19 +225,26 @@ pub fn save_runtime_state(
 
     let path = extensions_dir.join(RUNTIME_STATE_FILE);
 
-    // 先以仅当前用户可读写的权限写临时文件，再原子替换。旧版本
-    // runtime.json 中的 token 会在这次保存后被迁移移除。
-    let tmp_path = extensions_dir.join("runtime.tmp");
-    write_private_file(&tmp_path, json.as_bytes())?;
-    #[cfg(target_os = "windows")]
-    if path.exists() {
-        // std::fs::rename does not replace an existing destination on Windows.
-        std::fs::remove_file(&path).map_err(|e| format!("移除旧状态文件失败: {e}"))?;
-    }
-    std::fs::rename(&tmp_path, &path).map_err(|e| format!("替换状态文件失败: {e}"))?;
-    restrict_file_permissions(&path)?;
+    atomic_write(&path, json.as_bytes())
+}
 
-    Ok(())
+fn read_desired(root: &Path) -> HashMap<String, PersistedExtension> {
+    std::fs::read(root.join(RUNTIME_STATE_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<RuntimeStateFile>(&raw).ok())
+        .map(|s| s.enabled)
+        .unwrap_or_default()
+}
+pub(super) fn desired_names(root: &Path) -> Vec<String> {
+    read_desired(root).into_keys().collect()
+}
+pub(super) fn forget_desired(root: &Path, name: &str) -> Result<(), String> {
+    let mut enabled = read_desired(root);
+    enabled.remove(name);
+    atomic_write(
+        &root.join(RUNTIME_STATE_FILE),
+        &serde_json::to_vec(&RuntimeStateFile { enabled }).map_err(|e| e.to_string())?,
+    )
 }
 
 /// 从持久化文件恢复运行时状态（用于初始化）。
@@ -267,14 +272,23 @@ pub fn restore_runtime_state_inner(
         Ok(s) => s,
         Err(e) => {
             log::warn!("运行时状态文件解析失败: {e}");
-            let _ = std::fs::remove_file(&path);
             return restored_ports;
         }
     };
 
+    // Strip legacy tokens while preserving desired enablement, before any spawn.
+    if let Ok(clean) = serde_json::to_vec(&state) {
+        if let Err(e) = atomic_write(&path, &clean) {
+            log::warn!("无法迁移运行时状态: {e}");
+            return restored_ports;
+        }
+    }
     let mut enabled = enabled_map.lock().unwrap();
 
     for (name, persisted) in state.enabled {
+        if validate_extension_name(&name).is_err() {
+            continue;
+        }
         let manifest_path = extensions_dir.join(&name).join("manifest.json");
 
         if !manifest_path.exists() {
@@ -282,7 +296,8 @@ pub fn restore_runtime_state_inner(
             continue;
         }
 
-        let manifest: Manifest = match super::discovery::read_and_validate_manifest(&manifest_path) {
+        let manifest: Manifest = match super::discovery::read_and_validate_manifest(&manifest_path)
+        {
             Ok(manifest) => manifest,
             Err(error) => {
                 log::warn!("拓展「{name}」的 manifest.json 无效，跳过恢复: {error}");
@@ -290,13 +305,13 @@ pub fn restore_runtime_state_inner(
             }
         };
 
+        if manifest.name != name || super::installer::check_platform(&manifest).is_err() {
+            continue;
+        }
         let ext_dir = extensions_dir.join(&name);
-        if let Err(error) = super::trust::authorize_activation(
-            extensions_dir,
-            &ext_dir,
-            &manifest,
-            None,
-        ) {
+        if let Err(error) =
+            super::trust::authorize_activation(extensions_dir, &ext_dir, &manifest, None)
+        {
             log::warn!("拓展「{name}」的包、来源或权限已变化，保持禁用: {error}");
             continue;
         }
@@ -349,15 +364,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn failed_state_replace_preserves_old_target() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("trust.json");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("old"), b"keep").unwrap();
+        assert!(atomic_write(&path, b"new").is_err());
+        assert_eq!(std::fs::read(path.join("old")).unwrap(), b"keep");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_sharing_violation_preserves_state() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("runtime.json");
+        std::fs::write(&path, b"old").unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&path)
+            .unwrap();
+        assert!(atomic_write(&path, b"new").is_err());
+        drop(handle);
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+    }
+    #[test]
+    fn unknown_publisher_preserves_desired_enablement_without_api_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/signed-extension-v1");
+        let directory = root.path().join("signed-fixture");
+        std::fs::create_dir_all(directory.join("a")).unwrap();
+        for file in ["manifest.json", "signature.json", "a.z", "a/x"] {
+            std::fs::copy(fixture.join(file), directory.join(file)).unwrap();
+        }
+        std::fs::write(
+            root.path().join("runtime.json"),
+            br#"{"enabled":{"signed-fixture":{"port":0,"token":"old-secret"}}}"#,
+        )
+        .unwrap();
+        let enabled = Arc::new(Mutex::new(HashMap::new()));
+        restore_runtime_state_inner(root.path(), &enabled, 0, 0);
+        assert!(enabled.lock().unwrap().is_empty());
+        assert!(desired_names(root.path()).contains(&"signed-fixture".into()));
+        assert!(!std::fs::read_to_string(root.path().join("runtime.json"))
+            .unwrap()
+            .contains("old-secret"));
+    }
+
+    #[test]
     fn tokens_rotate_and_are_not_persisted() {
         let first = generate_token();
         let second = generate_token();
         assert_ne!(first, second);
 
-        let directory = std::env::temp_dir().join(format!(
-            "moke-extension-runtime-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("moke-extension-runtime-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let enabled = Arc::new(Mutex::new(HashMap::from([(
             "sample-extension".into(),

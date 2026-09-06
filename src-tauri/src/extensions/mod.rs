@@ -5,10 +5,13 @@
 mod api_server;
 mod discovery;
 mod events;
+mod installer;
 mod lifecycle;
+mod package_path;
 mod permissions;
 mod security;
 mod storage;
+mod transport;
 mod trust;
 
 use std::collections::HashMap;
@@ -28,6 +31,10 @@ use tauri::Manager;
 
 /// 拓展系统的运行时状态。
 pub struct ExtensionRuntime {
+    operations: Arc<Mutex<()>>,
+    installer: Mutex<installer::Installer>,
+    recovery_error: Option<String>,
+    _directory_lock: Option<std::fs::File>,
     /// 已启用的拓展：name → EnabledExtension
     pub enabled: Arc<Mutex<HashMap<String, EnabledExtension>>>,
     /// 下一个可分配给拓展的端口
@@ -72,6 +79,7 @@ pub struct ExtensionInfo {
     pub description: String,
     pub author: String,
     pub enabled: bool,
+    pub resume_pending: bool,
     /// 拓展后端监听的端口（仅 enabled 时有效）
     pub port: u16,
     pub permissions: Vec<String>,
@@ -146,6 +154,8 @@ pub struct EntryConfig {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackendConfig {
+    #[serde(default)]
+    pub targets: Vec<String>,
     pub executable: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -183,14 +193,27 @@ fn start_extension_backend(
     }
 
     let Some(backend) = &entry.backend else {
-        return Ok((lifecycle::allocate_port(&state.next_port, state.port_range_start), None));
+        return Ok((
+            lifecycle::allocate_port(&state.next_port, state.port_range_start),
+            None,
+        ));
     };
 
     let ext_dir = state.extensions_dir.join(name);
     let port = lifecycle::allocate_port(&state.next_port, state.port_range_start);
-    lifecycle::start_backend(&ext_dir, backend, port, token, state.api_port, state.ws_port)
-        .map(|child| (port, Some(child)))
-        .map_err(|e| format!("无法启动拓展「{name}」后端: {e}"))
+    if port == 0 {
+        return Err("没有可用的扩展后端端口，请关闭占用程序后重试".into());
+    }
+    lifecycle::start_backend(
+        &ext_dir,
+        backend,
+        port,
+        token,
+        state.api_port,
+        state.ws_port,
+    )
+    .map(|child| (port, Some(child)))
+    .map_err(|e| format!("无法启动拓展「{name}」后端: {e}"))
 }
 
 fn stop_extension_backend(ext: EnabledExtension) {
@@ -198,7 +221,9 @@ fn stop_extension_backend(ext: EnabledExtension) {
         if let Some(ref mut child) = *backend {
             let _ = child.kill();
             for _ in 0..20 {
-                if child.try_wait().ok().flatten().is_some() { break; }
+                if child.try_wait().ok().flatten().is_some() {
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
         }
@@ -209,9 +234,77 @@ fn stop_extension_backend(ext: EnabledExtension) {
 // Tauri Commands
 // ---------------------------------------------------------------------------
 
+/// Native picker runs only from the host IPC surface, never from extension HTTP.
+#[tauri::command]
+async fn ext_prepare_import(app: AppHandle) -> Result<Option<installer::Preview>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let selected = app
+            .dialog()
+            .file()
+            .add_filter("Moke 扩展 ZIP", &["zip"])
+            .blocking_pick_file();
+        let Some(selected) = selected else {
+            return Ok(None);
+        };
+        let path = selected.into_path().map_err(|e| e.to_string())?;
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        if let Some(error) = &state.recovery_error {
+            return Err(error.clone());
+        }
+        let result = state
+            .installer
+            .lock()
+            .unwrap()
+            .prepare(&state.extensions_dir, &path);
+        result.map(Some)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn ext_commit_import(
+    app: AppHandle,
+    ticket: String,
+    package_digest: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        if let Some(error) = &state.recovery_error {
+            return Err(error.clone());
+        }
+        let result = state
+            .installer
+            .lock()
+            .unwrap()
+            .commit(&state, &ticket, &package_digest);
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn ext_cancel_import(state: tauri::State<'_, ExtensionRuntime>, ticket: String) {
+    let _operation = state.operations.lock().unwrap();
+    state.installer.lock().unwrap().cancel(&ticket);
+}
+
 /// 列出所有已安装的拓展。
 #[tauri::command]
-fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<ExtensionInfo> {
+async fn ext_list_extensions(app: AppHandle) -> Result<Vec<ExtensionInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        list_extensions(&state)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+fn list_extensions(state: &ExtensionRuntime) -> Vec<ExtensionInfo> {
     // Package hashing can be slow for large extensions. Snapshot only the
     // fields needed by the UI so API token checks are not blocked on disk IO.
     let enabled: HashMap<String, u16> = state
@@ -221,12 +314,16 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
         .iter()
         .map(|(name, extension)| (name.clone(), extension.port))
         .collect();
+    let desired = lifecycle::desired_names(&state.extensions_dir);
     let discoveries = discovery::discover_extensions(&state.extensions_dir);
 
     discoveries
         .into_iter()
         .map(|d| {
-            let trust = trust::evaluate_installed(&state.extensions_dir, &d.dir, &d.manifest);
+            let mut trust = trust::evaluate_installed(&state.extensions_dir, &d.dir, &d.manifest);
+            if let Some(error) = &state.recovery_error {
+                trust.blocked_reason = Some(format!("安装恢复失败，请重启后重试: {error}"));
+            }
             let is_enabled = enabled.contains_key(&d.manifest.name);
             let has_backend = d
                 .manifest
@@ -237,11 +334,16 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
             // has_ui: 有 entry 就有 UI
             // - ui_port > 0: 拓展自己 serve 前端
             // - 声明了 backend: backend 可以 serve 前端（ui_port 可能为 0，表示自动分配）
-            let has_ui = d.manifest.entry.as_ref().is_some_and(|e| e.ui_port > 0 || e.backend.is_some());
+            let has_ui = d
+                .manifest
+                .entry
+                .as_ref()
+                .is_some_and(|e| e.ui_port > 0 || e.backend.is_some());
 
             let port = enabled.get(&d.manifest.name).copied().unwrap_or(0);
 
             ExtensionInfo {
+                resume_pending: !is_enabled && desired.contains(&d.manifest.name),
                 name: d.manifest.name,
                 version: d.manifest.version,
                 display_name: d.manifest.display_name,
@@ -270,11 +372,27 @@ fn ext_enable_extension(
     name: String,
     approval: Option<ExtensionApproval>,
 ) -> Result<(), String> {
+    let _operation = state.operations.lock().unwrap();
+    activate(
+        &state,
+        &name,
+        approval.as_ref().map(|a| a.package_digest.as_str()),
+    )
+}
+
+fn activate(
+    state: &ExtensionRuntime,
+    name: &str,
+    approved_digest: Option<&str>,
+) -> Result<(), String> {
+    if let Some(error) = &state.recovery_error {
+        return Err(format!("安装恢复失败，请重启后重试: {error}"));
+    }
     lifecycle::validate_extension_name(&name)?;
 
     {
         let enabled = state.enabled.lock().unwrap();
-        if enabled.contains_key(&name) {
+        if enabled.contains_key(name) {
             return Err("拓展已启用".into());
         }
     }
@@ -294,20 +412,16 @@ fn ext_enable_extension(
     }
 
     let ext_dir = state.extensions_dir.join(&name);
-    trust::authorize_activation(
-        &state.extensions_dir,
-        &ext_dir,
-        &manifest,
-        approval.as_ref().map(|value| value.package_digest.as_str()),
-    )?;
+    trust::authorize_activation(&state.extensions_dir, &ext_dir, &manifest, approved_digest)?;
 
+    installer::check_platform(&manifest)?;
     let token = lifecycle::generate_token();
     let (port, backend_child) = start_extension_backend(&state, &name, &manifest, &token)?;
 
     {
         let mut enabled = state.enabled.lock().unwrap();
         enabled.insert(
-            name.clone(),
+            name.to_owned(),
             EnabledExtension {
                 token: token.clone(),
                 port,
@@ -317,7 +431,12 @@ fn ext_enable_extension(
         );
     }
 
-    lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
+    if let Err(error) = lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled) {
+        if let Some(ext) = state.enabled.lock().unwrap().remove(name) {
+            stop_extension_backend(ext);
+        }
+        return Err(error);
+    }
 
     log::info!("拓展「{name}」已启用，端口 {port}");
     Ok(())
@@ -329,17 +448,22 @@ fn ext_disable_extension(
     state: tauri::State<'_, ExtensionRuntime>,
     name: String,
 ) -> Result<(), String> {
+    let _operation = state.operations.lock().unwrap();
+    if let Some(error) = &state.recovery_error {
+        return Err(error.clone());
+    }
     lifecycle::validate_extension_name(&name)?;
+    lifecycle::forget_desired(&state.extensions_dir, &name)?;
 
     // 先取出拓展信息，释放锁，再杀进程和持久化（防死锁）
     let ext = {
         let mut enabled = state.enabled.lock().unwrap();
-        enabled
-            .remove(&name)
-            .ok_or_else(|| format!("拓展「{name}」未启用"))?
+        enabled.remove(&name)
     };
 
-    stop_extension_backend(ext);
+    if let Some(ext) = ext {
+        stop_extension_backend(ext);
+    }
 
     // 持久化（此时重新获取 enabled 锁，不会死锁因为不在锁内）
     lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
@@ -357,7 +481,12 @@ fn ext_uninstall_extension(
     state: tauri::State<'_, ExtensionRuntime>,
     name: String,
 ) -> Result<(), String> {
+    let _operation = state.operations.lock().unwrap();
+    if let Some(error) = &state.recovery_error {
+        return Err(error.clone());
+    }
     lifecycle::validate_extension_name(&name)?;
+    lifecycle::forget_desired(&state.extensions_dir, &name)?;
 
     // 1. 先禁用（杀进程 + 持久化）
     let ext = {
@@ -401,10 +530,7 @@ fn ext_get_extensions_dir(state: tauri::State<'_, ExtensionRuntime>) -> String {
 /// 诊断命令：返回当前拓展系统和阅读器的运行状态。
 /// 前端调试面板可调用此命令排查问题。
 #[tauri::command]
-fn ext_diagnostics(
-    state: tauri::State<'_, ExtensionRuntime>,
-    app: AppHandle,
-) -> serde_json::Value {
+fn ext_diagnostics(state: tauri::State<'_, ExtensionRuntime>, app: AppHandle) -> serde_json::Value {
     let enabled: Vec<String> = state.enabled.lock().unwrap().keys().cloned().collect();
     let all_windows: Vec<String> = app.webview_windows().keys().cloned().collect();
     let reader_windows: Vec<String> = all_windows
@@ -515,8 +641,8 @@ fn ext_moke_list_offline_books(app: AppHandle) -> Result<Vec<MokeOfflineBookInfo
         return Ok(Vec::new());
     }
 
-    let entries = std::fs::read_dir(&books_dir)
-        .map_err(|e| format!("failed to read Moke books dir: {e}"))?;
+    let entries =
+        std::fs::read_dir(&books_dir).map_err(|e| format!("failed to read Moke books dir: {e}"))?;
     let mut books = Vec::new();
 
     for entry in entries.flatten() {
@@ -582,10 +708,7 @@ const EXTENSION_PORT_START: u16 = 19557;
 ///
 /// 启动顺序很重要：先启动 server 占用端口，再恢复拓展分配端口，避免冲突。
 pub fn init(app: &AppHandle) {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .expect("无法获取 app data 目录");
+    let app_data_dir = app.path().app_data_dir().expect("无法获取 app data 目录");
 
     let extensions_dir = app_data_dir.join("extensions");
 
@@ -595,7 +718,19 @@ pub fn init(app: &AppHandle) {
         log::warn!("{e}");
     }
 
+    let (directory_lock, recovery_error) = match installer::lock_directory(&extensions_dir) {
+        Ok(file) => (Some(file), installer::recover(&extensions_dir).err()),
+        Err(error) => (None, Some(error)),
+    };
+    if let Some(error) = &recovery_error {
+        log::error!("扩展安装恢复失败，未启动扩展: {error}");
+    }
+    let staging = extensions_dir.join(".staging");
+    if recovery_error.is_none() && staging.exists() {
+        let _ = std::fs::remove_dir_all(staging);
+    }
     let enabled = Arc::new(Mutex::new(HashMap::new()));
+    let operations = Arc::new(Mutex::new(()));
 
     // 1. 先启动 WebSocket 服务器（先占端口），保留 sender 用于事件广播
     let (ws_port, ws_sender) = events::start(enabled.clone(), WS_SERVER_PORT);
@@ -609,19 +744,24 @@ pub fn init(app: &AppHandle) {
         extensions_dir: extensions_dir.clone(),
         app_handle: app.clone(),
         pending_commands: pending_commands.clone(),
+        operations: operations.clone(),
     });
     let api_port = api_server::start(api_ctx, API_SERVER_PORT);
 
-    // 3. 拓展 UI/backend 端口仍使用兼容范围；随机宿主端口由操作系统
-    // 独占，不会与随后启动的拓展后端重复绑定。
+    // 3. 后端分配时探测端口可用性，宿主 API/WS 端口已先行占用。
     let port_range_start = EXTENSION_PORT_START;
 
     // 4. 最后恢复上次的启用状态
     let next_port = Arc::new(AtomicU16::new(port_range_start));
-    {
+    if recovery_error.is_none() {
         let runtime_state = extensions_dir.clone();
         let enabled_clone = enabled.clone();
-        let restored_ports = lifecycle::restore_runtime_state_inner(&runtime_state, &enabled_clone, api_port, ws_port);
+        let restored_ports = lifecycle::restore_runtime_state_inner(
+            &runtime_state,
+            &enabled_clone,
+            api_port,
+            ws_port,
+        );
         if let Some(max_port) = restored_ports.into_iter().max() {
             lifecycle::reserve_after_port(&next_port, max_port);
         }
@@ -646,6 +786,10 @@ pub fn init(app: &AppHandle) {
     }
 
     let runtime = ExtensionRuntime {
+        operations,
+        installer: Mutex::new(installer::Installer::default()),
+        recovery_error,
+        _directory_lock: directory_lock,
         enabled,
         next_port: next_port.clone(),
         extensions_dir: extensions_dir.clone(),
@@ -666,10 +810,12 @@ pub fn init(app: &AppHandle) {
 }
 
 /// 返回所有 Tauri commands 的 handler。
-pub fn invoke_handler(
-) -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         ext_list_extensions,
+        ext_prepare_import,
+        ext_commit_import,
+        ext_cancel_import,
         ext_enable_extension,
         ext_disable_extension,
         ext_uninstall_extension,

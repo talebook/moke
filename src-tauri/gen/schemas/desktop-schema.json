@@ -2541,10 +2541,70 @@
           "markdownDescription": "Enables the download_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the ext_cancel_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-cancel-import",
+          "markdownDescription": "Enables the ext_cancel_import command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_commit_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-commit-import",
+          "markdownDescription": "Enables the ext_commit_import command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-diagnostics",
+          "markdownDescription": "Enables the ext_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_disable_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-disable-extension",
+          "markdownDescription": "Enables the ext_disable_extension command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_enable_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-enable-extension",
+          "markdownDescription": "Enables the ext_enable_extension command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_get_api_port command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-get-api-port",
+          "markdownDescription": "Enables the ext_get_api_port command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_get_extensions_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-get-extensions-dir",
+          "markdownDescription": "Enables the ext_get_extensions_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_list_extensions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-list-extensions",
+          "markdownDescription": "Enables the ext_list_extensions command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_prepare_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-prepare-import",
+          "markdownDescription": "Enables the ext_prepare_import command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ext_reader_event command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ext-reader-event",
           "markdownDescription": "Enables the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_uninstall_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-uninstall-extension",
+          "markdownDescription": "Enables the ext_uninstall_extension command without any pre-configured scope."
         },
         {
           "description": "Enables the extract_epub_cover_full command without any pre-configured scope.",
@@ -2691,10 +2751,70 @@
           "markdownDescription": "Denies the download_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the ext_cancel_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-cancel-import",
+          "markdownDescription": "Denies the ext_cancel_import command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_commit_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-commit-import",
+          "markdownDescription": "Denies the ext_commit_import command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_diagnostics command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-diagnostics",
+          "markdownDescription": "Denies the ext_diagnostics command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_disable_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-disable-extension",
+          "markdownDescription": "Denies the ext_disable_extension command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_enable_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-enable-extension",
+          "markdownDescription": "Denies the ext_enable_extension command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_get_api_port command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-get-api-port",
+          "markdownDescription": "Denies the ext_get_api_port command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_get_extensions_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-get-extensions-dir",
+          "markdownDescription": "Denies the ext_get_extensions_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_list_extensions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-list-extensions",
+          "markdownDescription": "Denies the ext_list_extensions command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_prepare_import command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-prepare-import",
+          "markdownDescription": "Denies the ext_prepare_import command without any pre-configured scope."
+        },
+        {
           "description": "Denies the ext_reader_event command without any pre-configured scope.",
           "type": "string",
           "const": "deny-ext-reader-event",
           "markdownDescription": "Denies the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_uninstall_extension command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-uninstall-extension",
+          "markdownDescription": "Denies the ext_uninstall_extension command without any pre-configured scope."
         },
         {
           "description": "Denies the extract_epub_cover_full command without any pre-configured scope.",
@@ -8281,12 +8401,6 @@
           "type": "string",
           "const": "updater:deny-install",
           "markdownDescription": "Denies the install command without any pre-configured scope."
-        },
-        {
-          "description": "Default permissions for the plugin",
-          "type": "string",
-          "const": "webdriver:default",
-          "markdownDescription": "Default permissions for the plugin"
         },
         {
           "description": "Allows connecting and sending data to a WebSocket server\n#### This default permission set includes:\n\n- `allow-connect`\n- `allow-send`",

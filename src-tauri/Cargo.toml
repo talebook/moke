@@ -57,6 +57,11 @@ tauri-plugin-turso = { path = "../readest/apps/readest-app/src-tauri/plugins/tau
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 tiny_http = "0.12"
+httparse = "1"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+tempfile = "3"
+fs4 = "0.13.1"
+unicode-normalization = "0.1"
 tungstenite = "0.24"
 
 # Plugins that depend on native Linux libraries (gtk/x11)

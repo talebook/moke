@@ -1,4 +1,5 @@
 packages:
   - "."
+  - "packages/moke-ext"
 allowBuilds:
   sharp: true

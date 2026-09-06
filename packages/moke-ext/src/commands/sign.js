@@ -8,11 +8,15 @@ import {
 } from 'node:crypto';
 import {
   lstatSync,
+  openSync, readSync, closeSync,
   readFileSync,
   readdirSync,
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+
+import { normalizeNativePath } from '../package-path.js';
+import { validateManifest } from './validate.js';
 
 const SIGNATURE_CONTEXT = 'moke-extension-signature-v1';
 const PACKAGE_CONTEXT = Buffer.from('moke-extension-package-v1\0');
@@ -40,11 +44,11 @@ function parseOptions(args) {
   return options;
 }
 
-function collectFiles(root, current = root, files = [], depth = 0) {
+export function collectFiles(root, current = root, files = [], depth = 0) {
   if (depth > 32) throw new Error('Package directory depth exceeds 32 levels');
   for (const entry of readdirSync(current, { withFileTypes: true })) {
     const fullPath = join(current, entry.name);
-    const packagePath = relative(root, fullPath);
+    const packagePath = normalizeNativePath(relative(root, fullPath), sep);
     const metadata = lstatSync(fullPath);
     if (metadata.isSymbolicLink()) {
       throw new Error(`Package cannot contain symbolic links: ${packagePath}`);
@@ -52,14 +56,14 @@ function collectFiles(root, current = root, files = [], depth = 0) {
     if (metadata.isDirectory()) {
       collectFiles(root, fullPath, files, depth + 1);
     } else if (metadata.isFile()) {
-      const isRootFile = !packagePath.includes(sep);
+      const isRootFile = !packagePath.includes('/');
       const lowerName = packagePath.toLowerCase();
       const hostMutable = HOST_MUTABLE_FILES.has(lowerName) || lowerName.endsWith('-setup.exe');
       if (!(isRootFile && hostMutable)) {
         files.push(packagePath);
         if (files.length > MAX_PACKAGE_FILES) throw new Error(`Package exceeds ${MAX_PACKAGE_FILES} files`);
       }
-    }
+    } else { throw new Error(`Special file in package: ${packagePath}`); }
   }
   return files;
 }
@@ -72,10 +76,20 @@ export function computePackageDigest(rootDirectory) {
   let packageBytes = 0;
   for (const packagePath of files) {
     const normalizedPath = packagePath.split(sep).join('/');
-    const bytes = readFileSync(join(root, packagePath));
-    packageBytes += bytes.length;
-    if (packageBytes > MAX_PACKAGE_BYTES) throw new Error('Package exceeds the 1 GiB safety limit');
-    const fileHash = createHash('sha256').update(bytes).digest();
+    const handle = openSync(join(root, packagePath), 'r');
+    const hash = createHash('sha256');
+    let size = 0;
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      for (;;) {
+        const count = readSync(handle, buffer);
+        if (!count) break;
+        size += count; packageBytes += count;
+        if (size > 256 * 1024 * 1024 || packageBytes > MAX_PACKAGE_BYTES) throw new Error('Package exceeds safety limits');
+        hash.update(buffer.subarray(0, count));
+      }
+    } finally { closeSync(handle); }
+    const fileHash = hash.digest();
     packageHash.update(normalizedPath);
     packageHash.update(Buffer.from([0]));
     packageHash.update(fileHash);
@@ -108,7 +122,10 @@ export function signPackage({ directory, keyPath, keyId }) {
     throw new Error('key-id may only contain letters, numbers, hyphens and underscores');
   }
 
-  const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+  const raw = readFileSync(join(root, 'manifest.json'), 'utf8');
+  if (Buffer.byteLength(raw) > 64 * 1024) throw new Error('Manifest exceeds 64 KiB');
+  const manifest = JSON.parse(raw);
+  validateManifest(manifest);
   if (!manifest.publisher?.id || !manifest.publisher?.name || !manifest.publisher?.source) {
     throw new Error('manifest.publisher must declare id, name and source before signing');
   }

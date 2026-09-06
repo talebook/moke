@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Package,
@@ -14,18 +14,47 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { useExtensionStore, type ExtensionInfo } from '@/lib/store/extensions';
+import { useExtensionStore, prepareExtensionImport, cancelExtensionImport, commitExtensionImport, type ImportPreview, type ExtensionInfo } from '@/lib/store/extensions';
 
 export default function ExtensionsPage() {
   const router = useRouter();
   const { extensions, loaded, loadExtensions, enableExtension, disableExtension, uninstallExtension } =
     useExtensionStore();
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     loadExtensions();
   }, [loadExtensions]);
+
+  useEffect(() => {
+    if (preview && dialog.current && !dialog.current.open) dialog.current.showModal();
+    return () => { if (preview) void cancelExtensionImport(preview.ticket).catch(() => {}); };
+  }, [preview]);
+
+  const handleImport = async () => {
+    setActionInProgress('import'); setErrorMsg(null); setNotice(null);
+    try { setPreview(await prepareExtensionImport()); }
+    catch (e) { setErrorMsg(String(e)); }
+    finally { setActionInProgress(null); }
+  };
+  const cancelImport = async () => {
+    if (!preview || actionInProgress) return;
+    try { await cancelExtensionImport(preview.ticket); setPreview(null); }
+    catch (e) { setErrorMsg(String(e)); }
+  };
+  const commitImport = async () => {
+    if (!preview) return;
+    setActionInProgress('import'); setErrorMsg(null);
+    try {
+      await commitExtensionImport(preview);
+      setNotice('导入成功。新扩展请点击启用；升级保留原启用状态和扩展数据。');
+    } catch (e) { setErrorMsg(String(e)); }
+    finally { setPreview(null); setActionInProgress(null); }
+  };
 
   const handleToggle = async (ext: ExtensionInfo) => {
     setActionInProgress(ext.name);
@@ -77,10 +106,26 @@ export default function ExtensionsPage() {
           <div className="mb-8">
             <h1 className="text-2xl font-semibold text-foreground">拓展</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              管理已安装的拓展程序
+              从本地 ZIP 安装和升级扩展
             </p>
           </div>
 
+          <button onClick={handleImport} disabled={Boolean(actionInProgress || preview)} className="mb-4 px-4 py-2 rounded-lg bg-primary text-white disabled:opacity-40">
+            {actionInProgress === 'import' ? '正在处理扩展包…' : '导入扩展'}
+          </button>
+          {notice && <p role="status" className="mb-4 text-sm text-foreground">{notice}</p>}
+          {preview && (
+            <dialog ref={dialog} aria-labelledby="import-title" onCancel={(event) => { event.preventDefault(); void cancelImport(); }} className="max-w-lg w-[90vw] max-h-[90vh] overflow-y-auto rounded-xl bg-background text-foreground p-6 border border-border">
+              <h2 id="import-title" className="text-lg font-semibold">{preview.extension.trust.upgradeFrom ? '确认升级扩展' : '确认安装扩展'}</h2>
+              <p className="mt-2 font-medium">{preview.extension.displayName}（{preview.extension.name}）</p>
+              <div className="mt-3 max-h-[55vh] overflow-y-auto whitespace-pre-wrap break-words text-sm">{buildApprovalMessage(preview.extension).replace(`启用 ${preview.extension.displayName} 前请核对：`, '安装前请核对：')}</div>
+              <p className="mt-3 text-sm text-muted-foreground">校验期间不会运行包内程序。已启用扩展升级成功后会恢复运行。未知发布者的签名只证明内容来源，请确认你信任该作者。</p>
+              <div className="mt-5 flex justify-end gap-3">
+                <button autoFocus onClick={cancelImport} disabled={Boolean(actionInProgress)} className="px-4 py-2 rounded-lg border border-border">取消</button>
+                <button onClick={commitImport} disabled={Boolean(actionInProgress)} className="px-4 py-2 rounded-lg bg-primary text-white disabled:opacity-40">{actionInProgress ? '正在安装…' : preview.extension.trust.upgradeFrom ? '确认升级' : '确认安装'}</button>
+              </div>
+            </dialog>
+          )}
           {errorMsg && (
             <div className="mb-4 px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive flex items-center justify-between">
               <span>{errorMsg}</span>
@@ -97,7 +142,7 @@ export default function ExtensionsPage() {
               <Puzzle className="w-12 h-12 text-muted-foreground/40 mb-4" />
               <p className="text-sm text-muted-foreground">暂无已安装的拓展</p>
               <p className="text-xs text-muted-foreground/60 mt-1">
-                将拓展安装到 AppData 目录后，重启应用即可在此处管理
+                点击“导入扩展”选择作者提供的 .zip 文件
               </p>
             </div>
           ) : (
@@ -117,7 +162,7 @@ export default function ExtensionsPage() {
                   <ExtensionCard
                     key={ext.name}
                     ext={ext}
-                    busy={actionInProgress === ext.name}
+                    busy={Boolean(actionInProgress || preview)}
                     onToggle={() => handleToggle(ext)}
                     onUninstall={() => handleUninstall(ext)}
                     onDetail={() => router.push(`/extensions/detail?name=${ext.name}`)}
@@ -207,6 +252,7 @@ function ExtensionCard({
           >
             <Shield className="w-4 h-4" />
           </button>
+          {ext.resumePending && <span className="text-xs text-amber-700">上次启用未恢复，请重新确认或重试</span>}
           <button
             onClick={onToggle}
             disabled={busy}

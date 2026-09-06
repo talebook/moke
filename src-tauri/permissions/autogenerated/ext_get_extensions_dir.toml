@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-get-extensions-dir"
+description = "Enables the ext_get_extensions_dir command without any pre-configured scope."
+commands.allow = ["ext_get_extensions_dir"]
+
+[[permission]]
+identifier = "deny-ext-get-extensions-dir"
+description = "Denies the ext_get_extensions_dir command without any pre-configured scope."
+commands.deny = ["ext_get_extensions_dir"]

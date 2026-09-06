@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-disable-extension"
+description = "Enables the ext_disable_extension command without any pre-configured scope."
+commands.allow = ["ext_disable_extension"]
+
+[[permission]]
+identifier = "deny-ext-disable-extension"
+description = "Denies the ext_disable_extension command without any pre-configured scope."
+commands.deny = ["ext_disable_extension"]

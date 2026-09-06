@@ -2,9 +2,9 @@
 
 ## 目标与威胁边界
 
-Moke 把扩展安装目录、Talebook 服务器、本机网页和同一用户权限下的其他进程视为不可信。签名门禁用于阻止安装后被篡改的包、未知来源静默替换、权限静默扩大以及版本降级/重放。
+Moke 将本地 ZIP、Talebook 服务器、本机网页及扩展声明视为不可信，使用签名、内容绑定确认与权限快照防止未批准内容通过正常安装/启用链路执行。
 
-它不把扩展变成沙箱：用户确认并启用的原生后端仍以当前用户权限运行。操作系统账户已被完全攻陷时，攻击者也可能替换 Moke 本体；这需要依赖 Moke 安装包签名和操作系统完整性保护。
+原生后端以当前用户权限运行，不是沙箱。同用户恶意进程若能任意写 AppData 或操纵进程，仍可在最后一次验证与 OS loader 打开文件之间替换代码和依赖；目录权限、重复哈希和原子替换不能彻底消除该竞态。完整格式、安装事务、迁移说明和保障边界见 [ZIP 扩展安装与迁移](extension-zip.md)。
 
 ## 包签名
 
@@ -25,7 +25,7 @@ Moke 把扩展安装目录、Talebook 服务器、本机网页和同一用户权
 构建和签名流程：
 
 ```bash
-openssl genpkey -algorithm Ed25519 -out publisher.pem
+openssl genpkey -algorithm Ed25519 -out ../publisher.pem
 moke-ext build
 moke-ext sign --key ../publisher.pem --key-id release-2026
 moke-ext package
@@ -76,3 +76,5 @@ Moke 在首次启用以及每次应用启动时重新计算包摘要和签名状
 ## 当前兼容策略
 
 旧版未签名原生扩展不再自动运行；发布者必须增加 `publisher`、提升版本并生成 `signature.json`。旧版未签名纯 UI/无头扩展可按当前摘要逐包确认，以便渐进迁移。任何权限或来源变化都会再次触发确认。
+
+ZIP 是推荐分发格式；NSIS 扩展安装器已退出 CLI 推荐流程。新增强制权限及 403 迁移映射见 [ZIP 文档](extension-zip.md#旧权限与连接兼容)。

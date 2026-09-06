@@ -83,7 +83,8 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
   assert.match(nextConfig, /pageExtensions: \['moke\.tsx'\]/);
   assert.match(readerEntry, /<Reader \/>/);
   assert.doesNotMatch(readerEntry, /Library/);
-  assert.match(tauriBuild, /AppManifest::new\(\)\.commands\(APP_ACL_COMMANDS\)/);
+  assert.match(tauriBuild, /\[APP_ACL_COMMANDS, EXTENSION_ACL_COMMANDS\]\s*\.concat\(\)/);
+  assert.match(tauriBuild, /AppManifest::new\(\)\.commands\(commands\)/);
   assert.ok(readerCapability.permissions.includes('allow-get-executable-dir'));
   assert.ok(readerCapability.permissions.includes('allow-ext-reader-event'));
   assert.match(readme, /git submodule sync --recursive/);

@@ -32,7 +32,7 @@ pub struct WsBroadcast {
 
 /// 一个已认证且已订阅的客户端连接。
 struct Client {
-    ws: tungstenite::WebSocket<std::net::TcpStream>,
+    ws: tungstenite::WebSocket<super::transport::DeadlineStream>,
     extension_name: String,
     subscriptions: Vec<String>,
     /// 最后一次收到消息或 pong 的时间，用于心跳超时检测。
@@ -268,6 +268,7 @@ fn accept_and_authenticate(
         .set_write_timeout(Some(WS_HANDSHAKE_TIMEOUT))
         .map_err(|error| format!("设置 WS 握手写入超时失败: {error}"))?;
 
+    let stream = super::transport::DeadlineStream::new(stream, WS_HANDSHAKE_TIMEOUT, 128 * 1024);
     let mut origin_extension = None;
     let expected_host = super::security::expected_authority(actual_port);
     let enabled_for_handshake = enabled.clone();
@@ -331,6 +332,7 @@ fn accept_and_authenticate(
     // 即使来源是受信拓展页面也必须持有 token；浏览器来源本身不是凭据。
     let (extension_name, subscriptions) =
         authenticate_and_subscribe(&mut ws, enabled, origin_extension.as_deref())?;
+    ws.get_mut().finish_handshake().map_err(|e| e.to_string())?;
     Ok(Client {
         ws,
         extension_name,
@@ -358,7 +360,7 @@ fn handshake_error(
 }
 
 fn authenticate_and_subscribe(
-    ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+    ws: &mut tungstenite::WebSocket<super::transport::DeadlineStream>,
     enabled: &Arc<Mutex<HashMap<String, EnabledExtension>>>,
     origin_extension: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
@@ -480,7 +482,7 @@ fn broadcast_to_clients(clients: &mut Vec<Client>, event: &str, payload: &str) {
 
 /// 向新连接客户端重放已缓存的事件（每个事件类型最近一条）。
 fn replay_events(
-    ws: &mut tungstenite::WebSocket<std::net::TcpStream>,
+    ws: &mut tungstenite::WebSocket<super::transport::DeadlineStream>,
     subscriptions: &[String],
     last_events: &HashMap<String, String>,
 ) {
@@ -498,6 +500,51 @@ fn replay_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn real_ws_handshake_has_total_deadline_and_checks_token_permissions() {
+        use std::io::Write;
+        use std::net::TcpStream;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let enabled = Arc::new(Mutex::new(HashMap::from([(
+            "sample".into(),
+            EnabledExtension {
+                token: "test-token".into(),
+                port: 24000,
+                backend: Mutex::new(None),
+                permissions: vec!["reader.events.subscribe".into()],
+            },
+        )])));
+        let mut slow = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let stream = listener.accept().unwrap().0;
+        let state = enabled.clone();
+        let start = std::time::Instant::now();
+        let worker =
+            thread::spawn(move || assert!(accept_and_authenticate(stream, &state, port).is_err()));
+        slow.write_all(b"GET / HTTP/1.1\r\nX-Slow: ").unwrap();
+        for _ in 0..12 {
+            thread::sleep(Duration::from_millis(500));
+            if slow.write_all(b"a").is_err() {
+                break;
+            }
+        }
+        worker.join().unwrap();
+        assert!(start.elapsed() < Duration::from_secs(8));
+        for token in ["bad-token", "test-token"] {
+            let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let server = listener.accept().unwrap().0;
+            let state = enabled.clone();
+            let worker = thread::spawn(move || {
+                accept_and_authenticate(server, &state, port).map(|c| c.extension_name)
+            });
+            let (mut client, _) =
+                tungstenite::client(format!("ws://127.0.0.1:{port}"), stream).unwrap();
+            client.send(tungstenite::Message::Text(serde_json::json!({"type":"hello","extension":"sample","token":token,"events":["reader.state"]}).to_string())).unwrap();
+            let result = worker.join().unwrap();
+            assert_eq!(result.is_ok(), token == "test-token");
+        }
+    }
 
     #[test]
     fn pending_handshake_limit_is_bounded_and_released() {

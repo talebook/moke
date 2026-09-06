@@ -244,26 +244,12 @@ X-Extension-Token: {token}    // 启用拓展时由主程序分配
 
 ## 分发
 
-### 打包为 NSIS 安装器
+### 打包并导入 ZIP
 
-1. 将拓展文件放入 `dist/` 目录
-2. 复制 `installer-template.nsi` 并修改顶部 `EXT_*` 常量
-3. 用 NSIS 编译: `makensis my-extension.nsi`
-4. 生成的 `setup.exe` 即安装包
-
-安装器会自动：
-- 检测 Moke 主程序是否已安装（未安装则拒绝）
-- 将文件复制到 `%APPDATA%\com.moke.client\extensions\{name}\`
-- 写入注册表
-
-### 手动安装（开发调试）
-
-直接将拓展文件夹复制到:
-```
-%APPDATA%\com.moke.client\extensions\my-extension\
-```
-
-然后打开 Moke → 设置 → 拓展管理 → 启用。
+运行 `moke-ext build`、`moke-ext sign --key <包外私钥> --key-id <标识>`、`moke-ext package`。
+在 Moke 扩展页点击“导入扩展”，核对签名/版本/权限并确认。首次安装后单独启用。
+NSIS 扩展覆盖安装和手工覆盖 AppData 已退出推荐流程。详细格式、平台目标与数据迁移见
+[ZIP 扩展安装与迁移](../../docs/extension-zip.md)。Moke 主程序安装器不受影响。
 
 ## 安全注意事项
 

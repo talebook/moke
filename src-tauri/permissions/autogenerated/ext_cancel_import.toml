@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-cancel-import"
+description = "Enables the ext_cancel_import command without any pre-configured scope."
+commands.allow = ["ext_cancel_import"]
+
+[[permission]]
+identifier = "deny-ext-cancel-import"
+description = "Denies the ext_cancel_import command without any pre-configured scope."
+commands.deny = ["ext_cancel_import"]

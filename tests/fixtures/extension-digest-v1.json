@@ -1,0 +1,21 @@
+{
+  "files": {
+    "a/x": "x",
+    "a.z": "z",
+    "a@y": "@",
+    "目录/é.txt": "unicode"
+  },
+  "windows_paths": [
+    "a\\x",
+    "a.z",
+    "a@y",
+    "目录\\é.txt"
+  ],
+  "ordered_paths": [
+    "a.z",
+    "a/x",
+    "a@y",
+    "目录/é.txt"
+  ],
+  "sha256": "6b145b2d9813fa4ca7c6bec8c59b7668a580c9655022a82eccad1ab2c51e25bd"
+}

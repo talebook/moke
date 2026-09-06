@@ -86,10 +86,26 @@ fn now_ms() -> u64 {
 // 持久化
 // ---------------------------------------------------------------------------
 
-const STATS_FILE: &str = "stats.json";
+fn stats_file() -> std::path::PathBuf {
+    std::env::var_os("MOKE_EXT_DATA_DIR").map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(".")).join("stats.json")
+}
 
 fn load_stats() -> Stats {
-    match fs::read_to_string(STATS_FILE) {
+    let path = stats_file();
+    if !path.exists() {
+        // One-time migration from the host-retained previous package. Never
+        // overwrite current data, and never execute legacy installer contents.
+        if let Some(legacy) = std::env::var_os("MOKE_EXT_LEGACY_DIR") {
+            let old = std::path::PathBuf::from(legacy).join("stats.json");
+            if let Ok(raw) = fs::read(&old) {
+                if raw.len() <= 10 * 1024 * 1024 && serde_json::from_slice::<Stats>(&raw).is_ok() {
+                    let _ = fs::write(&path, raw);
+                }
+            }
+        }
+    }
+    match fs::read_to_string(path) {
         Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
         Err(_) => Stats::default(),
     }
@@ -100,9 +116,10 @@ fn save_stats(stats: &Stats) {
         Ok(j) => j,
         Err(_) => return,
     };
-    let tmp = format!("{STATS_FILE}.tmp");
+    let path = stats_file();
+    let tmp = path.with_extension("tmp");
     let _ = fs::write(&tmp, &json);
-    let _ = fs::rename(&tmp, STATS_FILE);
+    let _ = fs::rename(&tmp, path);
 }
 
 // ---------------------------------------------------------------------------

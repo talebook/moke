@@ -58,7 +58,8 @@ A Moke extension.
 
 \`\`\`bash
 moke-ext build
-moke-ext package   # requires NSIS installed
+moke-ext sign --key ../publisher.pem --key-id local-dev
+moke-ext package   # import the ZIP in Moke
 \`\`\`
 `;
 

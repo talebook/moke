@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "algorithm": "ed25519",
+  "key_id": "test-only",
+  "public_key": "2p86jiraviwc+Gj4NiVlHRvft8uanKqf9PoIH/FAPnY=",
+  "package_sha256": "05a71642ec39f9bd4582480e23ff55a2d5fc903ad22188324958f8f6bb91d70d",
+  "signature": "HGLUDcdeYMJ0AG4qoSwV1K7nty3jyM0Ztp7YYzYBIsN1gmwgVmrfB6IEEwO4d9k0Esu9nI4+QrKIO5gUhQr+Cg=="
+}
