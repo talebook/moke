@@ -19,14 +19,25 @@ export async function retryOnlineRead<T>(
     };
     signal.addEventListener('abort', cancel, { once: true });
     const timer = setTimeout(() => {
-      rejectAbort(new DOMException('Online read timed out', 'TimeoutError'));
-      controller.abort();
+      const error = new DOMException('Online read timed out', 'TimeoutError');
+      rejectAbort(error);
+      controller.abort(error);
     }, timeoutMs);
     try {
       return await Promise.race([read(controller.signal), stopped]);
     } catch (error) {
       if (signal.aborted) throw aborted();
-      if (attempt >= 2 || !retryable(error)) throw error;
+      const canRetry = retryable(error);
+      const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
+      if (canRetry || timedOut) {
+        console.warn('[online-read] ' + JSON.stringify({
+          attempt: attempt + 1,
+          reason: timedOut ? 'timeout' : 'transient-failure',
+          timeoutMs,
+          retryInMs: canRetry && attempt < 2 ? 250 * 2 ** attempt : null,
+        }));
+      }
+      if (attempt >= 2 || !canRetry) throw error;
     } finally {
       clearTimeout(timer);
       signal.removeEventListener('abort', cancel);
