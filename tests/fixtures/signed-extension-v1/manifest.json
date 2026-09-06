@@ -1,0 +1,1 @@
+{"name":"signed-fixture","version":"1.0.0","display_name":"Signed test fixture","publisher":{"id":"org.example.test","name":"Test only","source":"https://example.invalid/test"},"permissions":["storage"]}

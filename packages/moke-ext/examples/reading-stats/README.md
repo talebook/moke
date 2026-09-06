@@ -1,69 +1,20 @@
-# 阅读统计 — 示例拓展
+# 阅读统计 ZIP 示例
 
-演示 Moke 拓展系统的完整示例。实时显示翻页次数、阅读时长、当前进度。
+在 Moke 仓库根目录执行 `pnpm install --frozen-lockfile`，然后：
 
-## 快速打包（一键生成安装器）
-
-```bash
-build.bat
+```sh
+cd packages/moke-ext/examples/reading-stats
+node ../../bin/moke-ext.js build
+node ../../bin/moke-ext.js sign --key /path/outside/project/publisher.pem --key-id your-key-id
+node ../../bin/moke-ext.js package
 ```
 
-脚本自动执行：编译 Rust 后端 → 收集文件到 dist/ → 调用 NSIS 生成 `reading-stats-setup.exe`。
+生成 `reading-stats-1.1.0.zip`。`build` 为当前 Windows/macOS/Linux x86_64/aarch64 目标编译 Rust 后端，写入准确的 `entry.backend.targets`。在其他平台分别构建并签名；不要把 Windows 二进制声明为 Linux。Windows 也可运行 `build.bat` 完成构建，再按提示签名与打包。
 
-**前提条件:**
-- [Rust](https://rustup.rs/)（编译后端）
-- [NSIS](https://nsis.sourceforge.io/Download)（打包安装器，`makensis` 需在 PATH 中）
+进入 Moke → 扩展 → 导入扩展，选择 ZIP，核对阅读事件/状态等权限并确认。首次安装后点击启用。第三方或示例测试密钥显示“未知发布者”，不会被当作 Moke 官方签名；需确认来源。不要把私钥提交或装入 ZIP。
 
-## 手动步骤
+旧 1.0.0 升级会保留宿主 storage.json 和完整旧目录。新统计数据写入 `MOKE_EXT_DATA_DIR/stats.json`，首次启动从宿主提供的 `MOKE_EXT_LEGACY_DIR/stats.json` 迁移，不覆盖现有数据。旧 NSIS 安装器不再调用，Moke 应用自身安装器不受影响。
 
-### 1. 编译后端
+浏览器 UI 只访问本扩展同源后端；`MOKE_EXT_TOKEN`、`MOKE_API_PORT`、`MOKE_WS_PORT` 只从后端环境读取，不向浏览器提供 token。
 
-```bash
-cd backend
-cargo build --release
-# → target/release/server.exe
-```
-
-### 2. 准备打包文件
-
-```
-dist/
-├── manifest.json        ← 从本目录复制
-├── server.exe           ← 从 backend/target/release/ 复制
-└── ui/
-    └── index.html       ← 从本目录复制
-```
-
-### 3. 生成安装器
-
-```bash
-makensis installer.nsi
-# → reading-stats-setup.exe
-```
-
-### 4. 安装 & 启用
-
-1. 双击 `reading-stats-setup.exe` 安装
-2. 打开 Moke → 设置 → 拓展管理 → 找到「阅读统计」→ 启用
-3. 打开一本书开始阅读，侧边栏「拓展 → 阅读统计」查看实时统计
-
-## 开发调试（跳过安装器）
-
-直接将文件复制到拓展目录：
-
-```
-%APPDATA%\com.moke.client\extensions\reading-stats\
-├── manifest.json
-├── server.exe
-└── ui/index.html
-```
-
-然后在 Moke 中启用即可。
-
-## 架构
-
-```
-manifest.json → 主程序: 分配端口 19557+, 启动 server.exe (注入 MOKE_EXT_TOKEN)
-server.exe    → 静态文件服务 + /api/token 端点
-ui/index.html → fetch(/api/token) → WS(19556) 认证 → 订阅 reader:* 事件
-```
+完整包格式、限额和安全边界见 [ZIP 文档](../../../../docs/extension-zip.md)。

@@ -1,124 +1,53 @@
-// moke-ext validate — validate manifest.json
-
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-const KNOWN_PERMISSIONS = [
-  'books.read', 'books.download',
-  'user.profile', 'server.info',
-  'reader.events.subscribe', 'reader.command.send', 'reader.state.read',
-  'storage', 'sidebar.add', 'page.register',
-];
-
-function fail(msg) {
-  console.error(`  FAIL  ${msg}`);
-  return false;
+// Shared by validate/build/sign/package: never sign an invalid manifest.
+import { readFileSync } from 'node:fs';
+const PERMISSIONS = ['books.read','books.download','user.profile','server.info','reader.events.subscribe','reader.command.send','reader.state.read','storage','sidebar.add','page.register'];
+const TARGETS = ['windows-x86_64','windows-aarch64','linux-x86_64','linux-aarch64','macos-x86_64','macos-aarch64'];
+function object(value, keys, label) {
+  if (!value || Array.isArray(value) || typeof value !== 'object' || Object.keys(value).some(k => !keys.includes(k))) throw new Error(`${label}: invalid object or unknown fields`);
 }
-
-function ok(msg) {
-  console.log(`  OK    ${msg}`);
-  return true;
+function string(value, max, label, required = false) {
+  if (value === undefined && !required) return;
+  if (typeof value !== 'string' || Buffer.byteLength(value) > max || (required && !value.trim())) throw new Error(`${label}: invalid string`);
 }
-
-export default function validate() {
-  const manifestPath = join(process.cwd(), 'manifest.json');
-  if (!existsSync(manifestPath)) {
-    console.error('No manifest.json found in current directory.');
-    console.error('Run "moke-ext init <name>" to create a new extension.');
-    process.exit(1);
+export function validateManifest(m) {
+  object(m, ['name','version','api_version','display_name','description','author','publisher','entry','sidebar','permissions','lucide_icons'], 'manifest');
+  string(m.name,64,'name',true);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(m.name)) throw new Error('Invalid extension name');
+  string(m.version,64,'version',true);
+  if (!/^\d+\.\d+\.\d+$/.test(m.version) || m.version.split('.').some(n => n.length > 10)) throw new Error('Invalid version');
+  string(m.display_name,128,'display_name',true);
+  string(m.description,512,'description'); string(m.author,128,'author');
+  if (m.api_version !== undefined && !['','1'].includes(m.api_version)) throw new Error('Unsupported api_version');
+  if (m.publisher !== undefined) {
+    object(m.publisher,['id','name','source'],'publisher');
+    string(m.publisher.id,128,'publisher.id',true);
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(m.publisher.id)) throw new Error('Invalid publisher.id');
+    string(m.publisher.name,128,'publisher.name',true); string(m.publisher.source,512,'publisher.source',true);
+    const url = new URL(m.publisher.source);
+    if (/[\r\n\x00-\x20]/.test(m.publisher.source) || url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname)))) throw new Error('publisher.source must be HTTPS (literal localhost allowed for development)');
   }
-
-  console.log('Validating manifest.json...\n');
-
-  let raw;
-  try { raw = readFileSync(manifestPath, 'utf-8'); } catch (e) { fail(`Cannot read: ${e.message}`); process.exit(1); }
-  if (raw.length > 64 * 1024) { fail('File too large (>64 KB)'); process.exit(1); }
-
-  let m;
-  try { m = JSON.parse(raw); } catch (e) { fail(`Invalid JSON: ${e.message}`); process.exit(1); }
-
-  let passed = 0, total = 0;
-
-  // Required fields
-  const required = [
-    ['name', 'string', /^[a-z][a-z0-9-]{0,62}[a-z0-9]$/],
-    ['version', 'string', /^\d+\.\d+\.\d+$/],
-    ['display_name', 'string', /^.{1,128}$/],
-  ];
-  for (const [field, type, pattern] of required) {
-    total++;
-    if (typeof m[field] !== type) { fail(`${field}: missing or wrong type (expected ${type})`); continue; }
-    if (pattern && !pattern.test(m[field])) { fail(`${field}: "${m[field]}" does not match ${pattern}`); continue; }
-    ok(`${field}: ${m[field]}`);
-    passed++;
-  }
-
-  // Optional string fields
-  for (const field of ['description', 'author']) {
-    total++;
-    if (m[field] !== undefined && typeof m[field] !== 'string') { fail(`${field}: must be string`); continue; }
-    if (m[field] && m[field].length > (field === 'description' ? 512 : 128)) { fail(`${field}: too long`); continue; }
-    ok(`${field}: ${m[field] || '(not set)'}`);
-    passed++;
-  }
-
-  // Permissions
-  total++;
-  if (!Array.isArray(m.permissions)) { fail('permissions: must be an array'); }
-  else {
-    const unknown = m.permissions.filter(p => !KNOWN_PERMISSIONS.includes(p));
-    if (unknown.length) { fail(`permissions: unknown — ${unknown.join(', ')}`); }
-    else { ok(`permissions: ${m.permissions.length ? m.permissions.join(', ') : '(none)'}`); passed++; }
-  }
-
-  // Entry
-  total++;
+  if (m.permissions !== undefined && (!Array.isArray(m.permissions) || m.permissions.some(p => !PERMISSIONS.includes(p)))) throw new Error('Unknown permissions');
   if (m.entry !== undefined) {
-    if (typeof m.entry !== 'object' || m.entry === null) { fail('entry: must be an object'); }
-    else {
-      const hasUi = typeof m.entry.ui_port === 'number';
-      const hasBackend = m.entry.backend && typeof m.entry.backend === 'object';
-      if (hasBackend) {
-        const exe = m.entry.backend.executable;
-        if (!exe || typeof exe !== 'string' || exe.includes('/') || exe.includes('\\') || exe.includes('..')) {
-          fail('entry.backend.executable: must be a plain filename (no path separators)');
-        } else if (!hasUi) {
-          fail('entry: backend requires ui_port to be set (even if 0 for auto-assign)');
-        } else {
-          ok(`entry: backend="${exe}" ui_port=${m.entry.ui_port}`);
-          passed++;
-        }
-      } else if (hasUi) {
-        ok(`entry: ui_port=${m.entry.ui_port}`);
-        passed++;
-      } else {
-        fail('entry: must have ui_port and/or backend');
-      }
+    object(m.entry,['ui_port','backend'],'entry');
+    if (m.entry.ui_port !== undefined && (!Number.isInteger(m.entry.ui_port) || m.entry.ui_port < 0 || m.entry.ui_port > 65535)) throw new Error('Invalid ui_port');
+    const b = m.entry.backend;
+    if (b !== undefined) {
+      object(b,['executable','args','targets'],'backend'); string(b.executable,128,'executable',true);
+      if (!/^[a-zA-Z0-9_.-]+$/.test(b.executable) || b.executable.includes('..') || ['signature.json','storage.json','uninstall.exe','installer.nsi'].includes(b.executable.toLowerCase()) || b.executable.toLowerCase().endsWith('-setup.exe')) throw new Error('Invalid executable');
+      if (b.args !== undefined && (!Array.isArray(b.args) || b.args.some(a => typeof a !== 'string' || /[\r\n]/.test(a)))) throw new Error('Invalid backend args');
+      if (b.targets !== undefined && (!Array.isArray(b.targets) || b.targets.some(t => !TARGETS.includes(t)))) throw new Error('Unsupported backend.targets');
     }
-  } else {
-    ok('entry: (headless extension)');
-    passed++;
   }
-
-  // Sidebar
-  total++;
   if (m.sidebar !== undefined) {
-    if (!m.sidebar.label || typeof m.sidebar.label !== 'string') { fail('sidebar.label: required string'); }
-    else if (m.sidebar.label.length > 64) { fail('sidebar.label: too long (>64 chars)'); }
-    else { ok(`sidebar: "${m.sidebar.label}"`); passed++; }
-  } else {
-    ok('sidebar: (none)');
-    passed++;
+    object(m.sidebar,['label','icon','order'],'sidebar'); string(m.sidebar.label,64,'sidebar.label',true); string(m.sidebar.icon,64,'sidebar.icon',true);
+    if (m.sidebar.order !== undefined && (!Number.isInteger(m.sidebar.order) || m.sidebar.order < -2147483648 || m.sidebar.order > 2147483647)) throw new Error('Invalid sidebar.order');
   }
-
-  // Unknown fields
-  const known = ['name','version','api_version','display_name','description','author','entry','sidebar','permissions','lucide_icons'];
-  const unknownFields = Object.keys(m).filter(k => !known.includes(k));
-  if (unknownFields.length) {
-    fail(`Unknown fields: ${unknownFields.join(', ')} (will be rejected by Moke)`);
-  }
-
-  console.log(`\n${passed}/${total} checks passed`);
-
-  if (passed < total) process.exit(1);
+  if (m.lucide_icons !== undefined && (!Array.isArray(m.lucide_icons) || m.lucide_icons.length > 50 || m.lucide_icons.some(i => typeof i !== 'string' || Buffer.byteLength(i) > 64))) throw new Error('Invalid lucide_icons');
+  return m;
+}
+export default function validate() {
+  const raw = readFileSync('manifest.json','utf8');
+  if (Buffer.byteLength(raw) > 64 * 1024) throw new Error('Manifest exceeds 64 KiB');
+  validateManifest(JSON.parse(raw));
+  console.log('manifest.json valid');
 }

@@ -31,19 +31,41 @@ export interface ExtensionInfo {
   description: string;
   author: string;
   enabled: boolean;
+  resumePending?: boolean;
   /** 拓展后端端口（仅 enabled 时有效） */
   port: number;
   permissions: string[];
   sidebar: { label: string; icon: string; order: number } | null;
   hasBackend: boolean;
   hasUi: boolean;
+  trust: ExtensionTrust;
+}
+
+export interface ExtensionTrust {
+  signatureStatus: 'trusted' | 'unknown_publisher' | 'unsigned' | 'invalid';
+  publisherId: string | null;
+  publisherName: string | null;
+  source: string | null;
+  keyId: string | null;
+  packageDigest: string;
+  trusted: boolean;
+  requiresApproval: boolean;
+  blockedReason: string | null;
+  risks: string[];
+  permissionsAdded: string[];
+  permissionsRemoved: string[];
+  upgradeFrom: string | null;
+}
+
+export interface ExtensionApproval {
+  packageDigest: string;
 }
 
 interface ExtensionState {
   extensions: ExtensionInfo[];
   loaded: boolean;
   loadExtensions: () => Promise<void>;
-  enableExtension: (name: string) => Promise<void>;
+  enableExtension: (name: string, approval?: ExtensionApproval) => Promise<void>;
   disableExtension: (name: string) => Promise<void>;
   uninstallExtension: (name: string) => Promise<void>;
   /** 返回已启用且有 sidebar 声明的拓展，按 order 排序。 */
@@ -63,7 +85,7 @@ const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 let extensionsRuntimeChecked = false;
 let extensionsRuntimeAvailable = false;
 
-async function canUseExtensions(): Promise<boolean> {
+export async function canUseExtensions(): Promise<boolean> {
   if (!isTauri) return false;
   if (!extensionsRuntimeChecked) {
     extensionsRuntimeChecked = true;
@@ -99,11 +121,27 @@ interface RawExtension {
   description: string;
   author: string;
   enabled: boolean;
+  resume_pending: boolean;
   port: number;
   permissions: string[];
   sidebar: { label: string; icon: string; order: number } | null;
   has_backend: boolean;
   has_ui: boolean;
+  trust: {
+    signature_status: ExtensionTrust['signatureStatus'];
+    publisher_id: string | null;
+    publisher_name: string | null;
+    source: string | null;
+    key_id: string | null;
+    package_digest: string;
+    trusted: boolean;
+    requires_approval: boolean;
+    blocked_reason: string | null;
+    risks: string[];
+    permissions_added: string[];
+    permissions_removed: string[];
+    upgrade_from: string | null;
+  };
 }
 
 function mapExtension(raw: RawExtension): ExtensionInfo {
@@ -114,11 +152,27 @@ function mapExtension(raw: RawExtension): ExtensionInfo {
     description: raw.description,
     author: raw.author,
     enabled: raw.enabled,
+    resumePending: raw.resume_pending,
     port: raw.port,
     permissions: raw.permissions,
     sidebar: raw.sidebar,
     hasBackend: raw.has_backend,
     hasUi: raw.has_ui,
+    trust: {
+      signatureStatus: raw.trust.signature_status,
+      publisherId: raw.trust.publisher_id,
+      publisherName: raw.trust.publisher_name,
+      source: raw.trust.source,
+      keyId: raw.trust.key_id,
+      packageDigest: raw.trust.package_digest,
+      trusted: raw.trust.trusted,
+      requiresApproval: raw.trust.requires_approval,
+      blockedReason: raw.trust.blocked_reason,
+      risks: raw.trust.risks,
+      permissionsAdded: raw.trust.permissions_added,
+      permissionsRemoved: raw.trust.permissions_removed,
+      upgradeFrom: raw.trust.upgrade_from,
+    },
   };
 }
 
@@ -165,8 +219,11 @@ export const useExtensionStore = create<ExtensionState>()((set, get) => ({
     }
   },
 
-  enableExtension: async (name: string) => {
-    await invokeExt('ext_enable_extension', { name });
+  enableExtension: async (name: string, approval?: ExtensionApproval) => {
+    await invokeExt('ext_enable_extension', {
+      name,
+      approval: approval ? { package_digest: approval.packageDigest } : null,
+    });
     await get().loadExtensions();
   },
 
@@ -182,3 +239,17 @@ export const useExtensionStore = create<ExtensionState>()((set, get) => ({
 
   getSidebarExtensions: () => getSidebarExtensions(get().extensions),
 }));
+
+export interface ImportPreview { ticket: string; extension: ExtensionInfo }
+export async function prepareExtensionImport(): Promise<ImportPreview | null> {
+  if (!(await canUseExtensions())) throw new Error('ZIP 扩展导入仅支持 Windows、macOS 和 Linux 桌面版');
+  const result = await invokeExt<{ ticket: string; extension: RawExtension } | null>('ext_prepare_import');
+  return result ? { ticket: result.ticket, extension: mapExtension(result.extension) } : null;
+}
+export async function cancelExtensionImport(ticket: string): Promise<void> {
+  await invokeExt('ext_cancel_import', { ticket });
+}
+export async function commitExtensionImport(preview: ImportPreview): Promise<void> {
+  await invokeExt('ext_commit_import', { ticket: preview.ticket, packageDigest: preview.extension.trust.packageDigest });
+  await useExtensionStore.getState().loadExtensions();
+}

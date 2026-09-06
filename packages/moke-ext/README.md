@@ -5,11 +5,12 @@ Scaffold, build, validate, and package Moke extensions.
 ## Install
 
 ```bash
-# From the tools/moke-ext directory:
-npm link
+# From the Moke repository root:
+pnpm install --frozen-lockfile
+# Use node packages/moke-ext/bin/moke-ext.js, or register that CLI on PATH.
 
 # Or add to PATH:
-set PATH=%PATH%;C:\path\to\talebook-client\tools\moke-ext\bin
+set PATH=%PATH%;C:\path\to\talebook-client\packages\moke-ext\bin
 ```
 
 ## Commands
@@ -44,12 +45,28 @@ moke-ext build
 
 ### `moke-ext package`
 
-Build an NSIS installer from dist/. Requires NSIS installed (`makensis` in PATH).
+Create a ZIP from dist/ with manifest.json directly at its root. No NSIS is required. Sign native backends first.
 
 ```bash
 moke-ext package
-# → dist/reading-stats-setup.exe
+# → reading-stats-1.0.0.zip
+# Moke → Extensions → Import extension → select ZIP → review and confirm
 ```
+
+### `moke-ext sign`
+
+Sign the built `dist/` package with an Ed25519 publisher key. Native backends
+must be signed before Moke will execute them.
+
+```bash
+openssl genpkey -algorithm Ed25519 -out ../publisher.pem
+moke-ext build
+moke-ext sign --key ../publisher.pem --key-id release-2026
+moke-ext package
+```
+
+The manifest must include `publisher.id`, `publisher.name`, and an HTTPS
+`publisher.source`. Keep the private key outside the extension directory.
 
 ### `moke-ext dev`
 
@@ -67,5 +84,12 @@ cd my-extension
 # Edit manifest.json, ui/index.html...
 moke-ext validate
 moke-ext build
+moke-ext sign --key ../publisher.pem --key-id release-2026
 moke-ext package
 ```
+
+See [`docs/extension-trust-model.md`](../../docs/extension-trust-model.md) in the Moke repository for the signed
+payload, upgrade/permission confirmation rules, token rotation, and revocation
+procedure.
+
+See [ZIP package format, platform targets and migration](../../docs/extension-zip.md). Keep mutable data in `MOKE_EXT_DATA_DIR`; `build` declares the current native target in `entry.backend.targets`.

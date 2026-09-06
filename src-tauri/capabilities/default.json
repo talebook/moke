@@ -85,6 +85,16 @@
     "process:allow-exit",
     "process:allow-restart",
     "updater:default",
-    "allow-open-reader"
+    "allow-open-reader",
+    "allow-ext-list-extensions",
+    "allow-ext-prepare-import",
+    "allow-ext-commit-import",
+    "allow-ext-cancel-import",
+    "allow-ext-enable-extension",
+    "allow-ext-disable-extension",
+    "allow-ext-uninstall-extension",
+    "allow-ext-get-api-port",
+    "allow-ext-get-extensions-dir",
+    "allow-ext-diagnostics"
   ]
 }

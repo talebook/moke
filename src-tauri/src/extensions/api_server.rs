@@ -1,10 +1,13 @@
 //! 拓展 REST API Server。
 //!
-//! 基于 `tiny_http` 提供 REST 接口，供拓展（外部进程）调用。
+//! 使用有连接并发上限、绝对读取截止时间的回环传输提供 REST 接口。
 //! 监听 `127.0.0.1`（仅本地可达），通过 token 认证拓展身份。
 
+use super::security::ValidatedOrigin;
 use super::EnabledExtension;
 use std::collections::HashMap;
+use std::io::Read;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -15,6 +18,10 @@ use tauri::Manager;
 pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
 /// 同时阻塞等待阅读器命令回执的请求上限，避免耗尽 API 请求线程。
 pub(crate) const MAX_CONCURRENT_COMMAND_WAITS: usize = 32;
+/// Maximum number of HTTP handlers, including handlers waiting for reader receipts.
+pub(crate) const MAX_CONCURRENT_REQUESTS: usize = 48;
+/// Requests larger than this are rejected before their bodies are read.
+pub(crate) const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
 const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
 const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
 
@@ -33,6 +40,38 @@ impl ApiError {
             status: 400,
             code,
             message: message.into(),
+        }
+    }
+
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: 401,
+            code: "AUTH_FAILED",
+            message: message.into(),
+        }
+    }
+
+    fn forbidden(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: 403,
+            code,
+            message: message.into(),
+        }
+    }
+
+    fn request_timeout(message: impl Into<String>) -> Self {
+        Self {
+            status: 408,
+            code: "REQUEST_TIMEOUT",
+            message: message.into(),
+        }
+    }
+
+    fn payload_too_large() -> Self {
+        Self {
+            status: 413,
+            code: "PAYLOAD_TOO_LARGE",
+            message: format!("请求体不能超过 {MAX_REQUEST_BODY_BYTES} 字节"),
         }
     }
 
@@ -261,6 +300,7 @@ pub(crate) fn is_reader_window_label(label: &str) -> bool {
 
 /// API Server 线程持有的只读上下文。
 pub struct ServerContext {
+    pub operations: Arc<Mutex<()>>,
     pub enabled: Arc<Mutex<HashMap<String, EnabledExtension>>>,
     pub extensions_dir: std::path::PathBuf,
     pub app_handle: tauri::AppHandle,
@@ -273,31 +313,77 @@ pub struct ServerContext {
 // 启动
 // ---------------------------------------------------------------------------
 
-/// 在独立线程中启动 REST API Server。
-/// 如果首选端口被占用，自动尝试下一个端口（最多 10 次）。
-pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
-    let mut port = start_port;
-    let server = loop {
-        match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
-            Ok(s) => break s,
-            Err(_e) if port < start_port + 10 => {
-                log::warn!(
-                    "API Server 端口 {port} 被占用，尝试 {next}",
-                    next = port + 1
-                );
-                port += 1;
+#[derive(Default)]
+struct RequestLimiter {
+    active: AtomicUsize,
+}
+
+struct RequestPermit {
+    limiter: Arc<RequestLimiter>,
+}
+
+impl RequestLimiter {
+    fn try_acquire(self: &Arc<Self>) -> Option<RequestPermit> {
+        let mut active = self.active.load(Ordering::Acquire);
+        loop {
+            if active >= MAX_CONCURRENT_REQUESTS {
+                return None;
             }
-            Err(e) => panic!("无法启动 API Server (尝试了 {start_port}-{port}): {e}"),
+            match self.active.compare_exchange_weak(
+                active,
+                active + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(RequestPermit {
+                        limiter: self.clone(),
+                    })
+                }
+                Err(current) => active = current,
+            }
         }
+    }
+}
+
+impl Drop for RequestPermit {
+    fn drop(&mut self) {
+        self.limiter.active.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn dispatch_connection(
+    stream: std::net::TcpStream,
+    limiter: &Arc<RequestLimiter>,
+    handler: impl FnOnce(std::net::TcpStream) + Send + 'static,
+) -> Option<std::thread::JoinHandle<()>> {
+    // Acquire before parsing any bytes or creating a worker.
+    let Some(permit) = limiter.try_acquire() else {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return None;
     };
+    Some(std::thread::spawn(move || {
+        let _permit = permit;
+        handler(stream);
+    }))
+}
 
-    let actual_port = server.server_addr().to_ip().unwrap().port();
-    log::info!("拓展 API Server 已启动: http://127.0.0.1:{actual_port}");
-
+/// 在独立线程中启动 REST API Server。`start_port == 0` 让操作系统为本次
+/// Moke 会话分配随机回环端口；非零值仅用于兼容测试和诊断。
+pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", start_port))
+        .unwrap_or_else(|e| panic!("无法启动 API Server: {e}"));
+    let actual_port = listener.local_addr().unwrap().port();
+    let limiter = Arc::new(RequestLimiter::default());
     std::thread::spawn(move || {
-        for request in server.incoming_requests() {
+        for stream in listener.incoming().flatten() {
             let ctx = ctx.clone();
-            std::thread::spawn(move || handle_request(request, ctx));
+            dispatch_connection(stream, &limiter, move |stream| {
+                match super::transport::Request::read_headers(stream) {
+                    Ok(request) => handle_request(request, ctx, actual_port),
+                    Err((stream, status)) => super::transport::reject(stream, status),
+                }
+            });
         }
     });
 
@@ -308,126 +394,319 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
 // 路由分发
 // ---------------------------------------------------------------------------
 
-fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
-    // 先提取所有需要的数据（immutable borrows），然后读取 body（mutable borrow）
-    let url = request.url().to_string();
-    let method = request.method().clone();
-    let ext_name = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("X-Extension-Name"))
-        .map(|h| h.value.to_string());
-    let ext_token = request
-        .headers()
-        .iter()
-        .find(|h| h.field.equiv("X-Extension-Token"))
-        .map(|h| h.value.to_string());
+fn header(name: &str, value: &str) -> tiny_http::Header {
+    tiny_http::Header::from_bytes(name.as_bytes(), value.as_bytes()).unwrap()
+}
 
-    // 读取请求体（需要 mutable borrow，必须在所有 immutable borrow 结束之后）
-    let body = {
-        let mut s = String::new();
-        let _ = request.as_reader().read_to_string(&mut s);
-        s
+fn single_header(
+    request: &super::transport::Request,
+    name: &str,
+) -> Result<Option<String>, ApiError> {
+    let values: Vec<String> = request
+        .headers()
+        .iter()
+        .filter(|item| item.field.as_str().as_str().eq_ignore_ascii_case(name))
+        .map(|item| item.value.to_string())
+        .collect();
+    match values.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(value.clone())),
+        _ => Err(ApiError::bad_request(
+            "DUPLICATE_HEADER",
+            format!("请求头 {name} 不能重复"),
+        )),
+    }
+}
+
+fn with_security_headers(
+    mut response: tiny_http::Response<std::io::Cursor<Vec<u8>>>,
+    cors_origin: Option<&str>,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    response.add_header(header("Content-Type", "application/json; charset=utf-8"));
+    response.add_header(header("X-Content-Type-Options", "nosniff"));
+    response.add_header(header("Cache-Control", "no-store"));
+    if let Some(origin) = cors_origin {
+        response.add_header(header("Access-Control-Allow-Origin", origin));
+        response.add_header(header("Vary", "Origin"));
+    }
+    response
+}
+
+fn respond_json(
+    request: super::transport::Request,
+    status: u16,
+    body: String,
+    cors_origin: Option<&str>,
+) {
+    let response = with_security_headers(
+        tiny_http::Response::from_string(body).with_status_code(status),
+        cors_origin,
+    );
+    let _ = request.respond(response);
+}
+
+fn respond_error(request: super::transport::Request, error: ApiError, cors_origin: Option<&str>) {
+    let body = serde_json::json!({
+        "code": error.code,
+        "error": error.message,
+    })
+    .to_string();
+    respond_json(request, error.status, body, cors_origin);
+}
+
+fn validate_requested_headers(value: Option<&str>) -> Result<(), ApiError> {
+    const ALLOWED: [&str; 3] = ["content-type", "x-extension-name", "x-extension-token"];
+    if let Some(value) = value {
+        for requested in value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if !ALLOWED
+                .iter()
+                .any(|allowed| requested.eq_ignore_ascii_case(allowed))
+            {
+                return Err(ApiError::forbidden(
+                    "CORS_HEADER_FORBIDDEN",
+                    format!("预检请求头「{requested}」不被允许"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_preflight(
+    request: &super::transport::Request,
+    ctx: &ServerContext,
+    actual_port: u16,
+) -> Result<String, ApiError> {
+    let host = single_header(request, "Host")?;
+    if !super::security::validate_host(host.as_deref(), actual_port) {
+        return Err(ApiError::forbidden(
+            "INVALID_HOST",
+            "Host 必须是当前回环监听地址",
+        ));
+    }
+
+    let origin = single_header(request, "Origin")?;
+    let validated = {
+        let enabled = ctx.enabled.lock().unwrap();
+        super::security::validate_origin(origin.as_deref(), &enabled)
+    }
+    .map_err(|message| ApiError::forbidden("INVALID_ORIGIN", message))?;
+    let ValidatedOrigin::Extension { value, .. } = validated else {
+        return Err(ApiError::forbidden(
+            "INVALID_ORIGIN",
+            "浏览器预检请求必须携带受信拓展 Origin",
+        ));
     };
 
-    // 添加 CORS header（仅对本地拓展，实际不限来源）
-    let cors_header =
-        tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap();
+    let requested_method =
+        single_header(request, "Access-Control-Request-Method")?.ok_or_else(|| {
+            ApiError::bad_request("INVALID_PREFLIGHT", "缺少 Access-Control-Request-Method 头")
+        })?;
+    if !["GET", "POST", "PUT", "DELETE"]
+        .iter()
+        .any(|allowed| requested_method.eq_ignore_ascii_case(allowed))
+    {
+        return Err(ApiError::forbidden(
+            "CORS_METHOD_FORBIDDEN",
+            "预检请求方法不被允许",
+        ));
+    }
+    let requested_headers = single_header(request, "Access-Control-Request-Headers")?;
+    validate_requested_headers(requested_headers.as_deref())?;
+    Ok(value)
+}
 
-    // 处理 CORS 预检请求
-    if method == tiny_http::Method::Options || url == "/" {
-        // for CORS preflight & health check
-        let response = tiny_http::Response::from_string("")
-            .with_header(cors_header)
-            .with_header(
-                tiny_http::Header::from_bytes(
-                    &b"Access-Control-Allow-Headers"[..],
-                    &b"X-Extension-Name, X-Extension-Token, Content-Type"[..],
-                )
-                .unwrap(),
-            )
-            .with_header(
-                tiny_http::Header::from_bytes(
-                    &b"Access-Control-Allow-Methods"[..],
-                    &b"GET, POST, PUT, DELETE, OPTIONS"[..],
-                )
-                .unwrap(),
-            );
-        let _ = request.respond(response);
+fn validate_body_length(request: &super::transport::Request) -> Result<(), ApiError> {
+    if request
+        .body_length()
+        .is_some_and(|length| length > MAX_REQUEST_BODY_BYTES)
+    {
+        Err(ApiError::payload_too_large())
+    } else {
+        Ok(())
+    }
+}
+
+fn read_request_body(request: &mut super::transport::Request) -> Result<String, ApiError> {
+    validate_body_length(request)?;
+
+    let mut bytes = Vec::new();
+    request
+        .as_reader()
+        .take((MAX_REQUEST_BODY_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                ApiError::request_timeout("读取请求体超时")
+            }
+            _ => ApiError::bad_request("BODY_READ_FAILED", error.to_string()),
+        })?;
+    if bytes.len() > MAX_REQUEST_BODY_BYTES {
+        return Err(ApiError::payload_too_large());
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| ApiError::bad_request("INVALID_BODY_ENCODING", "请求体必须是 UTF-8"))
+}
+
+fn handle_request(
+    mut request: super::transport::Request,
+    ctx: Arc<ServerContext>,
+    actual_port: u16,
+) {
+    let url = request.url().to_string();
+    let method = request.method().clone();
+
+    if method == tiny_http::Method::Options {
+        match validate_preflight(&request, &ctx, actual_port) {
+            Ok(origin) => {
+                let mut response = with_security_headers(
+                    tiny_http::Response::from_string("").with_status_code(204),
+                    Some(&origin),
+                );
+                response.add_header(header(
+                    "Access-Control-Allow-Headers",
+                    "X-Extension-Name, X-Extension-Token, Content-Type",
+                ));
+                response.add_header(header(
+                    "Access-Control-Allow-Methods",
+                    "GET, POST, PUT, DELETE",
+                ));
+                response.add_header(header("Access-Control-Max-Age", "600"));
+                let _ = request.respond(response);
+            }
+            Err(error) => respond_error(request, error, None),
+        }
         return;
     }
 
-    // Token 认证
-    if let Err(e) = authenticate(&ctx, ext_name.as_deref(), ext_token.as_deref()) {
-        let response = tiny_http::Response::from_string(
-            serde_json::json!({"code": "AUTH_FAILED", "error": e}).to_string(),
-        )
-        .with_status_code(401)
-        .with_header(cors_header)
-        .with_header(
-            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+    // Host, Origin and token checks deliberately happen before any body read.
+    let host = match single_header(&request, "Host") {
+        Ok(value) => value,
+        Err(error) => {
+            respond_error(request, error, None);
+            return;
+        }
+    };
+    if !super::security::validate_host(host.as_deref(), actual_port) {
+        respond_error(
+            request,
+            ApiError::forbidden("INVALID_HOST", "Host 必须是当前回环监听地址"),
+            None,
         );
-        let _ = request.respond(response);
         return;
     }
 
+    let origin = match single_header(&request, "Origin") {
+        Ok(value) => value,
+        Err(error) => {
+            respond_error(request, error, None);
+            return;
+        }
+    };
+    let validated_origin = {
+        let enabled = ctx.enabled.lock().unwrap();
+        super::security::validate_origin(origin.as_deref(), &enabled)
+    };
+    let validated_origin = match validated_origin {
+        Ok(value) => value,
+        Err(message) => {
+            respond_error(
+                request,
+                ApiError::forbidden("INVALID_ORIGIN", message),
+                None,
+            );
+            return;
+        }
+    };
+    let cors_origin = match &validated_origin {
+        ValidatedOrigin::Backend => None,
+        ValidatedOrigin::Extension { value, .. } => Some(value.clone()),
+    };
+
+    // A declared oversized body is rejected before authentication and without
+    // touching the body stream. This also prevents attackers from using auth
+    // failures to tie up workers with large uploads.
+    if let Err(error) = validate_body_length(&request) {
+        respond_error(request, error, cors_origin.as_deref());
+        return;
+    }
+
+    let ext_name = match single_header(&request, "X-Extension-Name") {
+        Ok(value) => value,
+        Err(error) => {
+            respond_error(request, error, cors_origin.as_deref());
+            return;
+        }
+    };
+    if let ValidatedOrigin::Extension { name, .. } = &validated_origin {
+        if ext_name.as_deref() != Some(name.as_str()) {
+            respond_error(
+                request,
+                ApiError::forbidden("ORIGIN_EXTENSION_MISMATCH", "Origin 与拓展身份不匹配"),
+                cors_origin.as_deref(),
+            );
+            return;
+        }
+    }
+    let ext_token = match single_header(&request, "X-Extension-Token") {
+        Ok(value) => value,
+        Err(error) => {
+            respond_error(request, error, cors_origin.as_deref());
+            return;
+        }
+    };
+    if let Err(error) = authenticate(&ctx, ext_name.as_deref(), ext_token.as_deref()) {
+        respond_error(request, error, cors_origin.as_deref());
+        return;
+    }
     let ext_name = ext_name.unwrap();
 
-    // 路由
-    let result = match (&method, url.as_str()) {
-        // ---- 宿主信息 ----
-        (tiny_http::Method::Get, "/api/v1/info") => handle_info(&ctx, &ext_name),
-
-        // ---- 阅读器 ----
-        (_, u) if u.starts_with("/api/v1/reader/") => {
-            handle_reader(&ctx, &ext_name, &method, u, &body)
+    let body = match read_request_body(&mut request) {
+        Ok(body) => body,
+        Err(error) => {
+            respond_error(request, error, cors_origin.as_deref());
+            return;
         }
+    };
 
-        // ---- 拓展存储（列出所有 key） ----
+    // Keep storage/permissions in step with installation and token revocation.
+    // Reader waits do not hold the filesystem operation lock.
+    let _operation = if url.starts_with("/api/v1/extension/storage") {
+        Some(ctx.operations.lock().unwrap())
+    } else {
+        None
+    };
+    if let Err(error) = authenticate(&ctx, Some(&ext_name), ext_token.as_deref()) {
+        respond_error(request, error, cors_origin.as_deref());
+        return;
+    }
+    let result = match (&method, url.as_str()) {
+        (tiny_http::Method::Get, "/api/v1/info") => handle_info(&ctx, &ext_name),
+        (_, path) if path.starts_with("/api/v1/reader/") => {
+            handle_reader(&ctx, &ext_name, &method, path, &body)
+        }
         (tiny_http::Method::Get, "/api/v1/extension/storage") => {
             handle_ext_storage_list(&ctx, &ext_name)
         }
-
-        // ---- 拓展自管理 ----
         (tiny_http::Method::Post, "/api/v1/extension/sidebar/add") => {
             handle_ext_sidebar_add(&ctx, &ext_name, &body)
         }
         (tiny_http::Method::Post, "/api/v1/extension/page/register") => {
             handle_ext_page_register(&ctx, &ext_name, &body)
         }
-        (_, u) if u.starts_with("/api/v1/extension/storage/") => {
-            handle_ext_storage(&ctx, &ext_name, &method, u, &body)
+        (_, path) if path.starts_with("/api/v1/extension/storage/") => {
+            handle_ext_storage(&ctx, &ext_name, &method, path, &body)
         }
-
-        // ---- 404 ----
         _ => Err(ApiError::not_found("未找到")),
     };
 
     match result {
-        Ok(body) => {
-            let response = tiny_http::Response::from_string(body)
-                .with_header(cors_header)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
-                );
-            let _ = request.respond(response);
-        }
-        Err(error) => {
-            let body = serde_json::json!({
-                "code": error.code,
-                "error": error.message,
-            })
-            .to_string();
-            let response = tiny_http::Response::from_string(body)
-                .with_status_code(error.status)
-                .with_header(cors_header)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
-                );
-            let _ = request.respond(response);
-        }
+        Ok(body) => respond_json(request, 200, body, cors_origin.as_deref()),
+        Err(error) => respond_error(request, error, cors_origin.as_deref()),
     }
 }
 
@@ -439,17 +718,17 @@ fn authenticate(
     ctx: &ServerContext,
     ext_name: Option<&str>,
     ext_token: Option<&str>,
-) -> Result<(), String> {
-    let name = ext_name.ok_or("缺少 X-Extension-Name 头".to_string())?;
-    let token = ext_token.ok_or("缺少 X-Extension-Token 头".to_string())?;
+) -> Result<(), ApiError> {
+    let name = ext_name.ok_or_else(|| ApiError::unauthorized("缺少 X-Extension-Name 头"))?;
+    let token = ext_token.ok_or_else(|| ApiError::unauthorized("缺少 X-Extension-Token 头"))?;
 
     let enabled = ctx.enabled.lock().unwrap();
     let ext = enabled
         .get(name)
-        .ok_or_else(|| format!("拓展「{name}」未启用或不存在"))?;
+        .ok_or_else(|| ApiError::unauthorized(format!("拓展「{name}」未启用或不存在")))?;
 
-    if ext.token != token {
-        return Err("token 无效".into());
+    if !super::security::token_matches(&ext.token, token) {
+        return Err(ApiError::unauthorized("token 无效"));
     }
 
     Ok(())
@@ -461,6 +740,14 @@ fn authenticate(
 
 /// GET /api/v1/info
 fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, _ext_name, "server.info").map_err(
+        |message| {
+            ApiError::forbidden(
+                "PERMISSION_REQUIRED",
+                format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+            )
+        },
+    )?;
     let all_windows: Vec<String> = ctx.app_handle.webview_windows().keys().cloned().collect();
     log::info!("/api/v1/info: all windows = {:?}", all_windows);
 
@@ -576,6 +863,14 @@ fn handle_reader(
 ) -> ApiResult {
     // GET /api/v1/reader/windows
     if url == "/api/v1/reader/windows" && method == &tiny_http::Method::Get {
+        super::permissions::check_permission(&ctx.enabled, ext_name, "reader.state.read").map_err(
+            |message| {
+                ApiError::forbidden(
+                    "PERMISSION_REQUIRED",
+                    format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+                )
+            },
+        )?;
         let windows: Vec<String> = ctx
             .app_handle
             .webview_windows()
@@ -591,6 +886,13 @@ fn handle_reader(
         let label = label.strip_suffix("/state").unwrap_or(label);
 
         if method == &tiny_http::Method::Get && url.ends_with("/state") {
+            super::permissions::check_permission(&ctx.enabled, ext_name, "reader.state.read")
+                .map_err(|message| {
+                    ApiError::forbidden(
+                        "PERMISSION_REQUIRED",
+                        format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+                    )
+                })?;
             // 返回阅读器基本状态（窗口存在性 + 标签）
             if let Some(_window) = ctx.app_handle.get_webview_window(label) {
                 let state = serde_json::json!({
@@ -605,6 +907,13 @@ fn handle_reader(
 
         // POST /api/v1/reader/{label}/command
         if method == &tiny_http::Method::Post && url.ends_with("/command") {
+            super::permissions::check_permission(&ctx.enabled, ext_name, "reader.command.send")
+                .map_err(|message| {
+                    ApiError::forbidden(
+                        "PERMISSION_REQUIRED",
+                        format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+                    )
+                })?;
             let label = label.strip_suffix("/command").unwrap_or(label);
             if let Some(window) = ctx.app_handle.get_webview_window(label) {
                 // 将命令作为 Tauri event 转发给阅读器窗口。同步等待时会暂时把
@@ -706,7 +1015,15 @@ fn handle_reader(
 }
 
 /// POST /api/v1/extension/sidebar/add
-fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
+fn handle_ext_sidebar_add(ctx: &ServerContext, ext_name: &str, body: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, ext_name, "sidebar.add").map_err(
+        |message| {
+            ApiError::forbidden(
+                "PERMISSION_REQUIRED",
+                format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+            )
+        },
+    )?;
     let data: serde_json::Value = serde_json::from_str(body)
         .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
@@ -719,7 +1036,15 @@ fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> A
 }
 
 /// POST /api/v1/extension/page/register
-fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
+fn handle_ext_page_register(ctx: &ServerContext, ext_name: &str, body: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, ext_name, "page.register").map_err(
+        |message| {
+            ApiError::forbidden(
+                "PERMISSION_REQUIRED",
+                format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+            )
+        },
+    )?;
     let data: serde_json::Value = serde_json::from_str(body)
         .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
@@ -732,7 +1057,12 @@ fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) ->
 
 /// GET /api/v1/extension/storage — 列出所有 key
 fn handle_ext_storage_list(ctx: &ServerContext, ext_name: &str) -> ApiResult {
-    super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
+    super::permissions::check_permission(&ctx.enabled, ext_name, "storage").map_err(|message| {
+        ApiError::forbidden(
+            "PERMISSION_REQUIRED",
+            format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+        )
+    })?;
     let ext_dir = ctx.extensions_dir.join(ext_name);
     let keys = super::storage::list_keys(&ext_dir)?;
     Ok(serde_json::json!({"keys": keys}).to_string())
@@ -747,7 +1077,12 @@ fn handle_ext_storage(
     body: &str,
 ) -> ApiResult {
     // 安全：只有允许 storage 权限的拓展才能访问
-    super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
+    super::permissions::check_permission(&ctx.enabled, ext_name, "storage").map_err(|message| {
+        ApiError::forbidden(
+            "PERMISSION_REQUIRED",
+            format!("{message}；请作者更新 manifest 权限并重新打包导入"),
+        )
+    })?;
 
     let key = url.strip_prefix("/api/v1/extension/storage/").unwrap_or("");
     if key.is_empty() {
@@ -792,6 +1127,69 @@ mod tests {
             target_window: target_window.into(),
             request_id: request_id.into(),
         }
+    }
+
+    #[test]
+    fn raw_socket_limit_precedes_header_parsing_and_recovers() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let limiter = Arc::new(RequestLimiter::default());
+        let mut clients = Vec::new();
+        let mut workers = Vec::new();
+        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        for _ in 0..MAX_CONCURRENT_REQUESTS {
+            clients.push(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+            let stream = listener.accept().unwrap().0;
+            let gate = gate.clone();
+            workers.push(
+                dispatch_connection(stream, &limiter, move |stream| {
+                    let (lock, condition) = &*gate;
+                    let _guard = condition
+                        .wait_while(lock.lock().unwrap(), |released| !*released)
+                        .unwrap();
+                    drop(stream);
+                })
+                .unwrap(),
+            );
+        }
+        let mut rejected = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        assert!(
+            dispatch_connection(listener.accept().unwrap().0, &limiter, |_| panic!(
+                "must not parse"
+            ))
+            .is_none()
+        );
+        rejected
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        assert!(matches!(rejected.read(&mut [0]), Ok(0) | Err(_)));
+        {
+            let (lock, condition) = &*gate;
+            *lock.lock().unwrap() = true;
+            condition.notify_all();
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(limiter.active.load(Ordering::Acquire), 0);
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let worker = dispatch_connection(listener.accept().unwrap().0, &limiter, |stream| {
+            let request = super::super::transport::Request::read_headers(stream)
+                .ok()
+                .unwrap();
+            request
+                .respond(tiny_http::Response::from_string("ok"))
+                .unwrap();
+        })
+        .unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(response.ends_with("ok"));
+        worker.join().unwrap();
     }
 
     #[test]
@@ -1139,5 +1537,44 @@ mod tests {
             invalid["result"],
             serde_json::json!({"command": "legacy", "value": 42})
         );
+    }
+
+    #[test]
+    fn cors_preflight_header_policy_matches_actual_api_headers() {
+        assert!(validate_requested_headers(Some(
+            "content-type, X-Extension-Name, x-extension-token",
+        ))
+        .is_ok());
+        let error = validate_requested_headers(Some("X-Extension-Name, X-Evil")).unwrap_err();
+        assert_eq!(error.status, 403);
+        assert_eq!(error.code, "CORS_HEADER_FORBIDDEN");
+    }
+
+    #[test]
+    fn body_and_concurrency_limits_have_stable_errors() {
+        let body_error = ApiError::payload_too_large();
+        assert_eq!(body_error.status, 413);
+        assert_eq!(body_error.code, "PAYLOAD_TOO_LARGE");
+
+        let limiter = Arc::new(RequestLimiter::default());
+        let permits: Vec<_> = (0..MAX_CONCURRENT_REQUESTS)
+            .map(|_| limiter.try_acquire().expect("capacity available"))
+            .collect();
+        assert!(limiter.try_acquire().is_none());
+        drop(permits);
+        assert!(limiter.try_acquire().is_some());
+    }
+
+    #[test]
+    fn oversized_and_authentication_errors_are_stable_without_echoing_credentials() {
+        let auth_error = ApiError::unauthorized("token 无效");
+        let body_error = ApiError::payload_too_large();
+        assert_eq!((auth_error.status, auth_error.code), (401, "AUTH_FAILED"));
+        assert_eq!(
+            (body_error.status, body_error.code),
+            (413, "PAYLOAD_TOO_LARGE")
+        );
+        assert!(!auth_error.message.contains("moke_ext_"));
+        assert!(!body_error.message.contains("moke_ext_"));
     }
 }

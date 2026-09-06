@@ -40,7 +40,12 @@ pub fn discover_extensions(extensions_dir: &Path) -> Vec<Discovery> {
 
     for entry in entries.flatten() {
         let dir = entry.path();
-        if !dir.is_dir() {
+        if entry
+            .file_name()
+            .to_str()
+            .is_none_or(|name| validate_name(name).is_err())
+            || entry.file_type().map_or(true, |t| !t.is_dir())
+        {
             continue;
         }
 
@@ -50,8 +55,11 @@ pub fn discover_extensions(extensions_dir: &Path) -> Vec<Discovery> {
         }
 
         match read_and_validate_manifest(&manifest_path) {
-            Ok(manifest) => {
+            Ok(manifest) if dir.file_name().and_then(|n| n.to_str()) == Some(&manifest.name) => {
                 results.push(Discovery { dir, manifest });
+            }
+            Ok(_) => {
+                log::warn!("拓展名称与目录名不符");
             }
             Err(e) => {
                 log::warn!("跳过无效拓展「{}」: {e}", dir.display());
@@ -68,16 +76,21 @@ pub fn discover_extensions(extensions_dir: &Path) -> Vec<Discovery> {
 
 /// 读取并严格校验 manifest.json。
 pub fn read_and_validate_manifest(path: &Path) -> Result<Manifest, String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| format!("无法读取 manifest.json: {e}"))?;
+    use std::io::Read;
+    let mut raw = String::new();
+    std::fs::File::open(path)
+        .map_err(|e| e.to_string())?
+        .take(64 * 1024 + 1)
+        .read_to_string(&mut raw)
+        .map_err(|e| e.to_string())?;
 
     // 文件大小限制：64 KB（防止巨大 JSON 攻击）
     if raw.len() > 64 * 1024 {
         return Err("manifest.json 过大（超过 64 KB）".into());
     }
 
-    let manifest: Manifest = serde_json::from_str(&raw)
-        .map_err(|e| format!("manifest.json 解析失败: {e}"))?;
+    let manifest: Manifest =
+        serde_json::from_str(&raw).map_err(|e| format!("manifest.json 解析失败: {e}"))?;
 
     validate_manifest(&manifest)?;
     Ok(manifest)
@@ -93,10 +106,7 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
 
     // 3. api_version：如填写则必须为 "1"
     if !manifest.api_version.is_empty() && manifest.api_version != "1" {
-        return Err(format!(
-            "不支持的 api_version「{}」",
-            manifest.api_version
-        ));
+        return Err(format!("不支持的 api_version「{}」", manifest.api_version));
     }
 
     // 4. display_name：不能为空，最长 128 字符
@@ -117,6 +127,38 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         return Err("author 过长（超过 128 字符）".into());
     }
 
+    // 签名发布者元数据会进入签名 payload，先做严格的长度和来源校验。
+    if let Some(publisher) = &manifest.publisher {
+        if !publisher
+            .id
+            .starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+            || publisher.id.is_empty()
+            || publisher.id.len() > 128
+            || !publisher.id.chars().all(|character| {
+                character.is_ascii_lowercase()
+                    || character.is_ascii_digit()
+                    || matches!(character, '.' | '-' | '_')
+            })
+        {
+            return Err("publisher.id 格式无效".into());
+        }
+        if publisher.name.trim().is_empty() || publisher.name.len() > 128 {
+            return Err("publisher.name 无效（空或超过 128 字符）".into());
+        }
+        let url = tauri::Url::parse(&publisher.source).map_err(|_| "publisher.source URL 无效")?;
+        let source_is_allowed = url.scheme() == "https"
+            || (url.scheme() == "http"
+                && matches!(url.host_str(), Some("localhost" | "127.0.0.1")));
+        if publisher.source.len() > 512
+            || publisher.source.chars().any(|c| c.is_control() || c == ' ')
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || !source_is_allowed
+        {
+            return Err("publisher.source 必须是 HTTPS URL（本机开发来源除外）".into());
+        }
+    }
+
     // 7. permissions：必须在白名单中
     for perm in &manifest.permissions {
         if !KNOWN_PERMISSIONS.contains(&perm.as_str()) {
@@ -128,6 +170,20 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
     if let Some(entry) = &manifest.entry {
         if let Some(backend) = &entry.backend {
             validate_executable_path(&backend.executable)?;
+            for target in &backend.targets {
+                if ![
+                    "windows-x86_64",
+                    "windows-aarch64",
+                    "linux-x86_64",
+                    "linux-aarch64",
+                    "macos-x86_64",
+                    "macos-aarch64",
+                ]
+                .contains(&target.as_str())
+                {
+                    return Err(format!("不支持的 backend.targets: {target}"));
+                }
+            }
             // args 中禁止包含换行符（防注入）
             for arg in &backend.args {
                 if arg.contains('\n') || arg.contains('\r') {
@@ -199,7 +255,9 @@ fn validate_version(version: &str) -> Result<(), String> {
     }
     let parts: Vec<&str> = version.split('.').collect();
     if parts.len() != 3 {
-        return Err(format!("版本号「{version}」格式无效，需要 major.minor.patch"));
+        return Err(format!(
+            "版本号「{version}」格式无效，需要 major.minor.patch"
+        ));
     }
     for part in &parts {
         if part.is_empty() || !part.chars().all(|c| c.is_ascii_digit()) {
@@ -237,6 +295,14 @@ fn validate_executable_path(path: &str) -> Result<(), String> {
     // 禁止包含路径分隔符（只允许纯文件名）
     if path.contains('/') || path.contains('\\') {
         return Err("backend.executable 必须为纯文件名（不含路径分隔符）".into());
+    }
+    let lower = path.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "signature.json" | "storage.json" | "uninstall.exe" | "installer.nsi"
+    ) || lower.ends_with("-setup.exe")
+    {
+        return Err("backend.executable 不能指向宿主生成或签名排除的文件".into());
     }
     Ok(())
 }
@@ -317,5 +383,27 @@ mod tests {
     fn test_validate_executable_accepts_simple_name() {
         assert!(validate_executable_path("server.exe").is_ok());
         assert!(validate_executable_path("my-backend").is_ok());
+    }
+
+    #[test]
+    fn test_validate_manifest_rejects_insecure_publisher_source() {
+        let manifest = Manifest {
+            name: "sample-extension".into(),
+            version: "1.0.0".into(),
+            api_version: "1".into(),
+            display_name: "Sample".into(),
+            description: String::new(),
+            author: String::new(),
+            publisher: Some(super::super::PublisherConfig {
+                id: "org.example".into(),
+                name: "Example".into(),
+                source: "http://example.org/extension".into(),
+            }),
+            entry: None,
+            sidebar: None,
+            permissions: Vec::new(),
+            lucide_icons: Vec::new(),
+        };
+        assert!(validate_manifest(&manifest).is_err());
     }
 }

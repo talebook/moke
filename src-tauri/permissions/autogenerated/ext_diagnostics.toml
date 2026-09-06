@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-diagnostics"
+description = "Enables the ext_diagnostics command without any pre-configured scope."
+commands.allow = ["ext_diagnostics"]
+
+[[permission]]
+identifier = "deny-ext-diagnostics"
+description = "Denies the ext_diagnostics command without any pre-configured scope."
+commands.deny = ["ext_diagnostics"]
