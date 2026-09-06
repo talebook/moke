@@ -135,6 +135,26 @@ test('bootstrap cannot authorize a different origin, book, path, query or MIME',
   }
 });
 
+test('persisted equivalent origin spellings are canonicalized before preflight', async () => {
+  for (const serverUrl of [
+    `${SERVER}/`,
+    `${SERVER}///`,
+    ' HTTPS://BOOKS.EXAMPLE:443/ ',
+  ]) {
+    let call = 0;
+    const source = await resolveTalebookOnlineSource(async (url, init) => {
+      call += 1;
+      if (call === 1) {
+        assert.equal(url, BOOTSTRAP);
+        return bootstrapResponse();
+      }
+      if (init?.method === 'HEAD') return headResponse();
+      return rangeResponse();
+    }, serverUrl, ` ${BOOK_ID} `);
+    assert.equal(source.url, SOURCE);
+  }
+});
+
 test('redirects and invalid current server origins fail closed', async () => {
   await assert.rejects(
     resolveTalebookOnlineSource(
@@ -157,7 +177,10 @@ test('redirects and invalid current server origins fail closed', async () => {
   ]) {
     await assert.rejects(
       resolveTalebookOnlineSource(async () => bootstrapResponse(), invalidServer, BOOK_ID),
-      (error) => error instanceof OnlineReadingError && error.code === 'online.response_invalid',
+      (error) =>
+        error instanceof OnlineReadingError &&
+        error.code === 'online.response_invalid' &&
+        error.stage === 'server-url',
     );
   }
 });

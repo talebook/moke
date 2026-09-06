@@ -18,15 +18,36 @@ export type OnlineReadingErrorCode =
   | 'online.response_invalid'
   | 'online.network';
 
+export type OnlineReadingErrorStage =
+  | 'server-url'
+  | 'book-id'
+  | 'bootstrap-url'
+  | 'bootstrap-mime'
+  | 'bootstrap-body'
+  | 'bootstrap-contract'
+  | 'head-url'
+  | 'head-metadata'
+  | 'range-url'
+  | 'range-status'
+  | 'range-mime'
+  | 'range-metadata'
+  | 'range-body';
+
 export class OnlineReadingError extends Error {
   readonly code: OnlineReadingErrorCode;
   readonly status?: number;
+  readonly stage?: OnlineReadingErrorStage;
 
-  constructor(code: OnlineReadingErrorCode, status?: number) {
-    super(code);
+  constructor(
+    code: OnlineReadingErrorCode,
+    status?: number,
+    stage?: OnlineReadingErrorStage,
+  ) {
+    super(stage ? `${code}:${stage}` : code);
     this.name = 'OnlineReadingError';
     this.code = code;
     this.status = status;
+    this.stage = stage;
   }
 }
 
@@ -117,27 +138,35 @@ function errorForBootstrapCode(code: unknown, status: number): OnlineReadingErro
 
 function parseCurrentServerOrigin(serverUrl: string): string {
   try {
-    const parsed = new URL(serverUrl);
+    // Persisted Moke data from older builds may retain whitespace, repeated
+    // trailing slashes, uppercase schemes/hosts or an explicit default port.
+    // URL canonicalization makes all of those equivalent to the same origin;
+    // rejecting their spelling before issuing any request caused the field
+    // failure to surface as online.response_invalid.
+    const parsed = new URL(serverUrl.trim());
     if (
       !['http:', 'https:'].includes(parsed.protocol) ||
       parsed.username ||
       parsed.password ||
-      parsed.pathname !== '/' ||
+      !/^\/+$/u.test(parsed.pathname) ||
       parsed.search ||
-      parsed.hash ||
-      parsed.origin !== serverUrl.replace(/\/$/, '')
+      parsed.hash
     ) {
       throw new Error('invalid');
     }
     return parsed.origin;
   } catch {
-    throw new OnlineReadingError('online.response_invalid');
+    throw new OnlineReadingError('online.response_invalid', undefined, 'server-url');
   }
 }
 
-function requireExactResponseUrl(response: Response, expectedUrl: string): void {
+function requireExactResponseUrl(
+  response: Response,
+  expectedUrl: string,
+  stage: Extract<OnlineReadingErrorStage, 'bootstrap-url' | 'head-url' | 'range-url'>,
+): void {
   if (response.redirected || response.url !== expectedUrl) {
-    throw new OnlineReadingError('online.response_invalid', response.status);
+    throw new OnlineReadingError('online.response_invalid', response.status, stage);
   }
 }
 
@@ -163,14 +192,14 @@ function validateBootstrap(
     !resourceUrl.startsWith('/') ||
     resourceUrl.startsWith('//')
   ) {
-    throw new OnlineReadingError('online.response_invalid');
+    throw new OnlineReadingError('online.response_invalid', undefined, 'bootstrap-contract');
   }
 
   let resource: URL;
   try {
     resource = new URL(resourceUrl, serverOrigin);
   } catch {
-    throw new OnlineReadingError('online.response_invalid');
+    throw new OnlineReadingError('online.response_invalid', undefined, 'bootstrap-contract');
   }
   const keys = [...resource.searchParams.keys()];
   const revisions = resource.searchParams.getAll('revision');
@@ -185,7 +214,7 @@ function validateBootstrap(
     revisions.length !== 1 ||
     revisions[0] !== revision
   ) {
-    throw new OnlineReadingError('online.response_invalid');
+    throw new OnlineReadingError('online.response_invalid', undefined, 'bootstrap-contract');
   }
 
   return {
@@ -248,8 +277,10 @@ export async function resolveTalebookOnlineSource(
   rangeRequest: RequestLike = request,
 ): Promise<TalebookOnlineSource> {
   const serverOrigin = parseCurrentServerOrigin(serverUrl);
-  const bookId = String(rawBookId);
-  if (!/^\d+$/.test(bookId)) throw new OnlineReadingError('online.response_invalid');
+  const bookId = String(rawBookId).trim();
+  if (!/^\d+$/.test(bookId)) {
+    throw new OnlineReadingError('online.response_invalid', undefined, 'book-id');
+  }
 
   const bootstrapUrl = `${serverOrigin}/api/book/${bookId}/reader-bootstrap?engine=readest`;
   let bootstrapResponse: Response;
@@ -260,7 +291,7 @@ export async function resolveTalebookOnlineSource(
     throw new OnlineReadingError('online.network');
   }
 
-  requireExactResponseUrl(bootstrapResponse, bootstrapUrl);
+  requireExactResponseUrl(bootstrapResponse, bootstrapUrl, 'bootstrap-url');
   const bootstrapMime = normalizedMime(bootstrapResponse.headers.get('content-type'));
   let source: OnlineSourceCandidate;
   if (!bootstrapResponse.ok) {
@@ -289,7 +320,11 @@ export async function resolveTalebookOnlineSource(
   } else {
     if (bootstrapMime !== 'application/json') {
       await safeCancel(bootstrapResponse);
-      throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
+      throw new OnlineReadingError(
+        'online.response_invalid',
+        bootstrapResponse.status,
+        'bootstrap-mime',
+      );
     }
 
     let bootstrap: BootstrapEnvelope;
@@ -297,9 +332,13 @@ export async function resolveTalebookOnlineSource(
       bootstrap = await readJsonResponse<BootstrapEnvelope>(bootstrapResponse);
     } catch (error) {
       if (error instanceof MokeApiError) {
-        throw new OnlineReadingError('online.response_invalid', error.status);
+        throw new OnlineReadingError('online.response_invalid', error.status, 'bootstrap-body');
       }
-      throw new OnlineReadingError('online.response_invalid', bootstrapResponse.status);
+      throw new OnlineReadingError(
+        'online.response_invalid',
+        bootstrapResponse.status,
+        'bootstrap-body',
+      );
     }
     if (bootstrap.err !== 'ok') {
       throw errorForBootstrapCode(bootstrap.err, bootstrapResponse.status);
@@ -317,7 +356,7 @@ export async function resolveTalebookOnlineSource(
   } catch {
     throw new OnlineReadingError('online.network');
   }
-  requireExactResponseUrl(head, source.url);
+  requireExactResponseUrl(head, source.url, 'head-url');
 
   let headSize: number | null = null;
   let headEtag: string | null = null;
@@ -325,33 +364,33 @@ export async function resolveTalebookOnlineSource(
     const headMime = normalizedMime(head.headers.get('content-type'));
     if (headMime && !sourceAcceptsMime(source, headMime)) {
       await drainHeadResponse(head);
-      throw new OnlineReadingError('online.mime_invalid', head.status);
+      throw new OnlineReadingError('online.mime_invalid', head.status, 'head-metadata');
     }
     const contentEncoding = head.headers.get('content-encoding');
     const contentLength = head.headers.get('content-length');
     const etag = head.headers.get('etag');
     if (contentEncoding && contentEncoding.toLowerCase() !== 'identity') {
       await drainHeadResponse(head);
-      throw new OnlineReadingError('online.response_invalid', head.status);
+      throw new OnlineReadingError('online.response_invalid', head.status, 'head-metadata');
     }
     if (contentLength !== null) {
       headSize = Number(contentLength);
       if (!Number.isSafeInteger(headSize) || headSize <= 0) {
         await drainHeadResponse(head);
-        throw new OnlineReadingError('online.response_invalid', head.status);
+        throw new OnlineReadingError('online.response_invalid', head.status, 'head-metadata');
       }
     }
     if (etag !== null) {
       if (!SAFE_ETAG.test(etag)) {
         await drainHeadResponse(head);
-        throw new OnlineReadingError('online.response_invalid', head.status);
+        throw new OnlineReadingError('online.response_invalid', head.status, 'head-metadata');
       }
       headEtag = etag;
     }
   } else if (head.status !== 405 && head.status !== 501) {
     await drainHeadResponse(head);
     if (!head.ok) throw errorForStatus(head.status);
-    throw new OnlineReadingError('online.response_invalid', head.status);
+    throw new OnlineReadingError('online.response_invalid', head.status, 'head-metadata');
   }
   await drainHeadResponse(head);
 
@@ -373,10 +412,10 @@ export async function resolveTalebookOnlineSource(
   } catch {
     throw new OnlineReadingError('online.network');
   }
-  requireExactResponseUrl(probe, source.url);
+  requireExactResponseUrl(probe, source.url, 'range-url');
   if (probe.status === 200) {
     await safeCancel(probe);
-    throw new OnlineReadingError('online.range_unsupported', probe.status);
+    throw new OnlineReadingError('online.range_unsupported', probe.status, 'range-status');
   }
   if (probe.status === 416) {
     await safeCancel(probe);
@@ -388,11 +427,11 @@ export async function resolveTalebookOnlineSource(
   }
   if (probe.status !== 206) {
     await safeCancel(probe);
-    throw new OnlineReadingError('online.response_invalid', probe.status);
+    throw new OnlineReadingError('online.response_invalid', probe.status, 'range-status');
   }
   if (!sourceAcceptsMime(source, probe.headers.get('content-type'))) {
     await safeCancel(probe);
-    throw new OnlineReadingError('online.mime_invalid', probe.status);
+    throw new OnlineReadingError('online.mime_invalid', probe.status, 'range-mime');
   }
 
   const contentEncoding = probe.headers.get('content-encoding');
@@ -408,7 +447,7 @@ export async function resolveTalebookOnlineSource(
     !SAFE_ETAG.test(etag)
   ) {
     await safeCancel(probe);
-    throw new OnlineReadingError('online.response_invalid', probe.status);
+    throw new OnlineReadingError('online.response_invalid', probe.status, 'range-metadata');
   }
   if (headSize !== null && headSize !== size) {
     await safeCancel(probe);
@@ -426,7 +465,7 @@ export async function resolveTalebookOnlineSource(
     throw new OnlineReadingError('online.network', probe.status);
   }
   if (firstByte.byteLength !== 1) {
-    throw new OnlineReadingError('online.response_invalid', probe.status);
+    throw new OnlineReadingError('online.response_invalid', probe.status, 'range-body');
   }
 
   return {
