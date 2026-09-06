@@ -169,8 +169,17 @@ test('Moke host commands use exact window/platform ACL and document guards', () 
     /#\[cfg\(any\(target_env = "ohos", target_os = "android"\)\)\]\s*moke_navigate,/,
   );
   assert.match(source, /fn require_moke_shell[\s\S]*is_moke_shell_path/);
-  assert.match(source, /fn moke_navigate[\s\S]*require_moke_reader\(&webview\)/);
-  assert.match(source, /if path != "\/library"/);
+  assert.match(source, /fn moke_navigate[\s\S]*is_allowed_moke_navigation\(&source, &target\)/);
+  assert.match(
+    source,
+    /is_moke_shell_path\(source\.path\(\)\)[\s\S]*target\.path\(\) == "\/readest\/reader"/,
+  );
+  assert.match(
+    source,
+    /is_moke_reader_path\(source\.path\(\)\)[\s\S]*target\.path\(\) == "\/library" && target\.query\(\)\.is_none\(\)/,
+  );
+  assert.match(source, /target\.fragment\(\)\.is_some\(\)/);
+  assert.match(source, /fn schedule_moke_navigation[\s\S]*from_millis\(100\)/);
 
   for (const command of [
     'allow-moke-list-downloaded-books',

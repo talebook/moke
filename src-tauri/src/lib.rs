@@ -49,21 +49,52 @@ fn is_moke_reader_path(path: &str) -> bool {
     path == "/readest" || path.starts_with("/readest/")
 }
 
+fn has_same_url_origin(left: &tauri::Url, right: &tauri::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.username() == right.username()
+        && left.password() == right.password()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_allowed_moke_navigation(source: &tauri::Url, target: &tauri::Url) -> bool {
+    if !has_same_url_origin(source, target) || target.fragment().is_some() {
+        return false;
+    }
+
+    if is_moke_shell_path(source.path()) {
+        // Enter only the bundled book-reader document. Its query carries the
+        // source/book context and is validated again by the Reader frontend.
+        target.path() == "/readest/reader"
+    } else if is_moke_reader_path(source.path()) {
+        // Reader has no generic host router capability: it may only return to
+        // the fixed Moke library route.
+        target.path() == "/library" && target.query().is_none()
+    } else {
+        false
+    }
+}
+
+#[cfg(any(target_env = "ohos", target_os = "android"))]
+fn schedule_moke_navigation(webview: tauri::Webview, target: tauri::Url) {
+    // Navigating inside the command can replace the JavaScript document before
+    // Tauri delivers this command's completion callback, producing a stale
+    // callback-id warning. A short deferred dispatch lets the invoke settle
+    // before the native full-document navigation starts.
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Err(error) = webview.navigate(target) {
+            log::warn!("deferred moke navigation failed: {error}");
+        }
+    });
+}
+
 fn require_moke_shell(webview: &tauri::Webview) -> Result<(), String> {
     let url = webview.url().map_err(|error| error.to_string())?;
     if is_moke_shell_path(url.path()) {
         Ok(())
     } else {
         Err("command is available only to the Moke shell".into())
-    }
-}
-
-fn require_moke_reader(webview: &tauri::Webview) -> Result<(), String> {
-    let url = webview.url().map_err(|error| error.to_string())?;
-    if is_moke_reader_path(url.path()) {
-        Ok(())
-    } else {
-        Err("command is available only to the embedded Reader".into())
     }
 }
 
@@ -120,17 +151,18 @@ fn moke_runtime_platform(webview: tauri::Webview) -> Result<&'static str, String
 #[cfg(any(target_env = "ohos", target_os = "android"))]
 #[tauri::command]
 fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
-    require_moke_reader(&webview)?;
-    if path != "/library" {
-        return Err("embedded Reader may return only to the Moke library".into());
+    if !path.starts_with('/') || path.starts_with("//") {
+        return Err("navigation target must be a same-origin absolute path".into());
     }
 
-    let target = webview
-        .url()
-        .map_err(|error| error.to_string())?
-        .join(&path)
-        .map_err(|error| error.to_string())?;
-    webview.navigate(target).map_err(|error| error.to_string())
+    let source = webview.url().map_err(|error| error.to_string())?;
+    let target = source.join(&path).map_err(|error| error.to_string())?;
+    if !is_allowed_moke_navigation(&source, &target) {
+        return Err("navigation is not an allowed Moke/Reader document transition".into());
+    }
+
+    schedule_moke_navigation(webview, target);
+    Ok(())
 }
 
 fn moke_downloads_index_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -947,7 +979,7 @@ mod download_storage_tests {
 
 #[cfg(test)]
 mod moke_document_acl_tests {
-    use super::{is_moke_reader_path, is_moke_shell_path};
+    use super::{is_allowed_moke_navigation, is_moke_reader_path, is_moke_shell_path};
 
     #[test]
     fn host_commands_and_reader_navigation_have_disjoint_document_paths() {
@@ -963,6 +995,42 @@ mod moke_document_acl_tests {
         ] {
             assert!(!is_moke_shell_path(path));
             assert!(is_moke_reader_path(path));
+        }
+    }
+
+    #[test]
+    fn native_navigation_allows_only_exact_cross_document_transitions() {
+        let shell = tauri::Url::parse("http://tauri.localhost/detail?id=11").unwrap();
+        let reader = tauri::Url::parse(
+            "http://tauri.localhost/readest/reader?file=book.epub&moke=1",
+        )
+        .unwrap();
+        let library = tauri::Url::parse("http://tauri.localhost/library").unwrap();
+
+        assert!(is_allowed_moke_navigation(&shell, &reader));
+        assert!(is_allowed_moke_navigation(&reader, &library));
+
+        for denied in [
+            "http://tauri.localhost/readest",
+            "http://tauri.localhost/readest/reader/extra",
+            "http://tauri.localhost/readest/reader#fragment",
+            "https://evil.example/readest/reader?file=book.epub",
+        ] {
+            assert!(!is_allowed_moke_navigation(
+                &shell,
+                &tauri::Url::parse(denied).unwrap(),
+            ));
+        }
+        for denied in [
+            "http://tauri.localhost/",
+            "http://tauri.localhost/library?next=/settings",
+            "http://tauri.localhost/settings",
+            "https://evil.example/library",
+        ] {
+            assert!(!is_allowed_moke_navigation(
+                &reader,
+                &tauri::Url::parse(denied).unwrap(),
+            ));
         }
     }
 }
