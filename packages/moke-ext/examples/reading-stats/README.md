@@ -69,7 +69,7 @@ makensis installer.nsi
 ## 架构
 
 ```
-manifest.json → 主程序: 分配端口 19557+, 启动 server.exe (注入 MOKE_EXT_TOKEN)
-server.exe    → 静态文件服务 + /api/token 端点
-ui/index.html → fetch(/api/token) → WS(19556) 认证 → 订阅 reader:* 事件
+manifest.json → 主程序: 分配 UI 端口并启动 server.exe
+server.exe    → 从 MOKE_EXT_TOKEN / MOKE_WS_PORT 读取会话配置并订阅 reader:* 事件
+ui/index.html → 仅同源读取 server.exe 的 /api/stats；不会接触宿主 token
 ```

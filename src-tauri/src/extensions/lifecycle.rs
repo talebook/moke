@@ -1,7 +1,8 @@
 //! 拓展生命周期管理：启用/禁用/卸载、后端进程启停、状态持久化。
 
-use super::{EnabledExtension, BackendConfig, Manifest};
+use super::{BackendConfig, EnabledExtension, Manifest};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
@@ -47,7 +48,11 @@ pub fn allocate_port(next_port: &Arc<AtomicU16>, port_range_start: u16) -> u16 {
 pub fn reserve_after_port(next_port: &Arc<AtomicU16>, used_port: u16) {
     let next = used_port.saturating_add(1).clamp(PORT_MIN, PORT_MAX);
     let _ = next_port.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-        if current <= used_port { Some(next) } else { None }
+        if current <= used_port {
+            Some(next)
+        } else {
+            None
+        }
     });
 }
 
@@ -104,7 +109,10 @@ pub fn start_backend(
         .current_dir(ext_dir)
         .env_clear()
         // 最基本的 Windows 运行环境
-        .env("SYSTEMROOT", std::env::var("SYSTEMROOT").unwrap_or_else(|_| "C:\\Windows".into()))
+        .env(
+            "SYSTEMROOT",
+            std::env::var("SYSTEMROOT").unwrap_or_else(|_| "C:\\Windows".into()),
+        )
         .env("PATH", std::env::var("PATH").unwrap_or_default())
         // 传递 token 和宿主服务端口，拓展后端可通过环境变量获取
         .env("MOKE_EXT_TOKEN", token)
@@ -134,11 +142,7 @@ pub fn start_backend(
         ));
     }
 
-    log::info!(
-        "启动拓展后端: {} (PID: {})",
-        exe_path.display(),
-        child.id()
-    );
+    log::info!("启动拓展后端: {} (PID: {})", exe_path.display(), child.id());
 
     Ok(child)
 }
@@ -155,7 +159,46 @@ struct RuntimeStateFile {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedExtension {
+    #[serde(default)]
     port: u16,
+}
+
+pub fn secure_extensions_directory(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("限制拓展目录权限失败: {error}"))?;
+    }
+    Ok(())
+}
+
+fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| format!("写入临时状态文件失败: {error}"))?;
+    file.write_all(contents)
+        .map_err(|error| format!("写入临时状态文件失败: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("同步临时状态文件失败: {error}"))?;
+    Ok(())
+}
+
+fn restrict_file_permissions(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("限制运行时状态文件权限失败: {error}"))?;
+    }
+    Ok(())
 }
 
 /// 将当前已启用的拓展状态写入文件。
@@ -177,21 +220,24 @@ pub fn save_runtime_state(
         })
         .collect();
 
-    let state = RuntimeStateFile {
-        enabled: persisted,
-    };
+    let state = RuntimeStateFile { enabled: persisted };
 
-    let json = serde_json::to_string_pretty(&state)
-        .map_err(|e| format!("序列化运行时状态失败: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(&state).map_err(|e| format!("序列化运行时状态失败: {e}"))?;
 
     let path = extensions_dir.join(RUNTIME_STATE_FILE);
 
-    // 先写临时文件，再原子替换（防写入过程中断电导致文件损坏）
+    // 先以仅当前用户可读写的权限写临时文件，再原子替换。旧版本
+    // runtime.json 中的 token 会在这次保存后被迁移移除。
     let tmp_path = extensions_dir.join("runtime.tmp");
-    std::fs::write(&tmp_path, &json)
-        .map_err(|e| format!("写入临时状态文件失败: {e}"))?;
-    std::fs::rename(&tmp_path, &path)
-        .map_err(|e| format!("替换状态文件失败: {e}"))?;
+    write_private_file(&tmp_path, json.as_bytes())?;
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        // std::fs::rename does not replace an existing destination on Windows.
+        std::fs::remove_file(&path).map_err(|e| format!("移除旧状态文件失败: {e}"))?;
+    }
+    std::fs::rename(&tmp_path, &path).map_err(|e| format!("替换状态文件失败: {e}"))?;
+    restrict_file_permissions(&path)?;
 
     Ok(())
 }

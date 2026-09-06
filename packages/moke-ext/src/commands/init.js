@@ -34,48 +34,12 @@ const INDEX_HTML = `<!DOCTYPE html>
     h1 { font-size: 1.3rem; margin-bottom: 8px; }
     p { font-size: 0.85rem; color: #8b806e; }
     .status { margin-top: 16px; font-size: 0.8rem; }
-    .connected { color: #065f46; }
-    .disconnected { color: #991b1b; }
   </style>
 </head>
 <body>
   <h1>%DISPLAY%</h1>
   <p>Moke extension — edit ui/index.html to get started.</p>
-  <div class="status" id="status">Connecting...</div>
-
-  <script>
-    const WS_PORT = 19556;
-    const EXT_NAME = '%NAME%';
-
-    async function connect() {
-      const status = document.getElementById('status');
-
-      // 1. Get token from backend
-      let token = '';
-      try { token = (await (await fetch('/api/token')).json()).token || ''; } catch {}
-
-      // 2. Connect WebSocket
-      const ws = new WebSocket('ws://127.0.0.1:' + WS_PORT);
-      ws.onopen = () => {
-        status.className = 'status connected';
-        status.textContent = 'Connected';
-        ws.send(JSON.stringify({
-          type: 'hello', extension: EXT_NAME, token,
-          events: ['reader:book:opened', 'reader:page:changed', 'reader:book:closed'],
-        }));
-      };
-      ws.onmessage = (msg) => {
-        const { event, data } = JSON.parse(msg.data);
-        status.textContent = event + ': ' + JSON.stringify(data).substring(0, 80);
-      };
-      ws.onclose = () => {
-        status.className = 'status disconnected';
-        status.textContent = 'Disconnected, retrying...';
-        setTimeout(connect, 5000);
-      };
-    }
-    connect();
-  </script>
+  <div class="status">UI ready. Add a backend for host API access.</div>
 </body>
 </html>`;
 
