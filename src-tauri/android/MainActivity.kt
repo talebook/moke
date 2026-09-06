@@ -4,6 +4,7 @@
 // KeyDownInterceptor 接口，导致 intercept_keys 命令静默失败，音量键翻页无效
 // （talebook/moke#17）。此文件在 CI（build-release.yml）中于 `tauri android init`
 // 之后覆盖到 src-tauri/gen/android 生成的 MainActivity。
+// 此 Activity 同时提供系统代理查询的 JNI 入口，供 Moke 原生 HTTP 请求使用。
 //
 // 音量键翻页链路：readest 前端 acquireVolumeKeyInterception() →
 // interceptKeys({ volumeKeys: true }) → NativeBridgePlugin.intercept_keys →
@@ -22,12 +23,32 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
+import androidx.annotation.Keep
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.readest.native_bridge.KeyDownInterceptor
 import java.lang.ref.WeakReference
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.URI
 
 class MainActivity : TauriActivity(), KeyDownInterceptor {
+    // Called over JNI on a Rust blocking worker, never exposed to publication
+    // JavaScript. Android updates its default selector when the VPN/Wi-Fi proxy
+    // changes; it also owns exclusion-list and PAC decisions for this URL.
+    @Keep
+    fun resolveMokeProxy(url: String): String? {
+        val uri = URI(url)
+        require(uri.scheme == "http" || uri.scheme == "https")
+        val proxy = ProxySelector.getDefault()?.select(uri)?.firstOrNull() ?: return null
+        if (proxy.type() == Proxy.Type.DIRECT) return null
+        // Android HTTP proxies also tunnel HTTPS destinations using CONNECT.
+        require(proxy.type() == Proxy.Type.HTTP) { "Unsupported Android proxy type" }
+        val address = proxy.address() as InetSocketAddress
+        return URI("http", null, address.hostString, address.port, null, null, null).toASCIIString()
+    }
+
     private var wv: WebView? = null
     private var interceptVolumeKeysEnabled = false
     private var interceptBackKeyEnabled = false

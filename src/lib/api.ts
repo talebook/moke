@@ -4,7 +4,7 @@ import { getSafeErrorCode, logHttpErrorMetadata } from '@/lib/api-log';
 import {
   attachSafeJsonReader,
   buildTauriBinaryHeaders,
-  buildTauriRequestInit,
+  buildSystemProxyRequestInit,
   cancelResponseBodyQuietly,
   drainResponseBodyQuietly,
   getErrorMessage,
@@ -100,10 +100,15 @@ export async function request(
   try {
     if (isTauriApp) {
       const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+      const { platform } = await import('@tauri-apps/plugin-os');
+      const init = await buildSystemProxyRequestInit(urlStr, options, platform(), async (url) => {
+        const { invoke } = await import('@tauri-apps/api/core');
+        return invoke<string | null>('moke_android_proxy', { url });
+      });
       // Tauri 桌面端：使用插件 fetch。需要显式放宽以兼容自建 Talebook 服务器：
       // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
       // - maxRedirections: 跟随登录后的重定向（与浏览器行为一致）
-      response = await tauriFetch(urlStr, buildTauriRequestInit(options) as any);
+      response = await tauriFetch(urlStr, init);
     } else {
       response = await fetch(url, options);
     }

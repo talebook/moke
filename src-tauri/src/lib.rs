@@ -26,6 +26,9 @@ compile_error!("reader-e2e is supported only by desktop development builds");
 
 mod extensions;
 
+#[cfg(target_os = "android")]
+mod android_network;
+
 // Keep build-script profile routing covered by the normal `cargo test --lib`
 // command used in CI without compiling it into production application code.
 #[cfg(test)]
@@ -620,6 +623,8 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
+        #[cfg(target_os = "android")]
+        android_network::moke_android_proxy,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
         moke_record_downloaded_book,
