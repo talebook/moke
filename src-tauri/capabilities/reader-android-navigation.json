@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "reader-android-navigation",
+  "description": "Android single-WebView Reader may return only to the Moke library through the native navigation command.",
+  "windows": [
+    "main"
+  ],
+  "platforms": [
+    "android"
+  ],
+  "permissions": [
+    "allow-moke-navigate"
+  ]
+}

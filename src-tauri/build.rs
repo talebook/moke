@@ -30,6 +30,21 @@ const APP_ACL_COMMANDS: &[&str] = &[
     "localsend_cancel_receive",
     "localsend_send_files",
     "localsend_cancel_send",
+    // Moke host commands used by the shell. On single-WebView targets the
+    // command implementations also validate the active document path because
+    // the shell and Reader necessarily share the `main` label.
+    "moke_runtime_platform",
+    "moke_navigate",
+    "moke_record_downloaded_book",
+    "moke_delete_downloaded_book_file",
+    "moke_open_downloaded_book",
+    "moke_reveal_downloaded_book",
+    "moke_remove_downloaded_book",
+    "moke_select_download_directory",
+    "moke_reset_download_directory",
+    "moke_get_download_directory",
+    "moke_download_storage_stats",
+    "moke_list_downloaded_books",
     // Host command implemented in src/extensions/mod.rs, not readestlib.
     "ext_reader_event",
 ];
@@ -39,9 +54,8 @@ fn main() {
     // its app ACL manifest cannot propagate like a plugin `links` manifest.
     // Declare that command surface in the embedding host; Reader capabilities
     // can then grant it to both bundled and debug-remote Reader windows.
-    let attributes = tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(APP_ACL_COMMANDS),
-    );
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(APP_ACL_COMMANDS));
 
     // Desktop capabilities reference plugins that are unavailable on OHOS, so
     // only compile the platform-specific capability. Device dev servers run on

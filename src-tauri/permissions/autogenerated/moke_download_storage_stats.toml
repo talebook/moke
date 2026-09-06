@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-download-storage-stats"
+description = "Enables the moke_download_storage_stats command without any pre-configured scope."
+commands.allow = ["moke_download_storage_stats"]
+
+[[permission]]
+identifier = "deny-moke-download-storage-stats"
+description = "Denies the moke_download_storage_stats command without any pre-configured scope."
+commands.deny = ["moke_download_storage_stats"]

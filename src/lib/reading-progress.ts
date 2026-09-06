@@ -65,12 +65,13 @@ export function normalizeReaderProgressEvent(input: Record<string, unknown>): Re
   };
 }
 
-export async function fetchReadingProgress(bookId: string | number): Promise<ReadingProgressPayload | null> {
+export async function fetchReadingProgress(bookId: string | number, signal?: AbortSignal): Promise<ReadingProgressPayload | null> {
   const { serverUrl, capabilities } = useServerStore.getState();
   if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return null;
 
   try {
     const response = await request(`${serverUrl}/api/book/${bookId}/progress`, {
+      signal,
       credentials: 'include',
     });
     const data = await readApiJson<ReadingProgressResponse>(response);

@@ -41,6 +41,63 @@ use tauri_plugin_fs::FsExt;
 
 static MOKE_DOWNLOADS_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
+fn is_moke_shell_path(path: &str) -> bool {
+    path != "/readest" && !path.starts_with("/readest/")
+}
+
+fn is_moke_reader_path(path: &str) -> bool {
+    path == "/readest" || path.starts_with("/readest/")
+}
+
+fn has_same_url_origin(left: &tauri::Url, right: &tauri::Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.username() == right.username()
+        && left.password() == right.password()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
+fn is_allowed_moke_navigation(source: &tauri::Url, target: &tauri::Url) -> bool {
+    if !has_same_url_origin(source, target) || target.fragment().is_some() {
+        return false;
+    }
+
+    if is_moke_shell_path(source.path()) {
+        // Enter only the bundled book-reader document. Its query carries the
+        // source/book context and is validated again by the Reader frontend.
+        target.path() == "/readest/reader"
+    } else if is_moke_reader_path(source.path()) {
+        // Reader has no generic host router capability: it may only return to
+        // the fixed Moke library route.
+        target.path() == "/library" && target.query().is_none()
+    } else {
+        false
+    }
+}
+
+#[cfg(any(target_env = "ohos", target_os = "android"))]
+fn schedule_moke_navigation(webview: tauri::Webview, target: tauri::Url) {
+    // Navigating inside the command can replace the JavaScript document before
+    // Tauri delivers this command's completion callback, producing a stale
+    // callback-id warning. A short deferred dispatch lets the invoke settle
+    // before the native full-document navigation starts.
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if let Err(error) = webview.navigate(target) {
+            log::warn!("deferred moke navigation failed: {error}");
+        }
+    });
+}
+
+fn require_moke_shell(webview: &tauri::Webview) -> Result<(), String> {
+    let url = webview.url().map_err(|error| error.to_string())?;
+    if is_moke_shell_path(url.path()) {
+        Ok(())
+    } else {
+        Err("command is available only to the Moke shell".into())
+    }
+}
+
 /// Metadata for a book downloaded by Moke.  The reader uses this small host
 /// API instead of reaching into Moke's IndexedDB, which is private to the
 /// main WebView.
@@ -77,12 +134,14 @@ struct MokeDownloadedBookResponse {
 /// `target_os = "linux"`. Expose the target environment explicitly so the
 /// frontend can select the single-WebView reader flow on OHOS.
 #[tauri::command]
-fn moke_runtime_platform() -> &'static str {
+fn moke_runtime_platform(webview: tauri::Webview) -> Result<&'static str, String> {
+    require_moke_shell(&webview)?;
+
     #[cfg(target_env = "ohos")]
-    return "ohos";
+    return Ok("ohos");
 
     #[cfg(not(target_env = "ohos"))]
-    std::env::consts::OS
+    Ok(std::env::consts::OS)
 }
 
 /// Performs a full-document navigation inside the current Android/OpenHarmony
@@ -93,15 +152,17 @@ fn moke_runtime_platform() -> &'static str {
 #[tauri::command]
 fn moke_navigate(webview: tauri::Webview, path: String) -> Result<(), String> {
     if !path.starts_with('/') || path.starts_with("//") {
-        return Err("navigation path must stay inside the application".into());
+        return Err("navigation target must be a same-origin absolute path".into());
     }
 
-    let target = webview
-        .url()
-        .map_err(|error| error.to_string())?
-        .join(&path)
-        .map_err(|error| error.to_string())?;
-    webview.navigate(target).map_err(|error| error.to_string())
+    let source = webview.url().map_err(|error| error.to_string())?;
+    let target = source.join(&path).map_err(|error| error.to_string())?;
+    if !is_allowed_moke_navigation(&source, &target) {
+        return Err("navigation is not an allowed Moke/Reader document transition".into());
+    }
+
+    schedule_moke_navigation(webview, target);
+    Ok(())
 }
 
 fn moke_downloads_index_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -245,7 +306,12 @@ fn write_moke_downloads(app: &AppHandle, books: &[MokeDownloadedBook]) -> Result
 }
 
 #[tauri::command]
-fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Result<(), String> {
+fn moke_record_downloaded_book(
+    webview: tauri::Webview,
+    app: AppHandle,
+    book: MokeDownloadedBook,
+) -> Result<(), String> {
+    require_moke_shell(&webview)?;
     let _guard = MOKE_DOWNLOADS_INDEX_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
@@ -273,7 +339,12 @@ fn moke_record_downloaded_book(app: AppHandle, book: MokeDownloadedBook) -> Resu
 }
 
 #[tauri::command]
-fn moke_remove_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+fn moke_remove_downloaded_book(
+    webview: tauri::Webview,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
+    require_moke_shell(&webview)?;
     let _guard = MOKE_DOWNLOADS_INDEX_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
@@ -328,7 +399,12 @@ fn indexed_downloaded_book_path(app: &AppHandle, id: &str) -> Result<PathBuf, St
 }
 
 #[tauri::command]
-fn moke_delete_downloaded_book_file(app: AppHandle, id: String) -> Result<(), String> {
+fn moke_delete_downloaded_book_file(
+    webview: tauri::Webview,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
+    require_moke_shell(&webview)?;
     let path = indexed_downloaded_book_path(&app, &id)?;
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -338,9 +414,14 @@ fn moke_delete_downloaded_book_file(app: AppHandle, id: String) -> Result<(), St
 }
 
 #[tauri::command]
-fn moke_open_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+fn moke_open_downloaded_book(
+    webview: tauri::Webview,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
 
+    require_moke_shell(&webview)?;
     let path = indexed_downloaded_book_path(&app, &id)?;
     app.opener()
         .open_path(path.to_string_lossy().into_owned(), None::<String>)
@@ -348,9 +429,14 @@ fn moke_open_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn moke_reveal_downloaded_book(app: AppHandle, id: String) -> Result<(), String> {
+fn moke_reveal_downloaded_book(
+    webview: tauri::Webview,
+    app: AppHandle,
+    id: String,
+) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
 
+    require_moke_shell(&webview)?;
     let path = indexed_downloaded_book_path(&app, &id)?;
     app.opener()
         .reveal_item_in_dir(path)
@@ -358,7 +444,11 @@ fn moke_reveal_downloaded_book(app: AppHandle, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>, String> {
+async fn moke_select_download_directory(
+    webview: tauri::Webview,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    require_moke_shell(&webview)?;
     // Tauri's folder picker is desktop-only. Keep it out of every mobile
     // target at compile time: Android/iOS expose `FileDialogBuilder`, but do
     // not implement `blocking_pick_folder`.
@@ -403,12 +493,17 @@ async fn moke_select_download_directory(app: AppHandle) -> Result<Option<String>
 }
 
 #[tauri::command]
-fn moke_reset_download_directory(app: AppHandle) -> Result<(), String> {
+fn moke_reset_download_directory(webview: tauri::Webview, app: AppHandle) -> Result<(), String> {
+    require_moke_shell(&webview)?;
     write_download_directory(&app, None)
 }
 
 #[tauri::command]
-fn moke_get_download_directory(app: AppHandle) -> Result<Option<String>, String> {
+fn moke_get_download_directory(
+    webview: tauri::Webview,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    require_moke_shell(&webview)?;
     Ok(read_download_directory(&app)?.map(|path| download_directory_for_frontend(&path)))
 }
 
@@ -505,9 +600,11 @@ fn mount_specificity(mount: &Path, style: MountPathStyle) -> usize {
 
 #[tauri::command]
 fn moke_download_storage_stats(
+    webview: tauri::Webview,
     app: AppHandle,
     directory: Option<String>,
 ) -> Result<DownloadStorageStats, String> {
+    require_moke_shell(&webview)?;
     let configured = read_download_directory(&app)?;
     let target = match (directory, configured) {
         (Some(requested), Some(configured))
@@ -536,7 +633,11 @@ fn moke_download_storage_stats(
 /// Lists local Moke downloads for the embedded Readest home page. Files that
 /// predate the metadata index are still exposed with a filename-derived title.
 #[tauri::command]
-fn moke_list_downloaded_books(app: AppHandle) -> Result<Vec<MokeDownloadedBookResponse>, String> {
+fn moke_list_downloaded_books(
+    webview: tauri::Webview,
+    app: AppHandle,
+) -> Result<Vec<MokeDownloadedBookResponse>, String> {
+    require_moke_shell(&webview)?;
     let _guard = MOKE_DOWNLOADS_INDEX_LOCK
         .lock()
         .map_err(|error| error.to_string())?;
@@ -873,6 +974,64 @@ mod download_storage_tests {
             ),
             Some("/srv/books"),
         );
+    }
+}
+
+#[cfg(test)]
+mod moke_document_acl_tests {
+    use super::{is_allowed_moke_navigation, is_moke_reader_path, is_moke_shell_path};
+
+    #[test]
+    fn host_commands_and_reader_navigation_have_disjoint_document_paths() {
+        for path in ["/", "/detail", "/library", "/settings"] {
+            assert!(is_moke_shell_path(path));
+            assert!(!is_moke_reader_path(path));
+        }
+        for path in [
+            "/readest",
+            "/readest/",
+            "/readest/reader",
+            "/readest/reader.html",
+        ] {
+            assert!(!is_moke_shell_path(path));
+            assert!(is_moke_reader_path(path));
+        }
+    }
+
+    #[test]
+    fn native_navigation_allows_only_exact_cross_document_transitions() {
+        let shell = tauri::Url::parse("http://tauri.localhost/detail?id=11").unwrap();
+        let reader = tauri::Url::parse(
+            "http://tauri.localhost/readest/reader?file=book.epub&moke=1",
+        )
+        .unwrap();
+        let library = tauri::Url::parse("http://tauri.localhost/library").unwrap();
+
+        assert!(is_allowed_moke_navigation(&shell, &reader));
+        assert!(is_allowed_moke_navigation(&reader, &library));
+
+        for denied in [
+            "http://tauri.localhost/readest",
+            "http://tauri.localhost/readest/reader/extra",
+            "http://tauri.localhost/readest/reader#fragment",
+            "https://evil.example/readest/reader?file=book.epub",
+        ] {
+            assert!(!is_allowed_moke_navigation(
+                &shell,
+                &tauri::Url::parse(denied).unwrap(),
+            ));
+        }
+        for denied in [
+            "http://tauri.localhost/",
+            "http://tauri.localhost/library?next=/settings",
+            "http://tauri.localhost/settings",
+            "https://evil.example/library",
+        ] {
+            assert!(!is_allowed_moke_navigation(
+                &reader,
+                &tauri::Url::parse(denied).unwrap(),
+            ));
+        }
     }
 }
 

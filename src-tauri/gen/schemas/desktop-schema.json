@@ -2619,6 +2619,78 @@
           "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-delete-downloaded-book-file",
+          "markdownDescription": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_download_storage_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-download-storage-stats",
+          "markdownDescription": "Enables the moke_download_storage_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_get_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-get-download-directory",
+          "markdownDescription": "Enables the moke_get_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_list_downloaded_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-list-downloaded-books",
+          "markdownDescription": "Enables the moke_list_downloaded_books command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-navigate",
+          "markdownDescription": "Enables the moke_navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_open_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-open-downloaded-book",
+          "markdownDescription": "Enables the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_record_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-record-downloaded-book",
+          "markdownDescription": "Enables the moke_record_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_remove_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-remove-downloaded-book",
+          "markdownDescription": "Enables the moke_remove_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_reset_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-reset-download-directory",
+          "markdownDescription": "Enables the moke_reset_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_reveal_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-reveal-downloaded-book",
+          "markdownDescription": "Enables the moke_reveal_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_runtime_platform command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-runtime-platform",
+          "markdownDescription": "Enables the moke_runtime_platform command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_select_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-select-download-directory",
+          "markdownDescription": "Enables the moke_select_download_directory command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_reader command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-reader",
@@ -2767,6 +2839,78 @@
           "type": "string",
           "const": "deny-localsend-stop",
           "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-delete-downloaded-book-file",
+          "markdownDescription": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_download_storage_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-download-storage-stats",
+          "markdownDescription": "Denies the moke_download_storage_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_get_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-get-download-directory",
+          "markdownDescription": "Denies the moke_get_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_list_downloaded_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-list-downloaded-books",
+          "markdownDescription": "Denies the moke_list_downloaded_books command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-navigate",
+          "markdownDescription": "Denies the moke_navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_open_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-open-downloaded-book",
+          "markdownDescription": "Denies the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_record_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-record-downloaded-book",
+          "markdownDescription": "Denies the moke_record_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_remove_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-remove-downloaded-book",
+          "markdownDescription": "Denies the moke_remove_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_reset_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-reset-download-directory",
+          "markdownDescription": "Denies the moke_reset_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_reveal_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-reveal-downloaded-book",
+          "markdownDescription": "Denies the moke_reveal_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_runtime_platform command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-runtime-platform",
+          "markdownDescription": "Denies the moke_runtime_platform command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_select_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-select-download-directory",
+          "markdownDescription": "Denies the moke_select_download_directory command without any pre-configured scope."
         },
         {
           "description": "Denies the open_reader command without any pre-configured scope.",
@@ -8281,12 +8425,6 @@
           "type": "string",
           "const": "updater:deny-install",
           "markdownDescription": "Denies the install command without any pre-configured scope."
-        },
-        {
-          "description": "Default permissions for the plugin",
-          "type": "string",
-          "const": "webdriver:default",
-          "markdownDescription": "Default permissions for the plugin"
         },
         {
           "description": "Allows connecting and sending data to a WebSocket server\n#### This default permission set includes:\n\n- `allow-connect`\n- `allow-send`",

@@ -1,5 +1,6 @@
 'use client';
 
+import { retryOnlineRead } from '@/lib/online-retry';
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Download, Loader2, Trash2 } from 'lucide-react';
@@ -46,6 +47,7 @@ import {
   onlineReadingErrorMessage,
   resolveTalebookOnlineSource,
 } from '@/lib/online-reading';
+import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
 
 interface BookDetail {
   id: string;
@@ -440,11 +442,27 @@ function DetailContent() {
 
     try {
       const [source, restoreProgress, currentPlatform] = await Promise.all([
-        resolveTalebookOnlineSource(request, serverUrl, book.id, controller.signal),
-        fetchReadingProgress(book.id),
+        resolveTalebookOnlineSource(
+          request,
+          serverUrl,
+          book.id,
+          controller.signal,
+          isTauriApp ? tauriRangeFetch : request,
+        ),
+        // Remote progress is optional; a stalled progress endpoint must not
+        // hold a successfully probed book on the connecting screen forever.
+        retryOnlineRead(
+          (signal) => fetchReadingProgress(book.id, signal),
+          () => false,
+          controller.signal,
+          8_000,
+        ).catch(() => null),
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;
+      // The preflight may have validated a same-host HTTP → HTTPS upgrade.
+      // Keep progress identity on the saved server URL, but authorize the resolved source.
+      const sourceServerUrl = new URL(source.url).origin;
 
       if (isSingleWebviewRuntime(currentPlatform)) {
         const href = buildEmbeddedReaderUrl({
@@ -454,7 +472,8 @@ function DetailContent() {
           mokeBookId: String(book.id),
           restoreProgress,
           serverUrl: useServerStore.getState().serverUrl,
-          sourceServerUrl: serverUrl,
+          sourceServerUrl,
+          runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;
@@ -469,7 +488,7 @@ function DetailContent() {
             debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
-            mokeSourceServerUrl: serverUrl,
+            mokeSourceServerUrl: sourceServerUrl,
           });
         },
         onOpened: () => {
@@ -587,6 +606,7 @@ function DetailContent() {
           // The explicit navigation id lets the reader skip only startup and
           // annotation relocations; genuine page turns still sync directly.
           serverUrl: useServerStore.getState().serverUrl,
+          runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;

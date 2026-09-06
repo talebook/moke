@@ -141,6 +141,7 @@ test('base Tauri config activates only host and reader capabilities', () => {
     'default',
     'reader',
     'reader-mobile',
+    'reader-android-navigation',
   ]);
   assert.ok(
     !readTauriConfig().app.security.capabilities.includes('ohos'),
@@ -148,10 +149,13 @@ test('base Tauri config activates only host and reader capabilities', () => {
   );
 });
 
-test('desktop and mobile reader variants grant the same reader operations', () => {
+test('desktop and mobile reader variants grant the same Reader operations', () => {
   const desktop = readCapability('src-tauri/capabilities/reader.json');
   const mobile = readCapability('src-tauri/capabilities/reader-mobile.json');
-  assert.deepEqual(mobile.permissions, desktop.permissions);
+  const readerPermissions = (capability) => capability.permissions.filter(
+    (permission) => !permissionIdentifier(permission).startsWith('allow-moke-'),
+  );
+  assert.deepEqual(readerPermissions(mobile), readerPermissions(desktop));
 });
 
 test('embedded reader windows can update their native window title', () => {

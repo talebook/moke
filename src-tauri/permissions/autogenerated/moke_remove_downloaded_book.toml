@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-remove-downloaded-book"
+description = "Enables the moke_remove_downloaded_book command without any pre-configured scope."
+commands.allow = ["moke_remove_downloaded_book"]
+
+[[permission]]
+identifier = "deny-moke-remove-downloaded-book"
+description = "Denies the moke_remove_downloaded_book command without any pre-configured scope."
+commands.deny = ["moke_remove_downloaded_book"]
