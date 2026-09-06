@@ -36,7 +36,11 @@ function DetailContent() {
     setErrorMsg(null);
     try {
       if (ext.enabled) await disableExtension(ext.name);
-      else await enableExtension(ext.name);
+      else if (ext.trust.blockedReason) throw new Error(ext.trust.blockedReason);
+      else if (ext.trust.requiresApproval) {
+        if (!confirm(buildApprovalMessage(ext))) return;
+        await enableExtension(ext.name, { packageDigest: ext.trust.packageDigest });
+      } else await enableExtension(ext.name);
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -131,6 +135,29 @@ function DetailContent() {
           <div className="space-y-8">
             <section className="space-y-3">
               <div className="px-1">
+                <h2 className="text-sm font-semibold text-foreground tracking-tight">发布者与完整性</h2>
+              </div>
+              <div className="divide-y divide-amber-950/10 rounded-[28px] app-glass p-1">
+                <InfoRow label="签名" value={trustLabel(ext)} />
+                <InfoRow label="发布者" value={ext.trust.publisherName || ext.trust.publisherId || '未知'} />
+                <InfoRow label="来源" value={ext.trust.source || '未声明'} mono />
+                <InfoRow label="签名密钥" value={ext.trust.keyId || '-'} mono />
+                <InfoRow label="内容摘要" value={ext.trust.packageDigest || '-'} mono />
+              </div>
+              {ext.trust.blockedReason && (
+                <div className="px-4 py-3 rounded-xl bg-destructive/10 border border-destructive/20 text-sm text-destructive">
+                  已阻断：{ext.trust.blockedReason}
+                </div>
+              )}
+              {!ext.trust.blockedReason && ext.trust.risks.length > 0 && (
+                <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                  {ext.trust.risks.map((risk) => <p key={risk}>• {risk}</p>)}
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="px-1">
                 <h2 className="text-sm font-semibold text-foreground tracking-tight">状态与操作</h2>
               </div>
               <div className="divide-y divide-amber-950/10 rounded-[28px] app-glass p-1">
@@ -173,6 +200,16 @@ function DetailContent() {
                     </div>
                   ))
                 )}
+                {ext.trust.permissionsAdded.length > 0 && (
+                  <div className="px-4 py-3 text-xs text-destructive border-t border-amber-950/10">
+                    本次新增：{ext.trust.permissionsAdded.join('、')}
+                  </div>
+                )}
+                {ext.trust.permissionsRemoved.length > 0 && (
+                  <div className="px-4 py-3 text-xs text-muted-foreground border-t border-amber-950/10">
+                    本次移除：{ext.trust.permissionsRemoved.join('、')}
+                  </div>
+                )}
               </div>
             </section>
           </div>
@@ -180,6 +217,32 @@ function DetailContent() {
       </div>
     </DesktopLayout>
   );
+}
+
+function trustLabel(ext: ExtensionInfo): string {
+  switch (ext.trust.signatureStatus) {
+    case 'trusted': return '签名有效 / 发布者已确认';
+    case 'unknown_publisher': return '签名有效 / 未知发布者或新密钥';
+    case 'invalid': return '签名无效';
+    default: return '未签名';
+  }
+}
+
+function buildApprovalMessage(ext: ExtensionInfo): string {
+  const lines = [
+    `启用 ${ext.displayName} 前请核对：`,
+    '',
+    `签名：${trustLabel(ext)}`,
+    `发布者：${ext.trust.publisherName || ext.trust.publisherId || '未知'}`,
+    `来源：${ext.trust.source || '未声明'}`,
+    `版本：${ext.trust.upgradeFrom ? `${ext.trust.upgradeFrom} → ` : ''}${ext.version}`,
+    `当前权限：${ext.permissions.join('、') || '无'}`,
+  ];
+  if (ext.trust.permissionsAdded.length) lines.push(`新增权限：${ext.trust.permissionsAdded.join('、')}`);
+  if (ext.trust.permissionsRemoved.length) lines.push(`移除权限：${ext.trust.permissionsRemoved.join('、')}`);
+  if (ext.trust.risks.length) lines.push('', '风险提示：', ...ext.trust.risks.map((risk) => `- ${risk}`));
+  lines.push('', `内容摘要：${ext.trust.packageDigest.slice(0, 16)}…`, '', '此确认只绑定当前内容；未来变化必须重新确认。');
+  return lines.join('\n');
 }
 
 export default function DetailPage() {

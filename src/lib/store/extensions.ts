@@ -37,13 +37,34 @@ export interface ExtensionInfo {
   sidebar: { label: string; icon: string; order: number } | null;
   hasBackend: boolean;
   hasUi: boolean;
+  trust: ExtensionTrust;
+}
+
+export interface ExtensionTrust {
+  signatureStatus: 'trusted' | 'unknown_publisher' | 'unsigned' | 'invalid';
+  publisherId: string | null;
+  publisherName: string | null;
+  source: string | null;
+  keyId: string | null;
+  packageDigest: string;
+  trusted: boolean;
+  requiresApproval: boolean;
+  blockedReason: string | null;
+  risks: string[];
+  permissionsAdded: string[];
+  permissionsRemoved: string[];
+  upgradeFrom: string | null;
+}
+
+export interface ExtensionApproval {
+  packageDigest: string;
 }
 
 interface ExtensionState {
   extensions: ExtensionInfo[];
   loaded: boolean;
   loadExtensions: () => Promise<void>;
-  enableExtension: (name: string) => Promise<void>;
+  enableExtension: (name: string, approval?: ExtensionApproval) => Promise<void>;
   disableExtension: (name: string) => Promise<void>;
   uninstallExtension: (name: string) => Promise<void>;
   /** 返回已启用且有 sidebar 声明的拓展，按 order 排序。 */
@@ -104,6 +125,21 @@ interface RawExtension {
   sidebar: { label: string; icon: string; order: number } | null;
   has_backend: boolean;
   has_ui: boolean;
+  trust: {
+    signature_status: ExtensionTrust['signatureStatus'];
+    publisher_id: string | null;
+    publisher_name: string | null;
+    source: string | null;
+    key_id: string | null;
+    package_digest: string;
+    trusted: boolean;
+    requires_approval: boolean;
+    blocked_reason: string | null;
+    risks: string[];
+    permissions_added: string[];
+    permissions_removed: string[];
+    upgrade_from: string | null;
+  };
 }
 
 function mapExtension(raw: RawExtension): ExtensionInfo {
@@ -119,6 +155,21 @@ function mapExtension(raw: RawExtension): ExtensionInfo {
     sidebar: raw.sidebar,
     hasBackend: raw.has_backend,
     hasUi: raw.has_ui,
+    trust: {
+      signatureStatus: raw.trust.signature_status,
+      publisherId: raw.trust.publisher_id,
+      publisherName: raw.trust.publisher_name,
+      source: raw.trust.source,
+      keyId: raw.trust.key_id,
+      packageDigest: raw.trust.package_digest,
+      trusted: raw.trust.trusted,
+      requiresApproval: raw.trust.requires_approval,
+      blockedReason: raw.trust.blocked_reason,
+      risks: raw.trust.risks,
+      permissionsAdded: raw.trust.permissions_added,
+      permissionsRemoved: raw.trust.permissions_removed,
+      upgradeFrom: raw.trust.upgrade_from,
+    },
   };
 }
 
@@ -165,8 +216,11 @@ export const useExtensionStore = create<ExtensionState>()((set, get) => ({
     }
   },
 
-  enableExtension: async (name: string) => {
-    await invokeExt('ext_enable_extension', { name });
+  enableExtension: async (name: string, approval?: ExtensionApproval) => {
+    await invokeExt('ext_enable_extension', {
+      name,
+      approval: approval ? { package_digest: approval.packageDigest } : null,
+    });
     await get().loadExtensions();
   },
 

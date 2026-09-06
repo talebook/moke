@@ -8,6 +8,7 @@ mod events;
 mod lifecycle;
 mod permissions;
 mod storage;
+mod trust;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -53,6 +54,8 @@ pub struct EnabledExtension {
     pub port: u16,
     /// 拓展后端进程句柄（None 表示纯前端拓展）
     pub backend: Mutex<Option<std::process::Child>>,
+    /// 启用时经用户确认的权限快照。运行期间不再信任可变的 manifest。
+    pub permissions: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +77,7 @@ pub struct ExtensionInfo {
     pub sidebar: Option<SidebarInfo>,
     pub has_backend: bool,
     pub has_ui: bool,
+    pub trust: trust::TrustEvaluation,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -110,6 +114,8 @@ pub struct Manifest {
     #[serde(default)]
     pub author: String,
     #[serde(default)]
+    pub publisher: Option<PublisherConfig>,
+    #[serde(default)]
     pub entry: Option<EntryConfig>,
     #[serde(default)]
     pub sidebar: Option<SidebarConfig>,
@@ -117,6 +123,14 @@ pub struct Manifest {
     pub permissions: Vec<String>,
     #[serde(default)]
     pub lucide_icons: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublisherConfig {
+    pub id: String,
+    pub name: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -143,6 +157,12 @@ pub struct SidebarConfig {
     pub icon: String,
     #[serde(default)]
     pub order: i32,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExtensionApproval {
+    package_digest: String,
 }
 
 fn start_extension_backend(
@@ -191,12 +211,21 @@ fn stop_extension_backend(ext: EnabledExtension) {
 /// 列出所有已安装的拓展。
 #[tauri::command]
 fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<ExtensionInfo> {
-    let enabled = state.enabled.lock().unwrap();
+    // Package hashing can be slow for large extensions. Snapshot only the
+    // fields needed by the UI so API token checks are not blocked on disk IO.
+    let enabled: HashMap<String, u16> = state
+        .enabled
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(name, extension)| (name.clone(), extension.port))
+        .collect();
     let discoveries = discovery::discover_extensions(&state.extensions_dir);
 
     discoveries
         .into_iter()
         .map(|d| {
+            let trust = trust::evaluate_installed(&state.extensions_dir, &d.dir, &d.manifest);
             let is_enabled = enabled.contains_key(&d.manifest.name);
             let has_backend = d
                 .manifest
@@ -209,7 +238,7 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
             // - 声明了 backend: backend 可以 serve 前端（ui_port 可能为 0，表示自动分配）
             let has_ui = d.manifest.entry.as_ref().is_some_and(|e| e.ui_port > 0 || e.backend.is_some());
 
-            let port = enabled.get(&d.manifest.name).map(|e| e.port).unwrap_or(0);
+            let port = enabled.get(&d.manifest.name).copied().unwrap_or(0);
 
             ExtensionInfo {
                 name: d.manifest.name,
@@ -227,6 +256,7 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
                 }),
                 has_backend,
                 has_ui,
+                trust,
             }
         })
         .collect()
@@ -237,6 +267,7 @@ fn ext_list_extensions(state: tauri::State<'_, ExtensionRuntime>) -> Vec<Extensi
 fn ext_enable_extension(
     state: tauri::State<'_, ExtensionRuntime>,
     name: String,
+    approval: Option<ExtensionApproval>,
 ) -> Result<(), String> {
     lifecycle::validate_extension_name(&name)?;
 
@@ -261,6 +292,14 @@ fn ext_enable_extension(
         ));
     }
 
+    let ext_dir = state.extensions_dir.join(&name);
+    trust::authorize_activation(
+        &state.extensions_dir,
+        &ext_dir,
+        &manifest,
+        approval.as_ref().map(|value| value.package_digest.as_str()),
+    )?;
+
     let token = lifecycle::generate_token();
     let (port, backend_child) = start_extension_backend(&state, &name, &manifest, &token)?;
 
@@ -272,6 +311,7 @@ fn ext_enable_extension(
                 token: token.clone(),
                 port,
                 backend: Mutex::new(backend_child),
+                permissions: manifest.permissions.clone(),
             },
         );
     }
@@ -309,10 +349,8 @@ fn ext_disable_extension(
 
 /// 卸载一个拓展。
 ///
-/// 流程：
-/// 1. 先禁用拓展（关闭后端进程、持久化状态）
-/// 2. 尝试运行拓展自带的 uninstall.exe（NSIS 卸载程序，清理注册表等）
-/// 3. uninstall.exe 不存在或失败时，回退到直接删除目录
+/// 流程：先禁用拓展，再由宿主直接删除目录。卸载时绝不执行拓展目录内
+/// 的 `uninstall.exe`，否则未受信任的安装内容可借卸载路径执行任意代码。
 #[tauri::command]
 fn ext_uninstall_extension(
     state: tauri::State<'_, ExtensionRuntime>,
@@ -333,89 +371,18 @@ fn ext_uninstall_extension(
     lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
     log::info!("拓展「{name}」已禁用，开始卸载...");
 
-    // 2. 尝试运行 uninstall.exe（NSIS 生成的规范卸载程序）
     let ext_dir = state.extensions_dir.join(&name);
     if !ext_dir.exists() {
         return Err(format!("拓展目录不存在: {}", ext_dir.display()));
     }
 
-    let uninstaller = ext_dir.join("uninstall.exe");
-    if uninstaller.exists() {
-        match run_uninstaller(&uninstaller) {
-            Ok(true) => {
-                log::info!("拓展「{name}」已通过 uninstall.exe 卸载");
-                return Ok(());
-            }
-            Ok(false) => {
-                log::warn!("uninstall.exe 已执行但目录仍存在，回退到强制删除");
-            }
-            Err(e) => {
-                log::warn!("uninstall.exe 运行失败: {e}，回退到强制删除");
-            }
-        }
-    } else {
-        log::info!("拓展「{name}」未提供 uninstall.exe，使用强制删除");
-    }
-
-    // 3. 回退：强制删除
     if ext_dir.exists() {
         std::fs::remove_dir_all(&ext_dir)
             .map_err(|e| format!("无法删除拓展目录「{}」: {e}", ext_dir.display()))?;
     }
 
-    log::info!("拓展「{name}」已卸载（强制删除）");
+    log::info!("拓展「{name}」已由宿主卸载");
     Ok(())
-}
-
-/// 运行拓展自带的卸载程序。返回 Ok(true) 表示卸载后目录已消失，
-/// Ok(false) 表示程序执行了但目录仍在，Err 表示启动失败。
-fn run_uninstaller(uninstaller: &std::path::Path) -> Result<bool, String> {
-    let mut cmd = std::process::Command::new(uninstaller);
-    // 静默卸载参数（NSIS: /S = silent）
-    cmd.arg("/S").arg("_?=").arg(
-        uninstaller
-            .parent()
-            .unwrap_or(std::path::Path::new(".")),
-    );
-
-    // Windows: 隐藏窗口
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let start = std::time::Instant::now();
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("无法启动 uninstall.exe: {e}"))?;
-
-    // 等待最多 30 秒
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                log::info!(
-                    "uninstall.exe 退出, 状态: {status}, 耗时: {:?}",
-                    start.elapsed()
-                );
-                // 检查目录是否已删除
-                let parent = uninstaller.parent().unwrap_or(std::path::Path::new("."));
-                return Ok(!parent.exists());
-            }
-            Ok(None) => {
-                if start.elapsed() > std::time::Duration::from_secs(30) {
-                    let _ = child.kill();
-                    return Err("uninstall.exe 超时（30 秒）".into());
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-            Err(e) => {
-                let _ = child.kill();
-                return Err(format!("检查 uninstall.exe 状态失败: {e}"));
-            }
-        }
-    }
 }
 
 /// 返回 API Server 的 REST 端口。
