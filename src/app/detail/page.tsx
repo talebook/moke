@@ -1,5 +1,6 @@
 'use client';
 
+import { retryOnlineRead } from '@/lib/online-retry';
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Trash2 } from 'lucide-react';
@@ -441,7 +442,14 @@ function DetailContent() {
           controller.signal,
           isTauriApp ? tauriRangeFetch : request,
         ),
-        fetchReadingProgress(book.id),
+        // Remote progress is optional; a stalled progress endpoint must not
+        // hold a successfully probed book on the connecting screen forever.
+        retryOnlineRead(
+          (signal) => fetchReadingProgress(book.id, signal),
+          () => false,
+          controller.signal,
+          8_000,
+        ).catch(() => null),
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;

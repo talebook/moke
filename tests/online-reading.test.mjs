@@ -332,3 +332,34 @@ test('aborted bootstrap and network failures stay retryable without leaking raw 
   );
   assert.doesNotMatch(onlineReadingErrorMessage(new Error('secret-token')), /secret-token/);
 });
+
+test('online preflight retries a transient gateway failure and revalidates all metadata', async () => {
+  let attempts = 0;
+  const request = async (url, init) => {
+    if (url === BOOTSTRAP) {
+      attempts += 1;
+      if (attempts === 1) return fakeResponse({ url, status: 503 });
+      return bootstrapResponse();
+    }
+    if (init.method === 'HEAD') return headResponse();
+    return fakeResponse({ url: SOURCE, status: 206, contentType: 'application/epub+zip',
+      headers: { 'content-length': '1', 'content-range': 'bytes 0-0/10485760', etag: '"epub-one"' },
+      body: new Uint8Array([0]),
+    });
+  };
+  const result = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
+  assert.equal(result.url, SOURCE);
+  assert.equal(attempts, 2);
+});
+
+test('cancelling an online preflight prevents another attempt', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const pending = resolveTalebookOnlineSource(async () => {
+    requests += 1;
+    controller.abort();
+    throw new TypeError('network');
+  }, SERVER, BOOK_ID, controller.signal);
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(requests, 1);
+});

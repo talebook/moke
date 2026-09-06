@@ -1,3 +1,4 @@
+import { retryOnlineRead } from './online-retry.ts';
 import { MokeApiError, readJsonResponse } from './api-core.ts';
 
 const EPUB_MIME = 'application/epub+zip';
@@ -267,9 +268,9 @@ async function drainHeadResponse(response: Response): Promise<void> {
 
 /**
  * Resolve and preflight Talebook's authorization-checked EPUB resource.
- * No body is read here; Reader performs strict, on-demand 206 requests.
+ * Only the one-byte Range proof is consumed; Reader loads the book on demand.
  */
-export async function resolveTalebookOnlineSource(
+async function resolveTalebookOnlineSourceOnce(
   request: RequestLike,
   serverUrl: string,
   rawBookId: string | number,
@@ -477,6 +478,32 @@ export async function resolveTalebookOnlineSource(
     size,
     etag,
   };
+}
+
+/** Retry only transient connection failures; protocol/auth failures require user action. */
+export async function resolveTalebookOnlineSource(
+  request: RequestLike,
+  serverUrl: string,
+  rawBookId: string | number,
+  signal?: AbortSignal,
+  rangeRequest: RequestLike = request,
+): Promise<TalebookOnlineSource> {
+  try {
+    return await retryOnlineRead(
+      (attemptSignal) => resolveTalebookOnlineSourceOnce(
+        request, serverUrl, rawBookId, attemptSignal, rangeRequest,
+      ),
+      (error) => error instanceof DOMException && error.name === 'TimeoutError' ||
+        error instanceof OnlineReadingError && error.code === 'online.network' &&
+        (error.status === undefined || [408, 502, 503, 504].includes(error.status)),
+      signal ?? new AbortController().signal,
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new OnlineReadingError('online.network');
+    }
+    throw error;
+  }
 }
 
 export function onlineReadingErrorMessage(error: unknown): string {
