@@ -108,7 +108,10 @@ function errorForStatus(
   status: number,
   stage: Extract<OnlineReadingErrorStage, 'bootstrap-status' | 'head-status' | 'range-status'>,
 ): OnlineReadingError {
-  if (status === 401 || (status >= 300 && status < 400)) {
+  if (status >= 300 && status < 400) {
+    return new OnlineReadingError('online.response_invalid', status, stage);
+  }
+  if (status === 401) {
     return new OnlineReadingError('online.auth_required', status, stage);
   }
   if (status === 403) return new OnlineReadingError('online.permission_denied', status, stage);
@@ -123,6 +126,26 @@ function errorForStatus(
     return new OnlineReadingError('online.resource_changed', status, stage);
   }
   return new OnlineReadingError('online.network', status, stage);
+}
+
+/** Only a permanent upgrade of the identical default-port bootstrap URL is trusted. */
+function bootstrapHttpsUpgrade(response: Response, requestedUrl: string): string | null {
+  if (response.status !== 301 && response.status !== 308) return null;
+  const location = response.headers.get('location');
+  if (!location) return null;
+  try {
+    const source = new URL(requestedUrl);
+    const target = new URL(location, source);
+    if (
+      source.protocol !== 'http:' || source.port !== '' ||
+      target.protocol !== 'https:' || target.port !== '' ||
+      target.hostname !== source.hostname || target.username || target.password ||
+      target.pathname !== source.pathname || target.search !== source.search || target.hash
+    ) return null;
+    return target.href;
+  } catch {
+    return null;
+  }
 }
 
 function errorForBootstrapCode(code: unknown, status: number): OnlineReadingError {
@@ -285,16 +308,26 @@ async function resolveTalebookOnlineSourceOnce(
   signal?: AbortSignal,
   rangeRequest: RequestLike = request,
 ): Promise<TalebookOnlineSource> {
-  const serverOrigin = parseCurrentServerOrigin(serverUrl);
+  let serverOrigin = parseCurrentServerOrigin(serverUrl);
   const bookId = String(rawBookId).trim();
   if (!/^\d+$/.test(bookId)) {
     throw new OnlineReadingError('online.response_invalid', undefined, 'book-id');
   }
 
-  const bootstrapUrl = `${serverOrigin}/api/book/${bookId}/reader-bootstrap?engine=readest`;
+  let bootstrapUrl = `${serverOrigin}/api/book/${bookId}/reader-bootstrap?engine=readest`;
   let bootstrapResponse: Response;
   try {
     bootstrapResponse = await request(bootstrapUrl, noRedirectRequest(signal));
+    requireExactResponseUrl(bootstrapResponse, bootstrapUrl, 'bootstrap-url');
+    const upgradedUrl = bootstrapHttpsUpgrade(bootstrapResponse, bootstrapUrl);
+    if (upgradedUrl) {
+      await safeCancel(bootstrapResponse);
+      if (signal?.aborted) throw new DOMException('Online read cancelled', 'AbortError');
+      // No general redirect following: a second redirect is rejected below.
+      bootstrapUrl = upgradedUrl;
+      serverOrigin = new URL(upgradedUrl).origin;
+      bootstrapResponse = await request(bootstrapUrl, noRedirectRequest(signal));
+    }
   } catch (error) {
     if (error instanceof OnlineReadingError) throw error;
     throw new OnlineReadingError('online.network');
@@ -515,6 +548,9 @@ export async function resolveTalebookOnlineSource(
 }
 
 export function onlineReadingErrorMessage(error: unknown): string {
+  if (error instanceof OnlineReadingError && error.status && error.status >= 300 && error.status < 400) {
+    return '在线阅读请求被服务器重定向，请检查书库地址是否应使用 HTTPS；无法验证的跳转已停止。';
+  }
   const code = error instanceof OnlineReadingError ? error.code : 'online.network';
   switch (code) {
     case 'online.auth_required':

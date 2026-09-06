@@ -380,10 +380,11 @@ for (const [failedStage, expectedCalls] of [['bootstrap-status', 1], ['head-stat
         throw new Error('must not continue after authorization failure');
       };
       await assert.rejects(resolveTalebookOnlineSource(request, SERVER, BOOK_ID), (error) => {
-        assert.equal(error.code, 'online.auth_required');
+        const expectedCode = status === 401 ? 'online.auth_required' : 'online.response_invalid';
+        assert.equal(error.code, expectedCode);
         assert.equal(error.stage, failedStage);
         assert.equal(error.status, status);
-        assert.equal(error.message, `online.auth_required:${failedStage}:http-${status}`);
+        assert.equal(error.message, `${expectedCode}:${failedStage}:http-${status}`);
         assert.equal(error.stack.includes('private-'), false);
         assert.equal(error.stack.includes('auth.example'), false);
         return true;
@@ -402,5 +403,77 @@ test('HTTP 200 login envelope retains bootstrap body stage and cannot downgrade'
     assert.equal(error.message, 'online.auth_required:bootstrap-body:http-200');
     return true;
   });
+  assert.equal(calls, 1);
+});
+
+for (const status of [301, 308]) {
+  for (const legacy of [false, true]) {
+    test(`one HTTP ${status} HTTPS upgrade resolves ${legacy ? 'legacy' : 'modern'} source`, async () => {
+      const httpServer = SERVER.replace('https:', 'http:');
+      const httpBootstrap = BOOTSTRAP.replace('https:', 'http:');
+      const resource = legacy ? LEGACY_SOURCE : SOURCE;
+      const calls = [];
+      const result = await resolveTalebookOnlineSource(async (url, init) => {
+        calls.push({ url, init });
+        if (url === httpBootstrap) return fakeResponse({ status, url, headers: { location: BOOTSTRAP } });
+        if (url === BOOTSTRAP) return legacy
+          ? fakeResponse({ status: 404, url, contentType: 'text/html', body: 'missing' })
+          : bootstrapResponse();
+        assert.equal(url, resource);
+        return init.method === 'HEAD' ? headResponse({}, resource) : rangeResponse({ url: resource });
+      }, `${httpServer}:80`, BOOK_ID);
+      assert.equal(result.url, resource);
+      assert.equal(calls.length, 4);
+      assert.equal(calls.every(({ init }) => init.maxRedirections === 0 && init.redirect === 'manual'), true);
+      assert.equal(calls[3].init.headers.Range, 'bytes=0-0');
+    });
+  }
+}
+
+for (const target of [
+  'https://evil.example/api/book/42/reader-bootstrap?engine=readest',
+  `${SERVER}:8443/api/book/42/reader-bootstrap?engine=readest`,
+  `${SERVER}/login?engine=readest`,
+  `${BOOTSTRAP}&token=private-value`,
+  `${BOOTSTRAP}#fragment`,
+  BOOTSTRAP.replace('https://', 'https://user:private-value@'),
+  BOOTSTRAP.replace('https:', 'http:'),
+  '',
+]) {
+  test(`unverified bootstrap upgrade stays blocked (${target.includes('private') ? 'credential case' : target})`, async () => {
+    let calls = 0;
+    await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+      calls += 1;
+      return fakeResponse({ status: 308, url, headers: { location: target } });
+    }, SERVER.replace('https:', 'http:'), BOOK_ID), (error) => {
+      assert.equal(error.code, 'online.response_invalid');
+      assert.equal(error.status, 308);
+      assert.equal(error.message.includes('private-value'), false);
+      assert.equal(onlineReadingErrorMessage(error).includes('登录状态已失效'), false);
+      return true;
+    });
+    assert.equal(calls, 1);
+  });
+}
+
+for (const secondStatus of [308, 401, 403]) {
+  test(`HTTPS upgrade cannot follow another redirect or bypass HTTP ${secondStatus}`, async () => {
+    let calls = 0;
+    await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+      calls += 1;
+      return fakeResponse({ status: calls === 1 ? 308 : secondStatus, url, headers: { location: BOOTSTRAP } });
+    }, SERVER.replace('https:', 'http:'), BOOK_ID), (error) => error.status === secondStatus);
+    assert.equal(calls, 2);
+  });
+}
+
+test('cancellation after the redirect never sends the HTTPS follow-up', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+    calls += 1;
+    controller.abort();
+    return fakeResponse({ status: 308, url, headers: { location: BOOTSTRAP } });
+  }, SERVER.replace('https:', 'http:'), BOOK_ID, controller.signal), { name: 'AbortError' });
   assert.equal(calls, 1);
 });

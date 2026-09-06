@@ -11,7 +11,9 @@ test('book detail exposes online and offline actions separately', () => {
   assert.match(detail, /resolveTalebookOnlineSource\(\s*request,\s*serverUrl,\s*book\.id/);
   assert.match(detail, /isTauriApp \? tauriRangeFetch : request/);
   assert.match(detail, /filePath: source\.url/);
-  assert.match(detail, /mokeSourceServerUrl: serverUrl/);
+  assert.match(detail, /const sourceServerUrl = new URL\(source\.url\)\.origin/);
+  assert.match(detail, /sourceServerUrl,/);
+  assert.match(detail, /mokeSourceServerUrl: sourceServerUrl/);
 });
 
 test('online opening does not enter the offline download manager', () => {

@@ -460,6 +460,9 @@ function DetailContent() {
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;
+      // The preflight may have validated a same-host HTTP → HTTPS upgrade.
+      // Keep progress identity on the saved server URL, but authorize the resolved source.
+      const sourceServerUrl = new URL(source.url).origin;
 
       if (isSingleWebviewRuntime(currentPlatform)) {
         const href = buildEmbeddedReaderUrl({
@@ -469,7 +472,7 @@ function DetailContent() {
           mokeBookId: String(book.id),
           restoreProgress,
           serverUrl: useServerStore.getState().serverUrl,
-          sourceServerUrl: serverUrl,
+          sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
@@ -485,7 +488,7 @@ function DetailContent() {
             debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
-            mokeSourceServerUrl: serverUrl,
+            mokeSourceServerUrl: sourceServerUrl,
           });
         },
         onOpened: () => {
