@@ -102,17 +102,19 @@ export default function ExtensionsPage() {
   return (
     <DesktopLayout>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-5 sm:px-6 md:px-8 md:py-8">
-        <div className="mx-auto" style={{ maxWidth: '860px' }}>
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold text-foreground">拓展</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              从本地 ZIP 安装和升级扩展
-            </p>
+        <div className="mx-auto flex min-h-full flex-col" style={{ maxWidth: '860px' }}>
+          <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold text-foreground">拓展</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                管理已安装的拓展程序
+              </p>
+            </div>
+            <button onClick={handleImport} disabled={Boolean(actionInProgress || preview)} className="shrink-0 px-4 py-2 rounded-lg bg-primary text-white disabled:opacity-40">
+              {actionInProgress === 'import' ? '正在处理扩展包…' : '导入扩展'}
+            </button>
           </div>
 
-          <button onClick={handleImport} disabled={Boolean(actionInProgress || preview)} className="mb-4 px-4 py-2 rounded-lg bg-primary text-white disabled:opacity-40">
-            {actionInProgress === 'import' ? '正在处理扩展包…' : '导入扩展'}
-          </button>
           {notice && <p role="status" className="mb-4 text-sm text-foreground">{notice}</p>}
           {preview && (
             <dialog ref={dialog} aria-labelledby="import-title" onCancel={(event) => { event.preventDefault(); void cancelImport(); }} className="max-w-lg w-[90vw] max-h-[90vh] overflow-y-auto rounded-xl bg-background text-foreground p-6 border border-border">
@@ -134,15 +136,15 @@ export default function ExtensionsPage() {
           )}
 
           {!loaded ? (
-            <div className="flex items-center justify-center py-20">
+            <div className="flex flex-1 items-center justify-center py-20">
               <p className="text-sm text-muted-foreground">加载中...</p>
             </div>
           ) : extensions.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center py-20 text-center">
               <Puzzle className="w-12 h-12 text-muted-foreground/40 mb-4" />
               <p className="text-sm text-muted-foreground">暂无已安装的拓展</p>
               <p className="text-xs text-muted-foreground/60 mt-1">
-                点击“导入扩展”选择作者提供的 .zip 文件
+                点击右上方“导入扩展”，选择本地 ZIP 文件开始安装
               </p>
             </div>
           ) : (

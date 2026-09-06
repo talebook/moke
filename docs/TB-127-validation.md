@@ -96,3 +96,11 @@ Rust 回归覆盖有效签名/篡改/密钥轮换/降级、Node 签名 golden fi
 ## 保留的边界
 
 同用户恶意进程可忽略 advisory lock、修改 AppData 或干预 OS loader，因此最后一次哈希到执行之间仍有竞态；没有声称通过重复哈希彻底解决。原生后端也不是沙箱。升级保留完整旧目录和宿主 storage，新私有数据使用 DATA_DIR；旧目录会占用磁盘，不自动删除。REST 现在要求 Content-Length、每连接一个请求，拒绝 chunked/Expect，迁移已说明。正式根密钥、在线撤销、token TTL 刷新与独立整体复测仍是后续范围。
+
+## 2026-09-06 界面反馈调整
+
+- 导入按钮移至页面标题右侧；空状态保留原有灰色拼图图标及提示样式，在标题下方剩余内容区域居中。恢复“管理已安装的拓展程序”副标题。
+- `pnpm typecheck`、`pnpm exec eslint src/app/extensions/page.tsx` 通过。复用现有 Playwright 导入验证场景做临时截图运行：1 passed，覆盖预览、取消、提交及导入后从空状态进入列表；检查 1280×720 桌面和 390×844 窄屏截图。截图使用模拟 Tauri IPC，不代表原生文件选择器或移动设备实测。
+- 最终 DeepSec 0.2.0（来源 `fff031fc01fb36b95348214c8ee359f6ede8aa8b`），仓库根命令：`/opt/deepsec/fff031fc01fb36b95348214c8ee359f6ede8aa8b/venv/bin/deepsec shield scan . --layer l1,l2 --include-tests --format json --output -`。
+- 覆盖全仓 2457 文件（含测试及本地测试结果元数据），L1/L2，退出码 2；stderr 为空。候选路径已检查，无越出仓库的符号链接。43 条发现（16 critical / 20 high / 7 medium）的位置、规则及证据与调整前一致，处置沿用上表；本任务改动文件仍无 findings，全仓不能称安全通过。TSX 已覆盖，其余格式限制沿用前述说明。
+- stdout、stderr、退出码保留在 `.deepsec/`；脱敏报告及空状态桌面/窄屏、已安装列表截图附在 issue 回复中。未启用远程 LLM、L3 或 Spear。
