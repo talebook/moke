@@ -363,3 +363,44 @@ test('cancelling an online preflight prevents another attempt', async () => {
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(requests, 1);
 });
+
+for (const [failedStage, expectedCalls] of [['bootstrap-status', 1], ['head-status', 2], ['range-status', 3]]) {
+  for (const status of [401, 302, 307]) {
+    test(`auth diagnostics preserve ${failedStage} HTTP ${status} without retry or downgrade`, async () => {
+      let calls = 0;
+      const request = async (url, init) => {
+        calls += 1;
+        if (calls === expectedCalls) return fakeResponse({
+          status, url, contentType: 'text/html',
+          headers: { location: 'https://auth.example/login?token=private-value' },
+          body: 'private-response-body',
+        });
+        if (url === BOOTSTRAP) return bootstrapResponse();
+        if (init?.method === 'HEAD') return headResponse();
+        throw new Error('must not continue after authorization failure');
+      };
+      await assert.rejects(resolveTalebookOnlineSource(request, SERVER, BOOK_ID), (error) => {
+        assert.equal(error.code, 'online.auth_required');
+        assert.equal(error.stage, failedStage);
+        assert.equal(error.status, status);
+        assert.equal(error.message, `online.auth_required:${failedStage}:http-${status}`);
+        assert.equal(error.stack.includes('private-'), false);
+        assert.equal(error.stack.includes('auth.example'), false);
+        return true;
+      });
+      assert.equal(calls, expectedCalls);
+    });
+  }
+}
+
+test('HTTP 200 login envelope retains bootstrap body stage and cannot downgrade', async () => {
+  let calls = 0;
+  await assert.rejects(resolveTalebookOnlineSource(async () => {
+    calls += 1;
+    return bootstrapResponse({ err: 'user.need_login', msg: 'private-response-body' });
+  }, SERVER, BOOK_ID), (error) => {
+    assert.equal(error.message, 'online.auth_required:bootstrap-body:http-200');
+    return true;
+  });
+  assert.equal(calls, 1);
+});

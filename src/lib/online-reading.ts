@@ -22,6 +22,8 @@ export type OnlineReadingErrorCode =
 export type OnlineReadingErrorStage =
   | 'server-url'
   | 'book-id'
+  | 'bootstrap-status'
+  | 'head-status'
   | 'bootstrap-url'
   | 'bootstrap-mime'
   | 'bootstrap-body'
@@ -44,7 +46,9 @@ export class OnlineReadingError extends Error {
     status?: number,
     stage?: OnlineReadingErrorStage,
   ) {
-    super(stage ? `${code}:${stage}` : code);
+    // Console collectors often retain only Error.message/stack, not custom fields.
+    // Include only local stage names and numeric status; never server text or URLs.
+    super([code, stage, status === undefined ? undefined : `http-${status}`].filter(Boolean).join(':'));
     this.name = 'OnlineReadingError';
     this.code = code;
     this.status = status;
@@ -100,40 +104,44 @@ function noRedirectRequest(signal?: AbortSignal): RequestInit {
   } as RequestInit;
 }
 
-function errorForStatus(status: number, bootstrap = false): OnlineReadingError {
+function errorForStatus(
+  status: number,
+  stage: Extract<OnlineReadingErrorStage, 'bootstrap-status' | 'head-status' | 'range-status'>,
+): OnlineReadingError {
   if (status === 401 || (status >= 300 && status < 400)) {
-    return new OnlineReadingError('online.auth_required', status);
+    return new OnlineReadingError('online.auth_required', status, stage);
   }
-  if (status === 403) return new OnlineReadingError('online.permission_denied', status);
+  if (status === 403) return new OnlineReadingError('online.permission_denied', status, stage);
   if (status === 404) {
     return new OnlineReadingError(
-      bootstrap ? 'online.server_unsupported' : 'online.not_found',
+      stage === 'bootstrap-status' ? 'online.server_unsupported' : 'online.not_found',
       status,
+      stage,
     );
   }
   if (status === 409 || status === 412) {
-    return new OnlineReadingError('online.resource_changed', status);
+    return new OnlineReadingError('online.resource_changed', status, stage);
   }
-  return new OnlineReadingError('online.network', status);
+  return new OnlineReadingError('online.network', status, stage);
 }
 
 function errorForBootstrapCode(code: unknown, status: number): OnlineReadingError {
   switch (code) {
     case 'user.need_login':
     case 'user.activation_required':
-      return new OnlineReadingError('online.auth_required', status);
+      return new OnlineReadingError('online.auth_required', status, 'bootstrap-body');
     case 'user.no_permission':
     case 'permission':
-      return new OnlineReadingError('online.permission_denied', status);
+      return new OnlineReadingError('online.permission_denied', status, 'bootstrap-body');
     case 'book.not_found':
-      return new OnlineReadingError('online.not_found', status);
+      return new OnlineReadingError('online.not_found', status, 'bootstrap-body');
     case 'reader.format_unsupported':
     case 'reader.conversion_pending':
-      return new OnlineReadingError('online.format_unsupported', status);
+      return new OnlineReadingError('online.format_unsupported', status, 'bootstrap-body');
     case 'reader.resource_changed':
-      return new OnlineReadingError('online.resource_changed', status);
+      return new OnlineReadingError('online.resource_changed', status, 'bootstrap-body');
     default:
-      return errorForStatus(status, true);
+      return errorForStatus(status, 'bootstrap-status');
   }
 }
 
@@ -316,7 +324,7 @@ async function resolveTalebookOnlineSourceOnce(
     } else {
       throw envelope?.err
         ? errorForBootstrapCode(envelope.err, bootstrapResponse.status)
-        : errorForStatus(bootstrapResponse.status, true);
+        : errorForStatus(bootstrapResponse.status, 'bootstrap-status');
     }
   } else {
     if (bootstrapMime !== 'application/json') {
@@ -390,7 +398,7 @@ async function resolveTalebookOnlineSourceOnce(
     }
   } else if (head.status !== 405 && head.status !== 501) {
     await drainHeadResponse(head);
-    if (!head.ok) throw errorForStatus(head.status);
+    if (!head.ok) throw errorForStatus(head.status, 'head-status');
     throw new OnlineReadingError('online.response_invalid', head.status, 'head-metadata');
   }
   await drainHeadResponse(head);
@@ -424,7 +432,7 @@ async function resolveTalebookOnlineSourceOnce(
   }
   if (!probe.ok) {
     await safeCancel(probe);
-    throw errorForStatus(probe.status);
+    throw errorForStatus(probe.status, 'range-status');
   }
   if (probe.status !== 206) {
     await safeCancel(probe);
