@@ -7,6 +7,7 @@ mod discovery;
 mod events;
 mod lifecycle;
 mod permissions;
+mod security;
 mod storage;
 
 use std::collections::HashMap;
@@ -602,8 +603,12 @@ fn ext_moke_list_offline_books(app: AppHandle) -> Result<Vec<MokeOfflineBookInfo
 // ---------------------------------------------------------------------------
 
 /// 常量
-const API_SERVER_PORT: u16 = 19555;
-const WS_SERVER_PORT: u16 = 19556;
+// Host transports use OS-assigned ports so a stale fixed endpoint is never a
+// cross-session capability. Extension backends receive the actual values only
+// through their sanitized process environment.
+const API_SERVER_PORT: u16 = 0;
+const WS_SERVER_PORT: u16 = 0;
+const EXTENSION_PORT_START: u16 = 19557;
 
 /// 创建 `ExtensionRuntime` 并注入到 Tauri app state。
 /// 同时启动 API Server（REST + WebSocket）。
@@ -619,6 +624,8 @@ pub fn init(app: &AppHandle) {
 
     if let Err(e) = std::fs::create_dir_all(&extensions_dir) {
         log::error!("无法创建拓展目录「{}」: {e}", extensions_dir.display());
+    } else if let Err(e) = lifecycle::secure_extensions_directory(&extensions_dir) {
+        log::warn!("{e}");
     }
 
     let enabled = Arc::new(Mutex::new(HashMap::new()));
@@ -638,8 +645,9 @@ pub fn init(app: &AppHandle) {
     });
     let api_port = api_server::start(api_ctx, API_SERVER_PORT);
 
-    // 3. 拓展端口从 server 之后开始，避免冲突
-    let port_range_start = u16::max(api_port, ws_port) + 1;
+    // 3. 拓展 UI/backend 端口仍使用兼容范围；随机宿主端口由操作系统
+    // 独占，不会与随后启动的拓展后端重复绑定。
+    let port_range_start = EXTENSION_PORT_START;
 
     // 4. 最后恢复上次的启用状态
     let next_port = Arc::new(AtomicU16::new(port_range_start));
@@ -649,6 +657,11 @@ pub fn init(app: &AppHandle) {
         let restored_ports = lifecycle::restore_runtime_state_inner(&runtime_state, &enabled_clone, api_port, ws_port);
         if let Some(max_port) = restored_ports.into_iter().max() {
             lifecycle::reserve_after_port(&next_port, max_port);
+        }
+        // Rewrite legacy runtime.json files immediately so persisted plaintext
+        // tokens are removed even if the user never toggles an extension.
+        if let Err(error) = lifecycle::save_runtime_state(&runtime_state, &enabled_clone) {
+            log::warn!("迁移拓展运行时状态失败: {error}");
         }
     }
 
