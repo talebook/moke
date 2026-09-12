@@ -7,7 +7,7 @@ import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen,
 import { requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
-import { deleteOfflineBook, getOfflineBook, listOfflineBooks, removeOfflinePartial, setOfflineBookShelfState, type OfflineBookRecord } from '@/lib/offline-books';
+import { cacheOfflineMediaType, deleteOfflineBook, getOfflineBook, listOfflineBooks, removeOfflinePartial, setOfflineBookShelfState, type OfflineBookRecord } from '@/lib/offline-books';
 import {
   beginOfflineDownload,
   downloadAndSaveOfflineBook,
@@ -47,9 +47,12 @@ import {
   onlineReadingErrorMessage,
   resolveTalebookOnlineSource,
 } from '@/lib/online-reading';
+import { ComicReader } from '@/components/book/ComicReader';
+import { resolveBookReader } from '@/lib/book-reader-policy';
 import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
 
 interface BookDetail {
+  media_type?: string;
   id: string;
   title: string;
   authors?: string[] | Array<{ name: string }>;
@@ -80,6 +83,10 @@ function DetailContent() {
   const id = searchParams.get('id');
   const router = useRouter();
   const { serverUrl, offlineMode, capabilities, user } = useServerStore();
+  const [comicOffline, setComicOffline] = useState(false);
+  const [comicOpen, setComicOpen] = useState(false);
+  const closeComic = useCallback(() => setComicOpen(false), []);
+  const readerPreference = useSettingsStore(state => state.readerPreference);
   const [book, setBook] = useState<BookDetail | null>(null);
   const [offlineRecord, setOfflineRecord] = useState<OfflineBookRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,7 +126,9 @@ function DetailContent() {
   );
   const primaryFile = bookFiles[0];
   const fileFormats = bookFiles.map((file) => file.format.toUpperCase());
+  const readerKind = book ? resolveBookReader(book, readerPreference) : readerPreference;
   const onlineFormat = bookFiles.some((file) => file.format === 'epub') ? 'EPUB' : null;
+  const canOpenPrimary = readerKind !== 'embedded' || Boolean(onlineFormat);
   const downloadActionLabel = downloading
     ? `下载中 ${downloadProgress}%`
     : openingReader && !openingOnline
@@ -194,6 +203,7 @@ function DetailContent() {
         setBook({
           id: record.bookId,
           title: record.title,
+          media_type: record.media_type,
           author: record.author,
           img: record.coverDataUrl,
           files: localRecords.map((item) => ({ format: item.format, size: item.size })),
@@ -214,6 +224,7 @@ function DetailContent() {
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
+        void cacheOfflineMediaType(serverUrl, String(nextBook.id), nextBook.media_type).catch(() => undefined);
         const detailShelfState = bookDetailShelfState(nextBook);
         setInShelf(detailShelfState ?? false);
         const format = (nextBook?.files?.[0]?.format || 'epub').toLowerCase();
@@ -338,6 +349,7 @@ function DetailContent() {
           serverUrl,
           bookId: String(book.id),
           title: book.title,
+          media_type: book.media_type,
           format: selectedFormat,
           downloadedBytes: canResume ? undefined : 0,
         },
@@ -350,6 +362,7 @@ function DetailContent() {
               serverUrl,
               bookId: String(book.id),
               title: book.title,
+              media_type: book.media_type,
               author: authorNames.join('、'),
               inShelf,
               format: selectedFormat,
@@ -384,6 +397,7 @@ function DetailContent() {
         state: { ...current.state, read_state: 1 },
       } : current);
       setMessage('已下载到本地，现在可以阅读。');
+      return true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : '';
       if (reason === 'book.download.in_progress') {
@@ -412,6 +426,13 @@ function DetailContent() {
   };
 
   const handleOnlineRead = async () => {
+    if (!book) return;
+    const reader = resolveBookReader(book, useSettingsStore.getState().readerPreference);
+    if (reader === 'comic') { setComicOffline(false); setComicOpen(true); return; }
+    if (reader === 'system') {
+      if (downloaded || await handleDownload()) await handleOfflineRead();
+      return;
+    }
     if (!book || !onlineFormat) {
       setMessage('当前书籍格式暂不支持在线阅读，请下载后阅读。');
       return;
@@ -512,6 +533,11 @@ function DetailContent() {
 
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (!book) return;
+    if (resolveBookReader(book, useSettingsStore.getState().readerPreference) === 'comic') {
+      setComicOffline(true);
+      setComicOpen(true);
+      return;
+    }
     const openingMessage = '正在打开书籍，请稍候。';
     // 打开/记录在途时拦截重复点击，避免重复开窗和重复计数。
     if (openingReaderRef.current) {
@@ -739,11 +765,11 @@ function DetailContent() {
                     <button
                       data-testid="online-read-action"
                       onClick={() => void handleOnlineRead()}
-                      disabled={openingReader || !onlineFormat}
+                      disabled={openingReader || downloading || !canOpenPrimary}
                       className="inline-flex h-full min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <BookOpen className="h-4 w-4 shrink-0" />
-                      {openingOnline ? '在线打开中' : onlineFormat ? '在线阅读' : '暂不支持在线阅读'}
+                      {openingOnline ? '在线打开中' : readerKind === 'comic' ? '阅读漫画' : readerKind === 'system' ? (downloaded ? '阅读' : '下载后阅读') : onlineFormat ? '在线阅读' : '暂不支持在线阅读'}
                     </button>
                     <button
                       data-testid="offline-download-action"
@@ -773,7 +799,7 @@ function DetailContent() {
                     </button>
                   </div>
                 )}
-                {!offlineMode && !onlineFormat && (
+                {!offlineMode && !canOpenPrimary && (
                   <p className="mt-2 w-full px-1 text-xs leading-relaxed text-muted-foreground md:w-[220px]">
                     当前格式需先下载到本地再阅读。
                   </p>
@@ -976,6 +1002,7 @@ function DetailContent() {
           </div>
         </div>
       )}
+      {comicOpen && book && <ComicReader book={book} serverUrl={serverUrl} offline={offlineMode || comicOffline} onClose={closeComic} />}
     </DesktopLayout>
   );
 }

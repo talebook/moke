@@ -11,6 +11,7 @@ export interface DownloadOfflineBookOptions {
   serverUrl: string;
   bookId: string;
   title: string;
+  media_type?: string;
   author?: string;
   coverUrl?: string;
   inShelf?: boolean;
@@ -49,6 +50,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
       serverUrl: options.serverUrl,
       bookId: options.bookId,
       title: options.title,
+      media_type: options.media_type,
       author: options.author,
       inShelf: options.inShelf,
       coverDataUrl,
@@ -80,6 +82,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
     serverUrl: options.serverUrl,
     bookId: options.bookId,
     title: options.title,
+    media_type: options.media_type,
     author: options.author,
     inShelf: options.inShelf,
     coverDataUrl,
