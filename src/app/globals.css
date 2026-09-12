@@ -1007,3 +1007,14 @@ html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(
     }
   }
 }
+
+/* The pinned comic reader owns page layout; Moke owns the viewport/safe areas. */
+.moke-comic-reader { position: fixed; inset: 0; z-index: 100; background: #111827; color: #f8fafc; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.moke-comic-host, .moke-comic-host .kr-reader { width: 100%; height: 100%; }
+.moke-comic-state { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: #111827; padding: 24px; text-align: center; }
+.moke-comic-state p { max-width: 540px; line-height: 1.7; }
+.moke-comic-reader button { touch-action: manipulation; }
+.moke-comic-state button, .moke-comic-notice button { min-height: 44px; border: 1px solid #64748b; border-radius: 8px; padding: 8px 16px; margin: 4px; }
+.moke-comic-notice { position: absolute; z-index: 45; bottom: calc(60px + env(safe-area-inset-bottom)); right: 8px; max-width: min(480px, calc(100% - 16px)); padding: 12px; background: #450a0a; color: #fee2e2; border-radius: 8px; }
+[data-eink='true'] .moke-comic-reader, [data-eink='true'] .moke-comic-state, [data-eink='true'] .moke-comic-notice { background: #fff; color: #000; }
+[data-eink='true'] .moke-comic-reader .kr-toolbar, [data-eink='true'] .moke-comic-reader .kr-panel { background: #fff; color: #000; border: 1px solid #000; }

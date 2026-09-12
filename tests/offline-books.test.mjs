@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  cacheOfflineMediaType,
   deleteOfflineBook,
   getOfflineBook,
   saveOfflineBook,
@@ -543,4 +544,18 @@ test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显�
   };
 
   assert.equal(await getOfflineBook('https://a.example', '42'), null);
+});
+
+
+test('offline downloads retain classification and online refresh stays within server/book identity', async () => {
+  const store = installWebOfflineStore();
+  const first = { serverUrl: 'https://a.test', bookId: '42', title: 'Comic', format: 'pdf', fileName: 'comic.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']), media_type: 'comic' };
+  await saveOfflineBook(first);
+  await saveOfflineBook({ ...first, serverUrl: 'https://b.test' });
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'comic');
+  await cacheOfflineMediaType('https://a.test', '42', 'ebook');
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
+  assert.equal(store.records.get('https://b.test::42::pdf').media_type, 'comic');
+  await cacheOfflineMediaType('https://a.test', '42', undefined);
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
 });
