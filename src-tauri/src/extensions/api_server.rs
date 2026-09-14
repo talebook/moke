@@ -461,6 +461,7 @@ fn authenticate(
 
 /// GET /api/v1/info
 fn handle_info(ctx: &ServerContext, _ext_name: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, _ext_name, "server.info")?;
     let all_windows: Vec<String> = ctx.app_handle.webview_windows().keys().cloned().collect();
     log::info!("/api/v1/info: all windows = {:?}", all_windows);
 
@@ -576,6 +577,7 @@ fn handle_reader(
 ) -> ApiResult {
     // GET /api/v1/reader/windows
     if url == "/api/v1/reader/windows" && method == &tiny_http::Method::Get {
+        super::permissions::check_permission(&ctx.enabled, ext_name, "reader.state.read")?;
         let windows: Vec<String> = ctx
             .app_handle
             .webview_windows()
@@ -591,6 +593,7 @@ fn handle_reader(
         let label = label.strip_suffix("/state").unwrap_or(label);
 
         if method == &tiny_http::Method::Get && url.ends_with("/state") {
+            super::permissions::check_permission(&ctx.enabled, ext_name, "reader.state.read")?;
             // 返回阅读器基本状态（窗口存在性 + 标签）
             if let Some(_window) = ctx.app_handle.get_webview_window(label) {
                 let state = serde_json::json!({
@@ -605,6 +608,7 @@ fn handle_reader(
 
         // POST /api/v1/reader/{label}/command
         if method == &tiny_http::Method::Post && url.ends_with("/command") {
+            super::permissions::check_permission(&ctx.enabled, ext_name, "reader.command.send")?;
             let label = label.strip_suffix("/command").unwrap_or(label);
             if let Some(window) = ctx.app_handle.get_webview_window(label) {
                 // 将命令作为 Tauri event 转发给阅读器窗口。同步等待时会暂时把
@@ -706,7 +710,8 @@ fn handle_reader(
 }
 
 /// POST /api/v1/extension/sidebar/add
-fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
+fn handle_ext_sidebar_add(ctx: &ServerContext, ext_name: &str, body: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, ext_name, "sidebar.add")?;
     let data: serde_json::Value = serde_json::from_str(body)
         .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
@@ -719,7 +724,8 @@ fn handle_ext_sidebar_add(ctx: &ServerContext, _ext_name: &str, body: &str) -> A
 }
 
 /// POST /api/v1/extension/page/register
-fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) -> ApiResult {
+fn handle_ext_page_register(ctx: &ServerContext, ext_name: &str, body: &str) -> ApiResult {
+    super::permissions::check_permission(&ctx.enabled, ext_name, "page.register")?;
     let data: serde_json::Value = serde_json::from_str(body)
         .map_err(|e| ApiError::bad_request("INVALID_JSON", format!("JSON 解析失败: {e}")))?;
 
@@ -732,7 +738,7 @@ fn handle_ext_page_register(ctx: &ServerContext, _ext_name: &str, body: &str) ->
 
 /// GET /api/v1/extension/storage — 列出所有 key
 fn handle_ext_storage_list(ctx: &ServerContext, ext_name: &str) -> ApiResult {
-    super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
+    super::permissions::check_permission(&ctx.enabled, ext_name, "storage")?;
     let ext_dir = ctx.extensions_dir.join(ext_name);
     let keys = super::storage::list_keys(&ext_dir)?;
     Ok(serde_json::json!({"keys": keys}).to_string())
@@ -747,7 +753,7 @@ fn handle_ext_storage(
     body: &str,
 ) -> ApiResult {
     // 安全：只有允许 storage 权限的拓展才能访问
-    super::permissions::check_permission(ext_name, "storage", &ctx.extensions_dir)?;
+    super::permissions::check_permission(&ctx.enabled, ext_name, "storage")?;
 
     let key = url.strip_prefix("/api/v1/extension/storage/").unwrap_or("");
     if key.is_empty() {

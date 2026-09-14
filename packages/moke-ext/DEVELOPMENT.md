@@ -29,6 +29,11 @@ my-extension/
   "display_name": "我的拓展",      // 必填: 显示名称，最长 128 字符
   "description": "功能描述",       // 可选: 最长 512 字符
   "author": "开发者",              // 可选
+  "publisher": {
+    "id": "org.example",
+    "name": "开发者",
+    "source": "https://example.org/moke/extensions/my-extension"
+  },
 
   "entry": {
     "ui_port": 0,                 // 0 = 自动分配端口，或指定固定端口
@@ -51,6 +56,9 @@ my-extension/
   ]
 }
 ```
+
+含原生后端的扩展必须在 `moke-ext build` 后执行 `moke-ext sign`。签名、权限
+变更、密钥轮换和会话 token 的完整约定见 [`docs/extension-trust-model.md`](../../docs/extension-trust-model.md)。
 
 ### 3. 权限列表
 

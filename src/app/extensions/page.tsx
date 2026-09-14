@@ -6,11 +6,12 @@ import {
   Package,
   Puzzle,
   Shield,
-  Settings2,
   ToggleLeft,
   ToggleRight,
   Trash2,
-  ExternalLink,
+  ShieldCheck,
+  ShieldX,
+  TriangleAlert,
 } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useExtensionStore, type ExtensionInfo } from '@/lib/store/extensions';
@@ -33,7 +34,16 @@ export default function ExtensionsPage() {
       if (ext.enabled) {
         await disableExtension(ext.name);
       } else {
-        await enableExtension(ext.name);
+        if (ext.trust.blockedReason) {
+          throw new Error(ext.trust.blockedReason);
+        }
+        if (ext.trust.requiresApproval) {
+          const approved = confirm(buildApprovalMessage(ext));
+          if (!approved) return;
+          await enableExtension(ext.name, { packageDigest: ext.trust.packageDigest });
+        } else {
+          await enableExtension(ext.name);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -182,6 +192,7 @@ function ExtensionCard({
                   UI
                 </span>
               )}
+              <TrustBadge ext={ext} />
             </div>
           </div>
         </div>
@@ -219,5 +230,53 @@ function ExtensionCard({
         </div>
       </div>
     </div>
+  );
+}
+
+function buildApprovalMessage(ext: ExtensionInfo): string {
+  const lines = [
+    `启用 ${ext.displayName} 前请核对：`,
+    '',
+    `签名：${trustLabel(ext)}`,
+    `发布者：${ext.trust.publisherName || ext.trust.publisherId || '未知'}`,
+    `来源：${ext.trust.source || '未声明'}`,
+    `版本：${ext.trust.upgradeFrom ? `${ext.trust.upgradeFrom} → ` : ''}${ext.version}`,
+    `当前权限：${ext.permissions.join('、') || '无'}`,
+  ];
+  if (ext.trust.permissionsAdded.length) {
+    lines.push(`新增权限：${ext.trust.permissionsAdded.join('、')}`);
+  }
+  if (ext.trust.permissionsRemoved.length) {
+    lines.push(`移除权限：${ext.trust.permissionsRemoved.join('、')}`);
+  }
+  if (ext.trust.risks.length) {
+    lines.push('', '风险提示：', ...ext.trust.risks.map((risk) => `- ${risk}`));
+  }
+  lines.push('', `内容摘要：${ext.trust.packageDigest.slice(0, 16)}…`, '', '仅为当前内容确认。版本、来源或权限变化后必须重新确认。');
+  return lines.join('\n');
+}
+
+function trustLabel(ext: ExtensionInfo): string {
+  switch (ext.trust.signatureStatus) {
+    case 'trusted': return '签名有效 / 发布者已确认';
+    case 'unknown_publisher': return '签名有效 / 未知发布者或新密钥';
+    case 'invalid': return '签名无效';
+    default: return '未签名';
+  }
+}
+
+function TrustBadge({ ext }: { ext: ExtensionInfo }) {
+  const blocked = Boolean(ext.trust.blockedReason);
+  const Icon = blocked ? ShieldX : ext.trust.trusted ? ShieldCheck : TriangleAlert;
+  const className = blocked
+    ? 'bg-red-50 text-red-700'
+    : ext.trust.trusted
+      ? 'bg-green-50 text-green-700'
+      : 'bg-amber-50 text-amber-700';
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md ${className}`}>
+      <Icon className="w-3 h-3" />
+      {trustLabel(ext)}
+    </span>
   );
 }

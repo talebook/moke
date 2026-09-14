@@ -4220,12 +4220,14 @@ name = "moke"
 version = "0.1.0"
 dependencies = [
  "Readest",
+ "base64 0.22.1",
  "glob",
  "log",
  "napi-derive-ohos",
  "napi-ohos",
  "openharmony-ability",
  "openharmony-ability-derive",
+ "ring",
  "serde",
  "serde_json",
  "sysinfo",
