@@ -54,11 +54,11 @@ if (results.length === 0) {
   for (const result of results) {
     const { applied, failed, etsDir } = result.patches;
     console.log(
-      `[prepare-ohos] Applied ${applied.length}/${DEFAULT_PATCH_FILES.length} @ohos-rs/ability back-key patches to ${etsDir}`,
+      `[prepare-ohos] Applied ${applied.length}/${DEFAULT_PATCH_FILES.length} @ohos-rs/ability startup/back-key patches to ${etsDir}`,
     );
     for (const message of failed) {
       hardFailed = true;
-      console.error(`[prepare-ohos] FAILED to apply back-key patch: ${message}`);
+      console.error(`[prepare-ohos] FAILED to apply startup/back-key patch: ${message}`);
     }
     const storage = result.domStorage;
     if (storage.status === 'patched') {
@@ -74,7 +74,7 @@ if (results.length === 0) {
     }
   }
   if (hardFailed) {
-    console.error('[prepare-ohos] Back-key patches partially failed; aborting build.');
+    console.error('[prepare-ohos] OHOS patches partially failed; aborting build.');
     process.exit(1);
   }
 }

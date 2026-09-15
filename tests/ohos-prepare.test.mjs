@@ -10,6 +10,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 
 import {
   DEFAULT_PATCH_FILES,
@@ -22,6 +24,53 @@ import {
 
 const patchDir = fileURLToPath(new URL('../scripts/ohos-ability-patch', import.meta.url));
 const toPosixPath = (value) => value.replaceAll('\\', '/');
+
+test('RustAbility passes the real sandbox context before native startup', async () => {
+  const source = readFileSync(join(patchDir, 'ability', 'RustAbility.ets'), 'utf8');
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  });
+  const events = [];
+  let receivedContext;
+  const nativeModule = {
+    registerCustomProtocol: () => events.push('protocol'),
+    init: (context) => {
+      receivedContext = context;
+      events.push('init');
+      return { windowStageEventCallback: { onAbilityCreate: () => events.push('create') } };
+    },
+  };
+  const exports = {};
+  runInNewContext(outputText, {
+    exports,
+    AppStorage: { setOrCreate() {} },
+    require: (name) => {
+      switch (name) {
+        case '@kit.AbilityKit': return { UIAbility: class {} };
+        case '@ohos.web.webview':
+          return { default: { WebviewController: { initializeWebEngine: () => events.push('engine') } } };
+        case '../helper/loadable': return { Loadable: { load: async () => nativeModule } };
+        case '../components/MainPage': return { RouteName: 'RustAbility' };
+        default: throw new Error(`Unexpected runtime import: ${name}`);
+      }
+    },
+  });
+  const ability = new exports.RustAbility();
+  const resourceManager = {};
+  ability.moduleName = 'moke_lib';
+  ability.context = {
+    filesDir: '/data/storage/el2/base/haps/entry/files',
+    config: { language: 'zh-CN' },
+    resourceManager,
+  };
+  await ability.onCreate({}, {});
+  assert.equal(receivedContext.basePath, ability.context.filesDir);
+  assert.equal(receivedContext.prefPath, ability.context.filesDir);
+  assert.equal(receivedContext.moduleName, 'moke_lib');
+  assert.equal(receivedContext.preferredLocales, 'zh-CN');
+  assert.equal(receivedContext.resourceManager, resourceManager);
+  assert.deepEqual(events, ['protocol', 'engine', 'init', 'create']);
+});
 
 const UNPATCHED_MAIN_PAGE = `@Entry({ routeName: "RustAbility" })
 @Component
@@ -42,6 +91,9 @@ function WebBuilder(data: WebviewNodeData) {
 function makeFakePackage(ohosRoot, roots) {
   for (const root of roots) {
     const etsDir = join(ohosRoot, root, '@ohos-rs', 'ability', 'src', 'main', 'ets');
+    mkdirSync(join(etsDir, 'ability'), { recursive: true });
+    writeFileSync(join(etsDir, 'ability', 'RustAbility.ets'), 'export class RustAbility {}\n');
+    writeFileSync(join(etsDir, 'ability', 'type.ets'), 'export interface Module {}\n');
     mkdirSync(join(etsDir, 'webview'), { recursive: true });
     mkdirSync(join(etsDir, 'components'), { recursive: true });
     writeFileSync(join(etsDir, 'webview', 'DefaultWebview.ets'), UNPATCHED_DEFAULT_WEBVIEW);
@@ -78,7 +130,7 @@ test('findPackageDir 按 scoped 目录段定位 @ohos-rs/ability，缺失返回 
   }
 });
 
-test('prepareOhos 把 4 个补丁落到 entry/oh_modules，产物含 back-key 与 domStorageAccess', () => {
+test('prepareOhos 把 6 个补丁落到 entry/oh_modules，产物含 back-key 与 domStorageAccess', () => {
   const root = mkdtempSync(join(tmpdir(), 'ohos-prepare-'));
   try {
     makeFakePackage(root, ['entry/oh_modules']);
@@ -89,7 +141,7 @@ test('prepareOhos 把 4 个补丁落到 entry/oh_modules，产物含 back-key �
       result.abilityDir,
       join(root, 'entry', 'oh_modules', '@ohos-rs', 'ability'),
     );
-    assert.equal(result.patches.applied.length, 4);
+    assert.equal(result.patches.applied.length, 6);
     assert.deepEqual(result.patches.failed, []);
     const mainPage = readFileSync(
       join(result.abilityDir, 'src', 'main', 'ets', 'components', 'MainPage.ets'),
@@ -115,7 +167,7 @@ test('prepareOhos 两个候选位置都存在时都打补丁', () => {
     const { results } = prepareOhos({ ohosRoot: root, patchDir });
     assert.equal(results.length, 2);
     for (const result of results) {
-      assert.equal(result.patches.applied.length, 4);
+      assert.equal(result.patches.applied.length, 6);
       const mainPage = readFileSync(
         join(result.abilityDir, 'src', 'main', 'ets', 'components', 'MainPage.ets'),
         'utf8',
@@ -134,7 +186,7 @@ test('applyPatchesToPackage 目标缺失时返回失败列表（供 CLI 硬失�
     const abilityDir = join(root, 'entry', 'oh_modules', '@ohos-rs', 'ability');
     rmSync(join(abilityDir, 'src', 'main', 'ets', 'webview', 'Utils.ets'));
     const { applied, failed } = applyPatchesToPackage(abilityDir, patchDir, DEFAULT_PATCH_FILES);
-    assert.equal(applied.length, 3);
+    assert.equal(applied.length, 5);
     assert.equal(failed.length, 1);
     assert.ok(failed[0].includes('Utils.ets'));
   } finally {
