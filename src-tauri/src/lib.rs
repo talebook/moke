@@ -24,7 +24,10 @@ compile_error!("reader-e2e must not be enabled in release builds");
 ))]
 compile_error!("reader-e2e is supported only by desktop development builds");
 
+mod build_channel;
 mod extensions;
+#[cfg(feature = "preview")]
+mod preview;
 
 // Keep build-script profile routing covered by the normal `cargo test --lib`
 // command used in CI without compiling it into production application code.
@@ -38,6 +41,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
+
+use build_channel::MokeBuildInfo;
 
 static MOKE_DOWNLOADS_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
@@ -142,6 +147,16 @@ fn moke_runtime_platform(webview: tauri::Webview) -> Result<&'static str, String
 
     #[cfg(not(target_env = "ohos"))]
     Ok(std::env::consts::OS)
+}
+
+/// Returns compile-time build metadata for display and diagnostics.
+///
+/// This is not an authorization decision. Preview commands independently
+/// enforce entitlements in Rust, and stable builds omit the Preview module.
+#[tauri::command]
+fn moke_build_info(webview: tauri::Webview) -> Result<MokeBuildInfo, String> {
+    require_moke_shell(&webview)?;
+    Ok(MokeBuildInfo::current())
 }
 
 /// Performs a full-document navigation inside the current Android/OpenHarmony
@@ -720,6 +735,7 @@ fn moke_list_downloaded_books(
 fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static
 {
     tauri::generate_handler![
+        moke_build_info,
         moke_runtime_platform,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
@@ -807,9 +823,14 @@ pub fn run() {
     #[cfg(all(feature = "reader-e2e", debug_assertions))]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
-    #[cfg(not(target_env = "ohos"))]
+    #[cfg(all(not(target_env = "ohos"), not(feature = "preview")))]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
+
+    #[cfg(all(not(target_env = "ohos"), feature = "preview"))]
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init());
 

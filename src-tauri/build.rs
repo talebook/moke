@@ -33,6 +33,7 @@ const APP_ACL_COMMANDS: &[&str] = &[
     // Moke host commands used by the shell. On single-WebView targets the
     // command implementations also validate the active document path because
     // the shell and Reader necessarily share the `main` label.
+    "moke_build_info",
     "moke_runtime_platform",
     "moke_navigate",
     "moke_record_downloaded_book",

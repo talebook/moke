@@ -2619,6 +2619,12 @@
           "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-build-info",
+          "markdownDescription": "Enables the moke_build_info command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-delete-downloaded-book-file",
@@ -2839,6 +2845,12 @@
           "type": "string",
           "const": "deny-localsend-stop",
           "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-build-info",
+          "markdownDescription": "Denies the moke_build_info command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope.",

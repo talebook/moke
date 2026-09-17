@@ -22,7 +22,11 @@ type UpdateStatus =
 // 注意：tauri-plugin-opener 的 openUrl 在移动端走 open crate 的 unix 分支
 //（依赖 xdg-open/gio 等），Android/OHOS 上都不存在这些命令，因此无法调起
 // 系统浏览器——这里改为复制下载链接让用户自己粘贴打开。
-const RELEASE_URL = 'https://github.com/talebook/moke/releases/latest';
+const BUILD_CHANNEL = process.env.NEXT_PUBLIC_BUILD_CHANNEL === 'preview' ? 'preview' : 'stable';
+const RELEASE_URL = BUILD_CHANNEL === 'preview'
+  ? 'https://github.com/hehetoshang/moke/releases'
+  : 'https://github.com/talebook/moke/releases/latest';
+const PREVIEW_UPDATE_UNAVAILABLE = 'Preview 自动更新通道尚未配置，请从私人发布页获取新版本。';
 
 const DISMISSED_KEY = 'moke-dismissed-update-version';
 
@@ -194,6 +198,12 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
       // schedule more than one automatic update check.
       startupDone = true;
 
+      // Preview packages must never fall through to the stable updater. The
+      // native updater plugin is also omitted from Preview builds; this early
+      // return keeps startup quiet until the authenticated distribution
+      // service and its dedicated signing key are available.
+      if (BUILD_CHANNEL === 'preview') return;
+
       try {
         // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
         // 官方不支持移动端，需要运行时平台检测区分。
@@ -215,6 +225,16 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
 
     checkForUpdates: () => {
       if (checkInFlight) return checkInFlight;
+
+      if (BUILD_CHANNEL === 'preview') {
+        set({
+          status: 'error',
+          error: PREVIEW_UPDATE_UNAVAILABLE,
+          checkedAt: Date.now(),
+          shouldPrompt: false,
+        });
+        return Promise.resolve();
+      }
 
       // Defer the implementation to a microtask so checkInFlight is assigned
       // before platform detection or any other asynchronous work can begin.

@@ -12,6 +12,8 @@ name = "moke_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [features]
+default = []
+preview = []
 reader-e2e = ["tauri-plugin-webdriver"]
 
 [build-dependencies]

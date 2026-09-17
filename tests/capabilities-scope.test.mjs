@@ -8,6 +8,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const PRODUCTION_CAPABILITY_FILES = [
   'src-tauri/capabilities/default.json',
+  'src-tauri/capabilities/preview-default.json',
   'src-tauri/capabilities/reader.json',
   'src-tauri/capabilities/reader-mobile.json',
   'src-tauri/capabilities/ohos.json',
@@ -128,6 +129,7 @@ test('desktop fs write paths stay command-scoped instead of entering the plugin 
 
   for (const file of [
     'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/preview-default.json',
     'src-tauri/capabilities/reader.json',
     'src-tauri/capabilities/reader-mobile.json',
   ]) {
@@ -369,6 +371,7 @@ test('OHOS dev capability differs only by its development server origins', () =>
 test('HTTP access remains scheme-scoped and allows arbitrary server ports', () => {
   for (const file of [
     'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/preview-default.json',
     'src-tauri/capabilities/reader.json',
     'src-tauri/capabilities/reader-mobile.json',
   ]) {
