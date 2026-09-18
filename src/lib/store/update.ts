@@ -23,6 +23,7 @@ type UpdateStatus =
 //（依赖 xdg-open/gio 等），Android/OHOS 上都不存在这些命令，因此无法调起
 // 系统浏览器——这里改为复制下载链接让用户自己粘贴打开。
 const BUILD_CHANNEL = process.env.NEXT_PUBLIC_BUILD_CHANNEL === 'preview' ? 'preview' : 'stable';
+const PREVIEW_UPDATER_ENABLED = process.env.NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED === 'true';
 const RELEASE_URL = BUILD_CHANNEL === 'preview'
   ? 'https://github.com/hehetoshang/moke/releases'
   : 'https://github.com/talebook/moke/releases/latest';
@@ -82,6 +83,11 @@ type UpdateStoreSetter = (
   partial: Partial<UpdateStore> | ((state: UpdateStore) => Partial<UpdateStore>),
 ) => void;
 
+interface PreviewUpdateAuthorization {
+  authorization: string;
+  expiresAt: number;
+}
+
 function createDownloadHandler(set: UpdateStoreSetter) {
   let contentLength: number | null = null;
   let bytesDownloaded = 0;
@@ -117,6 +123,7 @@ export interface UpdateStoreDependencies {
   importProcess: () => Promise<ProcessMod | null>;
   resolvePlatform: () => Promise<'desktop' | 'mobile'>;
   sleep: (delayMs: number) => Promise<void>;
+  getPreviewUpdateAuthorization: () => Promise<PreviewUpdateAuthorization>;
 }
 
 async function importUpdater(): Promise<UpdaterMod | null> {
@@ -139,11 +146,17 @@ async function resolvePlatform(): Promise<'desktop' | 'mobile'> {
   }
 }
 
+async function getPreviewUpdateAuthorization(): Promise<PreviewUpdateAuthorization> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<PreviewUpdateAuthorization>('moke_preview_update_authorization');
+}
+
 const defaultDependencies: UpdateStoreDependencies = {
   importUpdater,
   importProcess,
   resolvePlatform,
   sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+  getPreviewUpdateAuthorization,
 };
 
 export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = {}) {
@@ -199,10 +212,10 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
       startupDone = true;
 
       // Preview packages must never fall through to the stable updater. The
-      // native updater plugin is also omitted from Preview builds; this early
-      // return keeps startup quiet until the authenticated distribution
-      // service and its dedicated signing key are available.
-      if (BUILD_CHANNEL === 'preview') return;
+      // The development Preview config has no updater endpoint. This early
+      // return keeps local builds quiet while release builds explicitly opt in
+      // to the authenticated distribution service and dedicated signing key.
+      if (BUILD_CHANNEL === 'preview' && !PREVIEW_UPDATER_ENABLED) return;
 
       try {
         // OHOS/移动端单 WebView 构建里没有注册 updater 插件，且 plugin-updater
@@ -226,7 +239,7 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
     checkForUpdates: () => {
       if (checkInFlight) return checkInFlight;
 
-      if (BUILD_CHANNEL === 'preview') {
+      if (BUILD_CHANNEL === 'preview' && !PREVIEW_UPDATER_ENABLED) {
         set({
           status: 'error',
           error: PREVIEW_UPDATE_UNAVAILABLE,
@@ -264,7 +277,17 @@ export function createUpdateStore(overrides: Partial<UpdateStoreDependencies> = 
         try {
           const previousPending = pending;
           const previousDownloaded = downloaded;
-          const update = await updater.check();
+          // Preview manifests require a fresh device-bound proof. It remains in
+          // memory and is sent only to the manifest endpoint. Artifact downloads
+          // use the short-lived URL returned by that authenticated manifest.
+          const checkOptions = BUILD_CHANNEL === 'preview'
+            ? {
+                headers: {
+                  Authorization: (await dependencies.getPreviewUpdateAuthorization()).authorization,
+                },
+              }
+            : undefined;
+          const update = await updater.check(checkOptions);
           if (!update) {
             if (previousPending) {
               try { await previousPending.close(); } catch { /* best effort */ }

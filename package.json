@@ -12,6 +12,7 @@
     "dev-preview": "dotenv -e .env.preview -- next dev --turbo",
     "build": "dotenv -e .env.tauri -- next build --turbo",
     "build:preview": "dotenv -e .env.preview -- next build --turbo && node scripts/strip-reader-sourcemaps.mjs out",
+    "preview:release-config": "node scripts/prepare-preview-release-config.mjs",
     "start": "dotenv -e .env.tauri -- next start",
     "dev-web": "dotenv -e .env.web -- next dev --turbo",
     "build-web": "dotenv -e .env.web -- next build --turbo",

@@ -28,6 +28,7 @@ const MAX_STORED_FILE_BYTES: u64 = 64 * 1024;
 const MAX_ACCESS_CODE_BYTES: usize = 4096;
 const CACHE_REVALIDATE_SECONDS: u64 = 30;
 const CHECKPOINT_INTERVAL_SECONDS: u64 = 5 * 60;
+const UPDATE_AUTHORIZATION_SECONDS: u64 = 5 * 60;
 const ENTITLEMENT_DIRECTORY: &str = "preview-entitlement";
 const IDENTITY_FILE: &str = "device-identity.json";
 const LEASE_FILE: &str = "lease.json";
@@ -154,6 +155,27 @@ struct RefreshRequest {
     app_version: String,
     lease: LeaseEnvelope,
     proof: DeviceProof,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAuthorizationClaims {
+    protocol_version: u8,
+    action: &'static str,
+    device_id: String,
+    device_public_key: String,
+    installation_id: String,
+    app_version: String,
+    issued_at: u64,
+    expires_at: u64,
+    nonce: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreviewUpdateAuthorization {
+    authorization: String,
+    expires_at: u64,
 }
 
 struct EntitlementConfig {
@@ -453,6 +475,38 @@ fn create_device_proof(
         requested_at,
         signature: URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref()),
     }
+}
+
+fn sign_update_authorization(
+    identity: &DeviceIdentity,
+    app_version: String,
+    issued_at: u64,
+    lease_offline_until: u64,
+) -> Result<PreviewUpdateAuthorization, String> {
+    let expires_at = issued_at
+        .saturating_add(UPDATE_AUTHORIZATION_SECONDS)
+        .min(lease_offline_until);
+    let claims = UpdateAuthorizationClaims {
+        protocol_version: PROTOCOL_VERSION,
+        action: "update",
+        device_id: identity.device_id.clone(),
+        device_public_key: identity.public_key.clone(),
+        installation_id: identity.installation_id.clone(),
+        app_version,
+        issued_at,
+        expires_at,
+        nonce: uuid::Uuid::new_v4().to_string(),
+    };
+    let payload = serde_json::to_vec(&claims)
+        .map_err(|_| "Unable to create Preview update authorization".to_string())?;
+    let encoded_payload = URL_SAFE_NO_PAD.encode(payload);
+    let message =
+        format!("moke-preview-update-authorization-v{PROTOCOL_VERSION}\n{encoded_payload}");
+    let signature = URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref());
+    Ok(PreviewUpdateAuthorization {
+        authorization: format!("MokePreview {encoded_payload}.{signature}"),
+        expires_at,
+    })
 }
 
 fn checkpoint_message(envelope: &LeaseEnvelope, last_seen_at: u64) -> String {
@@ -907,6 +961,37 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
     }
 }
 
+fn update_authorization(app: &AppHandle) -> Result<PreviewUpdateAuthorization, String> {
+    let _guard = ENTITLEMENT_LOCK
+        .lock()
+        .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+    let config = entitlement_config()?;
+    let root = entitlement_root(app)?;
+    let identity = load_or_create_identity(&root)?;
+    let record = read_json::<LeaseRecord>(&lease_path(&root))?
+        .ok_or_else(|| "Preview is not activated on this device".to_string())?;
+    verify_lease_checkpoint(&record, &identity)?;
+    let now = now_unix()?;
+    let payload = config
+        .verifier
+        .verify(&record.envelope, &identity.device_id, now)?;
+    if checkpoint_predates_lease(&record, &payload) {
+        return Err("Preview lease checkpoint predates the signed lease".into());
+    }
+    if clock_rollback_detected(&record, now) {
+        return Err("System clock rollback detected".into());
+    }
+    if now > payload.offline_until {
+        return Err("Preview entitlement has expired".into());
+    }
+    sign_update_authorization(
+        &identity,
+        app.package_info().version.to_string(),
+        now,
+        payload.offline_until,
+    )
+}
+
 #[tauri::command]
 pub(crate) fn moke_preview_entitlement_status(
     webview: Webview,
@@ -933,6 +1018,15 @@ pub(crate) async fn moke_preview_refresh(
 ) -> Result<PreviewEntitlementStatus, String> {
     super::super::require_moke_shell(&webview)?;
     refresh(&app).await
+}
+
+#[tauri::command]
+pub(crate) fn moke_preview_update_authorization(
+    webview: Webview,
+    app: AppHandle,
+) -> Result<PreviewUpdateAuthorization, String> {
+    super::super::require_moke_shell(&webview)?;
+    update_authorization(&app)
 }
 
 #[cfg(test)]
@@ -1028,6 +1122,48 @@ mod tests {
         assert!(message.contains(&identity.device_id));
         assert!(message.contains(&identity.installation_id));
         assert!(message.ends_with("1.2.3"));
+    }
+
+    #[test]
+    fn update_authorization_is_short_lived_and_device_signed() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let now = 1_800_000_000;
+        let authorization = sign_update_authorization(
+            &identity,
+            "1.2.3".into(),
+            now,
+            now + UPDATE_AUTHORIZATION_SECONDS + 60,
+        )
+        .unwrap();
+
+        assert_eq!(authorization.expires_at, now + UPDATE_AUTHORIZATION_SECONDS);
+        assert!(authorization.authorization.starts_with("MokePreview "));
+        assert!(!authorization
+            .authorization
+            .contains(&identity.installation_id));
+
+        let token = authorization
+            .authorization
+            .strip_prefix("MokePreview ")
+            .unwrap();
+        let (encoded_claims, encoded_signature) = token.split_once('.').unwrap();
+        let claims: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_claims).unwrap()).unwrap();
+        assert_eq!(claims["action"], "update");
+        assert_eq!(claims["deviceId"], identity.device_id);
+        assert_eq!(claims["expiresAt"], now + UPDATE_AUTHORIZATION_SECONDS);
+
+        let message =
+            format!("moke-preview-update-authorization-v{PROTOCOL_VERSION}\n{encoded_claims}");
+        signature::UnparsedPublicKey::new(&signature::ED25519, identity.key_pair.public_key())
+            .verify(
+                message.as_bytes(),
+                &URL_SAFE_NO_PAD.decode(encoded_signature).unwrap(),
+            )
+            .unwrap();
+
+        let capped = sign_update_authorization(&identity, "1.2.3".into(), now, now + 10).unwrap();
+        assert_eq!(capped.expires_at, now + 10);
     }
 
     #[test]

@@ -156,6 +156,7 @@ test('entitlement command permissions follow the bootstrap and authorized window
   for (const permission of [
     'allow-moke-preview-entitlement-status',
     'allow-moke-preview-refresh',
+    'allow-moke-preview-update-authorization',
   ]) {
     assert.ok(previewCapability.permissions.includes(permission));
   }

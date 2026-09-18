@@ -2685,6 +2685,12 @@
           "markdownDescription": "Enables the moke_preview_refresh command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-update-authorization",
+          "markdownDescription": "Enables the moke_preview_update_authorization command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_record_downloaded_book command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-record-downloaded-book",
@@ -2935,6 +2941,12 @@
           "type": "string",
           "const": "deny-moke-preview-refresh",
           "markdownDescription": "Denies the moke_preview_refresh command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-update-authorization",
+          "markdownDescription": "Denies the moke_preview_update_authorization command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_record_downloaded_book command without any pre-configured scope.",

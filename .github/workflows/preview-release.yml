@@ -1,0 +1,207 @@
+name: Preview Release
+
+on:
+  push:
+    tags:
+      - 'preview-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Preview version to build (for example 1.2.3)
+        required: true
+        type: string
+
+concurrency:
+  group: preview-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Preview on ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    environment: preview-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-latest
+          - platform: linux
+            os: ubuntu-22.04
+          - platform: windows
+            os: windows-latest
+
+    steps:
+      - name: Checkout private Preview repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Resolve and validate Preview version
+        shell: bash
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/preview-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/preview-v}"
+          else
+            VERSION="$MANUAL_VERSION"
+          fi
+          node -e 'const v=process.argv[1]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(v)) process.exit(1)' "$VERSION"
+          node -e 'const p=require("./package.json"); if (p.version !== process.argv[1]) { console.error("package.json version does not match Preview release"); process.exit(1) }' "$VERSION"
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Reader dependencies and vendor assets
+        shell: bash
+        run: |
+          cd readest
+          pnpm install --no-frozen-lockfile
+          pnpm --filter @readest/readest-app setup-vendors
+
+      - name: Validate dedicated Preview release secrets
+        shell: bash
+        env:
+          PREVIEW_SIGNING_KEY: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY }}
+          PREVIEW_SIGNING_PASSWORD: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PREVIEW_ENTITLEMENT_URL: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_URL }}
+          PREVIEW_ENTITLEMENT_PUBLIC_KEY: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY }}
+        run: |
+          node -e '
+            for (const name of ["PREVIEW_SIGNING_KEY", "PREVIEW_SIGNING_PASSWORD", "PREVIEW_ENTITLEMENT_URL", "PREVIEW_ENTITLEMENT_PUBLIC_KEY"]) {
+              if (!process.env[name]?.trim()) { console.error(`Missing dedicated Preview secret: ${name}`); process.exit(1) }
+            }
+          '
+
+      - name: Generate fail-closed Preview release configuration
+        env:
+          MOKE_PREVIEW_UPDATER_ENDPOINT: ${{ vars.MOKE_PREVIEW_UPDATER_ENDPOINT }}
+          MOKE_PREVIEW_UPDATER_PUBLIC_KEY: ${{ vars.MOKE_PREVIEW_UPDATER_PUBLIC_KEY }}
+        run: pnpm preview:release-config
+
+      - name: Build signed Preview desktop bundle
+        env:
+          CI: true
+          NODE_OPTIONS: --max-old-space-size=4096
+          NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED: 'true'
+          MOKE_PREVIEW_ENTITLEMENT_URL: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_URL }}
+          MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --config src-tauri/target/preview-release/tauri.release.conf.json --features preview
+
+      - name: Upload signed Preview bundles for manifest generation
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-updater-${{ matrix.platform }}
+          path: |
+            src-tauri/target/release/bundle/**/*.sig
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish bundles to the private GitHub release
+        if: startsWith(github.ref, 'refs/tags/preview-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Moke Preview v${{ env.PREVIEW_VERSION }}
+          prerelease: true
+          files: |
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+
+  manifest:
+    name: Build signed Preview updater manifest
+    needs: build
+    runs-on: ubuntu-latest
+    environment: preview-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Preview version
+        shell: bash
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/preview-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/preview-v}"
+          else
+            VERSION="$MANUAL_VERSION"
+          fi
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Download signed bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: preview-updater-*
+          merge-multiple: true
+          path: preview-updater-artifacts
+
+      - name: Generate authenticated-distribution manifest
+        shell: bash
+        env:
+          DOWNLOAD_BASE_URL: ${{ vars.MOKE_PREVIEW_DOWNLOAD_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DOWNLOAD_BASE_URL" ]; then
+            echo "MOKE_PREVIEW_DOWNLOAD_BASE_URL is required" >&2
+            exit 1
+          fi
+          node scripts/merge-updater-json.cjs preview-updater-artifacts \
+            --version "$PREVIEW_VERSION" \
+            --base-url "${DOWNLOAD_BASE_URL%/}/$PREVIEW_VERSION" \
+            --strict \
+            --output preview-latest.json
+
+      - name: Upload manifest for the private distribution service
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-update-manifest-${{ env.PREVIEW_VERSION }}
+          path: preview-latest.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish manifest to the private GitHub release
+        if: startsWith(github.ref, 'refs/tags/preview-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: preview-latest.json

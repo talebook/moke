@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-preview-update-authorization"
+description = "Enables the moke_preview_update_authorization command without any pre-configured scope."
+commands.allow = ["moke_preview_update_authorization"]
+
+[[permission]]
+identifier = "deny-moke-preview-update-authorization"
+description = "Denies the moke_preview_update_authorization command without any pre-configured scope."
+commands.deny = ["moke_preview_update_authorization"]

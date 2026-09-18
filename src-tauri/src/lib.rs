@@ -744,6 +744,8 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         preview::moke_preview_enter_app,
         #[cfg(feature = "preview")]
         preview::entitlement::moke_preview_refresh,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_update_authorization,
         moke_runtime_platform,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
@@ -831,14 +833,9 @@ pub fn run() {
     #[cfg(all(feature = "reader-e2e", debug_assertions))]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
 
-    #[cfg(all(not(target_env = "ohos"), not(feature = "preview")))]
+    #[cfg(not(target_env = "ohos"))]
     let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_clipboard_manager::init());
-
-    #[cfg(all(not(target_env = "ohos"), feature = "preview"))]
-    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init());
 

@@ -17,9 +17,9 @@ Release builders provide both variables to the Cargo process:
 - `MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY`: base64 or unpadded base64url Ed25519
   public key (32 bytes after decoding).
 
-If either value is absent or invalid, Preview remains locked. No production
-private signing key belongs in this repository, CI variables, or client
-artifacts.
+If either value is absent or invalid, Preview remains locked. The entitlement
+lease private key belongs only in the service-side secret/HSM boundary; it
+must not enter this repository, release CI, or client artifacts.
 
 ## Device identity
 
@@ -118,6 +118,42 @@ security boundary without a platform keystore/counter or a fresh server
 check. Deployments that require hard revocation must shorten the signed lease
 and require online refresh; they must not treat `offlineUntil` as server-grade
 revocation enforcement.
+
+## Authenticated updater access
+
+Release builds request a fresh native authorization value before checking the
+Preview update manifest. The value has this wire form:
+
+```text
+Authorization: MokePreview <base64url claims>.<base64url signature>
+```
+
+The decoded claims contain `protocolVersion`, the fixed action `update`,
+`deviceId`, `devicePublicKey`, `installationId`, `appVersion`, `issuedAt`,
+`expiresAt`, and a random `nonce`. The signature covers this exact message:
+
+```text
+moke-preview-update-authorization-v1
+<base64url claims>
+```
+
+The native client issues the value only while its signed lease remains valid.
+Its lifetime is at most five minutes and never extends beyond `offlineUntil`.
+The distribution service must verify the device signature, match the public
+key against the registered device, check the server-side entitlement and
+revocation state, require the `update` action, enforce the timestamp window,
+and reject nonce replay.
+
+This header is sent only when checking the manifest. The authenticated
+manifest should return short-lived, single-release artifact URLs; updater
+downloads intentionally do not receive the authorization header. Tauri still
+verifies every downloaded artifact with the dedicated Preview updater public
+key. Stable and Preview updater keys and endpoints must never be reused.
+
+The CI-generated `preview-latest.json` is private release metadata for the
+distribution service to ingest. If its artifact URLs are not independently
+short-lived, the service must rewrite them before returning the authenticated
+manifest; it must not expose the CI file as an unauthenticated public object.
 
 ## Service requirements
 

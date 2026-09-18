@@ -62,15 +62,15 @@ test('Preview build uses an isolated app identity and build environment', () => 
   assert.match(nativeBuildConfig, /CARGO_FEATURE_PREVIEW|preview_feature/);
 });
 
-test('Preview cannot silently use the stable updater channel', () => {
+test('Preview updater stays disabled in development and cannot reuse the stable channel', () => {
   assert.deepEqual(previewConfig.plugins.updater.endpoints, []);
   assert.equal(previewConfig.bundle.createUpdaterArtifacts, false);
   assert.ok(stableCapability.permissions.includes('updater:default'));
-  assert.ok(!previewCapability.permissions.includes('updater:default'));
+  assert.ok(previewCapability.permissions.includes('updater:default'));
   assert.ok(previewCapability.permissions.includes('allow-moke-build-info'));
   assert.match(
     nativeHost,
-    /cfg\(all\(not\(target_env = "ohos"\), not\(feature = "preview"\)\)\)[\s\S]*?tauri_plugin_updater/,
+    /cfg\(not\(target_env = "ohos"\)\)[\s\S]*?tauri_plugin_updater/,
   );
   assert.match(updateStore, /BUILD_CHANNEL === 'preview'/);
   assert.match(updateStore, /Preview packages must never fall through to the stable updater/);
