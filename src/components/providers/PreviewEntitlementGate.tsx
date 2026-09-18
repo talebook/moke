@@ -83,7 +83,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
       <>
         <div
           role="status"
-          className="fixed inset-x-0 top-0 z-[190] flex min-h-10 items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-center text-xs font-medium text-amber-950 shadow"
+          className="preview-entitlement-banner fixed inset-x-0 top-0 z-[190] flex min-h-10 items-center justify-center gap-3 bg-amber-500 px-4 py-2 text-center text-xs font-medium text-amber-950 shadow"
         >
           <span>Preview 正在使用离线宽限期，请尽快联网续期。</span>
           <button
@@ -109,7 +109,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         role="dialog"
         aria-modal="true"
         aria-labelledby="preview-entitlement-title"
-        className="m-auto w-full max-w-lg rounded-[28px] border border-amber-950/10 bg-background p-6 shadow-2xl sm:p-8"
+        className="preview-entitlement-dialog m-auto w-full max-w-lg rounded-[28px] border border-amber-950/10 bg-background p-6 shadow-2xl sm:p-8"
       >
         <div className="mb-5 flex items-center gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
@@ -174,7 +174,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                   required
                   value={accessCode}
                   onChange={(event) => setAccessCode(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none ring-primary/30 transition focus:ring-4"
+                  className="preview-entitlement-input h-11 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none ring-primary/30 transition focus:ring-4"
                 />
                 <button
                   type="submit"

@@ -732,6 +732,19 @@ html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(
   background-color: #FFFFFF !important;
 }
 
+/* Preview entitlement surfaces use semantic hooks so e-ink treatment stays
+   local instead of changing every solid bg-background utility in the app. */
+[data-eink='true'] .preview-entitlement-banner {
+  background-color: #E5E5E5 !important;
+  border-bottom: 1px solid #000000 !important;
+  color: #000000 !important;
+}
+[data-eink='true'] .preview-entitlement-dialog,
+[data-eink='true'] .preview-entitlement-input {
+  background-color: #FFFFFF !important;
+  border-color: #000000 !important;
+}
+
 /* border-border/N: the standard light-gray border (#E8E3DC, very subtle
    in normal mode). Near-invisible on white in e-ink — force solid black
    for crisp 1px outlines. Used by the user page history cards, QuickLink

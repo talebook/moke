@@ -98,6 +98,7 @@ struct LeasePayload {
 struct LeaseRecord {
     envelope: LeaseEnvelope,
     last_seen_at: u64,
+    checkpoint_signature: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -444,6 +445,45 @@ fn create_device_proof(
     }
 }
 
+fn checkpoint_message(envelope: &LeaseEnvelope, last_seen_at: u64) -> String {
+    format!(
+        "moke-preview-checkpoint-v{PROTOCOL_VERSION}\n{}\n{}\n{last_seen_at}",
+        envelope.payload, envelope.signature
+    )
+}
+
+fn create_lease_record(
+    envelope: LeaseEnvelope,
+    last_seen_at: u64,
+    identity: &DeviceIdentity,
+) -> LeaseRecord {
+    let message = checkpoint_message(&envelope, last_seen_at);
+    LeaseRecord {
+        envelope,
+        last_seen_at,
+        checkpoint_signature: URL_SAFE_NO_PAD
+            .encode(identity.key_pair.sign(message.as_bytes()).as_ref()),
+    }
+}
+
+fn verify_lease_checkpoint(record: &LeaseRecord, identity: &DeviceIdentity) -> Result<(), String> {
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(&record.checkpoint_signature)
+        .map_err(|_| "Preview lease checkpoint is invalid".to_string())?;
+    let message = checkpoint_message(&record.envelope, record.last_seen_at);
+    signature::UnparsedPublicKey::new(&signature::ED25519, identity.key_pair.public_key().as_ref())
+        .verify(message.as_bytes(), &signature_bytes)
+        .map_err(|_| "Preview lease checkpoint is invalid".to_string())
+}
+
+fn checkpoint_predates_lease(record: &LeaseRecord, payload: &LeasePayload) -> bool {
+    record.last_seen_at.saturating_add(CLOCK_SKEW_SECONDS) < payload.issued_at
+}
+
+fn clock_rollback_detected(record: &LeaseRecord, now: u64) -> bool {
+    now.saturating_add(CLOCK_SKEW_SECONDS) < record.last_seen_at
+}
+
 fn lease_path(root: &Path) -> PathBuf {
     root.join(LEASE_FILE)
 }
@@ -508,6 +548,14 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
         ));
     };
     let now = now_unix()?;
+    if let Err(error) = verify_lease_checkpoint(&record, &identity) {
+        return Ok(inactive_status(
+            PreviewEntitlementState::Invalid,
+            true,
+            identity.device_id,
+            error,
+        ));
+    }
     let payload = match config
         .verifier
         .verify(&record.envelope, &identity.device_id, now)
@@ -522,7 +570,15 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
             ));
         }
     };
-    if now.saturating_add(CLOCK_SKEW_SECONDS) < record.last_seen_at {
+    if checkpoint_predates_lease(&record, &payload) {
+        return Ok(inactive_status(
+            PreviewEntitlementState::Invalid,
+            true,
+            identity.device_id,
+            "Preview lease checkpoint predates the signed lease",
+        ));
+    }
+    if clock_rollback_detected(&record, now) {
         return Ok(status_from_payload(
             payload,
             identity.device_id,
@@ -532,6 +588,9 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
     }
     if now > record.last_seen_at {
         record.last_seen_at = now;
+        let message = checkpoint_message(&record.envelope, record.last_seen_at);
+        record.checkpoint_signature =
+            URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref());
         atomic_write_json(&path, &record)?;
     }
     if now <= payload.expires_at {
@@ -694,10 +753,7 @@ async fn activate(app: &AppHandle, access_code: &str) -> Result<PreviewEntitleme
             .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
         atomic_write_json(
             &lease_path(&root),
-            &LeaseRecord {
-                envelope,
-                last_seen_at: now,
-            },
+            &create_lease_record(envelope, now, &identity),
         )?;
         entitlement_status_locked(app)
     }
@@ -713,10 +769,17 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
         let identity = load_or_create_identity(&root)?;
         let record = read_json::<LeaseRecord>(&lease_path(&root))?
             .ok_or_else(|| "Preview is not activated on this device".to_string())?;
+        verify_lease_checkpoint(&record, &identity)?;
         let now = now_unix()?;
         let payload = config
             .verifier
             .verify(&record.envelope, &identity.device_id, now)?;
+        if checkpoint_predates_lease(&record, &payload) {
+            return Err("Preview lease checkpoint predates the signed lease".into());
+        }
+        if clock_rollback_detected(&record, now) {
+            return Err("System clock rollback detected".into());
+        }
         if now > payload.offline_until {
             return Err("Preview entitlement has expired".into());
         }
@@ -742,10 +805,7 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
             .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
         atomic_write_json(
             &lease_path(&root),
-            &LeaseRecord {
-                envelope,
-                last_seen_at: now,
-            },
+            &create_lease_record(envelope, now, &identity),
         )?;
         entitlement_status_locked(app)
     }
@@ -872,5 +932,48 @@ mod tests {
         assert!(message.contains(&identity.device_id));
         assert!(message.contains(&identity.installation_id));
         assert!(message.ends_with("1.2.3"));
+    }
+
+    #[test]
+    fn lease_checkpoint_rejects_timestamp_and_envelope_tampering() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let envelope = LeaseEnvelope {
+            payload: "signed-payload".into(),
+            signature: "service-signature".into(),
+        };
+        let mut record = create_lease_record(envelope, 1_800_000_000, &identity);
+
+        assert!(verify_lease_checkpoint(&record, &identity).is_ok());
+        record.last_seen_at += 1;
+        assert_eq!(
+            verify_lease_checkpoint(&record, &identity).unwrap_err(),
+            "Preview lease checkpoint is invalid"
+        );
+
+        record = create_lease_record(record.envelope, 1_800_000_000, &identity);
+        record.envelope.payload.push('x');
+        assert_eq!(
+            verify_lease_checkpoint(&record, &identity).unwrap_err(),
+            "Preview lease checkpoint is invalid"
+        );
+    }
+
+    #[test]
+    fn checkpoint_time_guards_detect_rollback_and_prelease_values() {
+        let now = 1_800_000_000;
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let payload = valid_payload(now, &identity.device_id);
+        let envelope = LeaseEnvelope {
+            payload: "payload".into(),
+            signature: "signature".into(),
+        };
+        let mut record = create_lease_record(envelope, payload.issued_at, &identity);
+
+        assert!(!checkpoint_predates_lease(&record, &payload));
+        record.last_seen_at = payload.issued_at - CLOCK_SKEW_SECONDS - 1;
+        assert!(checkpoint_predates_lease(&record, &payload));
+
+        record.last_seen_at = now + CLOCK_SKEW_SECONDS + 1;
+        assert!(clock_rollback_detected(&record, now));
     }
 }
