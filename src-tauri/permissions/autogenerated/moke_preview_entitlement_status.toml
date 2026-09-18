@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-preview-entitlement-status"
+description = "Enables the moke_preview_entitlement_status command without any pre-configured scope."
+commands.allow = ["moke_preview_entitlement_status"]
+
+[[permission]]
+identifier = "deny-moke-preview-entitlement-status"
+description = "Denies the moke_preview_entitlement_status command without any pre-configured scope."
+commands.deny = ["moke_preview_entitlement_status"]

@@ -736,6 +736,12 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_build_info,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_activate,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_entitlement_status,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_refresh,
         moke_runtime_platform,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,

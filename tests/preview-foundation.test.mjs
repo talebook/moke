@@ -14,16 +14,21 @@ const cargoManifest = readText('src-tauri/Cargo.toml');
 const nativeHost = readText('src-tauri/src/lib.rs');
 const nativeBuildChannel = readText('src-tauri/src/build_channel.rs');
 const previewModule = readText('src-tauri/src/preview/mod.rs');
+const previewEntitlement = readText('src-tauri/src/preview/entitlement.rs');
 const previewEnvironment = readText('.env.preview');
 const updateStore = readText('src/lib/store/update.ts');
 
 test('Preview is a compile-time Rust channel instead of a version-string gate', () => {
   assert.match(cargoManifest, /^default = \[\]$/m);
-  assert.match(cargoManifest, /^preview = \[\]$/m);
+  assert.match(
+    cargoManifest,
+    /^preview = \[[^\n]+dep:base64[^\n]+dep:reqwest[^\n]+dep:ring[^\n]+dep:sha2[^\n]+\]$/m,
+  );
   assert.match(nativeHost, /#\[cfg\(feature = "preview"\)\]\s*mod preview;/);
   assert.match(nativeBuildChannel, /cfg!\(feature = "preview"\)/);
   assert.match(nativeBuildChannel, /preview_compiled: matches!\(channel, BuildChannel::Preview\)/);
-  assert.match(previewModule, /Err\("preview entitlement is not configured"\)/);
+  assert.match(previewModule, /mod entitlement;/);
+  assert.match(previewEntitlement, /PreviewEntitlementState::NotConfigured/);
   assert.doesNotMatch(nativeBuildChannel, /package\.json|APP_VERSION|version/);
 });
 
