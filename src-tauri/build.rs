@@ -34,6 +34,9 @@ const APP_ACL_COMMANDS: &[&str] = &[
     // command implementations also validate the active document path because
     // the shell and Reader necessarily share the `main` label.
     "moke_build_info",
+    "moke_preview_activate",
+    "moke_preview_entitlement_status",
+    "moke_preview_refresh",
     "moke_runtime_platform",
     "moke_navigate",
     "moke_record_downloaded_book",

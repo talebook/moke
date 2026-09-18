@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-preview-refresh"
+description = "Enables the moke_preview_refresh command without any pre-configured scope."
+commands.allow = ["moke_preview_refresh"]
+
+[[permission]]
+identifier = "deny-moke-preview-refresh"
+description = "Denies the moke_preview_refresh command without any pre-configured scope."
+commands.deny = ["moke_preview_refresh"]
