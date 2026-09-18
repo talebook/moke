@@ -13,6 +13,7 @@ const previewCapability = readJson('src-tauri/capabilities/preview-default.json'
 const cargoManifest = readText('src-tauri/Cargo.toml');
 const nativeHost = readText('src-tauri/src/lib.rs');
 const nativeBuildChannel = readText('src-tauri/src/build_channel.rs');
+const nativeBuildConfig = readText('src-tauri/build_config.rs');
 const previewModule = readText('src-tauri/src/preview/mod.rs');
 const previewEntitlement = readText('src-tauri/src/preview/entitlement.rs');
 const previewEnvironment = readText('.env.preview');
@@ -53,6 +54,9 @@ test('Preview build uses an isolated app identity and build environment', () => 
   assert.match(rootPackage.scripts['build:preview'], /strip-reader-sourcemaps\.mjs out/);
   assert.match(rootPackage.scripts['tauri:build:preview'], /--features preview/);
   assert.match(rootPackage.scripts['tauri:build:preview'], /tauri\.preview\.conf\.json/);
+  assert.match(nativeBuildConfig, /validate_preview_build_channel/);
+  assert.match(nativeBuildConfig, /beforeBuildCommand/);
+  assert.match(nativeBuildConfig, /CARGO_FEATURE_PREVIEW|preview_feature/);
 });
 
 test('Preview cannot silently use the stable updater channel', () => {

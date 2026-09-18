@@ -151,8 +151,8 @@ fn moke_runtime_platform(webview: tauri::Webview) -> Result<&'static str, String
 
 /// Returns compile-time build metadata for display and diagnostics.
 ///
-/// This is not an authorization decision. Preview commands independently
-/// enforce entitlements in Rust, and stable builds omit the Preview module.
+/// This command remains available before Preview activation so the frontend
+/// can fail closed when its build channel does not match the native binary.
 #[tauri::command]
 fn moke_build_info(webview: tauri::Webview) -> Result<MokeBuildInfo, String> {
     require_moke_shell(&webview)?;
@@ -858,6 +858,13 @@ pub fn run() {
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
+                #[cfg(feature = "preview")]
+                if let Err(error) =
+                    preview::authorize_command(invoke.message.webview_ref().app_handle(), &cmd)
+                {
+                    invoke.resolver.reject(error);
+                    return true;
+                }
                 #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)

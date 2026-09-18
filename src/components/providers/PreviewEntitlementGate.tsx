@@ -2,28 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, LoaderCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  assertPreviewNativeBuild,
+  effectiveEntitlementState,
+  nextEntitlementBoundaryDelay,
+  type NativeBuildInfo,
+  type PreviewEntitlementStatus,
+} from '@/lib/preview-entitlement';
 
 const isPreviewBuild = process.env.NEXT_PUBLIC_BUILD_CHANNEL === 'preview';
-
-type EntitlementState =
-  | 'notConfigured'
-  | 'inactive'
-  | 'active'
-  | 'offlineGrace'
-  | 'expired'
-  | 'clockRollback'
-  | 'invalid';
-
-interface PreviewEntitlementStatus {
-  state: EntitlementState;
-  serviceConfigured: boolean;
-  deviceId: string;
-  subject: string | null;
-  capabilities: string[];
-  expiresAt: number | null;
-  offlineUntil: number | null;
-  message: string;
-}
 
 function formatError(error: unknown): string {
   return typeof error === 'string' && error.trim()
@@ -37,6 +24,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const mountedRef = useRef(true);
+  const statusRequestRef = useRef<Promise<void> | null>(null);
 
   const invokeEntitlement = useCallback(async (
     command: 'moke_preview_entitlement_status' | 'moke_preview_activate' | 'moke_preview_refresh',
@@ -46,17 +34,59 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     return invoke<PreviewEntitlementStatus>(command, args);
   }, []);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    void invokeEntitlement('moke_preview_entitlement_status')
-      .then((nextStatus) => {
-        if (mountedRef.current) setStatus(nextStatus);
+  const recheckEntitlement = useCallback(() => {
+    if (statusRequestRef.current) return statusRequestRef.current;
+
+    const request = Promise.all([
+      invokeEntitlement('moke_preview_entitlement_status'),
+      import('@tauri-apps/api/core').then(({ invoke }) => invoke<NativeBuildInfo>('moke_build_info')),
+    ])
+      .then(([nextStatus, buildInfo]) => {
+        assertPreviewNativeBuild(buildInfo);
+        if (!mountedRef.current) return;
+        setStatus(nextStatus);
+        setError('');
       })
       .catch((nextError) => {
-        if (mountedRef.current) setError(formatError(nextError));
+        if (!mountedRef.current) return;
+        setStatus(null);
+        setError(formatError(nextError));
+      })
+      .finally(() => {
+        if (statusRequestRef.current === request) statusRequestRef.current = null;
       });
-    return () => { mountedRef.current = false; };
+    statusRequestRef.current = request;
+    return request;
   }, [invokeEntitlement]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void recheckEntitlement();
+    return () => { mountedRef.current = false; };
+  }, [recheckEntitlement]);
+
+  useEffect(() => {
+    const recheck = () => { void recheckEntitlement(); };
+    const recheckWhenVisible = () => {
+      if (document.visibilityState === 'visible') recheck();
+    };
+    window.addEventListener('focus', recheck);
+    window.addEventListener('pageshow', recheck);
+    document.addEventListener('visibilitychange', recheckWhenVisible);
+    return () => {
+      window.removeEventListener('focus', recheck);
+      window.removeEventListener('pageshow', recheck);
+      document.removeEventListener('visibilitychange', recheckWhenVisible);
+    };
+  }, [recheckEntitlement]);
+
+  useEffect(() => {
+    if (!status) return;
+    const delay = nextEntitlementBoundaryDelay(status);
+    if (delay === null) return;
+    const timer = window.setTimeout(() => { void recheckEntitlement(); }, delay);
+    return () => window.clearTimeout(timer);
+  }, [recheckEntitlement, status]);
 
   const runCommand = async (
     command: 'moke_preview_activate' | 'moke_preview_refresh',
@@ -76,9 +106,11 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     }
   };
 
-  if (status?.state === 'active') return <>{children}</>;
+  const effectiveState = status ? effectiveEntitlementState(status) : null;
 
-  if (status?.state === 'offlineGrace') {
+  if (effectiveState === 'active') return <>{children}</>;
+
+  if (effectiveState === 'offlineGrace') {
     return (
       <>
         <div
@@ -100,7 +132,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     );
   }
 
-  const clockRollback = status?.state === 'clockRollback';
+  const clockRollback = effectiveState === 'clockRollback';
   const serviceConfigured = status?.serviceConfigured === true;
 
   return (
@@ -143,9 +175,9 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                 ? '检测到系统时间回拨。请先校准系统时间，再重新启动应用。'
                 : status.state === 'notConfigured'
                   ? '此构建尚未配置授权服务和验签公钥，因此已安全锁定。'
-                  : status.state === 'expired'
+                  : effectiveState === 'expired'
                     ? '此设备的 Preview 授权已过期，请输入新的访问码。'
-                    : status.state === 'invalid'
+                    : effectiveState === 'invalid'
                       ? '本机授权记录无效或已被修改，请重新激活。'
                       : '请输入开发者提供的一次性 Preview 访问码。'}
             </p>

@@ -54,6 +54,16 @@ const APP_ACL_COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PREVIEW");
+    println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+    build_config::validate_preview_build_channel(
+        std::env::var("PROFILE").ok().as_deref(),
+        std::env::var_os("CARGO_FEATURE_PREVIEW").is_some(),
+        std::env::var("TAURI_CONFIG").ok().as_deref(),
+    )
+    .expect("refusing to build mismatched Preview frontend and native channels");
+
     // Readest's bare app-level commands are linked through a Rust library, so
     // its app ACL manifest cannot propagate like a plugin `links` manifest.
     // Declare that command surface in the embedding host; Reader capabilities

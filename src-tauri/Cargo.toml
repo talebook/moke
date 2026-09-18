@@ -18,6 +18,7 @@ reader-e2e = ["tauri-plugin-webdriver"]
 
 [build-dependencies]
 tauri-build = { path = "../vendor/tauri/crates/tauri-build", features = [] }
+serde_json = "1.0"
 
 [dev-dependencies]
 # Same glob crate version tauri resolves (0.3.4, already in Cargo.lock via tauri).

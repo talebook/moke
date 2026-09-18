@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import {
+  assertPreviewNativeBuild,
+  effectiveEntitlementState,
+  nextEntitlementBoundaryDelay,
+} from '../src/lib/preview-entitlement.ts';
+
 const readText = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const readJson = (path) => JSON.parse(readText(path));
 
@@ -34,6 +40,55 @@ test('Preview leases are signed, device-bound, time-bounded, and fail closed', (
   assert.match(entitlement, /verify_lease_checkpoint\(&record, &identity\)/);
   assert.match(entitlement, /PreviewEntitlementState::Active \| PreviewEntitlementState::OfflineGrace/);
   assert.doesNotMatch(entitlement, /danger_accept_invalid_certs|http:\/\//);
+});
+
+test('running Preview sessions transition at lease boundaries with a fake clock', () => {
+  const status = {
+    state: 'active',
+    serviceConfigured: true,
+    deviceId: 'moke_test',
+    subject: 'tester',
+    capabilities: ['foundation'],
+    expiresAt: 1_800_000_100,
+    offlineUntil: 1_800_000_200,
+    message: 'active',
+  };
+
+  assert.equal(effectiveEntitlementState(status, 1_800_000_100_000), 'active');
+  assert.equal(effectiveEntitlementState(status, 1_800_000_101_000), 'offlineGrace');
+  assert.equal(effectiveEntitlementState(status, 1_800_000_201_000), 'expired');
+  assert.equal(nextEntitlementBoundaryDelay(status, 1_800_000_099_500), 1_500);
+
+  const offlineGrace = { ...status, state: 'offlineGrace' };
+  assert.equal(
+    effectiveEntitlementState(offlineGrace, 1_800_000_000_000),
+    'offlineGrace',
+    'a local clock rollback must not promote an observed grace lease back to active',
+  );
+});
+
+test('Preview fails closed on native channel mismatch', () => {
+  assert.doesNotThrow(() => assertPreviewNativeBuild({ channel: 'preview', previewCompiled: true }));
+  assert.throws(
+    () => assertPreviewNativeBuild({ channel: 'stable', previewCompiled: false }),
+    /构建通道不一致/,
+  );
+});
+
+test('Preview rechecks entitlement at time boundaries and lifecycle resumes', () => {
+  assert.match(gate, /nextEntitlementBoundaryDelay/);
+  assert.match(gate, /addEventListener\('focus', recheck\)/);
+  assert.match(gate, /addEventListener\('pageshow', recheck\)/);
+  assert.match(gate, /addEventListener\('visibilitychange', recheckWhenVisible\)/);
+});
+
+test('native IPC dispatch gates Moke, Reader, and extension commands', () => {
+  assert.match(
+    nativeHost,
+    /preview::authorize_command\(invoke\.message\.webview_ref\(\)\.app_handle\(\), &cmd\)/,
+  );
+  assert.match(nativeHost, /invoke\.resolver\.reject\(error\)/);
+  assert.match(entitlement, /lease_state_at\(&payload, now\)/);
 });
 
 test('Preview entitlement surfaces have scoped e-ink treatments', () => {

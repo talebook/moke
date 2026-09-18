@@ -524,6 +524,25 @@ fn status_from_payload(
     }
 }
 
+fn lease_state_at(payload: &LeasePayload, now: u64) -> (PreviewEntitlementState, &'static str) {
+    if now <= payload.expires_at {
+        (
+            PreviewEntitlementState::Active,
+            "Preview entitlement is active",
+        )
+    } else if now <= payload.offline_until {
+        (
+            PreviewEntitlementState::OfflineGrace,
+            "Preview entitlement is using its offline grace period",
+        )
+    } else {
+        (
+            PreviewEntitlementState::Expired,
+            "Preview entitlement has expired",
+        )
+    }
+}
+
 fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
     let root = entitlement_root(app)?;
     let identity = load_or_create_identity(&root)?;
@@ -593,28 +612,13 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
             URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref());
         atomic_write_json(&path, &record)?;
     }
-    if now <= payload.expires_at {
-        Ok(status_from_payload(
-            payload,
-            identity.device_id,
-            PreviewEntitlementState::Active,
-            "Preview entitlement is active",
-        ))
-    } else if now <= payload.offline_until {
-        Ok(status_from_payload(
-            payload,
-            identity.device_id,
-            PreviewEntitlementState::OfflineGrace,
-            "Preview entitlement is using its offline grace period",
-        ))
-    } else {
-        Ok(status_from_payload(
-            payload,
-            identity.device_id,
-            PreviewEntitlementState::Expired,
-            "Preview entitlement has expired",
-        ))
-    }
+    let (state, message) = lease_state_at(&payload, now);
+    Ok(status_from_payload(
+        payload,
+        identity.device_id,
+        state,
+        message,
+    ))
 }
 
 fn entitlement_status(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
@@ -975,5 +979,31 @@ mod tests {
 
         record.last_seen_at = now + CLOCK_SKEW_SECONDS + 1;
         assert!(clock_rollback_detected(&record, now));
+    }
+
+    #[test]
+    fn lease_state_transitions_at_signed_time_boundaries() {
+        let payload = LeasePayload {
+            expires_at: 1_800_000_100,
+            offline_until: 1_800_000_200,
+            ..valid_payload(1_800_000_000, "device-a")
+        };
+
+        assert_eq!(
+            lease_state_at(&payload, payload.expires_at).0,
+            PreviewEntitlementState::Active
+        );
+        assert_eq!(
+            lease_state_at(&payload, payload.expires_at + 1).0,
+            PreviewEntitlementState::OfflineGrace
+        );
+        assert_eq!(
+            lease_state_at(&payload, payload.offline_until).0,
+            PreviewEntitlementState::OfflineGrace
+        );
+        assert_eq!(
+            lease_state_at(&payload, payload.offline_until + 1).0,
+            PreviewEntitlementState::Expired
+        );
     }
 }
