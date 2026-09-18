@@ -10,6 +10,7 @@ const stableConfig = readJson('src-tauri/tauri.conf.json');
 const previewConfig = readJson('src-tauri/tauri.preview.conf.json');
 const stableCapability = readJson('src-tauri/capabilities/default.json');
 const previewCapability = readJson('src-tauri/capabilities/preview-default.json');
+const previewBootstrapCapability = readJson('src-tauri/capabilities/preview-bootstrap.json');
 const cargoManifest = readText('src-tauri/Cargo.toml');
 const nativeHost = readText('src-tauri/src/lib.rs');
 const nativeBuildChannel = readText('src-tauri/src/build_channel.rs');
@@ -38,11 +39,13 @@ test('Preview build uses an isolated app identity and build environment', () => 
   assert.equal(previewConfig.identifier, 'org.houheya.moke.preview');
   assert.equal(previewConfig.productName, 'Moke Preview');
   assert.match(previewConfig.app.windows[0].title, /Preview/);
+  assert.equal(previewConfig.app.windows[0].label, 'preview-bootstrap');
   assert.notEqual(
     previewConfig.bundle.windows.wix.upgradeCode,
     stableConfig.bundle.windows.wix.upgradeCode,
   );
   assert.deepEqual(previewConfig.app.security.capabilities, [
+    'preview-bootstrap',
     'preview-default',
     'reader',
     'reader-mobile',
@@ -71,4 +74,22 @@ test('Preview cannot silently use the stable updater channel', () => {
   );
   assert.match(updateStore, /BUILD_CHANNEL === 'preview'/);
   assert.match(updateStore, /Preview packages must never fall through to the stable updater/);
+});
+
+test('Preview bootstrap is statically isolated from privileged plugin and Reader capabilities', () => {
+  assert.deepEqual(previewBootstrapCapability.windows, ['preview-bootstrap']);
+  assert.deepEqual(previewCapability.windows, ['main']);
+  assert.deepEqual(previewBootstrapCapability.permissions, [
+    'core:default',
+    'allow-moke-build-info',
+    'allow-moke-preview-activate',
+    'allow-moke-preview-entitlement-status',
+    'allow-moke-preview-enter-app',
+  ]);
+  for (const permission of previewBootstrapCapability.permissions) {
+    assert.ok(!String(permission).startsWith('fs:'));
+    assert.ok(!String(permission).startsWith('http:'));
+    assert.ok(!String(permission).startsWith('process:'));
+    assert.notEqual(permission, 'core:webview:allow-create-webview-window');
+  }
 });

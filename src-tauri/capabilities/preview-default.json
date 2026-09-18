@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "preview-default",
-  "description": "Moke Preview host capabilities, excluding the stable updater.",
+  "description": "Authorized Moke Preview host capabilities, excluding the stable updater.",
   "windows": [
     "main"
   ],
@@ -86,7 +86,6 @@
     "process:allow-restart",
     "allow-open-reader",
     "allow-moke-build-info",
-    "allow-moke-preview-activate",
     "allow-moke-preview-entitlement-status",
     "allow-moke-preview-refresh",
     "allow-moke-runtime-platform",

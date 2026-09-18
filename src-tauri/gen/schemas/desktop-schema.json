@@ -2667,6 +2667,12 @@
           "markdownDescription": "Enables the moke_preview_activate command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-enter-app",
+          "markdownDescription": "Enables the moke_preview_enter_app command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_preview_entitlement_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-preview-entitlement-status",
@@ -2911,6 +2917,12 @@
           "type": "string",
           "const": "deny-moke-preview-activate",
           "markdownDescription": "Denies the moke_preview_activate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-enter-app",
+          "markdownDescription": "Denies the moke_preview_enter_app command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_preview_entitlement_status command without any pre-configured scope.",

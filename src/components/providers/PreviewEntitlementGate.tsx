@@ -23,8 +23,10 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const [accessCode, setAccessCode] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [windowLabel, setWindowLabel] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const statusRequestRef = useRef<Promise<void> | null>(null);
+  const handoffRequestedRef = useRef(false);
 
   const invokeEntitlement = useCallback(async (
     command: 'moke_preview_entitlement_status' | 'moke_preview_activate' | 'moke_preview_refresh',
@@ -40,11 +42,13 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     const request = Promise.all([
       invokeEntitlement('moke_preview_entitlement_status'),
       import('@tauri-apps/api/core').then(({ invoke }) => invoke<NativeBuildInfo>('moke_build_info')),
+      import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().label),
     ])
-      .then(([nextStatus, buildInfo]) => {
+      .then(([nextStatus, buildInfo, nextWindowLabel]) => {
         assertPreviewNativeBuild(buildInfo);
         if (!mountedRef.current) return;
         setStatus(nextStatus);
+        setWindowLabel(nextWindowLabel);
         setError('');
       })
       .catch((nextError) => {
@@ -88,6 +92,20 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     return () => window.clearTimeout(timer);
   }, [recheckEntitlement, status]);
 
+  const effectiveState = status ? effectiveEntitlementState(status) : null;
+  const isEntitled = effectiveState === 'active' || effectiveState === 'offlineGrace';
+
+  useEffect(() => {
+    if (!isEntitled || windowLabel !== 'preview-bootstrap' || handoffRequestedRef.current) return;
+    handoffRequestedRef.current = true;
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<void>('moke_preview_enter_app'))
+      .catch((nextError) => {
+        handoffRequestedRef.current = false;
+        if (mountedRef.current) setError(formatError(nextError));
+      });
+  }, [isEntitled, windowLabel]);
+
   const runCommand = async (
     command: 'moke_preview_activate' | 'moke_preview_refresh',
     args?: Record<string, unknown>,
@@ -106,7 +124,14 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     }
   };
 
-  const effectiveState = status ? effectiveEntitlementState(status) : null;
+  if (isEntitled && windowLabel !== 'main') {
+    return (
+      <div className="fixed inset-0 z-[180] flex items-center justify-center app-warm-bg text-sm text-muted-foreground">
+        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+        正在启动已授权的 Preview 工作区…
+      </div>
+    );
+  }
 
   if (effectiveState === 'active') return <>{children}</>;
 

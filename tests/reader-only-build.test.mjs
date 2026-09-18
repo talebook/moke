@@ -114,6 +114,7 @@ test('Moke ACL command manifest stays aligned with Reader plus the explicit host
     'moke_build_info',
     'moke_preview_activate',
     'moke_preview_entitlement_status',
+    'moke_preview_enter_app',
     'moke_preview_refresh',
     'moke_runtime_platform',
     'moke_navigate',

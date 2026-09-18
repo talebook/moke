@@ -110,6 +110,15 @@ window to seven days. It rejects invalid signatures, a different device ID,
 missing `foundation`, future issuance beyond five minutes, oversized data,
 and detected system-clock rollback.
 
+The offline deadline is a soft client-side limit on platforms where the
+identity and checkpoint live only in files. A local administrator can restore
+an older identity/lease snapshot together with the system clock. The native
+checkpoint detects ordinary rollback but cannot provide a non-resettable
+security boundary without a platform keystore/counter or a fresh server
+check. Deployments that require hard revocation must shorten the signed lease
+and require online refresh; they must not treat `offlineUntil` as server-grade
+revocation enforcement.
+
 ## Service requirements
 
 - Keep the Ed25519 private signing key in a managed secret/HSM boundary.

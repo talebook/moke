@@ -741,6 +741,8 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         #[cfg(feature = "preview")]
         preview::entitlement::moke_preview_entitlement_status,
         #[cfg(feature = "preview")]
+        preview::moke_preview_enter_app,
+        #[cfg(feature = "preview")]
         preview::entitlement::moke_preview_refresh,
         moke_runtime_platform,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
@@ -896,8 +898,9 @@ pub fn run() {
             // 初始化阅读器相关的进程内状态（如 LocalSend 与 Discord Rich Presence）。
             readestlib::manage_reader_state(_app.handle());
 
-            // 初始化拓展系统（REST+WS 服务器，仅桌面端；OHOS 上曾导致主线程阻塞）。
-            #[cfg(not(target_env = "ohos"))]
+            // Stable starts extensions immediately. Preview initializes them
+            // only after the native bootstrap handoff has verified a lease.
+            #[cfg(all(not(target_env = "ohos"), not(feature = "preview")))]
             extensions::init(_app.handle());
 
             Ok(())

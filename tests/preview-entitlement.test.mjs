@@ -18,6 +18,9 @@ const gate = readText('src/components/providers/PreviewEntitlementGate.tsx');
 const globalStyles = readText('src/app/globals.css');
 const privacyGate = readText('src/components/providers/PrivacyConsentGate.tsx');
 const previewCapability = readJson('src-tauri/capabilities/preview-default.json');
+const previewBootstrapCapability = readJson('src-tauri/capabilities/preview-bootstrap.json');
+const previewModule = readText('src-tauri/src/preview/mod.rs');
+const extensions = readText('src-tauri/src/extensions/mod.rs');
 
 test('Preview entitlement implementation exists only behind the Rust preview feature', () => {
   assert.match(cargoManifest, /^preview = \[[^\n]+dep:ring[^\n]+\]$/m);
@@ -91,6 +94,41 @@ test('native IPC dispatch gates Moke, Reader, and extension commands', () => {
   assert.match(entitlement, /lease_state_at\(&payload, now\)/);
 });
 
+test('native bootstrap owns privileged window and extension lifecycle', () => {
+  assert.match(previewModule, /PREVIEW_BOOTSTRAP_WINDOW: &str = "preview-bootstrap"/);
+  assert.match(previewModule, /WebviewWindowBuilder::new\([\s\S]*?PREVIEW_MAIN_WINDOW/);
+  assert.match(previewModule, /require_preview_capability\(&app, PreviewCapability::Foundation\)\?/);
+  assert.match(previewModule, /super::extensions::init\(&app_for_main_thread\)/);
+  assert.match(previewModule, /super::extensions::shutdown\(&app\)/);
+  assert.match(previewModule, /app\.request_restart\(\)/);
+  assert.match(nativeHost, /not\(feature = "preview"\)[\s\S]*extensions::init\(_app\.handle\(\)\)/);
+  assert.match(extensions, /pub fn shutdown\(app: &AppHandle\)/);
+});
+
+test('locked bootstrap cannot mint a reader window or call privileged plugins', () => {
+  const permissions = previewBootstrapCapability.permissions.map((permission) =>
+    typeof permission === 'string' ? permission : permission.identifier,
+  );
+  for (const forbidden of [
+    'core:webview:allow-create-webview-window',
+    'http:default',
+    'process:allow-exit',
+    'process:allow-restart',
+    'allow-open-reader',
+  ]) {
+    assert.ok(!permissions.includes(forbidden), forbidden);
+  }
+  assert.deepEqual(previewBootstrapCapability.windows, ['preview-bootstrap']);
+});
+
+test('native entitlement fast path is cached but periodically revalidates durable state', () => {
+  assert.match(entitlement, /CACHE_REVALIDATE_SECONDS/);
+  assert.match(entitlement, /CHECKPOINT_INTERVAL_SECONDS/);
+  assert.match(entitlement, /cached_status\(now, false\)/);
+  assert.match(previewModule, /revalidate_preview_capability/);
+  assert.match(previewModule, /ENTITLEMENT_MONITOR_INTERVAL/);
+});
+
 test('Preview entitlement surfaces have scoped e-ink treatments', () => {
   for (const className of [
     'preview-entitlement-banner',
@@ -114,12 +152,20 @@ test('access codes are transient and authorization precedes server synchronizati
   );
 });
 
-test('only the Preview host capability can call entitlement commands', () => {
+test('entitlement command permissions follow the bootstrap and authorized window roles', () => {
   for (const permission of [
-    'allow-moke-preview-activate',
     'allow-moke-preview-entitlement-status',
     'allow-moke-preview-refresh',
   ]) {
     assert.ok(previewCapability.permissions.includes(permission));
+  }
+  assert.ok(!previewCapability.permissions.includes('allow-moke-preview-activate'));
+  assert.ok(!previewCapability.permissions.includes('allow-moke-preview-enter-app'));
+  for (const permission of [
+    'allow-moke-preview-activate',
+    'allow-moke-preview-entitlement-status',
+    'allow-moke-preview-enter-app',
+  ]) {
+    assert.ok(previewBootstrapCapability.permissions.includes(permission));
   }
 });

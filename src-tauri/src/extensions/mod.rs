@@ -610,6 +610,10 @@ const WS_SERVER_PORT: u16 = 19556;
 ///
 /// 启动顺序很重要：先启动 server 占用端口，再恢复拓展分配端口，避免冲突。
 pub fn init(app: &AppHandle) {
+    if app.try_state::<ExtensionRuntime>().is_some() {
+        return;
+    }
+
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -683,6 +687,26 @@ pub fn init(app: &AppHandle) {
         ws_port,
         extensions_dir.display()
     );
+}
+
+/// Stop every extension backend before the Preview entitlement boundary
+/// tears down the privileged application session. The loopback servers are
+/// process-scoped and are closed by the immediately following native restart;
+/// draining the map first also invalidates every REST/WS bearer token.
+#[cfg(feature = "preview")]
+pub fn shutdown(app: &AppHandle) {
+    let Some(runtime) = app.try_state::<ExtensionRuntime>() else {
+        return;
+    };
+    let extensions: Vec<EnabledExtension> = {
+        let mut enabled = runtime.enabled.lock().unwrap();
+        enabled.drain().map(|(_, extension)| extension).collect()
+    };
+    for extension in extensions {
+        stop_extension_backend(extension);
+    }
+    runtime.pending_commands.lock().unwrap().clear();
+    log::info!("拓展系统已停止，所有运行时 token 已失效");
 }
 
 /// 返回所有 Tauri commands 的 handler。

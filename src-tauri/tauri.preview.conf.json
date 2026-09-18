@@ -9,6 +9,7 @@
   "app": {
     "windows": [
       {
+        "label": "preview-bootstrap",
         "title": "墨客 Preview",
         "width": 1280,
         "height": 800,
@@ -20,6 +21,7 @@
     ],
     "security": {
       "capabilities": [
+        "preview-bootstrap",
         "preview-default",
         "reader",
         "reader-mobile",

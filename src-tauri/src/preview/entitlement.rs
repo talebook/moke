@@ -26,6 +26,8 @@ const MAX_OFFLINE_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_STORED_FILE_BYTES: u64 = 64 * 1024;
 const MAX_ACCESS_CODE_BYTES: usize = 4096;
+const CACHE_REVALIDATE_SECONDS: u64 = 30;
+const CHECKPOINT_INTERVAL_SECONDS: u64 = 5 * 60;
 const ENTITLEMENT_DIRECTORY: &str = "preview-entitlement";
 const IDENTITY_FILE: &str = "device-identity.json";
 const LEASE_FILE: &str = "lease.json";
@@ -34,6 +36,14 @@ const SERVICE_URL: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_URL");
 const SERVICE_PUBLIC_KEY: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY");
 
 static ENTITLEMENT_LOCK: Mutex<()> = Mutex::new(());
+static ENTITLEMENT_CACHE: Mutex<Option<CachedEntitlement>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct CachedEntitlement {
+    status: PreviewEntitlementStatus,
+    verified_at: u64,
+    last_seen_at: u64,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PreviewCapability {
@@ -543,6 +553,55 @@ fn lease_state_at(payload: &LeasePayload, now: u64) -> (PreviewEntitlementState,
     }
 }
 
+fn cached_status_at(cache: &CachedEntitlement, now: u64) -> PreviewEntitlementStatus {
+    let mut status = cache.status.clone();
+    if now.saturating_add(CLOCK_SKEW_SECONDS) < cache.last_seen_at {
+        status.state = PreviewEntitlementState::ClockRollback;
+        status.message = "System clock rollback detected".into();
+        return status;
+    }
+
+    if matches!(
+        status.state,
+        PreviewEntitlementState::Active | PreviewEntitlementState::OfflineGrace
+    ) {
+        status.state = match (status.expires_at, status.offline_until) {
+            (Some(expires_at), _) if now <= expires_at => PreviewEntitlementState::Active,
+            (_, Some(offline_until)) if now <= offline_until => {
+                PreviewEntitlementState::OfflineGrace
+            }
+            _ => PreviewEntitlementState::Expired,
+        };
+        status.message = match status.state {
+            PreviewEntitlementState::Active => "Preview entitlement is active".into(),
+            PreviewEntitlementState::OfflineGrace => {
+                "Preview entitlement is using its offline grace period".into()
+            }
+            _ => "Preview entitlement has expired".into(),
+        };
+    }
+    status
+}
+
+fn cache_status(status: PreviewEntitlementStatus, verified_at: u64) {
+    if let Ok(mut cache) = ENTITLEMENT_CACHE.lock() {
+        *cache = Some(CachedEntitlement {
+            status,
+            verified_at,
+            last_seen_at: verified_at,
+        });
+    }
+}
+
+fn cached_status(now: u64, require_fresh: bool) -> Option<PreviewEntitlementStatus> {
+    let cache = ENTITLEMENT_CACHE.lock().ok()?;
+    let cache = cache.as_ref()?;
+    if require_fresh && now.saturating_sub(cache.verified_at) > CACHE_REVALIDATE_SECONDS {
+        return None;
+    }
+    Some(cached_status_at(cache, now))
+}
+
 fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
     let root = entitlement_root(app)?;
     let identity = load_or_create_identity(&root)?;
@@ -605,7 +664,11 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
             "System clock rollback detected",
         ));
     }
-    if now > record.last_seen_at {
+    if now
+        >= record
+            .last_seen_at
+            .saturating_add(CHECKPOINT_INTERVAL_SECONDS)
+    {
         record.last_seen_at = now;
         let message = checkpoint_message(&record.envelope, record.last_seen_at);
         record.checkpoint_signature =
@@ -622,17 +685,42 @@ fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus
 }
 
 fn entitlement_status(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
+    let now = now_unix()?;
+    if let Some(status) = cached_status(now, true) {
+        return Ok(status);
+    }
     let _guard = ENTITLEMENT_LOCK
         .lock()
         .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
-    entitlement_status_locked(app)
+    let status = entitlement_status_locked(app)?;
+    cache_status(status.clone(), now);
+    Ok(status)
 }
 
 pub(crate) fn require_preview_capability(
     app: &AppHandle,
     capability: PreviewCapability,
 ) -> Result<(), String> {
+    let now = now_unix()?;
+    let status = match cached_status(now, false) {
+        Some(status) => status,
+        None => entitlement_status(app)?,
+    };
+    require_status_capability(status, capability)
+}
+
+pub(crate) fn revalidate_preview_capability(
+    app: &AppHandle,
+    capability: PreviewCapability,
+) -> Result<(), String> {
     let status = entitlement_status(app)?;
+    require_status_capability(status, capability)
+}
+
+fn require_status_capability(
+    status: PreviewEntitlementStatus,
+    capability: PreviewCapability,
+) -> Result<(), String> {
     if !matches!(
         status.state,
         PreviewEntitlementState::Active | PreviewEntitlementState::OfflineGrace
@@ -759,7 +847,9 @@ async fn activate(app: &AppHandle, access_code: &str) -> Result<PreviewEntitleme
             &lease_path(&root),
             &create_lease_record(envelope, now, &identity),
         )?;
-        entitlement_status_locked(app)
+        let status = entitlement_status_locked(app)?;
+        cache_status(status.clone(), now);
+        Ok(status)
     }
 }
 
@@ -811,7 +901,9 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
             &lease_path(&root),
             &create_lease_record(envelope, now, &identity),
         )?;
-        entitlement_status_locked(app)
+        let status = entitlement_status_locked(app)?;
+        cache_status(status.clone(), now);
+        Ok(status)
     }
 }
 
@@ -1004,6 +1096,47 @@ mod tests {
         assert_eq!(
             lease_state_at(&payload, payload.offline_until + 1).0,
             PreviewEntitlementState::Expired
+        );
+    }
+
+    #[test]
+    fn cached_fast_path_enforces_expiry_and_clock_rollback_without_disk_io() {
+        let status = status_from_payload(
+            LeasePayload {
+                expires_at: 1_800_000_100,
+                offline_until: 1_800_000_200,
+                ..valid_payload(1_800_000_000, "device-a")
+            },
+            "device-a".into(),
+            PreviewEntitlementState::Active,
+            "active",
+        );
+        let cache = CachedEntitlement {
+            status,
+            verified_at: 1_800_000_000,
+            last_seen_at: 1_800_000_000,
+        };
+
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_100).state,
+            PreviewEntitlementState::Active
+        );
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_101).state,
+            PreviewEntitlementState::OfflineGrace
+        );
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_201).state,
+            PreviewEntitlementState::Expired
+        );
+
+        let future_cache = CachedEntitlement {
+            last_seen_at: 1_800_000_000 + CLOCK_SKEW_SECONDS + 1,
+            ..cache
+        };
+        assert_eq!(
+            cached_status_at(&future_cache, 1_800_000_000).state,
+            PreviewEntitlementState::ClockRollback
         );
     }
 }

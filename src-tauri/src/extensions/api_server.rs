@@ -127,6 +127,13 @@ pub(crate) enum RegisterPendingCommandError {
 }
 
 impl PendingCommands {
+    #[cfg(feature = "preview")]
+    pub(crate) fn clear(&mut self) {
+        self.active_by_correlation.clear();
+        self.correlation_by_key.clear();
+        self.retired_by_correlation.clear();
+    }
+
     pub(crate) fn register(
         &mut self,
         key: PendingCommandKey,

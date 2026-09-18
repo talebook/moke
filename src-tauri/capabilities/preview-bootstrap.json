@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview-bootstrap",
+  "description": "Minimal capability for the locked Preview activation window.",
+  "windows": [
+    "preview-bootstrap"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-moke-build-info",
+    "allow-moke-preview-activate",
+    "allow-moke-preview-entitlement-status",
+    "allow-moke-preview-enter-app"
+  ]
+}
