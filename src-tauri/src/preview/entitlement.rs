@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -295,21 +296,39 @@ fn entitlement_config() -> Result<EntitlementConfig, String> {
     let raw_public_key = SERVICE_PUBLIC_KEY
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "Preview entitlement public key is not configured".to_string())?;
-    let service_url = Url::parse(raw_url)
-        .map_err(|_| "Preview entitlement service URL is invalid".to_string())?;
-    if service_url.scheme() != "https"
-        || !service_url.username().is_empty()
-        || service_url.password().is_some()
-        || service_url.query().is_some()
-        || service_url.fragment().is_some()
-    {
-        return Err("Preview entitlement service URL must be an HTTPS origin or path".into());
-    }
+    let service_url = parse_entitlement_service_url(raw_url)?;
     let public_key = decode_public_key(raw_public_key)?;
     Ok(EntitlementConfig {
         service_url,
         verifier: EntitlementVerifier::new(&public_key)?,
     })
+}
+
+fn parse_entitlement_service_url(raw_url: &str) -> Result<Url, String> {
+    let service_url = Url::parse(raw_url)
+        .map_err(|_| "Preview entitlement service URL is invalid".to_string())?;
+    let loopback_http = cfg!(debug_assertions)
+        && service_url.scheme() == "http"
+        && service_url.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        });
+    if (service_url.scheme() != "https" && !loopback_http)
+        || service_url.host_str().is_none()
+        || !service_url.username().is_empty()
+        || service_url.password().is_some()
+        || service_url.query().is_some()
+        || service_url.fragment().is_some()
+    {
+        return Err(
+            "Preview entitlement service URL must use HTTPS (debug builds may use loopback HTTP)"
+                .into(),
+        );
+    }
+    Ok(service_url)
 }
 
 fn now_unix() -> Result<u64, String> {
@@ -1090,6 +1109,17 @@ pub(crate) async fn moke_preview_update_authorization(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn entitlement_url_allows_only_https_or_debug_loopback_http() {
+        assert!(parse_entitlement_service_url("https://preview.example.test/api").is_ok());
+        assert!(parse_entitlement_service_url("http://127.0.0.1:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://localhost:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://[::1]:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://192.0.2.1:18080").is_err());
+        assert!(parse_entitlement_service_url("https://user@preview.example.test").is_err());
+        assert!(parse_entitlement_service_url("https://preview.example.test?token=x").is_err());
+    }
 
     fn signed_envelope(signer: &Ed25519KeyPair, payload: &LeasePayload) -> LeaseEnvelope {
         let payload_bytes = serde_json::to_vec(payload).unwrap();
