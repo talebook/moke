@@ -103,3 +103,35 @@ jobs:
       - name: Run Rust library tests
         working-directory: src-tauri
         run: cargo test --lib --locked ${{ matrix.features }}
+
+  control-plane:
+    name: Preview control-plane tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Check formatting
+        working-directory: services/preview-control-plane
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        working-directory: services/preview-control-plane
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run tests
+        working-directory: services/preview-control-plane
+        run: cargo test --locked
+
+      - name: Validate hardened Compose configuration
+        working-directory: services/preview-control-plane
+        run: docker compose config --quiet --no-interpolate
