@@ -161,6 +161,14 @@ distribution service to ingest. If its artifact URLs are not independently
 short-lived, the service must rewrite them before returning the authenticated
 manifest; it must not expose the CI file as an unauthenticated public object.
 
+macOS Preview builds are intentionally omitted from this updater manifest
+until releases can be signed with a Developer ID Application certificate. The
+private release still publishes a DMG for manual installation, after which
+testers may apply their local development or ad-hoc signing procedure. An
+automatic update would replace that locally signed app bundle and invalidate
+the tester's signature, so a DMG must never be advertised as a Darwin updater
+artifact.
+
 ## Service requirements
 
 - Keep the Ed25519 private signing key in a managed secret/HSM boundary.

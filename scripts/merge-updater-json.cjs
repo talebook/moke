@@ -2,7 +2,8 @@
 // Stable usage remains: node scripts/merge-updater-json.cjs <sig-dir>
 // Preview releases must pass an explicit version and authenticated download base:
 //   node scripts/merge-updater-json.cjs <sig-dir> --version 1.2.3 \
-//     --base-url https://updates.example.test/v1/preview/artifacts/1.2.3 --strict
+//     --base-url https://updates.example.test/v1/preview/artifacts/1.2.3 \
+//     --exclude-darwin --strict
 //
 // The .sig files are uploaded via actions/upload-artifact@v4 with a workspace-relative
 // glob (e.g. src-tauri/target/release/bundle/**/*.sig), and the download-artifact step
@@ -63,7 +64,14 @@ function versionFromEnvironment(environment) {
   return tag.replace(/^(?:preview-)?v/, '') || '0.0.0';
 }
 
-function buildManifest({ dir, version, baseUrl, strict = false, now = new Date() }) {
+function buildManifest({
+  dir,
+  version,
+  baseUrl,
+  strict = false,
+  excludeDarwin = false,
+  now = new Date(),
+}) {
   const checkedVersion = validateVersion(version);
   const checkedBaseUrl = validateBaseUrl(baseUrl);
   const sigFiles = findSigFiles(dir).sort();
@@ -78,6 +86,7 @@ function buildManifest({ dir, version, baseUrl, strict = false, now = new Date()
       unknown.push(filename);
       continue;
     }
+    if (excludeDarwin && candidate.platform.startsWith('darwin-')) continue;
     const previous = selected.get(candidate.platform);
     if (previous && previous.priority === candidate.priority) {
       throw new Error(
@@ -117,10 +126,11 @@ function buildManifest({ dir, version, baseUrl, strict = false, now = new Date()
 function parseArguments(argv, environment) {
   const dir = argv[0];
   if (!dir) throw new Error('Usage: node scripts/merge-updater-json.cjs <sig-dir> [options]');
-  const options = { dir, strict: false, output: 'latest.json' };
+  const options = { dir, strict: false, excludeDarwin: false, output: 'latest.json' };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--strict') { options.strict = true; continue; }
+    if (argument === '--exclude-darwin') { options.excludeDarwin = true; continue; }
     if (!['--version', '--base-url', '--output'].includes(argument) || !argv[index + 1]) {
       throw new Error(`Unknown or incomplete argument: ${argument}`);
     }

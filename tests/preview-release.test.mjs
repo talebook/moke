@@ -8,7 +8,7 @@ import test from 'node:test';
 import { createPreviewReleaseConfig } from '../scripts/prepare-preview-release-config.mjs';
 
 const require = createRequire(import.meta.url);
-const { buildManifest } = require('../scripts/merge-updater-json.cjs');
+const { buildManifest, parseArguments } = require('../scripts/merge-updater-json.cjs');
 const readText = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const readJson = (path) => JSON.parse(readText(path));
 
@@ -65,19 +65,24 @@ test('strict updater manifest is deterministic and rejects ambiguous assets', (t
   const root = mkdtempSync(join(tmpdir(), 'moke-preview-manifest-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'linux'));
+  mkdirSync(join(root, 'macos'));
   writeFileSync(join(root, 'linux', 'Moke_1.2.3_amd64.AppImage.sig'), 'signed-appimage');
   writeFileSync(join(root, 'linux', 'Moke_1.2.3_amd64.deb.sig'), 'signed-deb');
+  writeFileSync(join(root, 'macos', 'Moke_1.2.3_aarch64.dmg.sig'), 'signed-dmg');
 
   const manifest = buildManifest({
     dir: root,
     version: '1.2.3',
     baseUrl: 'https://updates.example.test/v1/preview/artifacts/1.2.3',
     strict: true,
+    excludeDarwin: true,
     now: new Date('2026-09-18T00:00:00.000Z'),
   });
   assert.equal(manifest.version, '1.2.3');
   assert.equal(manifest.platforms['linux-x86_64'].signature, 'signed-appimage');
   assert.match(manifest.platforms['linux-x86_64'].url, /^https:\/\/updates\.example\.test\//);
+  assert.equal(manifest.platforms['darwin-aarch64'], undefined);
+  assert.equal(manifest.platforms['darwin-x86_64'], undefined);
 
   writeFileSync(join(root, 'linux', 'Other_1.2.3_amd64.AppImage.sig'), 'duplicate');
   assert.throws(
@@ -86,9 +91,22 @@ test('strict updater manifest is deterministic and rejects ambiguous assets', (t
       version: '1.2.3',
       baseUrl: 'https://updates.example.test/v1/preview/artifacts/1.2.3',
       strict: true,
+      excludeDarwin: true,
     }),
     /Duplicate updater assets/,
   );
+});
+
+test('Preview manifest CLI explicitly excludes Darwin updater artifacts', () => {
+  const options = parseArguments([
+    'preview-updater-artifacts',
+    '--version', '1.2.3',
+    '--base-url', 'https://updates.example.test/v1/preview/artifacts/1.2.3',
+    '--exclude-darwin',
+    '--strict',
+  ], {});
+  assert.equal(options.excludeDarwin, true);
+  assert.equal(options.strict, true);
 });
 
 test('Preview release workflow isolates the signing key and never falls back to Stable secrets', () => {
@@ -100,12 +118,16 @@ test('Preview release workflow isolates the signing key and never falls back to 
   assert.match(workflow, /--features preview/);
   assert.match(workflow, /preview:release-config/);
   assert.match(workflow, /--strict/);
+  assert.match(workflow, /--exclude-darwin/);
+  assert.match(workflow, /NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED: \$\{\{ matrix\.platform != 'macos' \}\}/);
   assert.doesNotMatch(buildJob, /TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(buildJob, /contents: read/);
   assert.match(signJob, /checks out no repository source/);
   assert.match(signJob, /@tauri-apps\/cli@2\.11\.3/);
   assert.match(signJob, /signer sign/);
   assert.match(signJob, /contents: write/);
+  assert.doesNotMatch(signJob, /-name '\*\.dmg'/);
+  assert.match(signJob, /preview-signed-artifacts\/\*\*\/\*\.dmg/);
   assert.doesNotMatch(signJob, /actions\/checkout/);
   assert.doesNotMatch(workflow, /uses: [^\s]+@(v\d+|stable)\s*$/m);
   assert.match(workflow, /persist-credentials: false/);

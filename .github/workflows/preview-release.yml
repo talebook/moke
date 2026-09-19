@@ -109,7 +109,11 @@ jobs:
         env:
           CI: true
           NODE_OPTIONS: --max-old-space-size=4096
-          NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED: 'true'
+          # macOS Preview releases are distributed as manually installed DMGs
+          # until a Developer ID Application certificate is available. A
+          # locally self-signed app cannot retain that signature after an
+          # automatic update replaces its bundle.
+          NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED: ${{ matrix.platform != 'macos' }}
         run: |
           pnpm build:preview
           pnpm build:reader
@@ -203,10 +207,10 @@ jobs:
             count=$((count + 1))
           done < <(find preview-signed-artifacts -type f \( \
             -name '*.AppImage' -o -name '*.deb' -o -name '*.msi' -o \
-            -name '*.exe' -o -name '*.dmg' \) -print0)
+            -name '*.exe' \) -print0)
           test "$count" -gt 0
 
-      - name: Upload signed Preview bundles for manifest generation
+      - name: Upload release bundles and signed updater artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: preview-updater-signed
@@ -214,7 +218,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish signed bundles to the private GitHub release
+      - name: Publish bundles to the private GitHub release
         if: startsWith(github.ref, 'refs/tags/preview-v')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -273,6 +277,7 @@ jobs:
           node scripts/merge-updater-json.cjs preview-updater-artifacts \
             --version "$PREVIEW_VERSION" \
             --base-url "${DOWNLOAD_BASE_URL%/}/$PREVIEW_VERSION" \
+            --exclude-darwin \
             --strict \
             --output preview-latest.json
 
