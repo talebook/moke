@@ -23,6 +23,8 @@ const UNAUTHENTICATED_COMMANDS: &[&str] = &[
     "moke_build_info",
     "moke_preview_activate",
     "moke_preview_entitlement_status",
+    "moke_preview_enter_app",
+    "moke_preview_refresh",
 ];
 
 pub(crate) fn command_requires_entitlement(command: &str) -> bool {
@@ -60,7 +62,7 @@ fn start_entitlement_monitor(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub(crate) fn moke_preview_enter_app(
+pub(crate) async fn moke_preview_enter_app(
     webview: tauri::Webview,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
@@ -71,6 +73,9 @@ pub(crate) fn moke_preview_enter_app(
     if source_label != PREVIEW_BOOTSTRAP_WINDOW {
         return Err("Preview app entry is available only to the bootstrap window".into());
     }
+    // Do not enter the privileged application from a copied or stale offline
+    // lease. Every process start must be approved by the entitlement service.
+    entitlement::refresh(&app).await?;
     require_preview_capability(&app, PreviewCapability::Foundation)?;
     if app.get_webview_window(PREVIEW_MAIN_WINDOW).is_some() {
         return Err("Preview main window already exists".into());
@@ -132,13 +137,13 @@ mod tests {
             "moke_build_info",
             "moke_preview_activate",
             "moke_preview_entitlement_status",
+            "moke_preview_enter_app",
+            "moke_preview_refresh",
         ] {
             assert!(!command_requires_entitlement(command), "{command}");
         }
 
         for command in [
-            "moke_preview_refresh",
-            "moke_preview_enter_app",
             "moke_runtime_platform",
             "moke_list_downloaded_books",
             "open_reader",

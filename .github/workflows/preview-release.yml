@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 180
     environment: preview-release
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -36,10 +36,11 @@ jobs:
 
     steps:
       - name: Checkout private Preview repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve and validate Preview version
         shell: bash
@@ -57,18 +58,18 @@ jobs:
           echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           standalone: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
@@ -86,16 +87,14 @@ jobs:
           pnpm install --no-frozen-lockfile
           pnpm --filter @readest/readest-app setup-vendors
 
-      - name: Validate dedicated Preview release secrets
+      - name: Validate Preview entitlement configuration
         shell: bash
         env:
-          PREVIEW_SIGNING_KEY: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY }}
-          PREVIEW_SIGNING_PASSWORD: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           PREVIEW_ENTITLEMENT_URL: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_URL }}
           PREVIEW_ENTITLEMENT_PUBLIC_KEY: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY }}
         run: |
           node -e '
-            for (const name of ["PREVIEW_SIGNING_KEY", "PREVIEW_SIGNING_PASSWORD", "PREVIEW_ENTITLEMENT_URL", "PREVIEW_ENTITLEMENT_PUBLIC_KEY"]) {
+            for (const name of ["PREVIEW_ENTITLEMENT_URL", "PREVIEW_ENTITLEMENT_PUBLIC_KEY"]) {
               if (!process.env[name]?.trim()) { console.error(`Missing dedicated Preview secret: ${name}`); process.exit(1) }
             }
           '
@@ -106,23 +105,28 @@ jobs:
           MOKE_PREVIEW_UPDATER_PUBLIC_KEY: ${{ vars.MOKE_PREVIEW_UPDATER_PUBLIC_KEY }}
         run: pnpm preview:release-config
 
-      - name: Build signed Preview desktop bundle
+      - name: Build Preview web assets without signing credentials
         env:
           CI: true
           NODE_OPTIONS: --max-old-space-size=4096
           NEXT_PUBLIC_PREVIEW_UPDATER_ENABLED: 'true'
+        run: |
+          pnpm build:preview
+          pnpm build:reader
+          pnpm copy:reader
+
+      - name: Build unsigned Preview desktop bundle
+        env:
+          CI: true
           MOKE_PREVIEW_ENTITLEMENT_URL: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_URL }}
           MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY: ${{ secrets.MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --config src-tauri/target/preview-release/tauri.release.conf.json --features preview
 
-      - name: Upload signed Preview bundles for manifest generation
-        uses: actions/upload-artifact@v4
+      - name: Upload unsigned Preview bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: preview-updater-${{ matrix.platform }}
+          name: preview-unsigned-${{ matrix.platform }}
           path: |
-            src-tauri/target/release/bundle/**/*.sig
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.msi
@@ -131,29 +135,110 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish bundles to the private GitHub release
+  sign:
+    name: Sign Preview updater bundles
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: preview-release
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve Preview version
+        shell: bash
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/preview-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/preview-v}"
+          else
+            VERSION="$MANUAL_VERSION"
+          fi
+          echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      # This job intentionally checks out no repository source. The only code
+      # receiving the updater private key is the exact-version Tauri signer.
+      - name: Setup Node.js for the isolated signer
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Install the exact Tauri signer without lifecycle scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tauri-signer"
+          cd "$RUNNER_TEMP/tauri-signer"
+          npm init --yes
+          npm pack --silent @tauri-apps/cli@2.11.3
+          npm pack --silent @tauri-apps/cli-linux-x64-gnu@2.11.3
+          echo '1049507bccfcb83ecf8b9fbeb49fd47c4c16b8ad3caddde808361d7886c901bea9651af196a9a8179821e47e58bf39943e14b821109a2d2b1086f5a4adf2be19  tauri-apps-cli-2.11.3.tgz' | sha512sum --check
+          echo 'faedc73bf177807c0be3cb7d81637fbaba99be96842730459936aae5e48886fcbc4cebe785bf8b809af7437046fb9271b81ac2523aad384cfa80cb6d74915204  tauri-apps-cli-linux-x64-gnu-2.11.3.tgz' | sha512sum --check
+          npm install --ignore-scripts --no-save \
+            ./tauri-apps-cli-2.11.3.tgz \
+            ./tauri-apps-cli-linux-x64-gnu-2.11.3.tgz
+
+      - name: Download unsigned platform bundles
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: preview-unsigned-*
+          merge-multiple: true
+          path: preview-signed-artifacts
+
+      - name: Sign final bundles in the isolated job
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PREVIEW_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+          SIGNER="$RUNNER_TEMP/tauri-signer/node_modules/.bin/tauri"
+          test -x "$SIGNER"
+          count=0
+          while IFS= read -r -d '' asset; do
+            "$SIGNER" signer sign "$asset"
+            count=$((count + 1))
+          done < <(find preview-signed-artifacts -type f \( \
+            -name '*.AppImage' -o -name '*.deb' -o -name '*.msi' -o \
+            -name '*.exe' -o -name '*.dmg' \) -print0)
+          test "$count" -gt 0
+
+      - name: Upload signed Preview bundles for manifest generation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: preview-updater-signed
+          path: preview-signed-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish signed bundles to the private GitHub release
         if: startsWith(github.ref, 'refs/tags/preview-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: Moke Preview v${{ env.PREVIEW_VERSION }}
           prerelease: true
           files: |
-            src-tauri/target/release/bundle/**/*.AppImage
-            src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.dmg
+            preview-signed-artifacts/**/*.AppImage
+            preview-signed-artifacts/**/*.deb
+            preview-signed-artifacts/**/*.msi
+            preview-signed-artifacts/**/*.exe
+            preview-signed-artifacts/**/*.dmg
 
   manifest:
     name: Build signed Preview updater manifest
-    needs: build
+    needs: sign
     runs-on: ubuntu-latest
     environment: preview-release
     permissions:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Resolve Preview version
         shell: bash
@@ -169,9 +254,9 @@ jobs:
           echo "PREVIEW_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Download signed bundles
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: preview-updater-*
+          pattern: preview-updater-signed
           merge-multiple: true
           path: preview-updater-artifacts
 
@@ -192,7 +277,7 @@ jobs:
             --output preview-latest.json
 
       - name: Upload manifest for the private distribution service
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: preview-update-manifest-${{ env.PREVIEW_VERSION }}
           path: preview-latest.json
@@ -201,7 +286,7 @@ jobs:
 
       - name: Publish manifest to the private GitHub release
         if: startsWith(github.ref, 'refs/tags/preview-v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           prerelease: true
           files: preview-latest.json

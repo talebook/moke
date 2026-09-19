@@ -29,7 +29,8 @@ test('Preview release overlay requires a dedicated HTTPS updater identity', () =
   };
   const config = createPreviewReleaseConfig({ environment, previewConfig, stableConfig });
 
-  assert.equal(config.bundle.createUpdaterArtifacts, true);
+  assert.equal(config.bundle.createUpdaterArtifacts, false);
+  assert.equal(config.build.beforeBuildCommand, '');
   assert.deepEqual(config.plugins.updater.endpoints, [environment.MOKE_PREVIEW_UPDATER_ENDPOINT]);
   assert.equal(config.plugins.updater.pubkey, previewPublicKey);
   assert.equal(config.identifier, 'org.houheya.moke.preview');
@@ -90,12 +91,23 @@ test('strict updater manifest is deterministic and rejects ambiguous assets', (t
   );
 });
 
-test('Preview release workflow never falls back to Stable secrets or unsigned artifacts', () => {
+test('Preview release workflow isolates the signing key and never falls back to Stable secrets', () => {
   const workflow = readText('.github/workflows/preview-release.yml');
+  const buildJob = workflow.slice(workflow.indexOf('  build:'), workflow.indexOf('  sign:'));
+  const signJob = workflow.slice(workflow.indexOf('  sign:'), workflow.indexOf('  manifest:'));
   assert.match(workflow, /secrets\.PREVIEW_TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(workflow, /MOKE_PREVIEW_ENTITLEMENT_URL/);
   assert.match(workflow, /--features preview/);
   assert.match(workflow, /preview:release-config/);
   assert.match(workflow, /--strict/);
+  assert.doesNotMatch(buildJob, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(buildJob, /contents: read/);
+  assert.match(signJob, /checks out no repository source/);
+  assert.match(signJob, /@tauri-apps\/cli@2\.11\.3/);
+  assert.match(signJob, /signer sign/);
+  assert.match(signJob, /contents: write/);
+  assert.doesNotMatch(signJob, /actions\/checkout/);
+  assert.doesNotMatch(workflow, /uses: [^\s]+@(v\d+|stable)\s*$/m);
+  assert.match(workflow, /persist-credentials: false/);
   assert.doesNotMatch(workflow, /secrets\.TAURI_SIGNING_PRIVATE_KEY\s*}}/);
 });

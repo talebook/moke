@@ -10,6 +10,7 @@
     "allow-moke-build-info",
     "allow-moke-preview-activate",
     "allow-moke-preview-entitlement-status",
-    "allow-moke-preview-enter-app"
+    "allow-moke-preview-enter-app",
+    "allow-moke-preview-refresh"
   ]
 }

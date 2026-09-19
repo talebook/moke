@@ -94,9 +94,14 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
 
   const effectiveState = status ? effectiveEntitlementState(status) : null;
   const isEntitled = effectiveState === 'active' || effectiveState === 'offlineGrace';
+  const canRefreshExpiredLease = effectiveState === 'expired' && Boolean(status?.subject);
 
   useEffect(() => {
-    if (!isEntitled || windowLabel !== 'preview-bootstrap' || handoffRequestedRef.current) return;
+    if (
+      (!isEntitled && !canRefreshExpiredLease)
+      || windowLabel !== 'preview-bootstrap'
+      || handoffRequestedRef.current
+    ) return;
     handoffRequestedRef.current = true;
     void import('@tauri-apps/api/core')
       .then(({ invoke }) => invoke<void>('moke_preview_enter_app'))
@@ -104,7 +109,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         handoffRequestedRef.current = false;
         if (mountedRef.current) setError(formatError(nextError));
       });
-  }, [isEntitled, windowLabel]);
+  }, [canRefreshExpiredLease, isEntitled, windowLabel]);
 
   const runCommand = async (
     command: 'moke_preview_activate' | 'moke_preview_refresh',

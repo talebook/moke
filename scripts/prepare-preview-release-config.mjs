@@ -100,9 +100,18 @@ export function createPreviewReleaseConfig({
 
   return {
     ...previewConfig,
+    build: {
+      ...previewConfig.build,
+      // Release CI builds all web assets before invoking Tauri. Keeping the
+      // bundler phase command-free prevents future Node/Reader scripts from
+      // inheriting any signing environment used by a separate signing job.
+      beforeBuildCommand: '',
+    },
     bundle: {
       ...previewConfig.bundle,
-      createUpdaterArtifacts: true,
+      // CI signs final platform bundles in an isolated job that checks out no
+      // source. The compile/bundle job must never receive the updater key.
+      createUpdaterArtifacts: false,
     },
     plugins: {
       ...previewConfig.plugins,

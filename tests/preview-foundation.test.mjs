@@ -85,6 +85,7 @@ test('Preview bootstrap is statically isolated from privileged plugin and Reader
     'allow-moke-preview-activate',
     'allow-moke-preview-entitlement-status',
     'allow-moke-preview-enter-app',
+    'allow-moke-preview-refresh',
   ]);
   for (const permission of previewBootstrapCapability.permissions) {
     assert.ok(!String(permission).startsWith('fs:'));

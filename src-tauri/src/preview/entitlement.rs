@@ -17,12 +17,18 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, Webview};
+use zeroize::Zeroizing;
 
 const PROTOCOL_VERSION: u8 = 1;
+const IDENTITY_VERSION: u8 = 2;
 const REQUIRED_CAPABILITY: &str = "foundation";
 const CLOCK_SKEW_SECONDS: u64 = 5 * 60;
-const MAX_ONLINE_LEASE_SECONDS: u64 = 48 * 60 * 60;
-const MAX_OFFLINE_WINDOW_SECONDS: u64 = 7 * 24 * 60 * 60;
+// Preview is a private distribution channel. A release must contact the
+// entitlement service at startup, and server leases are deliberately short.
+// There is no client-enforced offline grace period that can be extended by
+// restoring a filesystem snapshot or rolling back the wall clock.
+const MAX_ONLINE_LEASE_SECONDS: u64 = 60 * 60;
+const MAX_OFFLINE_WINDOW_SECONDS: u64 = 0;
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const MAX_STORED_FILE_BYTES: u64 = 64 * 1024;
 const MAX_ACCESS_CODE_BYTES: usize = 4096;
@@ -32,6 +38,7 @@ const UPDATE_AUTHORIZATION_SECONDS: u64 = 5 * 60;
 const ENTITLEMENT_DIRECTORY: &str = "preview-entitlement";
 const IDENTITY_FILE: &str = "device-identity.json";
 const LEASE_FILE: &str = "lease.json";
+const DEVICE_KEYRING_SERVICE: &str = "org.houheya.moke.preview.device-identity";
 
 const SERVICE_URL: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_URL");
 const SERVICE_PUBLIC_KEY: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY");
@@ -117,7 +124,8 @@ struct LeaseRecord {
 struct DeviceIdentityFile {
     version: u8,
     installation_id: String,
-    private_key_pkcs8: String,
+    key_id: String,
+    public_key: String,
 }
 
 struct DeviceIdentity {
@@ -408,16 +416,36 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
+fn device_keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(DEVICE_KEYRING_SERVICE, key_id)
+        .map_err(|_| "Unable to access the operating system credential store".to_string())
+}
+
 fn identity_from_file(file: DeviceIdentityFile) -> Result<DeviceIdentity, String> {
-    if file.version != PROTOCOL_VERSION || uuid::Uuid::parse_str(&file.installation_id).is_err() {
+    if file.version != IDENTITY_VERSION
+        || uuid::Uuid::parse_str(&file.installation_id).is_err()
+        || uuid::Uuid::parse_str(&file.key_id).is_err()
+    {
         return Err("Preview device identity is invalid".into());
     }
-    let private_key = STANDARD
-        .decode(file.private_key_pkcs8)
+    let entry = device_keyring_entry(&file.key_id)?;
+    let encoded_private_key = Zeroizing::new(entry.get_password().map_err(|_| {
+        "Preview device key is unavailable from the operating system credential store".to_string()
+    })?);
+    let private_key = Zeroizing::new(
+        STANDARD
+            .decode(encoded_private_key.as_bytes())
+            .map_err(|_| "Preview device identity is invalid".to_string())?,
+    );
+    let key_pair = Ed25519KeyPair::from_pkcs8(private_key.as_ref())
         .map_err(|_| "Preview device identity is invalid".to_string())?;
-    let key_pair = Ed25519KeyPair::from_pkcs8(&private_key)
-        .map_err(|_| "Preview device identity is invalid".to_string())?;
-    Ok(device_identity(file.installation_id, key_pair))
+    let identity = device_identity(file.installation_id, key_pair);
+    if identity.public_key != file.public_key {
+        return Err(
+            "Preview device identity does not match the operating system credential".into(),
+        );
+    }
+    Ok(identity)
 }
 
 fn device_identity(installation_id: String, key_pair: Ed25519KeyPair) -> DeviceIdentity {
@@ -433,20 +461,49 @@ fn device_identity(installation_id: String, key_pair: Ed25519KeyPair) -> DeviceI
 
 fn load_or_create_identity(root: &Path) -> Result<DeviceIdentity, String> {
     let path = root.join(IDENTITY_FILE);
-    if let Some(file) = read_json::<DeviceIdentityFile>(&path)? {
-        return identity_from_file(file);
+    if let Some(value) = read_json::<serde_json::Value>(&path)? {
+        // Version 1 placed an exportable PKCS#8 key directly in the app-data
+        // directory. Never import that key into the credential store: discard
+        // the old lease and rotate to a fresh identity so copied snapshots
+        // cannot silently become trusted OS credentials on another machine.
+        if value.get("privateKeyPkcs8").is_none() {
+            let file = serde_json::from_value::<DeviceIdentityFile>(value)
+                .map_err(|_| "Preview device identity is invalid".to_string())?;
+            return identity_from_file(file);
+        }
+        let lease = lease_path(root);
+        if lease.exists() {
+            fs::remove_file(&lease)
+                .map_err(|error| format!("Unable to retire the legacy Preview lease: {error}"))?;
+        }
     }
 
     let rng = SystemRandom::new();
     let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
         .map_err(|_| "Unable to generate Preview device identity".to_string())?;
+    let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
+        .map_err(|_| "Unable to generate Preview device identity".to_string())?;
+    let installation_id = uuid::Uuid::new_v4().to_string();
+    let key_id = uuid::Uuid::new_v4().to_string();
+    let identity = device_identity(installation_id.clone(), key_pair);
     let file = DeviceIdentityFile {
-        version: PROTOCOL_VERSION,
-        installation_id: uuid::Uuid::new_v4().to_string(),
-        private_key_pkcs8: STANDARD.encode(pkcs8.as_ref()),
+        version: IDENTITY_VERSION,
+        installation_id,
+        key_id: key_id.clone(),
+        public_key: identity.public_key.clone(),
     };
-    atomic_write_json(&path, &file)?;
-    identity_from_file(file)
+    let entry = device_keyring_entry(&key_id)?;
+    let encoded_private_key = Zeroizing::new(STANDARD.encode(pkcs8.as_ref()));
+    let store_result = entry.set_password(&encoded_private_key).map_err(|_| {
+        "Unable to store the Preview device key in the operating system credential store"
+            .to_string()
+    });
+    store_result?;
+    if let Err(error) = atomic_write_json(&path, &file) {
+        let _ = entry.delete_credential();
+        return Err(error);
+    }
+    Ok(identity)
 }
 
 fn proof_message(
@@ -481,11 +538,11 @@ fn sign_update_authorization(
     identity: &DeviceIdentity,
     app_version: String,
     issued_at: u64,
-    lease_offline_until: u64,
+    lease_expires_at: u64,
 ) -> Result<PreviewUpdateAuthorization, String> {
     let expires_at = issued_at
         .saturating_add(UPDATE_AUTHORIZATION_SECONDS)
-        .min(lease_offline_until);
+        .min(lease_expires_at);
     let claims = UpdateAuthorizationClaims {
         protocol_version: PROTOCOL_VERSION,
         action: "update",
@@ -907,7 +964,7 @@ async fn activate(app: &AppHandle, access_code: &str) -> Result<PreviewEntitleme
     }
 }
 
-async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
+pub(crate) async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
     let config = entitlement_config()?;
     let root = entitlement_root(app)?;
     let (identity, request, now) = {
@@ -927,9 +984,6 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
         }
         if clock_rollback_detected(&record, now) {
             return Err("System clock rollback detected".into());
-        }
-        if now > payload.offline_until {
-            return Err("Preview entitlement has expired".into());
         }
         let app_version = app.package_info().version.to_string();
         let request = RefreshRequest {
@@ -961,7 +1015,11 @@ async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
     }
 }
 
-fn update_authorization(app: &AppHandle) -> Result<PreviewUpdateAuthorization, String> {
+async fn update_authorization(app: &AppHandle) -> Result<PreviewUpdateAuthorization, String> {
+    // Update checks are never authorized from an offline snapshot. Refreshing
+    // first gives the service an immediate opportunity to reject revocation,
+    // cloned identities, excessive device use, or a replayed lease.
+    refresh(app).await?;
     let _guard = ENTITLEMENT_LOCK
         .lock()
         .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
@@ -981,14 +1039,14 @@ fn update_authorization(app: &AppHandle) -> Result<PreviewUpdateAuthorization, S
     if clock_rollback_detected(&record, now) {
         return Err("System clock rollback detected".into());
     }
-    if now > payload.offline_until {
+    if now > payload.expires_at {
         return Err("Preview entitlement has expired".into());
     }
     sign_update_authorization(
         &identity,
         app.package_info().version.to_string(),
         now,
-        payload.offline_until,
+        payload.expires_at,
     )
 }
 
@@ -1021,12 +1079,12 @@ pub(crate) async fn moke_preview_refresh(
 }
 
 #[tauri::command]
-pub(crate) fn moke_preview_update_authorization(
+pub(crate) async fn moke_preview_update_authorization(
     webview: Webview,
     app: AppHandle,
 ) -> Result<PreviewUpdateAuthorization, String> {
     super::super::require_moke_shell(&webview)?;
-    update_authorization(&app)
+    update_authorization(&app).await
 }
 
 #[cfg(test)]
@@ -1054,8 +1112,8 @@ mod tests {
             device_id: device_id.into(),
             capabilities: vec![REQUIRED_CAPABILITY.into()],
             issued_at: now.saturating_sub(10),
-            expires_at: now + 60 * 60,
-            offline_until: now + 24 * 60 * 60,
+            expires_at: now + 30 * 60,
+            offline_until: now + 30 * 60,
         }
     }
 
@@ -1104,6 +1162,13 @@ mod tests {
             validate_lease_payload(&payload, "device-a", now).unwrap_err(),
             "Preview lease does not grant the required capability"
         );
+
+        let mut payload = valid_payload(now, "device-a");
+        payload.offline_until += 1;
+        assert_eq!(
+            validate_lease_payload(&payload, "device-a", now).unwrap_err(),
+            "Preview lease offline window is invalid"
+        );
     }
 
     #[test]
@@ -1122,6 +1187,22 @@ mod tests {
         assert!(message.contains(&identity.device_id));
         assert!(message.contains(&identity.installation_id));
         assert!(message.ends_with("1.2.3"));
+    }
+
+    #[test]
+    fn device_identity_metadata_contains_no_private_key_material() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let file = DeviceIdentityFile {
+            version: IDENTITY_VERSION,
+            installation_id: identity.installation_id,
+            key_id: uuid::Uuid::new_v4().to_string(),
+            public_key: identity.public_key,
+        };
+        let value = serde_json::to_value(file).unwrap();
+        assert_eq!(value["version"], IDENTITY_VERSION);
+        assert!(value.get("keyId").is_some());
+        assert!(value.get("publicKey").is_some());
+        assert!(value.get("privateKeyPkcs8").is_none());
     }
 
     #[test]
@@ -1213,7 +1294,7 @@ mod tests {
     fn lease_state_transitions_at_signed_time_boundaries() {
         let payload = LeasePayload {
             expires_at: 1_800_000_100,
-            offline_until: 1_800_000_200,
+            offline_until: 1_800_000_100,
             ..valid_payload(1_800_000_000, "device-a")
         };
 
@@ -1223,11 +1304,7 @@ mod tests {
         );
         assert_eq!(
             lease_state_at(&payload, payload.expires_at + 1).0,
-            PreviewEntitlementState::OfflineGrace
-        );
-        assert_eq!(
-            lease_state_at(&payload, payload.offline_until).0,
-            PreviewEntitlementState::OfflineGrace
+            PreviewEntitlementState::Expired
         );
         assert_eq!(
             lease_state_at(&payload, payload.offline_until + 1).0,
@@ -1240,7 +1317,7 @@ mod tests {
         let status = status_from_payload(
             LeasePayload {
                 expires_at: 1_800_000_100,
-                offline_until: 1_800_000_200,
+                offline_until: 1_800_000_100,
                 ..valid_payload(1_800_000_000, "device-a")
             },
             "device-a".into(),
@@ -1259,10 +1336,10 @@ mod tests {
         );
         assert_eq!(
             cached_status_at(&cache, 1_800_000_101).state,
-            PreviewEntitlementState::OfflineGrace
+            PreviewEntitlementState::Expired
         );
         assert_eq!(
-            cached_status_at(&cache, 1_800_000_201).state,
+            cached_status_at(&cache, 1_800_000_102).state,
             PreviewEntitlementState::Expired
         );
 

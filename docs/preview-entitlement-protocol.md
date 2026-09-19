@@ -24,14 +24,20 @@ must not enter this repository, release CI, or client artifacts.
 ## Device identity
 
 On first launch the native client creates an Ed25519 keypair and random
-installation ID under the app-private Preview data directory. The device ID is
-`moke_` followed by the unpadded base64url SHA-256 digest of the public key.
+installation ID. Only the installation ID, public key, and an opaque key ID are
+stored under the app-private Preview data directory. The PKCS#8 private key is
+stored through the operating-system credential service (Keychain on macOS,
+Credential Manager on Windows, Secret Service on Linux). Copying the Moke app
+data directory to another machine therefore does not copy a usable identity.
+Version 1 file-backed identities are retired rather than imported, and their
+leases must be activated again with a newly generated credential-store key.
 
-The private key file is written with directory mode `0700` and file mode
-`0600` on Unix. This is a portable baseline, not hardware-backed storage.
-Moving the private file can clone an identity, so production hardening should
-move it to Keychain, Credential Manager, or a platform keystore when those
-backends are selected.
+The device ID is `moke_` followed by the unpadded base64url SHA-256 digest of
+the public key. An OS credential service is materially stronger than an
+app-data JSON file, but it is not equivalent to a non-exportable TPM or Secure
+Enclave signing key. A process running as the same desktop user may still be
+able to request the stored secret. The server remains the hard revocation and
+device-limit boundary.
 
 ## Activation
 
@@ -100,24 +106,23 @@ The decoded payload is:
   "deviceId": "moke_<digest>",
   "capabilities": ["foundation"],
   "issuedAt": 1800000000,
-  "expiresAt": 1800086400,
-  "offlineUntil": 1800345600
+  "expiresAt": 1800003600,
+  "offlineUntil": 1800003600
 }
 ```
 
-The client limits online lifetime to 48 hours and the post-expiry offline
-window to seven days. It rejects invalid signatures, a different device ID,
-missing `foundation`, future issuance beyond five minutes, oversized data,
-and detected system-clock rollback.
+The client limits the signed lease to one hour and requires `offlineUntil` to
+equal `expiresAt`; Preview releases intentionally have no offline grace
+period. It rejects invalid signatures, a different device ID, missing
+`foundation`, future issuance beyond five minutes, oversized data, and
+detected system-clock rollback. Every process start refreshes the lease before
+the privileged window and extension services are created.
 
-The offline deadline is a soft client-side limit on platforms where the
-identity and checkpoint live only in files. A local administrator can restore
-an older identity/lease snapshot together with the system clock. The native
-checkpoint detects ordinary rollback but cannot provide a non-resettable
-security boundary without a platform keystore/counter or a fresh server
-check. Deployments that require hard revocation must shorten the signed lease
-and require online refresh; they must not treat `offlineUntil` as server-grade
-revocation enforcement.
+The local checkpoint remains defense in depth, not a non-resettable trust
+root. Hard revocation comes from short server leases and the mandatory online
+refresh. A deployment that later restores offline use must first provide a
+non-exportable platform signing key plus non-rollback state; it must not treat
+an app-data checkpoint as server-grade enforcement.
 
 ## Authenticated updater access
 
@@ -137,8 +142,9 @@ moke-preview-update-authorization-v1
 <base64url claims>
 ```
 
-The native client issues the value only while its signed lease remains valid.
-Its lifetime is at most five minutes and never extends beyond `offlineUntil`.
+Before issuing this value, the native client performs an online lease refresh,
+giving the service an immediate revocation and device-limit decision. Its
+lifetime is at most five minutes and never extends beyond `expiresAt`.
 The distribution service must verify the device signature, match the public
 key against the registered device, check the server-side entitlement and
 revocation state, require the `update` action, enforce the timestamp window,

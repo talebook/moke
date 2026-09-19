@@ -1,4 +1,4 @@
-// Reads .sig files produced by Tauri's createUpdaterArtifacts and builds latest.json.
+// Reads .sig files produced by the isolated Preview signer and builds latest.json.
 // Stable usage remains: node scripts/merge-updater-json.cjs <sig-dir>
 // Preview releases must pass an explicit version and authenticated download base:
 //   node scripts/merge-updater-json.cjs <sig-dir> --version 1.2.3 \

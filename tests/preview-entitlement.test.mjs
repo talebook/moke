@@ -21,9 +21,11 @@ const previewCapability = readJson('src-tauri/capabilities/preview-default.json'
 const previewBootstrapCapability = readJson('src-tauri/capabilities/preview-bootstrap.json');
 const previewModule = readText('src-tauri/src/preview/mod.rs');
 const extensions = readText('src-tauri/src/extensions/mod.rs');
+const extensionApi = readText('src-tauri/src/extensions/api_server.rs');
+const extensionEvents = readText('src-tauri/src/extensions/events.rs');
 
 test('Preview entitlement implementation exists only behind the Rust preview feature', () => {
-  assert.match(cargoManifest, /^preview = \[[^\n]+dep:ring[^\n]+\]$/m);
+  assert.match(cargoManifest, /^preview = \[[^\n]+dep:keyring[^\n]+dep:ring[^\n]+\]$/m);
   assert.match(nativeHost, /#\[cfg\(feature = "preview"\)\]\s*mod preview;/);
   assert.match(
     nativeHost,
@@ -40,6 +42,11 @@ test('Preview leases are signed, device-bound, time-bounded, and fail closed', (
   assert.match(entitlement, /MAX_OFFLINE_WINDOW_SECONDS/);
   assert.match(entitlement, /ClockRollback/);
   assert.match(entitlement, /checkpoint_signature: String/);
+  assert.match(entitlement, /DEVICE_KEYRING_SERVICE/);
+  assert.match(entitlement, /\.get_password\(\)/);
+  assert.match(entitlement, /\.set_password\(&encoded_private_key\)/);
+  assert.doesNotMatch(entitlement, /private_key_pkcs8:\s*String/);
+  assert.match(entitlement, /MAX_OFFLINE_WINDOW_SECONDS:\s*u64\s*=\s*0/);
   assert.match(entitlement, /verify_lease_checkpoint\(&record, &identity\)/);
   assert.match(entitlement, /PreviewEntitlementState::Active \| PreviewEntitlementState::OfflineGrace/);
   assert.doesNotMatch(entitlement, /danger_accept_invalid_certs|http:\/\//);
@@ -98,6 +105,7 @@ test('native bootstrap owns privileged window and extension lifecycle', () => {
   assert.match(previewModule, /PREVIEW_BOOTSTRAP_WINDOW: &str = "preview-bootstrap"/);
   assert.match(previewModule, /WebviewWindowBuilder::new\([\s\S]*?PREVIEW_MAIN_WINDOW/);
   assert.match(previewModule, /require_preview_capability\(&app, PreviewCapability::Foundation\)\?/);
+  assert.match(previewModule, /entitlement::refresh\(&app\)\.await\?/);
   assert.match(previewModule, /super::extensions::init\(&app_for_main_thread\)/);
   assert.match(previewModule, /super::extensions::shutdown\(&app\)/);
   assert.match(previewModule, /app\.request_restart\(\)/);
@@ -127,6 +135,30 @@ test('native entitlement fast path is cached but periodically revalidates durabl
   assert.match(entitlement, /cached_status\(now, false\)/);
   assert.match(previewModule, /revalidate_preview_capability/);
   assert.match(previewModule, /ENTITLEMENT_MONITOR_INTERVAL/);
+});
+
+test('update authorization requires a fresh online lease and cannot use offline expiry', () => {
+  assert.match(
+    entitlement,
+    /async fn update_authorization[\s\S]*refresh\(app\)\.await\?[\s\S]*payload\.expires_at/,
+  );
+  assert.doesNotMatch(
+    entitlement,
+    /sign_update_authorization\([\s\S]{0,300}payload\.offline_until/,
+  );
+});
+
+test('extension loopback services bound unauthenticated resource use', () => {
+  assert.match(extensionApi, /MAX_CONCURRENT_API_REQUESTS/);
+  assert.match(extensionApi, /MAX_API_REQUEST_BODY_BYTES/);
+  assert.match(extensionApi, /authenticate\([\s\S]*read_request_body/);
+  assert.match(extensionApi, /body_length\(\)/);
+  assert.match(extensionApi, /\.take\(\(MAX_API_REQUEST_BODY_BYTES \+ 1\) as u64\)/);
+  assert.match(extensionEvents, /MAX_PENDING_WS_HANDSHAKES/);
+  assert.match(extensionEvents, /WS_HANDSHAKE_TIMEOUT/);
+  assert.match(extensionEvents, /set_read_timeout\(Some\(WS_HANDSHAKE_TIMEOUT\)\)/);
+  assert.match(extensionEvents, /thread::spawn\(move \|\| \{[\s\S]*perform_handshake/);
+  assert.match(extensionEvents, /max_message_size = Some\(MAX_WS_MESSAGE_BYTES\)/);
 });
 
 test('Preview entitlement surfaces have scoped e-ink treatments', () => {
@@ -166,6 +198,7 @@ test('entitlement command permissions follow the bootstrap and authorized window
     'allow-moke-preview-activate',
     'allow-moke-preview-entitlement-status',
     'allow-moke-preview-enter-app',
+    'allow-moke-preview-refresh',
   ]) {
     assert.ok(previewBootstrapCapability.permissions.includes(permission));
   }
