@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moke_preview
+      POSTGRES_USER: moke_preview
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - preview-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moke_preview -d moke_preview"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [backend]
+
+  control-plane:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: moke_preview
+      DATABASE_USER: moke_preview
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      BIND_ADDRESS: 0.0.0.0:8080
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
+      PREVIEW_LEASE_SIGNING_KEY: ${PREVIEW_LEASE_SIGNING_KEY:?set PREVIEW_LEASE_SIGNING_KEY}
+      PREVIEW_ACCESS_CODE_PEPPER: ${PREVIEW_ACCESS_CODE_PEPPER:?set PREVIEW_ACCESS_CODE_PEPPER}
+      PREVIEW_ARTIFACT_URL_KEY: ${PREVIEW_ARTIFACT_URL_KEY:?set PREVIEW_ARTIFACT_URL_KEY}
+      PREVIEW_ADMIN_TOKEN: ${PREVIEW_ADMIN_TOKEN:?set PREVIEW_ADMIN_TOKEN}
+      ARTIFACT_ROOT: /srv/artifacts
+      RUST_LOG: ${RUST_LOG:-moke_preview_control_plane=info,tower_http=info}
+    ports:
+      - "127.0.0.1:18080:8080"
+    networks: [backend]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - ./artifacts:/srv/artifacts:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+volumes:
+  preview-postgres:
+
+networks:
+  backend:
+    internal: true

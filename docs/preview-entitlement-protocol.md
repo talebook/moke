@@ -171,6 +171,11 @@ artifact.
 
 ## Service requirements
 
+The private repository contains the reference implementation and deployment
+baseline in `services/preview-control-plane`. Production operators still need
+to supply TLS termination, secrets, monitoring, backups, and the release
+artifact transfer step described in that service's README.
+
 - Keep the Ed25519 private signing key in a managed secret/HSM boundary.
 - Store hashed access codes, device public keys, lease IDs, status, expiry,
   nonce replay records, and an auditable revocation history.
