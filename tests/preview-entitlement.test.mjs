@@ -90,6 +90,18 @@ test('Preview rechecks entitlement at time boundaries and lifecycle resumes', ()
   assert.match(gate, /addEventListener\('focus', recheck\)/);
   assert.match(gate, /addEventListener\('pageshow', recheck\)/);
   assert.match(gate, /addEventListener\('visibilitychange', recheckWhenVisible\)/);
+  assert.match(gate, /setEntitlementCheckRevision\(\(revision\) => revision \+ 1\)/);
+  assert.match(
+    gate,
+    /\[canRefreshExpiredLease, entitlementCheckRevision, isEntitled, windowLabel\]/,
+  );
+});
+
+test('failed Preview checks and expired lease renewals have explicit retry actions', () => {
+  assert.match(gate, /onClick=\{\(\) => void runCommand\('moke_preview_refresh'\)\}/);
+  assert.match(gate, /重试续期/);
+  assert.match(gate, /onClick=\{\(\) => void recheckEntitlement\(\)\}/);
+  assert.match(gate, /重新检查/);
 });
 
 test('native IPC dispatch gates Moke, Reader, and extension commands', () => {

@@ -22,8 +22,10 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const [status, setStatus] = useState<PreviewEntitlementStatus | null>(null);
   const [accessCode, setAccessCode] = useState('');
   const [error, setError] = useState('');
+  const [isChecking, setIsChecking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [windowLabel, setWindowLabel] = useState<string | null>(null);
+  const [entitlementCheckRevision, setEntitlementCheckRevision] = useState(0);
   const mountedRef = useRef(true);
   const statusRequestRef = useRef<Promise<void> | null>(null);
   const handoffRequestedRef = useRef(false);
@@ -39,6 +41,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const recheckEntitlement = useCallback(() => {
     if (statusRequestRef.current) return statusRequestRef.current;
 
+    setIsChecking(true);
     const request = Promise.all([
       invokeEntitlement('moke_preview_entitlement_status'),
       import('@tauri-apps/api/core').then(({ invoke }) => invoke<NativeBuildInfo>('moke_build_info')),
@@ -49,6 +52,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         if (!mountedRef.current) return;
         setStatus(nextStatus);
         setWindowLabel(nextWindowLabel);
+        setEntitlementCheckRevision((revision) => revision + 1);
         setError('');
       })
       .catch((nextError) => {
@@ -58,6 +62,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
       })
       .finally(() => {
         if (statusRequestRef.current === request) statusRequestRef.current = null;
+        if (mountedRef.current) setIsChecking(false);
       });
     statusRequestRef.current = request;
     return request;
@@ -109,7 +114,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         handoffRequestedRef.current = false;
         if (mountedRef.current) setError(formatError(nextError));
       });
-  }, [canRefreshExpiredLease, isEntitled, windowLabel]);
+  }, [canRefreshExpiredLease, entitlementCheckRevision, isEntitled, windowLabel]);
 
   const runCommand = async (
     command: 'moke_preview_activate' | 'moke_preview_refresh',
@@ -206,7 +211,9 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                 : status.state === 'notConfigured'
                   ? '此构建尚未配置授权服务和验签公钥，因此已安全锁定。'
                   : effectiveState === 'expired'
-                    ? '此设备的 Preview 授权已过期，请输入新的访问码。'
+                    ? canRefreshExpiredLease
+                      ? '此设备的 Preview 授权已过期。请联网重试续期，或输入新的访问码。'
+                      : '此设备的 Preview 授权已过期，请输入新的访问码。'
                     : effectiveState === 'invalid'
                       ? '本机授权记录无效或已被修改，请重新激活。'
                       : '请输入开发者提供的一次性 Preview 访问码。'}
@@ -216,6 +223,18 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
               <div className="mb-1 font-medium text-foreground">设备编号</div>
               <code className="break-all select-all">{status.deviceId}</code>
             </div>
+
+            {canRefreshExpiredLease && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => void runCommand('moke_preview_refresh')}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-primary/5 text-sm font-semibold text-primary transition hover:bg-primary/10 disabled:opacity-50"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                {isSubmitting ? '正在续期…' : '重试续期'}
+              </button>
+            )}
 
             {serviceConfigured && !clockRollback && (
               <form
@@ -252,9 +271,21 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         )}
 
         {error && (
-          <p role="alert" className="mt-4 rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">
-            {error}
-          </p>
+          <div className="mt-4 space-y-3">
+            <p role="alert" className="rounded-2xl bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
+            </p>
+            {!status && (
+              <button
+                type="button"
+                disabled={isChecking}
+                onClick={() => void recheckEntitlement()}
+                className="flex h-10 w-full items-center justify-center rounded-2xl border border-border bg-background text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+              >
+                {isChecking ? '检查中…' : '重新检查'}
+              </button>
+            )}
+          </div>
         )}
       </section>
     </div>
