@@ -26,8 +26,6 @@ yarn-error.log*
 src-tauri/target/
 src-tauri/gen/
 src-tauri/bin/readest-*
-services/**/target/
-services/**/.env
 
 # binaries and logs (project-wide safety net)
 *.log
