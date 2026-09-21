@@ -13,6 +13,15 @@ import {
 const isPreviewBuild = process.env.NEXT_PUBLIC_BUILD_CHANNEL === 'preview';
 
 function formatError(error: unknown): string {
+  if (error === 'PREVIEW_DEVICE_LIMIT_REACHED') {
+    return '此激活码已绑定另一台设备。如需重装迁移，请确认替换原设备。';
+  }
+  if (error === 'PREVIEW_DEVICE_TRANSFER_COOLDOWN') {
+    return '此资格最近已经迁移过设备。为防止激活码被盗刷，七天内不能再次迁移。';
+  }
+  if (error === 'PREVIEW_DEVICE_TRANSFER_REQUIRES_APPROVAL') {
+    return '原设备最近仍在使用。为防止激活码被盗后抢占设备，请等待原设备离线满 24 小时，或联系开发者在控制台中重置设备。';
+  }
   return typeof error === 'string' && error.trim()
     ? error
     : 'Preview 授权操作失败，请稍后重试。';
@@ -24,6 +33,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const [error, setError] = useState('');
   const [isChecking, setIsChecking] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [canReplaceDevice, setCanReplaceDevice] = useState(false);
   const [windowLabel, setWindowLabel] = useState<string | null>(null);
   const [entitlementCheckRevision, setEntitlementCheckRevision] = useState(0);
   const mountedRef = useRef(true);
@@ -126,9 +136,17 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
       const nextStatus = await invokeEntitlement(command, args);
       if (!mountedRef.current) return;
       setStatus(nextStatus);
-      if (command === 'moke_preview_activate') setAccessCode('');
+      if (command === 'moke_preview_activate') {
+        setAccessCode('');
+        setCanReplaceDevice(false);
+      }
     } catch (nextError) {
-      if (mountedRef.current) setError(formatError(nextError));
+      if (mountedRef.current) {
+        setCanReplaceDevice(
+          command === 'moke_preview_activate' && nextError === 'PREVIEW_DEVICE_LIMIT_REACHED',
+        );
+        setError(formatError(nextError));
+      }
     } finally {
       if (mountedRef.current) setIsSubmitting(false);
     }
@@ -241,7 +259,11 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                 className="space-y-3"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void runCommand('moke_preview_activate', { accessCode });
+                  setCanReplaceDevice(false);
+                  void runCommand('moke_preview_activate', {
+                    accessCode,
+                    replaceExistingDevice: false,
+                  });
                 }}
               >
                 <label className="block text-sm font-medium text-foreground" htmlFor="preview-access-code">
@@ -254,7 +276,10 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                   maxLength={4096}
                   required
                   value={accessCode}
-                  onChange={(event) => setAccessCode(event.target.value)}
+                  onChange={(event) => {
+                    setAccessCode(event.target.value);
+                    setCanReplaceDevice(false);
+                  }}
                   className="preview-entitlement-input h-11 w-full rounded-2xl border border-border bg-background px-4 text-sm outline-none ring-primary/30 transition focus:ring-4"
                 />
                 <button
@@ -265,6 +290,24 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
                   <ShieldCheck className="h-4 w-4" />
                   {isSubmitting ? '正在激活…' : '激活此设备'}
                 </button>
+                {canReplaceDevice && (
+                  <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+                    <p className="mb-3 text-xs leading-5 text-amber-900 dark:text-amber-100">
+                      原设备离线满 24 小时后才允许自动迁移。继续后原设备会立即失效，当前设备将接管该资格；迁移成功后七天内不能再次迁移。
+                    </p>
+                    <button
+                      type="button"
+                      disabled={isSubmitting || accessCode.trim().length === 0}
+                      onClick={() => void runCommand('moke_preview_activate', {
+                        accessCode,
+                        replaceExistingDevice: true,
+                      })}
+                      className="h-10 w-full rounded-2xl bg-amber-700 px-4 text-sm font-semibold text-white transition hover:bg-amber-800 disabled:opacity-50"
+                    >
+                      {isSubmitting ? '正在迁移…' : '确认替换原设备'}
+                    </button>
+                  </div>
+                )}
               </form>
             )}
           </div>

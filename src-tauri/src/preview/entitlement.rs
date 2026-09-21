@@ -151,7 +151,13 @@ struct ActivationRequest {
     device_public_key: String,
     installation_id: String,
     app_version: String,
+    replace_existing_device: bool,
     proof: DeviceProof,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceErrorBody {
+    code: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -873,20 +879,6 @@ async fn send_lease_request<T: Serialize>(
         .await
         .map_err(|_| "Preview entitlement service is unavailable".to_string())?;
     let status = response.status();
-    if !status.is_success() {
-        return Err(match status {
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                "Preview access code or entitlement was rejected".into()
-            }
-            StatusCode::TOO_MANY_REQUESTS => {
-                "Preview entitlement service rate limit reached".into()
-            }
-            _ if status.is_server_error() => {
-                "Preview entitlement service is temporarily unavailable".into()
-            }
-            _ => "Preview entitlement request was rejected".into(),
-        });
-    }
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
@@ -909,6 +901,32 @@ async fn send_lease_request<T: Serialize>(
         }
         bytes.extend_from_slice(&chunk);
     }
+    if !status.is_success() {
+        let service_code = serde_json::from_slice::<ServiceErrorBody>(&bytes)
+            .ok()
+            .map(|body| body.code);
+        return Err(match (status, service_code.as_deref()) {
+            (StatusCode::CONFLICT, Some("DEVICE_LIMIT_REACHED")) => {
+                "PREVIEW_DEVICE_LIMIT_REACHED".into()
+            }
+            (StatusCode::CONFLICT, Some("DEVICE_TRANSFER_COOLDOWN")) => {
+                "PREVIEW_DEVICE_TRANSFER_COOLDOWN".into()
+            }
+            (StatusCode::CONFLICT, Some("DEVICE_TRANSFER_REQUIRES_APPROVAL")) => {
+                "PREVIEW_DEVICE_TRANSFER_REQUIRES_APPROVAL".into()
+            }
+            (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN, _) => {
+                "Preview access code or entitlement was rejected".into()
+            }
+            (StatusCode::TOO_MANY_REQUESTS, _) => {
+                "Preview entitlement service rate limit reached".into()
+            }
+            _ if status.is_server_error() => {
+                "Preview entitlement service is temporarily unavailable".into()
+            }
+            _ => "Preview entitlement request was rejected".into(),
+        });
+    }
     serde_json::from_slice(&bytes)
         .map_err(|_| "Preview entitlement response is invalid".to_string())
 }
@@ -924,7 +942,11 @@ fn validate_access_code(access_code: &str) -> Result<&str, String> {
     Ok(access_code)
 }
 
-async fn activate(app: &AppHandle, access_code: &str) -> Result<PreviewEntitlementStatus, String> {
+async fn activate(
+    app: &AppHandle,
+    access_code: &str,
+    replace_existing_device: bool,
+) -> Result<PreviewEntitlementStatus, String> {
     let access_code = validate_access_code(access_code)?;
     let config = entitlement_config()?;
     let root = entitlement_root(app)?;
@@ -935,13 +957,19 @@ async fn activate(app: &AppHandle, access_code: &str) -> Result<PreviewEntitleme
         let identity = load_or_create_identity(&root)?;
         let now = now_unix()?;
         let app_version = app.package_info().version.to_string();
+        let proof_action = if replace_existing_device {
+            "activate-replace"
+        } else {
+            "activate"
+        };
         let request = ActivationRequest {
             protocol_version: PROTOCOL_VERSION,
             device_id: identity.device_id.clone(),
             device_public_key: identity.public_key.clone(),
             installation_id: identity.installation_id.clone(),
             app_version: app_version.clone(),
-            proof: create_device_proof("activate", &identity, now, &app_version),
+            replace_existing_device,
+            proof: create_device_proof(proof_action, &identity, now, &app_version),
         };
         (identity, request, now)
     };
@@ -1064,9 +1092,10 @@ pub(crate) async fn moke_preview_activate(
     webview: Webview,
     app: AppHandle,
     access_code: String,
+    replace_existing_device: Option<bool>,
 ) -> Result<PreviewEntitlementStatus, String> {
     super::super::require_moke_shell(&webview)?;
-    activate(&app, &access_code).await
+    activate(&app, &access_code, replace_existing_device.unwrap_or(false)).await
 }
 
 #[tauri::command]

@@ -196,6 +196,15 @@ test('access codes are transient and authorization precedes server synchronizati
   );
 });
 
+test('device replacement requires a second explicit confirmation', () => {
+  assert.match(entitlement, /replace_existing_device: bool/);
+  assert.match(entitlement, /"activate-replace"/);
+  assert.match(entitlement, /PREVIEW_DEVICE_LIMIT_REACHED/);
+  assert.match(gate, /replaceExistingDevice: false/);
+  assert.match(gate, /replaceExistingDevice: true/);
+  assert.match(gate, /确认替换原设备/);
+});
+
 test('entitlement command permissions follow the bootstrap and authorized window roles', () => {
   for (const permission of [
     'allow-moke-preview-entitlement-status',

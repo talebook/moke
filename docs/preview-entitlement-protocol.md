@@ -53,6 +53,7 @@ by Moke. The JSON body is:
   "devicePublicKey": "<base64url>",
   "installationId": "<uuid>",
   "appVersion": "1.2.3",
+  "replaceExistingDevice": false,
   "proof": {
     "nonce": "<uuid>",
     "requestedAt": 1800000000,
@@ -75,6 +76,16 @@ moke-preview-activate-v1
 The service reconstructs the proof message from these request fields and
 should reject stale timestamps, reused nonces, disabled access codes,
 device-limit violations, and public keys already bound incompatibly.
+
+When the server reports `DEVICE_LIMIT_REACHED`, the bootstrap UI may offer a
+separate, explicit device-replacement confirmation. That retry sets
+`replaceExistingDevice` to `true` and signs the proof with the distinct
+`moke-preview-activate-replace-v1` action, so an intermediary cannot change a
+normal activation into a replacement. The reference service permits this only
+for one-device grants, after the old device has been inactive for 24 hours,
+and no more than once every seven days. It atomically revokes the previous
+device and leases and records an audit event. Immediate recovery requires an
+operator to revoke the old device first.
 
 ## Refresh
 
