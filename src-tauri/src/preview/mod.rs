@@ -91,7 +91,6 @@ pub(crate) async fn moke_preview_enter_app(
             )
             .title("墨客 Preview")
             .inner_size(1280.0, 800.0)
-            .min_inner_size(800.0, 600.0)
             .resizable(true)
             .visible(false)
             .build()

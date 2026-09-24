@@ -49,7 +49,9 @@ test('Preview leases are signed, device-bound, time-bounded, and fail closed', (
   assert.match(entitlement, /MAX_OFFLINE_WINDOW_SECONDS:\s*u64\s*=\s*0/);
   assert.match(entitlement, /verify_lease_checkpoint\(&record, &identity\)/);
   assert.match(entitlement, /PreviewEntitlementState::Active \| PreviewEntitlementState::OfflineGrace/);
-  assert.doesNotMatch(entitlement, /danger_accept_invalid_certs|http:\/\//);
+  assert.doesNotMatch(entitlement, /danger_accept_invalid_certs/);
+  assert.match(entitlement, /cfg!\(debug_assertions\)[\s\S]*address\.is_loopback\(\)/);
+  assert.match(entitlement, /service_url\.scheme\(\) == "http"/);
 });
 
 test('running Preview sessions transition at lease boundaries with a fake clock', () => {
