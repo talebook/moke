@@ -37,6 +37,55 @@ pnpm copy:reader    # fallback copy of readest/out/readest → out/readest
 The root test suite uses Node's built-in test runner. The embedded `readest/apps/readest-app` has its
 own larger test suite and its own `CLAUDE.md` — consult that file before touching reader code.
 
+## Promoting Preview features to `main`
+
+Treat `promote` as an end-to-end agent command. When a developer asks to `promote` Preview work,
+the agent must identify the eligible commits, port them onto a fresh branch based on the latest
+`origin/main`, run the relevant checks, push the branch, and open a PR targeting `talebook/moke:main`.
+The developer should not need to run the individual Git commands.
+
+Use these commit-subject prefixes for new Preview work:
+
+- `promote:` — a self-contained, generally useful change intended to move to stable `main`.
+- `preview:` — Preview-only licensing, distribution, experimentation, or infrastructure that must
+  remain outside stable `main`.
+
+The prefix is a routing hint, not proof that a change is safe. Before promotion, inspect the full
+diff of every candidate commit. Existing historical commits without either prefix require the same
+manual classification once; do not rewrite published history merely to add a prefix.
+
+Promotion rules:
+
+1. Never merge a `preview/*` branch wholesale and never push directly to `main`.
+2. Start from the latest `origin/main` on a new `promote/<feature>` branch, then use
+   `git cherry-pick -x` only for clean, explicitly selected commits.
+3. If a candidate mixes stable functionality with Preview-only code, do not cherry-pick it as-is.
+   Recreate or split the stable portion on the promotion branch and preserve source attribution in
+   the commit or PR description.
+4. Preview-only paths and concerns are denied by default, including:
+   - `src-tauri/src/preview/**`
+   - `src/components/providers/PreviewEntitlementGate.tsx`
+   - `src/lib/preview-entitlement.ts`
+   - `.env.preview`
+   - `.github/workflows/preview-*.yml`
+   - `src-tauri/tauri.preview.conf.json`
+   - Preview activation, device leases, control-plane endpoints, signing secrets, and gated updater
+     authorization
+5. A denied path may enter `main` only when the developer explicitly changes its product scope and
+   the PR explains why it is no longer Preview-only. Do not bypass the denylist by renaming files.
+6. Review submodule changes independently. Reader changes must be merged in the Reader repository
+   first, then promoted through an intentional Moke gitlink bump.
+7. Run the smallest relevant tests plus `pnpm lint`, `pnpm typecheck`, and `pnpm test` when the local
+   toolchain permits. Run Rust checks when `src-tauri/` changes. Report any unavailable checks.
+8. Before opening the PR, inspect `git diff origin/main...HEAD` and verify that no Preview-only
+   configuration, secret, entitlement bypass, or release workflow is included.
+9. The promotion PR must list the source Preview commits, note any manually extracted portions, and
+   state explicitly that Preview-only authorization and release code was excluded.
+
+For future work, prefer implementing generally useful features on a normal branch from `main`
+first, then merge `main` into Preview. Use promotion only when a feature genuinely needs Preview
+validation before it is ready for the stable product.
+
 ## Release publishing
 
 When a user asks you to publish a version, follow these rules strictly:
