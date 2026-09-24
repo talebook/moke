@@ -36,6 +36,7 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
   const [canReplaceDevice, setCanReplaceDevice] = useState(false);
   const [windowLabel, setWindowLabel] = useState<string | null>(null);
   const [entitlementCheckRevision, setEntitlementCheckRevision] = useState(0);
+  const [handoffAttempt, setHandoffAttempt] = useState(0);
   const mountedRef = useRef(true);
   const statusRequestRef = useRef<Promise<void> | null>(null);
   const handoffRequestedRef = useRef(false);
@@ -124,7 +125,19 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
         handoffRequestedRef.current = false;
         if (mountedRef.current) setError(formatError(nextError));
       });
-  }, [canRefreshExpiredLease, entitlementCheckRevision, isEntitled, windowLabel]);
+  }, [
+    canRefreshExpiredLease,
+    entitlementCheckRevision,
+    handoffAttempt,
+    isEntitled,
+    windowLabel,
+  ]);
+
+  const retryHandoff = () => {
+    handoffRequestedRef.current = false;
+    setError('');
+    setHandoffAttempt((attempt) => attempt + 1);
+  };
 
   const runCommand = async (
     command: 'moke_preview_activate' | 'moke_preview_refresh',
@@ -154,9 +167,25 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
 
   if (isEntitled && windowLabel !== 'main') {
     return (
-      <div className="fixed inset-0 z-[180] flex items-center justify-center app-warm-bg text-sm text-muted-foreground">
-        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-        正在启动已授权的 Preview 工作区…
+      <div className="fixed inset-0 z-[180] flex items-center justify-center app-warm-bg px-4 text-sm text-muted-foreground">
+        {error ? (
+          <div className="w-full max-w-md rounded-3xl border border-border bg-background p-6 text-center shadow-2xl">
+            <ShieldAlert className="mx-auto mb-3 h-7 w-7 text-destructive" />
+            <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>
+            <button
+              type="button"
+              onClick={retryHandoff}
+              className="h-10 rounded-2xl bg-primary px-5 font-semibold text-primary-foreground transition hover:opacity-90"
+            >
+              重试续期并启动
+            </button>
+          </div>
+        ) : (
+          <>
+            <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+            正在启动已授权的 Preview 工作区…
+          </>
+        )}
       </div>
     );
   }
