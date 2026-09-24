@@ -2619,6 +2619,12 @@
           "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-build-info",
+          "markdownDescription": "Enables the moke_build_info command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-delete-downloaded-book-file",
@@ -2653,6 +2659,36 @@
           "type": "string",
           "const": "allow-moke-open-downloaded-book",
           "markdownDescription": "Enables the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_activate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-activate",
+          "markdownDescription": "Enables the moke_preview_activate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-enter-app",
+          "markdownDescription": "Enables the moke_preview_enter_app command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_entitlement_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-entitlement-status",
+          "markdownDescription": "Enables the moke_preview_entitlement_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_refresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-refresh",
+          "markdownDescription": "Enables the moke_preview_refresh command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-update-authorization",
+          "markdownDescription": "Enables the moke_preview_update_authorization command without any pre-configured scope."
         },
         {
           "description": "Enables the moke_record_downloaded_book command without any pre-configured scope.",
@@ -2841,6 +2877,12 @@
           "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Denies the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-build-info",
+          "markdownDescription": "Denies the moke_build_info command without any pre-configured scope."
+        },
+        {
           "description": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope.",
           "type": "string",
           "const": "deny-moke-delete-downloaded-book-file",
@@ -2875,6 +2917,36 @@
           "type": "string",
           "const": "deny-moke-open-downloaded-book",
           "markdownDescription": "Denies the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_activate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-activate",
+          "markdownDescription": "Denies the moke_preview_activate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-enter-app",
+          "markdownDescription": "Denies the moke_preview_enter_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_entitlement_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-entitlement-status",
+          "markdownDescription": "Denies the moke_preview_entitlement_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_refresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-refresh",
+          "markdownDescription": "Denies the moke_preview_refresh command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-update-authorization",
+          "markdownDescription": "Denies the moke_preview_update_authorization command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_record_downloaded_book command without any pre-configured scope.",

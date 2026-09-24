@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "Moke host capabilities, limited to the main window.",
+  "identifier": "preview-default",
+  "description": "Authorized Moke Preview host capabilities, excluding the stable updater.",
   "windows": [
     "main"
   ],
@@ -87,6 +87,9 @@
     "updater:default",
     "allow-open-reader",
     "allow-moke-build-info",
+    "allow-moke-preview-entitlement-status",
+    "allow-moke-preview-refresh",
+    "allow-moke-preview-update-authorization",
     "allow-moke-runtime-platform",
     "allow-moke-record-downloaded-book",
     "allow-moke-delete-downloaded-book-file",

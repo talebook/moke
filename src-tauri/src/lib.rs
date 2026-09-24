@@ -24,7 +24,10 @@ compile_error!("reader-e2e must not be enabled in release builds");
 ))]
 compile_error!("reader-e2e is supported only by desktop development builds");
 
+mod build_channel;
 mod extensions;
+#[cfg(feature = "preview")]
+mod preview;
 
 // Keep build-script profile routing covered by the normal `cargo test --lib`
 // command used in CI without compiling it into production application code.
@@ -38,6 +41,8 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_fs::FsExt;
+
+use build_channel::MokeBuildInfo;
 
 static MOKE_DOWNLOADS_INDEX_LOCK: Mutex<()> = Mutex::new(());
 
@@ -142,6 +147,16 @@ fn moke_runtime_platform(webview: tauri::Webview) -> Result<&'static str, String
 
     #[cfg(not(target_env = "ohos"))]
     Ok(std::env::consts::OS)
+}
+
+/// Returns compile-time build metadata for display and diagnostics.
+///
+/// This command remains available before Preview activation so the frontend
+/// can fail closed when its build channel does not match the native binary.
+#[tauri::command]
+fn moke_build_info(webview: tauri::Webview) -> Result<MokeBuildInfo, String> {
+    require_moke_shell(&webview)?;
+    Ok(MokeBuildInfo::current())
 }
 
 /// Performs a full-document navigation inside the current Android/OpenHarmony
@@ -720,6 +735,17 @@ fn moke_list_downloaded_books(
 fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static
 {
     tauri::generate_handler![
+        moke_build_info,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_activate,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_entitlement_status,
+        #[cfg(feature = "preview")]
+        preview::moke_preview_enter_app,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_refresh,
+        #[cfg(feature = "preview")]
+        preview::entitlement::moke_preview_update_authorization,
         moke_runtime_platform,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
@@ -831,6 +857,13 @@ pub fn run() {
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
+                #[cfg(feature = "preview")]
+                if let Err(error) =
+                    preview::authorize_command(invoke.message.webview_ref().app_handle(), &cmd)
+                {
+                    invoke.resolver.reject(error);
+                    return true;
+                }
                 #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
@@ -862,8 +895,9 @@ pub fn run() {
             // 初始化阅读器相关的进程内状态（如 LocalSend 与 Discord Rich Presence）。
             readestlib::manage_reader_state(_app.handle());
 
-            // 初始化拓展系统（REST+WS 服务器，仅桌面端；OHOS 上曾导致主线程阻塞）。
-            #[cfg(not(target_env = "ohos"))]
+            // Stable starts extensions immediately. Preview initializes them
+            // only after the native bootstrap handoff has verified a lease.
+            #[cfg(all(not(target_env = "ohos"), not(feature = "preview")))]
             extensions::init(_app.handle());
 
             Ok(())

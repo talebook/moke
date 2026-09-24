@@ -10,6 +10,15 @@ const root = path.resolve(__dirname, '..');
 const readerRoot = path.join(root, 'readest', 'apps', 'readest-app');
 const readerNext = path.join(readerRoot, 'node_modules', 'next', 'dist', 'bin', 'next');
 const mokeNext = path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
+const supportedMokeEnvFiles = new Set(['.env.tauri', '.env.preview']);
+const envArgumentIndex = process.argv.indexOf('--env');
+const mokeEnvFile = envArgumentIndex === -1
+  ? '.env.tauri'
+  : process.argv[envArgumentIndex + 1];
+
+if (!supportedMokeEnvFiles.has(mokeEnvFile)) {
+  throw new Error(`Unsupported Moke environment file: ${mokeEnvFile || '(missing)'}`);
+}
 
 function readEnvFile(filePath) {
   if (!existsSync(filePath)) {
@@ -96,7 +105,7 @@ if (await waitForReader('http://localhost:3001/readest/reader')) {
   moke = spawn(process.execPath, [mokeNext, 'dev', '--turbo'], {
     cwd: root,
     stdio: 'inherit',
-    env: devEnv(root, '.env.tauri'),
+    env: devEnv(root, mokeEnvFile),
   });
   moke.on('exit', (code, signal) => {
     if (!shuttingDown) cleanup(signal ? 1 : (code ?? 1));

@@ -6,10 +6,16 @@
 use super::EnabledExtension;
 use std::collections::HashMap;
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+pub(crate) const MAX_PENDING_WS_HANDSHAKES: usize = 16;
+pub(crate) const MAX_AUTHENTICATED_WS_CLIENTS: usize = 64;
+pub(crate) const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024;
+const WS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 // ---------------------------------------------------------------------------
 // 数据结构
@@ -31,6 +37,27 @@ struct Client {
     last_activity: std::time::Instant,
 }
 
+struct HandshakeSlot {
+    active: Arc<AtomicUsize>,
+}
+
+impl Drop for HandshakeSlot {
+    fn drop(&mut self) {
+        self.active.fetch_sub(1, Ordering::Release);
+    }
+}
+
+fn try_acquire_handshake_slot(active: &Arc<AtomicUsize>) -> Option<HandshakeSlot> {
+    active
+        .fetch_update(Ordering::Acquire, Ordering::Relaxed, |current| {
+            (current < MAX_PENDING_WS_HANDSHAKES).then_some(current + 1)
+        })
+        .ok()
+        .map(|_| HandshakeSlot {
+            active: active.clone(),
+        })
+}
+
 // ---------------------------------------------------------------------------
 // 公开接口
 // ---------------------------------------------------------------------------
@@ -42,6 +69,7 @@ pub fn start(
     start_port: u16,
 ) -> (u16, Sender<WsBroadcast>) {
     let (tx, rx) = mpsc::channel::<WsBroadcast>();
+    let (handshake_tx, handshake_rx) = mpsc::channel::<Result<Client, String>>();
 
     let mut port = start_port;
     let listener = loop {
@@ -54,15 +82,14 @@ pub fn start(
             Err(e) => panic!("无法启动 WS Server (尝试了 {start_port}-{port}): {e}"),
         }
     };
-    listener
-        .set_nonblocking(true)
-        .expect("无法设置非阻塞模式");
+    listener.set_nonblocking(true).expect("无法设置非阻塞模式");
 
     let actual_port = listener.local_addr().unwrap().port();
     log::info!("拓展 WS Server 已启动: ws://127.0.0.1:{actual_port}");
 
     thread::spawn(move || {
         let mut clients: Vec<Client> = Vec::new();
+        let active_handshakes = Arc::new(AtomicUsize::new(0));
         // 事件重放缓存：event → 最近一次广播的 JSON payload
         let mut last_events: HashMap<String, String> = HashMap::new();
         // 心跳 tick 计数器
@@ -75,41 +102,48 @@ pub fn start(
             match listener.accept() {
                 Ok((stream, addr)) => {
                     log::info!("WS 新连接: {addr}");
-
-                    let mut ws = match tungstenite::accept(stream) {
-                        Ok(w) => w,
-                        Err(e) => {
-                            log::warn!("WS 握手失败: {e}");
-                            continue;
-                        }
+                    let Some(slot) = try_acquire_handshake_slot(&active_handshakes) else {
+                        log::warn!("WS 握手并发已达上限，拒绝连接: {addr}");
+                        drop(stream);
+                        continue;
                     };
-
-                    // 读取认证和订阅消息（非阻塞超时）
-                    match authenticate_and_subscribe(&mut ws, &enabled) {
-                        Ok((name, subs)) => {
-                            log::info!("WS 认证成功: {name}, 订阅: {subs:?}");
-
-                            // 重放已缓存的事件
-                            replay_events(&mut ws, &subs, &last_events);
-
-                            clients.push(Client {
-                                ws,
-                                extension_name: name,
-                                subscriptions: subs,
-                                last_activity: std::time::Instant::now(),
-                            });
-                        }
-                        Err(e) => {
-                            log::warn!("WS 认证失败: {e}");
-                            let _ = ws.close(None);
-                        }
+                    if clients.len() >= MAX_AUTHENTICATED_WS_CLIENTS {
+                        log::warn!("WS 客户端数量已达上限，拒绝连接: {addr}");
+                        drop(stream);
+                        continue;
                     }
+                    let enabled = enabled.clone();
+                    let handshake_tx = handshake_tx.clone();
+                    thread::spawn(move || {
+                        let _slot = slot;
+                        let result = perform_handshake(stream, &enabled);
+                        let _ = handshake_tx.send(result);
+                    });
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // 无新连接，继续处理
                 }
                 Err(e) => {
                     log::error!("WS accept 错误: {e}");
+                }
+            }
+
+            // 已认证握手通过有界并发工作线程返回，不阻塞事件广播循环。
+            while let Ok(result) = handshake_rx.try_recv() {
+                match result {
+                    Ok(mut client) if clients.len() < MAX_AUTHENTICATED_WS_CLIENTS => {
+                        log::info!(
+                            "WS 认证成功: {}, 订阅: {:?}",
+                            client.extension_name,
+                            client.subscriptions
+                        );
+                        replay_events(&mut client.ws, &client.subscriptions, &last_events);
+                        clients.push(client);
+                    }
+                    Ok(mut client) => {
+                        let _ = client.ws.close(None);
+                    }
+                    Err(error) => log::warn!("WS 握手或认证失败: {error}"),
                 }
             }
 
@@ -121,48 +155,46 @@ pub fn start(
             }
 
             // 3. 处理客户端消息（pong、unsubscribe 等）并清理断线
-            clients.retain_mut(|client| {
-                match client.ws.read() {
-                    Ok(tungstenite::Message::Text(text)) => {
-                        client.last_activity = std::time::Instant::now();
-                        if text == "ping" {
-                            let _ = client.ws.send(tungstenite::Message::Text("pong".into()));
-                        }
-                        true
+            clients.retain_mut(|client| match client.ws.read() {
+                Ok(tungstenite::Message::Text(text)) => {
+                    client.last_activity = std::time::Instant::now();
+                    if text == "ping" {
+                        let _ = client.ws.send(tungstenite::Message::Text("pong".into()));
                     }
-                    Ok(tungstenite::Message::Binary(_)) => {
-                        client.last_activity = std::time::Instant::now();
-                        true
-                    }
-                    Ok(tungstenite::Message::Ping(data)) => {
-                        client.last_activity = std::time::Instant::now();
-                        let _ = client.ws.send(tungstenite::Message::Pong(data));
-                        true
-                    }
-                    Ok(tungstenite::Message::Pong(_)) => {
-                        client.last_activity = std::time::Instant::now();
-                        true
-                    }
-                    Ok(tungstenite::Message::Close(_)) => {
-                        log::info!("WS 客户端断开: {}", client.extension_name);
-                        false
-                    }
-                    Err(tungstenite::Error::ConnectionClosed)
-                    | Err(tungstenite::Error::AlreadyClosed) => {
-                        log::info!("WS 连接关闭: {}", client.extension_name);
-                        false
-                    }
-                    Err(tungstenite::Error::Io(ref io))
-                        if io.kind() == std::io::ErrorKind::WouldBlock =>
-                    {
-                        true
-                    }
-                    Err(e) => {
-                        log::warn!("WS 错误 ({}): {e}", client.extension_name);
-                        false
-                    }
-                    _ => true,
+                    true
                 }
+                Ok(tungstenite::Message::Binary(_)) => {
+                    client.last_activity = std::time::Instant::now();
+                    true
+                }
+                Ok(tungstenite::Message::Ping(data)) => {
+                    client.last_activity = std::time::Instant::now();
+                    let _ = client.ws.send(tungstenite::Message::Pong(data));
+                    true
+                }
+                Ok(tungstenite::Message::Pong(_)) => {
+                    client.last_activity = std::time::Instant::now();
+                    true
+                }
+                Ok(tungstenite::Message::Close(_)) => {
+                    log::info!("WS 客户端断开: {}", client.extension_name);
+                    false
+                }
+                Err(tungstenite::Error::ConnectionClosed)
+                | Err(tungstenite::Error::AlreadyClosed) => {
+                    log::info!("WS 连接关闭: {}", client.extension_name);
+                    false
+                }
+                Err(tungstenite::Error::Io(ref io))
+                    if io.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    true
+                }
+                Err(e) => {
+                    log::warn!("WS 错误 ({}): {e}", client.extension_name);
+                    false
+                }
+                _ => true,
             });
 
             // 4. 心跳：定期 ping 客户端 + 清理超时连接
@@ -182,10 +214,7 @@ pub fn start(
                     }
                     // 发送 WebSocket Ping，接收方自动回复 Pong
                     if let Err(e) = client.ws.send(tungstenite::Message::Ping(vec![])) {
-                        log::warn!(
-                            "[ext] WS ping 失败 ({}): {e}",
-                            client.extension_name
-                        );
+                        log::warn!("[ext] WS ping 失败 ({}): {e}", client.extension_name);
                         return false;
                     }
                     true
@@ -198,6 +227,37 @@ pub fn start(
     });
 
     (actual_port, tx)
+}
+
+fn perform_handshake(
+    stream: std::net::TcpStream,
+    enabled: &Arc<Mutex<HashMap<String, EnabledExtension>>>,
+) -> Result<Client, String> {
+    // Apply timeouts before parsing the HTTP Upgrade request. A peer that
+    // connects without sending headers can therefore occupy only one bounded
+    // handshake slot for a short, fixed interval.
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("设置 WS 阻塞模式失败: {error}"))?;
+    stream
+        .set_read_timeout(Some(WS_HANDSHAKE_TIMEOUT))
+        .map_err(|error| format!("设置 WS 握手读取超时失败: {error}"))?;
+    stream
+        .set_write_timeout(Some(WS_HANDSHAKE_TIMEOUT))
+        .map_err(|error| format!("设置 WS 握手写入超时失败: {error}"))?;
+
+    let mut config = tungstenite::protocol::WebSocketConfig::default();
+    config.max_message_size = Some(MAX_WS_MESSAGE_BYTES);
+    config.max_frame_size = Some(MAX_WS_MESSAGE_BYTES);
+    let mut ws = tungstenite::accept_with_config(stream, Some(config))
+        .map_err(|error| format!("WebSocket HTTP 握手失败: {error}"))?;
+    let (extension_name, subscriptions) = authenticate_and_subscribe(&mut ws, enabled)?;
+    Ok(Client {
+        ws,
+        extension_name,
+        subscriptions,
+        last_activity: std::time::Instant::now(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -319,5 +379,28 @@ fn replay_events(
                 log::info!("WS 事件重放: {sub}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_handshake_slots_are_bounded_and_released() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let mut slots = Vec::new();
+        for _ in 0..MAX_PENDING_WS_HANDSHAKES {
+            slots.push(try_acquire_handshake_slot(&active).unwrap());
+        }
+        assert!(try_acquire_handshake_slot(&active).is_none());
+        slots.pop();
+        assert!(try_acquire_handshake_slot(&active).is_some());
+    }
+
+    #[test]
+    fn websocket_auth_messages_have_a_small_fixed_limit() {
+        assert!(MAX_WS_MESSAGE_BYTES <= 64 * 1024);
+        assert!(MAX_PENDING_WS_HANDSHAKES < MAX_AUTHENTICATED_WS_CLIENTS);
     }
 }

@@ -12,10 +12,13 @@ name = "moke_lib"
 crate-type = ["staticlib", "cdylib", "lib"]
 
 [features]
+default = []
+preview = ["dep:base64", "dep:keyring", "dep:reqwest", "dep:ring", "dep:sha2", "dep:zeroize"]
 reader-e2e = ["tauri-plugin-webdriver"]
 
 [build-dependencies]
 tauri-build = { path = "../vendor/tauri/crates/tauri-build", features = [] }
+serde_json = "1.0"
 
 [dev-dependencies]
 # Same glob crate version tauri resolves (0.3.4, already in Cargo.lock via tauri).
@@ -26,6 +29,12 @@ glob = "0.3"
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+base64 = { version = "0.22", optional = true }
+keyring = { version = "=4.2.0", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+ring = { version = "0.17", optional = true }
+sha2 = { version = "0.10", optional = true }
+zeroize = { version = "=1.9.0", optional = true }
 sysinfo = "0.34.2"
 tauri = { path = "../vendor/tauri/crates/tauri", default-features = false, features = [
   "wry",

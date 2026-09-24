@@ -8,6 +8,7 @@ import {
   hasAcceptedCurrentPrivacyPolicy,
   PRIVACY_CONSENT_CHANGED_EVENT,
 } from '@/lib/privacy-consent';
+import { PreviewEntitlementGate } from './PreviewEntitlementGate';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
 import { ServerProvider } from './ServerProvider';
 
@@ -36,9 +37,11 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
 
   if (state === 'accepted') {
     return (
-      <ServerProvider>
-        <ReaderProgressProvider>{children}</ReaderProgressProvider>
-      </ServerProvider>
+      <PreviewEntitlementGate>
+        <ServerProvider>
+          <ReaderProgressProvider>{children}</ReaderProgressProvider>
+        </ServerProvider>
+      </PreviewEntitlementGate>
     );
   }
 

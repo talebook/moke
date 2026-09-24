@@ -8,6 +8,8 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const PRODUCTION_CAPABILITY_FILES = [
   'src-tauri/capabilities/default.json',
+  'src-tauri/capabilities/preview-default.json',
+  'src-tauri/capabilities/preview-bootstrap.json',
   'src-tauri/capabilities/reader.json',
   'src-tauri/capabilities/reader-mobile.json',
   'src-tauri/capabilities/ohos.json',
@@ -96,13 +98,15 @@ for (const file of ALL_CAPABILITY_FILES) {
   });
 }
 
-test('production capabilities are split by host, desktop reader, and mobile reader windows', () => {
+test('production capabilities are split by bootstrap, host, desktop reader, and mobile reader windows', () => {
+  const previewBootstrap = readCapability('src-tauri/capabilities/preview-bootstrap.json');
   const main = readCapability('src-tauri/capabilities/default.json');
   const reader = readCapability('src-tauri/capabilities/reader.json');
   const mobileReader = readCapability('src-tauri/capabilities/reader-mobile.json');
   const ohos = readCapability('src-tauri/capabilities/ohos.json');
 
   assert.deepEqual(main.windows, ['main']);
+  assert.deepEqual(previewBootstrap.windows, ['preview-bootstrap']);
   assert.deepEqual(reader.windows, ['reader-*', 'moke-home-*']);
   assert.deepEqual(reader.platforms, ['linux', 'macOS', 'windows']);
   assert.deepEqual(mobileReader.windows, ['main']);
@@ -110,7 +114,7 @@ test('production capabilities are split by host, desktop reader, and mobile read
   assert.deepEqual(ohos.windows, ['main']);
   assert.deepEqual(ohos.platforms, ['openHarmony']);
 
-  for (const capability of [main, reader, mobileReader, ohos]) {
+  for (const capability of [previewBootstrap, main, reader, mobileReader, ohos]) {
     assert.ok(!capability.windows.includes('*'));
   }
 });
@@ -128,6 +132,7 @@ test('desktop fs write paths stay command-scoped instead of entering the plugin 
 
   for (const file of [
     'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/preview-default.json',
     'src-tauri/capabilities/reader.json',
     'src-tauri/capabilities/reader-mobile.json',
   ]) {
@@ -369,6 +374,7 @@ test('OHOS dev capability differs only by its development server origins', () =>
 test('HTTP access remains scheme-scoped and allows arbitrary server ports', () => {
   for (const file of [
     'src-tauri/capabilities/default.json',
+    'src-tauri/capabilities/preview-default.json',
     'src-tauri/capabilities/reader.json',
     'src-tauri/capabilities/reader-mobile.json',
   ]) {

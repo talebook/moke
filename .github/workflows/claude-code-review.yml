@@ -31,7 +31,21 @@ jobs:
         with:
           fetch-depth: 0        # 获取完整历史，便于审查
 
+      - name: Check Claude credentials
+        id: claude-credentials
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Claude Review skipped: ANTHROPIC_API_KEY is not configured."
+          fi
+
       - name: Run Claude Review via DeepSeek
+        if: steps.claude-credentials.outputs.available == 'true'
         id: claude-review
         uses: anthropics/claude-code-action@v1
         env:

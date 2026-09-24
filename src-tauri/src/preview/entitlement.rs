@@ -1,0 +1,1414 @@
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
+use reqwest::{redirect::Policy, StatusCode, Url};
+use ring::{
+    rand::SystemRandom,
+    signature::{self, Ed25519KeyPair, KeyPair},
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tauri::{AppHandle, Manager, Webview};
+use zeroize::Zeroizing;
+
+const PROTOCOL_VERSION: u8 = 1;
+const IDENTITY_VERSION: u8 = 2;
+const REQUIRED_CAPABILITY: &str = "foundation";
+const CLOCK_SKEW_SECONDS: u64 = 5 * 60;
+// Preview is a private distribution channel. A release must contact the
+// entitlement service at startup, and server leases are deliberately short.
+// There is no client-enforced offline grace period that can be extended by
+// restoring a filesystem snapshot or rolling back the wall clock.
+const MAX_ONLINE_LEASE_SECONDS: u64 = 60 * 60;
+const MAX_OFFLINE_WINDOW_SECONDS: u64 = 0;
+const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_STORED_FILE_BYTES: u64 = 64 * 1024;
+const MAX_ACCESS_CODE_BYTES: usize = 4096;
+const CACHE_REVALIDATE_SECONDS: u64 = 30;
+const CHECKPOINT_INTERVAL_SECONDS: u64 = 5 * 60;
+const UPDATE_AUTHORIZATION_SECONDS: u64 = 5 * 60;
+const ENTITLEMENT_DIRECTORY: &str = "preview-entitlement";
+const IDENTITY_FILE: &str = "device-identity.json";
+const LEASE_FILE: &str = "lease.json";
+const DEVICE_KEYRING_SERVICE: &str = "org.houheya.moke.preview.device-identity";
+
+const SERVICE_URL: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_URL");
+const SERVICE_PUBLIC_KEY: Option<&str> = option_env!("MOKE_PREVIEW_ENTITLEMENT_PUBLIC_KEY");
+
+static ENTITLEMENT_LOCK: Mutex<()> = Mutex::new(());
+static ENTITLEMENT_CACHE: Mutex<Option<CachedEntitlement>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct CachedEntitlement {
+    status: PreviewEntitlementStatus,
+    verified_at: u64,
+    last_seen_at: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PreviewCapability {
+    Foundation,
+}
+
+impl PreviewCapability {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Foundation => REQUIRED_CAPABILITY,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PreviewEntitlementState {
+    NotConfigured,
+    Inactive,
+    Active,
+    OfflineGrace,
+    Expired,
+    ClockRollback,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreviewEntitlementStatus {
+    state: PreviewEntitlementState,
+    service_configured: bool,
+    device_id: String,
+    subject: Option<String>,
+    capabilities: Vec<String>,
+    expires_at: Option<u64>,
+    offline_until: Option<u64>,
+    message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LeaseEnvelope {
+    payload: String,
+    signature: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LeasePayload {
+    version: u8,
+    lease_id: String,
+    subject: String,
+    device_id: String,
+    capabilities: Vec<String>,
+    issued_at: u64,
+    expires_at: u64,
+    offline_until: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LeaseRecord {
+    envelope: LeaseEnvelope,
+    last_seen_at: u64,
+    checkpoint_signature: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeviceIdentityFile {
+    version: u8,
+    installation_id: String,
+    key_id: String,
+    public_key: String,
+}
+
+struct DeviceIdentity {
+    installation_id: String,
+    device_id: String,
+    public_key: String,
+    key_pair: Ed25519KeyPair,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeviceProof {
+    nonce: String,
+    requested_at: u64,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActivationRequest {
+    protocol_version: u8,
+    device_id: String,
+    device_public_key: String,
+    installation_id: String,
+    app_version: String,
+    replace_existing_device: bool,
+    proof: DeviceProof,
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceErrorBody {
+    code: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshRequest {
+    protocol_version: u8,
+    device_id: String,
+    installation_id: String,
+    app_version: String,
+    lease: LeaseEnvelope,
+    proof: DeviceProof,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAuthorizationClaims {
+    protocol_version: u8,
+    action: &'static str,
+    device_id: String,
+    device_public_key: String,
+    installation_id: String,
+    app_version: String,
+    issued_at: u64,
+    expires_at: u64,
+    nonce: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreviewUpdateAuthorization {
+    authorization: String,
+    expires_at: u64,
+}
+
+struct EntitlementConfig {
+    service_url: Url,
+    verifier: EntitlementVerifier,
+}
+
+struct EntitlementVerifier {
+    public_key: [u8; 32],
+}
+
+impl EntitlementVerifier {
+    fn new(public_key: &[u8]) -> Result<Self, String> {
+        let public_key: [u8; 32] = public_key
+            .try_into()
+            .map_err(|_| "Preview entitlement public key must be 32 bytes".to_string())?;
+        Ok(Self { public_key })
+    }
+
+    fn verify(
+        &self,
+        envelope: &LeaseEnvelope,
+        expected_device_id: &str,
+        now: u64,
+    ) -> Result<LeasePayload, String> {
+        let payload_bytes = URL_SAFE_NO_PAD
+            .decode(&envelope.payload)
+            .map_err(|_| "Preview lease payload is not valid base64url".to_string())?;
+        if payload_bytes.len() > MAX_RESPONSE_BYTES {
+            return Err("Preview lease payload is too large".into());
+        }
+        let signature_bytes = URL_SAFE_NO_PAD
+            .decode(&envelope.signature)
+            .map_err(|_| "Preview lease signature is not valid base64url".to_string())?;
+        signature::UnparsedPublicKey::new(&signature::ED25519, self.public_key)
+            .verify(&payload_bytes, &signature_bytes)
+            .map_err(|_| "Preview lease signature is invalid".to_string())?;
+
+        let payload: LeasePayload = serde_json::from_slice(&payload_bytes)
+            .map_err(|_| "Preview lease payload is invalid".to_string())?;
+        validate_lease_payload(&payload, expected_device_id, now)?;
+        Ok(payload)
+    }
+}
+
+fn validate_lease_payload(
+    payload: &LeasePayload,
+    expected_device_id: &str,
+    now: u64,
+) -> Result<(), String> {
+    if payload.version != PROTOCOL_VERSION {
+        return Err("Preview lease protocol version is unsupported".into());
+    }
+    if payload.device_id != expected_device_id {
+        return Err("Preview lease belongs to a different device".into());
+    }
+    if payload.lease_id.is_empty() || payload.lease_id.len() > 128 {
+        return Err("Preview lease id is invalid".into());
+    }
+    if payload.subject.is_empty() || payload.subject.len() > 256 {
+        return Err("Preview lease subject is invalid".into());
+    }
+    if payload.capabilities.is_empty()
+        || payload.capabilities.len() > 32
+        || payload.capabilities.iter().any(|capability| {
+            capability.is_empty()
+                || capability.len() > 64
+                || !capability
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
+    {
+        return Err("Preview lease capabilities are invalid".into());
+    }
+    if !payload
+        .capabilities
+        .iter()
+        .any(|capability| capability == REQUIRED_CAPABILITY)
+    {
+        return Err("Preview lease does not grant the required capability".into());
+    }
+    if payload.issued_at > now.saturating_add(CLOCK_SKEW_SECONDS) {
+        return Err("Preview lease was issued in the future".into());
+    }
+    if payload.expires_at <= payload.issued_at
+        || payload.expires_at - payload.issued_at > MAX_ONLINE_LEASE_SECONDS
+    {
+        return Err("Preview lease online lifetime is invalid".into());
+    }
+    if payload.offline_until < payload.expires_at
+        || payload.offline_until - payload.expires_at > MAX_OFFLINE_WINDOW_SECONDS
+    {
+        return Err("Preview lease offline window is invalid".into());
+    }
+    Ok(())
+}
+
+fn decode_public_key(value: &str) -> Result<Vec<u8>, String> {
+    STANDARD
+        .decode(value.trim())
+        .or_else(|_| URL_SAFE_NO_PAD.decode(value.trim()))
+        .map_err(|_| "Preview entitlement public key is not valid base64".to_string())
+}
+
+fn entitlement_config() -> Result<EntitlementConfig, String> {
+    let raw_url = SERVICE_URL
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Preview entitlement service URL is not configured".to_string())?;
+    let raw_public_key = SERVICE_PUBLIC_KEY
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Preview entitlement public key is not configured".to_string())?;
+    let service_url = parse_entitlement_service_url(raw_url)?;
+    let public_key = decode_public_key(raw_public_key)?;
+    Ok(EntitlementConfig {
+        service_url,
+        verifier: EntitlementVerifier::new(&public_key)?,
+    })
+}
+
+fn parse_entitlement_service_url(raw_url: &str) -> Result<Url, String> {
+    let service_url = Url::parse(raw_url)
+        .map_err(|_| "Preview entitlement service URL is invalid".to_string())?;
+    let loopback_http = cfg!(debug_assertions)
+        && service_url.scheme() == "http"
+        && service_url.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                || host
+                    .trim_matches(['[', ']'])
+                    .parse::<IpAddr>()
+                    .is_ok_and(|address| address.is_loopback())
+        });
+    if (service_url.scheme() != "https" && !loopback_http)
+        || service_url.host_str().is_none()
+        || !service_url.username().is_empty()
+        || service_url.password().is_some()
+        || service_url.query().is_some()
+        || service_url.fragment().is_some()
+    {
+        return Err(
+            "Preview entitlement service URL must use HTTPS (debug builds may use loopback HTTP)"
+                .into(),
+        );
+    }
+    Ok(service_url)
+}
+
+fn now_unix() -> Result<u64, String> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| "System clock is before the Unix epoch".to_string())
+}
+
+fn entitlement_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join(ENTITLEMENT_DIRECTORY))
+        .map_err(|error| format!("Unable to resolve Preview entitlement storage: {error}"))
+}
+
+fn reject_symlink(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err("Preview entitlement storage cannot be a symbolic link".into())
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Unable to inspect Preview entitlement storage: {error}"
+        )),
+    }
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), String> {
+    reject_symlink(path)?;
+    fs::create_dir_all(path)
+        .map_err(|error| format!("Unable to create Preview entitlement storage: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("Unable to secure Preview entitlement storage: {error}"))?;
+    }
+    Ok(())
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>, String> {
+    reject_symlink(path)?;
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "Unable to inspect Preview entitlement file: {error}"
+            ))
+        }
+    };
+    if !metadata.is_file() || metadata.len() > MAX_STORED_FILE_BYTES {
+        return Err("Preview entitlement file is invalid".into());
+    }
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Unable to read Preview entitlement file: {error}"))?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| "Preview entitlement file is invalid".to_string())
+}
+
+fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Preview entitlement path has no parent".to_string())?;
+    ensure_private_directory(parent)?;
+    reject_symlink(path)?;
+    let bytes = serde_json::to_vec(value)
+        .map_err(|_| "Unable to serialize Preview entitlement file".to_string())?;
+    if bytes.len() as u64 > MAX_STORED_FILE_BYTES {
+        return Err("Preview entitlement file is too large".into());
+    }
+
+    let temp_path = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&temp_path)
+        .map_err(|error| format!("Unable to create Preview entitlement file: {error}"))?;
+    let write_result = (|| -> Result<(), String> {
+        file.write_all(&bytes)
+            .map_err(|error| format!("Unable to write Preview entitlement file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("Unable to sync Preview entitlement file: {error}"))?;
+        drop(file);
+        if path.exists() {
+            fs::remove_file(path)
+                .map_err(|error| format!("Unable to replace Preview entitlement file: {error}"))?;
+        }
+        fs::rename(&temp_path, path)
+            .map_err(|error| format!("Unable to commit Preview entitlement file: {error}"))?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
+}
+
+fn device_keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(DEVICE_KEYRING_SERVICE, key_id)
+        .map_err(|_| "Unable to access the operating system credential store".to_string())
+}
+
+fn identity_from_file(file: DeviceIdentityFile) -> Result<DeviceIdentity, String> {
+    if file.version != IDENTITY_VERSION
+        || uuid::Uuid::parse_str(&file.installation_id).is_err()
+        || uuid::Uuid::parse_str(&file.key_id).is_err()
+    {
+        return Err("Preview device identity is invalid".into());
+    }
+    let entry = device_keyring_entry(&file.key_id)?;
+    let encoded_private_key = Zeroizing::new(entry.get_password().map_err(|_| {
+        "Preview device key is unavailable from the operating system credential store".to_string()
+    })?);
+    let private_key = Zeroizing::new(
+        STANDARD
+            .decode(encoded_private_key.as_bytes())
+            .map_err(|_| "Preview device identity is invalid".to_string())?,
+    );
+    let key_pair = Ed25519KeyPair::from_pkcs8(private_key.as_ref())
+        .map_err(|_| "Preview device identity is invalid".to_string())?;
+    let identity = device_identity(file.installation_id, key_pair);
+    if identity.public_key != file.public_key {
+        return Err(
+            "Preview device identity does not match the operating system credential".into(),
+        );
+    }
+    Ok(identity)
+}
+
+fn device_identity(installation_id: String, key_pair: Ed25519KeyPair) -> DeviceIdentity {
+    let public_key_bytes = key_pair.public_key().as_ref();
+    let device_hash = Sha256::digest(public_key_bytes);
+    DeviceIdentity {
+        installation_id,
+        device_id: format!("moke_{}", URL_SAFE_NO_PAD.encode(device_hash)),
+        public_key: URL_SAFE_NO_PAD.encode(public_key_bytes),
+        key_pair,
+    }
+}
+
+fn load_or_create_identity(root: &Path) -> Result<DeviceIdentity, String> {
+    let path = root.join(IDENTITY_FILE);
+    if let Some(value) = read_json::<serde_json::Value>(&path)? {
+        // Version 1 placed an exportable PKCS#8 key directly in the app-data
+        // directory. Never import that key into the credential store: discard
+        // the old lease and rotate to a fresh identity so copied snapshots
+        // cannot silently become trusted OS credentials on another machine.
+        if value.get("privateKeyPkcs8").is_none() {
+            let file = serde_json::from_value::<DeviceIdentityFile>(value)
+                .map_err(|_| "Preview device identity is invalid".to_string())?;
+            return identity_from_file(file);
+        }
+        let lease = lease_path(root);
+        if lease.exists() {
+            fs::remove_file(&lease)
+                .map_err(|error| format!("Unable to retire the legacy Preview lease: {error}"))?;
+        }
+    }
+
+    let rng = SystemRandom::new();
+    let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
+        .map_err(|_| "Unable to generate Preview device identity".to_string())?;
+    let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
+        .map_err(|_| "Unable to generate Preview device identity".to_string())?;
+    let installation_id = uuid::Uuid::new_v4().to_string();
+    let key_id = uuid::Uuid::new_v4().to_string();
+    let identity = device_identity(installation_id.clone(), key_pair);
+    let file = DeviceIdentityFile {
+        version: IDENTITY_VERSION,
+        installation_id,
+        key_id: key_id.clone(),
+        public_key: identity.public_key.clone(),
+    };
+    let entry = device_keyring_entry(&key_id)?;
+    let encoded_private_key = Zeroizing::new(STANDARD.encode(pkcs8.as_ref()));
+    let store_result = entry.set_password(&encoded_private_key).map_err(|_| {
+        "Unable to store the Preview device key in the operating system credential store"
+            .to_string()
+    });
+    store_result?;
+    if let Err(error) = atomic_write_json(&path, &file) {
+        let _ = entry.delete_credential();
+        return Err(error);
+    }
+    Ok(identity)
+}
+
+fn proof_message(
+    action: &str,
+    identity: &DeviceIdentity,
+    nonce: &str,
+    requested_at: u64,
+    app_version: &str,
+) -> String {
+    format!(
+        "moke-preview-{action}-v{PROTOCOL_VERSION}\n{}\n{}\n{}\n{}\n{}",
+        identity.device_id, identity.installation_id, nonce, requested_at, app_version
+    )
+}
+
+fn create_device_proof(
+    action: &str,
+    identity: &DeviceIdentity,
+    requested_at: u64,
+    app_version: &str,
+) -> DeviceProof {
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let message = proof_message(action, identity, &nonce, requested_at, app_version);
+    DeviceProof {
+        nonce,
+        requested_at,
+        signature: URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref()),
+    }
+}
+
+fn sign_update_authorization(
+    identity: &DeviceIdentity,
+    app_version: String,
+    issued_at: u64,
+    lease_expires_at: u64,
+) -> Result<PreviewUpdateAuthorization, String> {
+    let expires_at = issued_at
+        .saturating_add(UPDATE_AUTHORIZATION_SECONDS)
+        .min(lease_expires_at);
+    let claims = UpdateAuthorizationClaims {
+        protocol_version: PROTOCOL_VERSION,
+        action: "update",
+        device_id: identity.device_id.clone(),
+        device_public_key: identity.public_key.clone(),
+        installation_id: identity.installation_id.clone(),
+        app_version,
+        issued_at,
+        expires_at,
+        nonce: uuid::Uuid::new_v4().to_string(),
+    };
+    let payload = serde_json::to_vec(&claims)
+        .map_err(|_| "Unable to create Preview update authorization".to_string())?;
+    let encoded_payload = URL_SAFE_NO_PAD.encode(payload);
+    let message =
+        format!("moke-preview-update-authorization-v{PROTOCOL_VERSION}\n{encoded_payload}");
+    let signature = URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref());
+    Ok(PreviewUpdateAuthorization {
+        authorization: format!("MokePreview {encoded_payload}.{signature}"),
+        expires_at,
+    })
+}
+
+fn checkpoint_message(envelope: &LeaseEnvelope, last_seen_at: u64) -> String {
+    format!(
+        "moke-preview-checkpoint-v{PROTOCOL_VERSION}\n{}\n{}\n{last_seen_at}",
+        envelope.payload, envelope.signature
+    )
+}
+
+fn create_lease_record(
+    envelope: LeaseEnvelope,
+    last_seen_at: u64,
+    identity: &DeviceIdentity,
+) -> LeaseRecord {
+    let message = checkpoint_message(&envelope, last_seen_at);
+    LeaseRecord {
+        envelope,
+        last_seen_at,
+        checkpoint_signature: URL_SAFE_NO_PAD
+            .encode(identity.key_pair.sign(message.as_bytes()).as_ref()),
+    }
+}
+
+fn verify_lease_checkpoint(record: &LeaseRecord, identity: &DeviceIdentity) -> Result<(), String> {
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(&record.checkpoint_signature)
+        .map_err(|_| "Preview lease checkpoint is invalid".to_string())?;
+    let message = checkpoint_message(&record.envelope, record.last_seen_at);
+    signature::UnparsedPublicKey::new(&signature::ED25519, identity.key_pair.public_key().as_ref())
+        .verify(message.as_bytes(), &signature_bytes)
+        .map_err(|_| "Preview lease checkpoint is invalid".to_string())
+}
+
+fn checkpoint_predates_lease(record: &LeaseRecord, payload: &LeasePayload) -> bool {
+    record.last_seen_at.saturating_add(CLOCK_SKEW_SECONDS) < payload.issued_at
+}
+
+fn clock_rollback_detected(record: &LeaseRecord, now: u64) -> bool {
+    now.saturating_add(CLOCK_SKEW_SECONDS) < record.last_seen_at
+}
+
+fn lease_path(root: &Path) -> PathBuf {
+    root.join(LEASE_FILE)
+}
+
+fn inactive_status(
+    state: PreviewEntitlementState,
+    service_configured: bool,
+    device_id: String,
+    message: impl Into<String>,
+) -> PreviewEntitlementStatus {
+    PreviewEntitlementStatus {
+        state,
+        service_configured,
+        device_id,
+        subject: None,
+        capabilities: Vec::new(),
+        expires_at: None,
+        offline_until: None,
+        message: message.into(),
+    }
+}
+
+fn status_from_payload(
+    payload: LeasePayload,
+    device_id: String,
+    state: PreviewEntitlementState,
+    message: impl Into<String>,
+) -> PreviewEntitlementStatus {
+    PreviewEntitlementStatus {
+        state,
+        service_configured: true,
+        device_id,
+        subject: Some(payload.subject),
+        capabilities: payload.capabilities,
+        expires_at: Some(payload.expires_at),
+        offline_until: Some(payload.offline_until),
+        message: message.into(),
+    }
+}
+
+fn lease_state_at(payload: &LeasePayload, now: u64) -> (PreviewEntitlementState, &'static str) {
+    if now <= payload.expires_at {
+        (
+            PreviewEntitlementState::Active,
+            "Preview entitlement is active",
+        )
+    } else if now <= payload.offline_until {
+        (
+            PreviewEntitlementState::OfflineGrace,
+            "Preview entitlement is using its offline grace period",
+        )
+    } else {
+        (
+            PreviewEntitlementState::Expired,
+            "Preview entitlement has expired",
+        )
+    }
+}
+
+fn cached_status_at(cache: &CachedEntitlement, now: u64) -> PreviewEntitlementStatus {
+    let mut status = cache.status.clone();
+    if now.saturating_add(CLOCK_SKEW_SECONDS) < cache.last_seen_at {
+        status.state = PreviewEntitlementState::ClockRollback;
+        status.message = "System clock rollback detected".into();
+        return status;
+    }
+
+    if matches!(
+        status.state,
+        PreviewEntitlementState::Active | PreviewEntitlementState::OfflineGrace
+    ) {
+        status.state = match (status.expires_at, status.offline_until) {
+            (Some(expires_at), _) if now <= expires_at => PreviewEntitlementState::Active,
+            (_, Some(offline_until)) if now <= offline_until => {
+                PreviewEntitlementState::OfflineGrace
+            }
+            _ => PreviewEntitlementState::Expired,
+        };
+        status.message = match status.state {
+            PreviewEntitlementState::Active => "Preview entitlement is active".into(),
+            PreviewEntitlementState::OfflineGrace => {
+                "Preview entitlement is using its offline grace period".into()
+            }
+            _ => "Preview entitlement has expired".into(),
+        };
+    }
+    status
+}
+
+fn cache_status(status: PreviewEntitlementStatus, verified_at: u64) {
+    if let Ok(mut cache) = ENTITLEMENT_CACHE.lock() {
+        *cache = Some(CachedEntitlement {
+            status,
+            verified_at,
+            last_seen_at: verified_at,
+        });
+    }
+}
+
+fn cached_status(now: u64, require_fresh: bool) -> Option<PreviewEntitlementStatus> {
+    let cache = ENTITLEMENT_CACHE.lock().ok()?;
+    let cache = cache.as_ref()?;
+    if require_fresh && now.saturating_sub(cache.verified_at) > CACHE_REVALIDATE_SECONDS {
+        return None;
+    }
+    Some(cached_status_at(cache, now))
+}
+
+fn entitlement_status_locked(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
+    let root = entitlement_root(app)?;
+    let identity = load_or_create_identity(&root)?;
+    let config = match entitlement_config() {
+        Ok(config) => config,
+        Err(error) => {
+            let state = if SERVICE_URL.is_none() || SERVICE_PUBLIC_KEY.is_none() {
+                PreviewEntitlementState::NotConfigured
+            } else {
+                PreviewEntitlementState::Invalid
+            };
+            return Ok(inactive_status(state, false, identity.device_id, error));
+        }
+    };
+    let path = lease_path(&root);
+    let Some(mut record) = read_json::<LeaseRecord>(&path)? else {
+        return Ok(inactive_status(
+            PreviewEntitlementState::Inactive,
+            true,
+            identity.device_id,
+            "Preview is not activated on this device",
+        ));
+    };
+    let now = now_unix()?;
+    if let Err(error) = verify_lease_checkpoint(&record, &identity) {
+        return Ok(inactive_status(
+            PreviewEntitlementState::Invalid,
+            true,
+            identity.device_id,
+            error,
+        ));
+    }
+    let payload = match config
+        .verifier
+        .verify(&record.envelope, &identity.device_id, now)
+    {
+        Ok(payload) => payload,
+        Err(error) => {
+            return Ok(inactive_status(
+                PreviewEntitlementState::Invalid,
+                true,
+                identity.device_id,
+                error,
+            ));
+        }
+    };
+    if checkpoint_predates_lease(&record, &payload) {
+        return Ok(inactive_status(
+            PreviewEntitlementState::Invalid,
+            true,
+            identity.device_id,
+            "Preview lease checkpoint predates the signed lease",
+        ));
+    }
+    if clock_rollback_detected(&record, now) {
+        return Ok(status_from_payload(
+            payload,
+            identity.device_id,
+            PreviewEntitlementState::ClockRollback,
+            "System clock rollback detected",
+        ));
+    }
+    if now
+        >= record
+            .last_seen_at
+            .saturating_add(CHECKPOINT_INTERVAL_SECONDS)
+    {
+        record.last_seen_at = now;
+        let message = checkpoint_message(&record.envelope, record.last_seen_at);
+        record.checkpoint_signature =
+            URL_SAFE_NO_PAD.encode(identity.key_pair.sign(message.as_bytes()).as_ref());
+        atomic_write_json(&path, &record)?;
+    }
+    let (state, message) = lease_state_at(&payload, now);
+    Ok(status_from_payload(
+        payload,
+        identity.device_id,
+        state,
+        message,
+    ))
+}
+
+fn entitlement_status(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
+    let now = now_unix()?;
+    if let Some(status) = cached_status(now, true) {
+        return Ok(status);
+    }
+    let _guard = ENTITLEMENT_LOCK
+        .lock()
+        .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+    let status = entitlement_status_locked(app)?;
+    cache_status(status.clone(), now);
+    Ok(status)
+}
+
+pub(crate) fn require_preview_capability(
+    app: &AppHandle,
+    capability: PreviewCapability,
+) -> Result<(), String> {
+    let now = now_unix()?;
+    let status = match cached_status(now, false) {
+        Some(status) => status,
+        None => entitlement_status(app)?,
+    };
+    require_status_capability(status, capability)
+}
+
+pub(crate) fn revalidate_preview_capability(
+    app: &AppHandle,
+    capability: PreviewCapability,
+) -> Result<(), String> {
+    let status = entitlement_status(app)?;
+    require_status_capability(status, capability)
+}
+
+fn require_status_capability(
+    status: PreviewEntitlementStatus,
+    capability: PreviewCapability,
+) -> Result<(), String> {
+    if !matches!(
+        status.state,
+        PreviewEntitlementState::Active | PreviewEntitlementState::OfflineGrace
+    ) {
+        return Err(status.message);
+    }
+    if !status
+        .capabilities
+        .iter()
+        .any(|granted| granted == capability.as_str())
+    {
+        return Err("Preview entitlement does not grant this capability".into());
+    }
+    Ok(())
+}
+
+fn service_endpoint(config: &EntitlementConfig, path: &str) -> Result<Url, String> {
+    let base = config.service_url.as_str().trim_end_matches('/');
+    Url::parse(&format!("{base}{path}"))
+        .map_err(|_| "Preview entitlement endpoint is invalid".to_string())
+}
+
+async fn send_lease_request<T: Serialize>(
+    endpoint: Url,
+    body: &T,
+    access_code: Option<&str>,
+) -> Result<LeaseEnvelope, String> {
+    let client = reqwest::Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|_| "Unable to initialize Preview entitlement client".to_string())?;
+    let mut request = client.post(endpoint).json(body);
+    if let Some(code) = access_code {
+        request = request.bearer_auth(code);
+    }
+    let mut response = request
+        .send()
+        .await
+        .map_err(|_| "Preview entitlement service is unavailable".to_string())?;
+    let status = response.status();
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
+    {
+        return Err("Preview entitlement response is too large".into());
+    }
+    let mut bytes = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(MAX_RESPONSE_BYTES as u64) as usize,
+    );
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "Unable to read Preview entitlement response".to_string())?
+    {
+        if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
+            return Err("Preview entitlement response is too large".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if !status.is_success() {
+        let service_code = serde_json::from_slice::<ServiceErrorBody>(&bytes)
+            .ok()
+            .map(|body| body.code);
+        return Err(match (status, service_code.as_deref()) {
+            (StatusCode::CONFLICT, Some("DEVICE_LIMIT_REACHED")) => {
+                "PREVIEW_DEVICE_LIMIT_REACHED".into()
+            }
+            (StatusCode::CONFLICT, Some("DEVICE_TRANSFER_COOLDOWN")) => {
+                "PREVIEW_DEVICE_TRANSFER_COOLDOWN".into()
+            }
+            (StatusCode::CONFLICT, Some("DEVICE_TRANSFER_REQUIRES_APPROVAL")) => {
+                "PREVIEW_DEVICE_TRANSFER_REQUIRES_APPROVAL".into()
+            }
+            (StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN, _) => {
+                "Preview access code or entitlement was rejected".into()
+            }
+            (StatusCode::TOO_MANY_REQUESTS, _) => {
+                "Preview entitlement service rate limit reached".into()
+            }
+            _ if status.is_server_error() => {
+                "Preview entitlement service is temporarily unavailable".into()
+            }
+            _ => "Preview entitlement request was rejected".into(),
+        });
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| "Preview entitlement response is invalid".to_string())
+}
+
+fn validate_access_code(access_code: &str) -> Result<&str, String> {
+    let access_code = access_code.trim();
+    if access_code.is_empty()
+        || access_code.len() > MAX_ACCESS_CODE_BYTES
+        || access_code.contains(['\r', '\n'])
+    {
+        return Err("Preview access code is invalid".into());
+    }
+    Ok(access_code)
+}
+
+async fn activate(
+    app: &AppHandle,
+    access_code: &str,
+    replace_existing_device: bool,
+) -> Result<PreviewEntitlementStatus, String> {
+    let access_code = validate_access_code(access_code)?;
+    let config = entitlement_config()?;
+    let root = entitlement_root(app)?;
+    let (identity, request, now) = {
+        let _guard = ENTITLEMENT_LOCK
+            .lock()
+            .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+        let identity = load_or_create_identity(&root)?;
+        let now = now_unix()?;
+        let app_version = app.package_info().version.to_string();
+        let proof_action = if replace_existing_device {
+            "activate-replace"
+        } else {
+            "activate"
+        };
+        let request = ActivationRequest {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: identity.device_id.clone(),
+            device_public_key: identity.public_key.clone(),
+            installation_id: identity.installation_id.clone(),
+            app_version: app_version.clone(),
+            replace_existing_device,
+            proof: create_device_proof(proof_action, &identity, now, &app_version),
+        };
+        (identity, request, now)
+    };
+    let endpoint = service_endpoint(&config, "/v1/preview/leases")?;
+    let envelope = send_lease_request(endpoint, &request, Some(access_code)).await?;
+    config
+        .verifier
+        .verify(&envelope, &identity.device_id, now)?;
+    {
+        let _guard = ENTITLEMENT_LOCK
+            .lock()
+            .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+        atomic_write_json(
+            &lease_path(&root),
+            &create_lease_record(envelope, now, &identity),
+        )?;
+        let status = entitlement_status_locked(app)?;
+        cache_status(status.clone(), now);
+        Ok(status)
+    }
+}
+
+pub(crate) async fn refresh(app: &AppHandle) -> Result<PreviewEntitlementStatus, String> {
+    let config = entitlement_config()?;
+    let root = entitlement_root(app)?;
+    let (identity, request, now) = {
+        let _guard = ENTITLEMENT_LOCK
+            .lock()
+            .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+        let identity = load_or_create_identity(&root)?;
+        let record = read_json::<LeaseRecord>(&lease_path(&root))?
+            .ok_or_else(|| "Preview is not activated on this device".to_string())?;
+        verify_lease_checkpoint(&record, &identity)?;
+        let now = now_unix()?;
+        let payload = config
+            .verifier
+            .verify(&record.envelope, &identity.device_id, now)?;
+        if checkpoint_predates_lease(&record, &payload) {
+            return Err("Preview lease checkpoint predates the signed lease".into());
+        }
+        if clock_rollback_detected(&record, now) {
+            return Err("System clock rollback detected".into());
+        }
+        let app_version = app.package_info().version.to_string();
+        let request = RefreshRequest {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: identity.device_id.clone(),
+            installation_id: identity.installation_id.clone(),
+            app_version: app_version.clone(),
+            lease: record.envelope,
+            proof: create_device_proof("refresh", &identity, now, &app_version),
+        };
+        (identity, request, now)
+    };
+    let endpoint = service_endpoint(&config, "/v1/preview/leases/refresh")?;
+    let envelope = send_lease_request(endpoint, &request, None).await?;
+    config
+        .verifier
+        .verify(&envelope, &identity.device_id, now)?;
+    {
+        let _guard = ENTITLEMENT_LOCK
+            .lock()
+            .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+        atomic_write_json(
+            &lease_path(&root),
+            &create_lease_record(envelope, now, &identity),
+        )?;
+        let status = entitlement_status_locked(app)?;
+        cache_status(status.clone(), now);
+        Ok(status)
+    }
+}
+
+async fn update_authorization(app: &AppHandle) -> Result<PreviewUpdateAuthorization, String> {
+    // Update checks are never authorized from an offline snapshot. Refreshing
+    // first gives the service an immediate opportunity to reject revocation,
+    // cloned identities, excessive device use, or a replayed lease.
+    refresh(app).await?;
+    let _guard = ENTITLEMENT_LOCK
+        .lock()
+        .map_err(|_| "Preview entitlement lock is unavailable".to_string())?;
+    let config = entitlement_config()?;
+    let root = entitlement_root(app)?;
+    let identity = load_or_create_identity(&root)?;
+    let record = read_json::<LeaseRecord>(&lease_path(&root))?
+        .ok_or_else(|| "Preview is not activated on this device".to_string())?;
+    verify_lease_checkpoint(&record, &identity)?;
+    let now = now_unix()?;
+    let payload = config
+        .verifier
+        .verify(&record.envelope, &identity.device_id, now)?;
+    if checkpoint_predates_lease(&record, &payload) {
+        return Err("Preview lease checkpoint predates the signed lease".into());
+    }
+    if clock_rollback_detected(&record, now) {
+        return Err("System clock rollback detected".into());
+    }
+    if now > payload.expires_at {
+        return Err("Preview entitlement has expired".into());
+    }
+    sign_update_authorization(
+        &identity,
+        app.package_info().version.to_string(),
+        now,
+        payload.expires_at,
+    )
+}
+
+#[tauri::command]
+pub(crate) fn moke_preview_entitlement_status(
+    webview: Webview,
+    app: AppHandle,
+) -> Result<PreviewEntitlementStatus, String> {
+    super::super::require_moke_shell(&webview)?;
+    entitlement_status(&app)
+}
+
+#[tauri::command]
+pub(crate) async fn moke_preview_activate(
+    webview: Webview,
+    app: AppHandle,
+    access_code: String,
+    replace_existing_device: Option<bool>,
+) -> Result<PreviewEntitlementStatus, String> {
+    super::super::require_moke_shell(&webview)?;
+    activate(&app, &access_code, replace_existing_device.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub(crate) async fn moke_preview_refresh(
+    webview: Webview,
+    app: AppHandle,
+) -> Result<PreviewEntitlementStatus, String> {
+    super::super::require_moke_shell(&webview)?;
+    refresh(&app).await
+}
+
+#[tauri::command]
+pub(crate) async fn moke_preview_update_authorization(
+    webview: Webview,
+    app: AppHandle,
+) -> Result<PreviewUpdateAuthorization, String> {
+    super::super::require_moke_shell(&webview)?;
+    update_authorization(&app).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entitlement_url_allows_only_https_or_debug_loopback_http() {
+        assert!(parse_entitlement_service_url("https://preview.example.test/api").is_ok());
+        assert!(parse_entitlement_service_url("http://127.0.0.1:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://localhost:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://[::1]:18080").is_ok());
+        assert!(parse_entitlement_service_url("http://192.0.2.1:18080").is_err());
+        assert!(parse_entitlement_service_url("https://user@preview.example.test").is_err());
+        assert!(parse_entitlement_service_url("https://preview.example.test?token=x").is_err());
+    }
+
+    fn signed_envelope(signer: &Ed25519KeyPair, payload: &LeasePayload) -> LeaseEnvelope {
+        let payload_bytes = serde_json::to_vec(payload).unwrap();
+        LeaseEnvelope {
+            payload: URL_SAFE_NO_PAD.encode(&payload_bytes),
+            signature: URL_SAFE_NO_PAD.encode(signer.sign(&payload_bytes).as_ref()),
+        }
+    }
+
+    fn test_signer() -> Ed25519KeyPair {
+        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
+        Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).unwrap()
+    }
+
+    fn valid_payload(now: u64, device_id: &str) -> LeasePayload {
+        LeasePayload {
+            version: PROTOCOL_VERSION,
+            lease_id: "lease-test".into(),
+            subject: "preview-tester".into(),
+            device_id: device_id.into(),
+            capabilities: vec![REQUIRED_CAPABILITY.into()],
+            issued_at: now.saturating_sub(10),
+            expires_at: now + 30 * 60,
+            offline_until: now + 30 * 60,
+        }
+    }
+
+    #[test]
+    fn signed_lease_is_bound_to_the_expected_device() {
+        let now = 1_800_000_000;
+        let signer = test_signer();
+        let verifier = EntitlementVerifier::new(signer.public_key().as_ref()).unwrap();
+        let envelope = signed_envelope(&signer, &valid_payload(now, "device-a"));
+
+        assert!(verifier.verify(&envelope, "device-a", now).is_ok());
+        assert_eq!(
+            verifier.verify(&envelope, "device-b", now).unwrap_err(),
+            "Preview lease belongs to a different device"
+        );
+    }
+
+    #[test]
+    fn modified_payload_or_signature_is_rejected() {
+        let now = 1_800_000_000;
+        let signer = test_signer();
+        let verifier = EntitlementVerifier::new(signer.public_key().as_ref()).unwrap();
+        let mut envelope = signed_envelope(&signer, &valid_payload(now, "device-a"));
+        let mut payload_bytes = URL_SAFE_NO_PAD.decode(&envelope.payload).unwrap();
+        payload_bytes[0] ^= 1;
+        envelope.payload = URL_SAFE_NO_PAD.encode(payload_bytes);
+        assert_eq!(
+            verifier.verify(&envelope, "device-a", now).unwrap_err(),
+            "Preview lease signature is invalid"
+        );
+    }
+
+    #[test]
+    fn lease_lifetimes_and_required_capability_are_bounded() {
+        let now = 1_800_000_000;
+        let mut payload = valid_payload(now, "device-a");
+        payload.expires_at = payload.issued_at + MAX_ONLINE_LEASE_SECONDS + 1;
+        assert_eq!(
+            validate_lease_payload(&payload, "device-a", now).unwrap_err(),
+            "Preview lease online lifetime is invalid"
+        );
+
+        let mut payload = valid_payload(now, "device-a");
+        payload.capabilities = vec!["other".into()];
+        assert_eq!(
+            validate_lease_payload(&payload, "device-a", now).unwrap_err(),
+            "Preview lease does not grant the required capability"
+        );
+
+        let mut payload = valid_payload(now, "device-a");
+        payload.offline_until += 1;
+        assert_eq!(
+            validate_lease_payload(&payload, "device-a", now).unwrap_err(),
+            "Preview lease offline window is invalid"
+        );
+    }
+
+    #[test]
+    fn access_codes_reject_empty_oversized_and_header_injection_values() {
+        assert!(validate_access_code("valid-code").is_ok());
+        assert!(validate_access_code("  ").is_err());
+        assert!(validate_access_code("bad\r\nheader").is_err());
+        assert!(validate_access_code(&"x".repeat(MAX_ACCESS_CODE_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn device_proof_commits_to_installation_and_request_context() {
+        let signer = test_signer();
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), signer);
+        let message = proof_message("activate", &identity, "nonce", 1_800_000_000, "1.2.3");
+        assert!(message.contains(&identity.device_id));
+        assert!(message.contains(&identity.installation_id));
+        assert!(message.ends_with("1.2.3"));
+    }
+
+    #[test]
+    fn device_identity_metadata_contains_no_private_key_material() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let file = DeviceIdentityFile {
+            version: IDENTITY_VERSION,
+            installation_id: identity.installation_id,
+            key_id: uuid::Uuid::new_v4().to_string(),
+            public_key: identity.public_key,
+        };
+        let value = serde_json::to_value(file).unwrap();
+        assert_eq!(value["version"], IDENTITY_VERSION);
+        assert!(value.get("keyId").is_some());
+        assert!(value.get("publicKey").is_some());
+        assert!(value.get("privateKeyPkcs8").is_none());
+    }
+
+    #[test]
+    fn update_authorization_is_short_lived_and_device_signed() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let now = 1_800_000_000;
+        let authorization = sign_update_authorization(
+            &identity,
+            "1.2.3".into(),
+            now,
+            now + UPDATE_AUTHORIZATION_SECONDS + 60,
+        )
+        .unwrap();
+
+        assert_eq!(authorization.expires_at, now + UPDATE_AUTHORIZATION_SECONDS);
+        assert!(authorization.authorization.starts_with("MokePreview "));
+        assert!(!authorization
+            .authorization
+            .contains(&identity.installation_id));
+
+        let token = authorization
+            .authorization
+            .strip_prefix("MokePreview ")
+            .unwrap();
+        let (encoded_claims, encoded_signature) = token.split_once('.').unwrap();
+        let claims: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(encoded_claims).unwrap()).unwrap();
+        assert_eq!(claims["action"], "update");
+        assert_eq!(claims["deviceId"], identity.device_id);
+        assert_eq!(claims["expiresAt"], now + UPDATE_AUTHORIZATION_SECONDS);
+
+        let message =
+            format!("moke-preview-update-authorization-v{PROTOCOL_VERSION}\n{encoded_claims}");
+        signature::UnparsedPublicKey::new(&signature::ED25519, identity.key_pair.public_key())
+            .verify(
+                message.as_bytes(),
+                &URL_SAFE_NO_PAD.decode(encoded_signature).unwrap(),
+            )
+            .unwrap();
+
+        let capped = sign_update_authorization(&identity, "1.2.3".into(), now, now + 10).unwrap();
+        assert_eq!(capped.expires_at, now + 10);
+    }
+
+    #[test]
+    fn lease_checkpoint_rejects_timestamp_and_envelope_tampering() {
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let envelope = LeaseEnvelope {
+            payload: "signed-payload".into(),
+            signature: "service-signature".into(),
+        };
+        let mut record = create_lease_record(envelope, 1_800_000_000, &identity);
+
+        assert!(verify_lease_checkpoint(&record, &identity).is_ok());
+        record.last_seen_at += 1;
+        assert_eq!(
+            verify_lease_checkpoint(&record, &identity).unwrap_err(),
+            "Preview lease checkpoint is invalid"
+        );
+
+        record = create_lease_record(record.envelope, 1_800_000_000, &identity);
+        record.envelope.payload.push('x');
+        assert_eq!(
+            verify_lease_checkpoint(&record, &identity).unwrap_err(),
+            "Preview lease checkpoint is invalid"
+        );
+    }
+
+    #[test]
+    fn checkpoint_time_guards_detect_rollback_and_prelease_values() {
+        let now = 1_800_000_000;
+        let identity = device_identity(uuid::Uuid::new_v4().to_string(), test_signer());
+        let payload = valid_payload(now, &identity.device_id);
+        let envelope = LeaseEnvelope {
+            payload: "payload".into(),
+            signature: "signature".into(),
+        };
+        let mut record = create_lease_record(envelope, payload.issued_at, &identity);
+
+        assert!(!checkpoint_predates_lease(&record, &payload));
+        record.last_seen_at = payload.issued_at - CLOCK_SKEW_SECONDS - 1;
+        assert!(checkpoint_predates_lease(&record, &payload));
+
+        record.last_seen_at = now + CLOCK_SKEW_SECONDS + 1;
+        assert!(clock_rollback_detected(&record, now));
+    }
+
+    #[test]
+    fn lease_state_transitions_at_signed_time_boundaries() {
+        let payload = LeasePayload {
+            expires_at: 1_800_000_100,
+            offline_until: 1_800_000_100,
+            ..valid_payload(1_800_000_000, "device-a")
+        };
+
+        assert_eq!(
+            lease_state_at(&payload, payload.expires_at).0,
+            PreviewEntitlementState::Active
+        );
+        assert_eq!(
+            lease_state_at(&payload, payload.expires_at + 1).0,
+            PreviewEntitlementState::Expired
+        );
+        assert_eq!(
+            lease_state_at(&payload, payload.offline_until + 1).0,
+            PreviewEntitlementState::Expired
+        );
+    }
+
+    #[test]
+    fn cached_fast_path_enforces_expiry_and_clock_rollback_without_disk_io() {
+        let status = status_from_payload(
+            LeasePayload {
+                expires_at: 1_800_000_100,
+                offline_until: 1_800_000_100,
+                ..valid_payload(1_800_000_000, "device-a")
+            },
+            "device-a".into(),
+            PreviewEntitlementState::Active,
+            "active",
+        );
+        let cache = CachedEntitlement {
+            status,
+            verified_at: 1_800_000_000,
+            last_seen_at: 1_800_000_000,
+        };
+
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_100).state,
+            PreviewEntitlementState::Active
+        );
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_101).state,
+            PreviewEntitlementState::Expired
+        );
+        assert_eq!(
+            cached_status_at(&cache, 1_800_000_102).state,
+            PreviewEntitlementState::Expired
+        );
+
+        let future_cache = CachedEntitlement {
+            last_seen_at: 1_800_000_000 + CLOCK_SKEW_SECONDS + 1,
+            ..cache
+        };
+        assert_eq!(
+            cached_status_at(&future_cache, 1_800_000_000).state,
+            PreviewEntitlementState::ClockRollback
+        );
+    }
+}

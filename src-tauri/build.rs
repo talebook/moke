@@ -33,6 +33,12 @@ const APP_ACL_COMMANDS: &[&str] = &[
     // Moke host commands used by the shell. On single-WebView targets the
     // command implementations also validate the active document path because
     // the shell and Reader necessarily share the `main` label.
+    "moke_build_info",
+    "moke_preview_activate",
+    "moke_preview_entitlement_status",
+    "moke_preview_enter_app",
+    "moke_preview_refresh",
+    "moke_preview_update_authorization",
     "moke_runtime_platform",
     "moke_navigate",
     "moke_record_downloaded_book",
@@ -50,6 +56,16 @@ const APP_ACL_COMMANDS: &[&str] = &[
 ];
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_PREVIEW");
+    println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+    build_config::validate_preview_build_channel(
+        std::env::var("PROFILE").ok().as_deref(),
+        std::env::var_os("CARGO_FEATURE_PREVIEW").is_some(),
+        std::env::var("TAURI_CONFIG").ok().as_deref(),
+    )
+    .expect("refusing to build mismatched Preview frontend and native channels");
+
     // Readest's bare app-level commands are linked through a Rust library, so
     // its app ACL manifest cannot propagate like a plugin `links` manifest.
     // Declare that command surface in the embedding host; Reader capabilities
