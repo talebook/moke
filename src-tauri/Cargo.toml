@@ -95,15 +95,28 @@ openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/deri
 tauri-plugin-fs = { path = "../vendor/ohos-plugins/plugins/fs" }
 tauri-plugin-shell = { path = "../vendor/ohos-plugins/plugins/shell" }
 tauri-plugin-opener = { path = "../vendor/ohos-plugins/plugins/opener" }
+# The mobile log backend has native stdout/stderr arms only for Android/iOS;
+# OHOS can use Rust's standard streams without a native plugin handle.
+tauri-plugin-log = { path = "../vendor/tauri-plugin-log" }
+# Upstream device-info treats every Tauri mobile target as Android/iOS and
+# therefore has no native handle on OHOS. Keep its commands available through
+# a no-data OHOS fallback until a native implementation exists.
+tauri-plugin-device-info = { path = "../vendor/tauri-plugin-device-info" }
+# Reader standalone-only mobile plugins remain transitive dependencies of the
+# embedded library. Their upstream mobile backends are Android/iOS-only, so
+# these copies select explicit unsupported/no-op fallbacks on OHOS.
+tauri-plugin-sign-in-with-apple = { path = "../vendor/tauri-plugin-sign-in-with-apple" }
+tauri-plugin-sharekit = { path = "../vendor/tauri-plugin-sharekit" }
+tauri-plugin-haptics = { path = "../vendor/tauri-plugin-haptics" }
+tauri-plugin-biometric = { path = "../vendor/tauri-plugin-biometric" }
 # turso_ext's build.rs checks `cfg!(target_os = "windows")` which evaluates
 # on the build *host*: cross-compiling from Windows for OpenHarmony
 # (target_os = "linux") wrongly links advapi32 (a Windows-only lib). Vendored
 # at readest's patches/turso_ext with the target read via CARGO_CFG_TARGET_OS.
 turso_ext = { path = "../readest/patches/turso_ext" }
-# tauri-plugin-deep-link reads `Env::appimage` on Linux, a field the Tauri
-# OpenHarmony branch only exposes off-OpenHarmony. Vendored at readest's
-# patches/tauri-plugin-deep-link with that read cfg-gated for OHOS.
-tauri-plugin-deep-link = { path = "../readest/patches/tauri-plugin-deep-link" }
+# Deep-link has no Android/iOS native handle for OHOS. The local patch keeps
+# cold-start reads available as `null` without invoking Linux desktop tools.
+tauri-plugin-deep-link = { path = "../vendor/tauri-plugin-deep-link" }
 tauri = { path = "../vendor/tauri/crates/tauri" }
 tauri-build = { path = "../vendor/tauri/crates/tauri-build" }
 tauri-codegen = { path = "../vendor/tauri/crates/tauri-codegen" }

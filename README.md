@@ -63,9 +63,10 @@ Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的
 CLI 使用官方支持的 `rustls` feature 和内置 CA 根证书，避开当前锁定版本的
 `platform-certs` 编译错误；TLS 校验仍然启用，但不会读取系统自定义 CA。
 
-本次官方分支迁移仍有插件兼容阻塞，完整状态见
-[OHOS 验证记录](docs/ohos-upstream-validation.md)。解决阻塞并配置 OHOS SDK、
-`ohpm`、Hvigor 和签名后，开发命令为：
+本次官方分支迁移的 Rust 插件兼容层已通过完整 OHOS target check 和
+`ohrs build --arch arm64`，但 HAP 组装、安装和设备运行仍待验证。完整状态见
+[OHOS 验证记录](docs/ohos-upstream-validation.md)。配置 OHOS SDK、`ohpm`、
+Hvigor 和签名后，开发命令为：
 
 ```bash
 pnpm tauri ohos init

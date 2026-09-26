@@ -2,8 +2,10 @@
 
 This migration pins `tauri-apps/tauri:feat/open-harmony` at
 `e3bf6eb168bacc7bb5c8c32d923bb8beaf77c92b`. The official source and OHOS
-template icons are unchanged. **This revision is not yet verified to build or
-run Moke on OHOS and should not be merged as a working OHOS migration.**
+template icons are unchanged. The complete Moke Rust graph now passes both the
+OHOS target check and `ohrs build --arch arm64`, but **a HAP has not yet been
+assembled, installed or run. This revision is therefore not yet a verified
+working OHOS migration.**
 
 ## fs/shell/opener compatibility (current revision)
 
@@ -87,11 +89,15 @@ not a claim that every Reader dependency has been replaced with upstream.
   check for fs 2.5.2, shell 2.3.6 and opener 2.5.5 passed in 7.68 seconds
   (exit 0). The fs routing regression suite passed all three tests. In addition
   to upstream warnings, fs reports an unused `PathKind::Path` variant on OHOS.
-- These are not HAP/device results. Full app target checking and ArkTS
-  validation remain separate acceptance requirements. The diagnostic invocation
-  of `CompileArkTS` exited with "task not found" before compiling the adapter;
-  this does not establish that the SDK is absent. The official full build uses
-  `assembleHap`, which remains to be validated.
+- The complete locked Moke dependency graph subsequently passed `cargo check
+  --target aarch64-unknown-linux-ohos`. A direct `ohrs build --arch arm64` from
+  `src-tauri/` also completed and generated `index.d.ts`; this verifies the
+  native Rust build that previously failed in `tauri-plugin-device-info`.
+- These are not HAP/device results. ArkTS and Hvigor assembly remain separate
+  acceptance requirements. The diagnostic invocation of `CompileArkTS` exited
+  with "task not found" before compiling the adapter; this does not establish
+  that the SDK is absent. The official full build uses `assembleHap`, which
+  remains to be validated.
 
 Reproduce the quick transport tests from `vendor/ohos-plugins` using the command
 in `plugins/opener/OHOS.md`. Reproduce app adapter tests with
@@ -107,7 +113,30 @@ Device acceptance still requires a newly built HAP, not the old installed dev
 package: startup, actual native invoke, approved/denied URL and file opens,
 missing-viewer errors, online/offline reading, back navigation and persistence.
 
-## Original source incompatibility (addressed in the plugin fork; full build pending)
+## Other Android/iOS-only mobile plugins
+
+Official Tauri marks OpenHarmony as `mobile`, while several Reader dependencies
+only define native handles for Android and iOS. Moke now pins local copies of
+the exact locked releases rather than editing the Cargo registry:
+
+- `device-info` keeps its IPC commands registered but returns empty values on
+  OHOS until a native implementation exists. Reader battery display therefore
+  degrades to unavailable instead of blocking startup.
+- `log` sends stdout/stderr targets through Rust standard streams on OHOS.
+- `deep-link` keeps cold-start reads available as `null` and does not invoke
+  Linux `xdg-mime` registration tools on OHOS.
+- Reader's transitive sign-in-with-Apple, ShareKit and haptics plugins select
+  their existing unsupported/no-op desktop fallbacks. Biometric status reports
+  unavailable and authentication fails explicitly as unsupported.
+
+The Reader-owned native bridge and native TTS plugins had already implemented
+OHOS fallback behavior in their desktop backends, but official mobile cfg was
+selecting their Android/iOS modules. Reader PR
+[hehetoshang/readest-reader#6](https://github.com/hehetoshang/readest-reader/pull/6)
+routes OHOS to those fallback backends. Moke pins the merged Reader revision.
+Android, iOS and desktop routing remains unchanged.
+
+## Original source incompatibility (addressed in the plugin fork)
 
 The official `crates/tauri-plugin/src/build/mobile.rs` emits `cfg(mobile)` for
 `target_env = "ohos"`. Moke's pinned `tauri-plugin-shell` 2.3.5 independently
@@ -232,7 +261,7 @@ complete HAP/runtime test still remain after resolving native compatibility.
 - PR #15 GitHub Actions jobs did not start: their annotations report an
   account billing/spending-limit restriction. They provide no build evidence.
 
-To complete validation, resolve any remaining full-app build errors, configure signing,
-build the HAP using the pinned official CLI, and run the
-above checks on the recovered QEMU or an OHOS device. Preserve the official template
-icons; icon customization is outside this migration.
+To complete validation, run the pinned official CLI through Hvigor
+`assembleHap`, configure signing as needed, install the resulting HAP, and run
+the above checks on the recovered QEMU or an OHOS device. Preserve the official
+template icons; icon customization is outside this migration.
