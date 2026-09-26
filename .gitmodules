@@ -3,8 +3,8 @@
 	url = https://github.com/hehetoshang/readest-reader.git
 [submodule "tauri"]
 	path = vendor/tauri
-	url = https://github.com/hehetoshang/tauri.git
-	branch = dev
+	url = https://github.com/tauri-apps/tauri.git
+	branch = feat/open-harmony
 [submodule "vendor/foliate-js"]
 	path = vendor/foliate-js
 	url = https://github.com/hehetoshang/foliate-js

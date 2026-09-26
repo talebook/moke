@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -22,6 +23,12 @@ import {
 
 const patchDir = fileURLToPath(new URL('../scripts/ohos-ability-patch', import.meta.url));
 const toPosixPath = (value) => value.replaceAll('\\', '/');
+const gitmodules = readFileSync(new URL('../.gitmodules', import.meta.url), 'utf8');
+const tauriManifest = readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+const releaseWorkflow = readFileSync(
+  new URL('../.github/workflows/build-release.yml', import.meta.url),
+  'utf8',
+);
 
 const UNPATCHED_MAIN_PAGE = `@Entry({ routeName: "RustAbility" })
 @Component
@@ -38,6 +45,49 @@ function WebBuilder(data: WebviewNodeData) {
     .onControllerAttached(() => {});
 }
 `;
+
+test('OHOS 统一使用官方 Tauri 分支与官方模板图标', () => {
+  const tauriSubmodule = gitmodules.match(
+    /\[submodule "tauri"\]([\s\S]*?)(?=\n\[submodule |$)/,
+  )?.[1];
+  assert.ok(tauriSubmodule, 'vendor/tauri submodule configuration is missing');
+  assert.match(tauriSubmodule, /url = https:\/\/github\.com\/tauri-apps\/tauri\.git/);
+  assert.match(tauriSubmodule, /branch = feat\/open-harmony/);
+  assert.doesNotMatch(tauriSubmodule, /hehetoshang\/tauri|branch = dev/);
+
+  for (const crate of [
+    'tauri',
+    'tauri-build',
+    'tauri-codegen',
+    'tauri-macros',
+    'tauri-plugin',
+    'tauri-runtime',
+    'tauri-runtime-wry',
+    'tauri-utils',
+  ]) {
+    assert.match(
+      tauriManifest,
+      new RegExp(`${crate} = \\{ path = "\\.\\.\\/vendor\\/tauri\\/crates\\/${crate}"`),
+      `${crate} must resolve through vendor/tauri`,
+    );
+  }
+
+  assert.doesNotMatch(releaseWorkflow, /Generate OpenHarmony launcher icons/);
+  for (const path of [
+    'AppScope/resources/base/media/background.png',
+    'AppScope/resources/base/media/foreground.png',
+    'AppScope/resources/base/media/layered_image.json',
+    'entry/src/main/resources/base/media/background.png',
+    'entry/src/main/resources/base/media/foreground.png',
+    'entry/src/main/resources/base/media/layered_image.json',
+    'entry/src/main/resources/base/media/startIcon.png',
+  ]) {
+    assert.ok(
+      existsSync(new URL(`../vendor/tauri/crates/tauri-cli/templates/mobile/open-harmony/${path}`, import.meta.url)),
+      `official OpenHarmony template icon is missing: ${path}`,
+    );
+  }
+});
 
 function makeFakePackage(ohosRoot, roots) {
   for (const root of roots) {

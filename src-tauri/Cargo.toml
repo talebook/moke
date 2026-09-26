@@ -95,8 +95,8 @@ openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/deri
 # (target_os = "linux") wrongly links advapi32 (a Windows-only lib). Vendored
 # at readest's patches/turso_ext with the target read via CARGO_CFG_TARGET_OS.
 turso_ext = { path = "../readest/patches/turso_ext" }
-# tauri-plugin-deep-link reads `Env::appimage` on Linux, a field the Moke
-# Tauri fork only exposes off-OpenHarmony. Vendored at readest's
+# tauri-plugin-deep-link reads `Env::appimage` on Linux, a field the Tauri
+# OpenHarmony branch only exposes off-OpenHarmony. Vendored at readest's
 # patches/tauri-plugin-deep-link with that read cfg-gated for OHOS.
 tauri-plugin-deep-link = { path = "../readest/patches/tauri-plugin-deep-link" }
 tauri = { path = "../vendor/tauri/crates/tauri" }
