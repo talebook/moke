@@ -3,6 +3,7 @@
   "productName": "Moke",
   "identifier": "org.houheya.moke",
   "build": {
+    "beforeDevCommand": "node scripts/prepare-ohos.mjs && node scripts/dev.mjs",
     "frontendDist": "../out",
     "beforeBuildCommand": "pnpm build && pnpm build:reader && pnpm copy:reader && node scripts/prepare-ohos.mjs"
   },

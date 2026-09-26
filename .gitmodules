@@ -22,5 +22,9 @@
 	url = https://github.com/harmony-contrib/openharmony-ability.git
 [submodule "vendor/wry"]
 	path = vendor/wry
-	url = https://github.com/hehetoshang/wry.git
+	url = https://github.com/tauri-apps/wry.git
 	branch = feat/open-harmony
+[submodule "vendor/ohos-plugins"]
+	path = vendor/ohos-plugins
+	url = https://github.com/hehetoshang/plugins-workspace.git
+	branch = feat/moke-ohos-shell-opener

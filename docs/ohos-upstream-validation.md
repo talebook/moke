@@ -5,7 +5,82 @@ This migration pins `tauri-apps/tauri:feat/open-harmony` at
 template icons are unchanged. **This revision is not yet verified to build or
 run Moke on OHOS and should not be merged as a working OHOS migration.**
 
-## Confirmed source incompatibility
+## Shell/opener adapter (current revision)
+
+The developer requested a personal fork for these two plugins, with the Tauri
+stack otherwise official. `vendor/ohos-plugins` pins
+`hehetoshang/plugins-workspace:feat/moke-ohos-shell-opener` at `4a12c6d8`.
+It is based on official `feat/open-harmony` at `cc9ec9b4`; only `plugins/shell`
+and `plugins/opener` were changed. Both Cargo patches are applied at Moke's root,
+so Moke, Reader and shell resolve the **same** opener instance. Reader source
+and its submodule revision were not changed.
+
+The fork fixes the conflicting target cfgs and Android/iOS-only handles
+described below. It also avoids a second upstream blocker: Tauri's OHOS
+`plugin/mobile.rs::run_command` currently returns `Ok(())` without delivering a
+response. Calling `run_mobile_plugin` there would wait indefinitely.
+
+Instead, the app-owned `src-tauri/src/ohos_opener.rs` NAPI exports forward
+validated requests to `scripts/ohos-opener/Opener.ets`. The adapter uses
+UIAbility `openLink` for HTTP(S), `startAbility` for the dialer/mail handler, and
+a read-only file URI Want for files. Native promise errors propagate to callers.
+Missing registration, UI-thread calls, queue failures, destroyed abilities and
+timeouts return errors. There are at most 64 pending requests and a 10-second
+response deadline. Already-started OS requests cannot be cancelled by a timeout.
+
+`prepare-ohos.mjs` integrates this adapter into the **generated app** EntryAbility
+idempotently, before the official base lifecycle starts, and unregisters on
+destroy. OHOS dev and build preparation both run it. No Tauri source, official
+icons, ACL definitions or publication sandbox was modified for this adapter.
+Named programs, `inAppBrowser`, directory opening and reveal-in-file-manager
+remain unsupported and report errors. Shell's POSIX process implementation is
+unchanged and remains subject to the OHOS app sandbox; this is not privileged
+system-shell access.
+
+`vendor/wry` now pins official `tauri-apps/wry:feat/open-harmony` at
+`6aaf4b84`. The previous private navigation-controller patch is intentionally
+not retained; back/forward navigation therefore needs explicit device retesting.
+Existing Reader-owned compatibility patches (including deep-link and turso_ext)
+and the existing ability back-key/storage preparation are unchanged. This is
+not a claim that every Reader dependency has been replaced with upstream.
+
+### Validation of this adapter
+
+- Four Rust std-only transport/validation tests pass, including native failure,
+  missing adapter, timeout cleanup and UI-thread deadlock prevention.
+- Eight app tests pass: generated lifecycle/idempotence/fail-closed behavior,
+  official-source wiring, native Want dispatch, read-only file permission,
+  deferred acknowledgment, native rejection and stale/destroyed requests.
+- The actual NAPI binding and actual fork transport were cross-checked together
+  in a small standalone harness with `cargo check --target
+  aarch64-unknown-linux-ohos` (napi-ohos/napi-derive-ohos 1.2.0): passed.
+- `cargo tree --locked --target aarch64-unknown-linux-ohos -i
+  tauri-plugin-opener` confirms Moke, Reader and shell share the pinned fork.
+- Final full frontend suite: 491 passed; lint passed with 23 existing warnings;
+  TypeScript typecheck passed. Targeted lint and rustfmt checks also passed.
+- Full shell/opener target checking was attempted with a 180-second foreground
+  limit. It stopped while compiling dependencies (exit 124), before reaching a
+  plugin result. It is **not** a successful check or a diagnosed compiler error.
+- These are not HAP/device results. Full plugin/app target checking and ArkTS
+  validation remain separate acceptance requirements. The current local Hvigor
+  task listing exposes only `default@ConfigureCmake`, not `CompileArkTS`; invoking
+  `CompileArkTS` exits with "task not found" before compiling the adapter.
+
+Reproduce the quick transport tests from `vendor/ohos-plugins` using the command
+in `plugins/opener/OHOS.md`. Reproduce app adapter tests with
+`node --test tests/ohos-opener.test.mjs`. The full target check is:
+
+```sh
+cargo check --locked --manifest-path src-tauri/Cargo.toml \
+  --target aarch64-unknown-linux-ohos \
+  -p tauri-plugin-shell -p tauri-plugin-opener
+```
+
+Device acceptance still requires a newly built HAP, not the old installed dev
+package: startup, actual native invoke, approved/denied URL and file opens,
+missing-viewer errors, online/offline reading, back navigation and persistence.
+
+## Original source incompatibility (addressed in the plugin fork; full build pending)
 
 The official `crates/tauri-plugin/src/build/mobile.rs` emits `cfg(mobile)` for
 `target_env = "ohos"`. Moke's pinned `tauri-plugin-shell` 2.3.5 independently
@@ -22,7 +97,8 @@ cross-compilation.
 The previous Tauri fork changed the plugin build helper to select the Rust
 fallback for OHOS. The official revision does not include that change. A
 working migration needs compatible plugins or a narrowly scoped compatibility
-fix; changing the submodule URL and passing frontend tests does not resolve it.
+fix; the adapter above provides that implementation, but changing source and
+passing frontend tests alone still does not establish device compatibility.
 
 The official `tauri-apps/plugins-workspace:feat/open-harmony` branch was also
 checked at `cc9ec9b4ad2f9ec9bd57c3503ded1bd94d092c48`. Its shell `build.rs`

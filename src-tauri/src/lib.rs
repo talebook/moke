@@ -26,6 +26,8 @@ compile_error!("reader-e2e is supported only by desktop development builds");
 
 mod build_channel;
 mod extensions;
+#[cfg(target_env = "ohos")]
+mod ohos_opener;
 #[cfg(feature = "preview")]
 mod preview;
 
@@ -429,7 +431,7 @@ fn moke_delete_downloaded_book_file(
 }
 
 #[tauri::command]
-fn moke_open_downloaded_book(
+async fn moke_open_downloaded_book(
     webview: tauri::Webview,
     app: AppHandle,
     id: String,
@@ -438,9 +440,15 @@ fn moke_open_downloaded_book(
 
     require_moke_shell(&webview)?;
     let path = indexed_downloaded_book_path(&app, &id)?;
-    app.opener()
-        .open_path(path.to_string_lossy().into_owned(), None::<String>)
-        .map_err(|error| error.to_string())
+    // The OHOS UIAbility replies asynchronously. Never wait for that reply on
+    // its UI thread or occupy the async runtime's worker while it is pending.
+    tauri::async_runtime::spawn_blocking(move || {
+        app.opener()
+            .open_path(path.to_string_lossy().into_owned(), None::<String>)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -90,6 +90,10 @@ openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
 openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
 
 [patch.crates-io]
+# Only shell/opener use our OHOS adapter fork. Patching at this root also
+# unifies the Reader's transitive dependencies with the host's opener registry.
+tauri-plugin-shell = { path = "../vendor/ohos-plugins/plugins/shell" }
+tauri-plugin-opener = { path = "../vendor/ohos-plugins/plugins/opener" }
 # turso_ext's build.rs checks `cfg!(target_os = "windows")` which evaluates
 # on the build *host*: cross-compiling from Windows for OpenHarmony
 # (target_os = "linux") wrongly links advapi32 (a Windows-only lib). Vendored
@@ -108,9 +112,7 @@ tauri-runtime = { path = "../vendor/tauri/crates/tauri-runtime" }
 tauri-runtime-wry = { path = "../vendor/tauri/crates/tauri-runtime-wry" }
 tauri-utils = { path = "../vendor/tauri/crates/tauri-utils" }
 
-# wry is vendored at vendor/wry (fork of tauri-apps/wry, feat/open-harmony
-# branch) so OHOS fixes (linux-body cross-compile, ArkWeb eval) can be made
-# locally and upstreamed as a separate PR to tauri-apps/wry.
+# Official tauri-apps/wry feat/open-harmony, pinned by the submodule gitlink.
 wry = { path = "../vendor/wry" }
 tao = { git = "https://github.com/tauri-apps/tao", branch = "feat/open-harmony" }
 
