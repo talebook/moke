@@ -48,11 +48,20 @@ fix; changing the submodule URL and passing frontend tests does not resolve it.
   frontend CI job now initializes `vendor/tauri`, which the new template-icon
   test requires.
 - The local Rust OHOS target is installed, but the OHOS SDK/toolchain is not
-  configured and `ohpm` is unavailable. `hdc list targets` reports `[Empty]`.
+  configured and `ohpm` is unavailable.
+- An existing ARM64 QEMU is managed by `ohos-qemu.service`. Its HDC port is
+  `127.0.0.1:5555`. The guest was unresponsive; restarting that service restored
+  HDC access without replacing its disk images. Explicitly run
+  `hdc tconn 127.0.0.1:5555` before selecting that target.
+- The recovered guest reports `OpenHarmony-7.0.0.39`, API 26. Its previously
+  installed `org.houheya.moke` (package version `1.0.0`, target API 24) accepts
+  `aa start -a EntryAbility -b org.houheya.moke` and has a running process, but
+  its framebuffer shows a white content area. This older development package
+  is not built from this PR and is not evidence that this migration works.
 - PR #15 GitHub Actions jobs did not start: their annotations report an
   account billing/spending-limit restriction. They provide no build evidence.
 
 To complete validation, resolve the plugin incompatibility, provide an OHOS
 SDK with `ohpm`/Hvigor, build the HAP using the pinned official CLI, and run the
-above checks on an OHOS device or emulator. Preserve the official template
+above checks on the recovered QEMU or an OHOS device. Preserve the official template
 icons; icon customization is outside this migration.
