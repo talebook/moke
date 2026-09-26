@@ -1,0 +1,107 @@
+name: Moke Preview 反馈
+description: 反馈 Moke Preview 中的问题、兼容性异常或体验建议
+title: "[Preview] "
+labels:
+  - moke-preview
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢参与 Moke Preview 内测。请尽量完整填写以下信息，以便快速定位问题。
+
+        请勿提交访问码、订单凭证、账号密码、服务器密钥或其他敏感信息。
+
+  - type: dropdown
+    id: feedback-type
+    attributes:
+      label: 反馈类型
+      description: 请选择最符合当前情况的类型。
+      options:
+        - 功能异常
+        - 安装或更新问题
+        - 兼容性问题
+        - 授权或激活问题
+        - 体验改进建议
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: preview-version
+    attributes:
+      label: Preview 版本
+      description: 可在应用的“关于”页面查看，请填写完整版本号。
+      placeholder: 例如 1.0.0-preview.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行平台
+      description: 请选择发生问题的平台。
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: system-version
+    attributes:
+      label: 系统版本
+      placeholder: 例如 Windows 11 24H2、macOS 15.6、Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请说明问题出现的页面、操作和表现。
+      placeholder: 请清晰描述你遇到的问题……
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出可以稳定触发问题的操作。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: 预期结果与实际结果
+      placeholder: |
+        预期结果：
+        实际结果：
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: 日志或截图
+      description: 可直接拖入截图或粘贴相关日志；提交前请移除个人信息和敏感内容。
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已确认该问题发生在 Moke Preview，而不是公开稳定版。
+          required: true
+        - label: 我已搜索现有 Issue，未发现相同问题。
+          required: true
+        - label: 我没有在内容中包含访问码、订单凭证、账号密码或其他敏感信息。
+          required: true
