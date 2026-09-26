@@ -16,6 +16,7 @@ import {
   DEFAULT_PATCH_FILES,
   applyPatchesToPackage,
   ensureDomStorage,
+  ensureWindowsHvigorCli,
   findPackageDir,
   packageRootsFor,
   prepareOhos,
@@ -45,6 +46,21 @@ function WebBuilder(data: WebviewNodeData) {
     .onControllerAttached(() => {});
 }
 `;
+
+test('Windows OHOS preparation fixes the generated Hvigor CLI path', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ohos-hvigor-'));
+  try {
+    const entry = join(root, 'entry');
+    mkdirSync(entry);
+    const hvigorPath = join(entry, 'hvigorfile.ts');
+    writeFileSync(hvigorPath, 'execFileSync(`vendor/tauri/target/debug/cargo-tauri`, ["tauri"]);\n');
+    assert.equal(ensureWindowsHvigorCli(root, 'win32'), 'patched');
+    assert.match(readFileSync(hvigorPath, 'utf8'), /execFileSync\(resolve\(__dirname, "\.\.\/\.\.\/\.\.\/\.\.\/vendor\/tauri\/target\/debug\/cargo-tauri\.exe"\)/);
+    assert.equal(ensureWindowsHvigorCli(root, 'win32'), 'already-present');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('OHOS 统一使用官方 Tauri 分支与官方模板图标', () => {
   const tauriSubmodule = gitmodules.match(

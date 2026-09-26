@@ -16,6 +16,29 @@ export const DEFAULT_PATCH_FILES = [
   'components/MainPage.ets',
 ];
 
+// The vendored Tauri CLI removes .exe from the generated Hvigor command.
+// Hvigor's execFileSync also resolves a relative command from its cwd, not
+// from entry/hvigorfile.ts. Use an absolute path to the CLI we build on Windows.
+export function ensureWindowsHvigorCli(ohosRoot, platform = process.platform) {
+  if (platform !== 'win32') return 'skipped';
+  const hvigorPath = join(ohosRoot, 'entry', 'hvigorfile.ts');
+  if (!existsSync(hvigorPath)) return 'missing';
+
+  const original = readFileSync(hvigorPath, 'utf8');
+  const command = 'execFileSync(resolve(__dirname, "../../../../vendor/tauri/target/debug/cargo-tauri.exe"),';
+  if (original.includes(command)) return 'already-present';
+
+  const updated = original.replace(
+    /execFileSync\(\s*`[^`]*vendor\/tauri\/target\/debug\/cargo-tauri(?:\.exe)?`\s*,/,
+    command,
+  );
+  if (updated === original) {
+    throw new Error(`Could not locate the vendored Tauri CLI command in ${hvigorPath}`);
+  }
+  writeFileSync(hvigorPath, updated, 'utf8');
+  return 'patched';
+}
+
 // `ohpm install` may resolve @ohos-rs/ability into gen/ohos/entry/oh_modules
 // (module-scoped, what the entry module actually compiles against) or
 // gen/ohos/oh_modules (project root). entry/oh_modules wins on priority and
@@ -106,5 +129,4 @@ export function prepareOhos({ ohosRoot, patchDir, patchFiles = DEFAULT_PATCH_FIL
   }
   return { packageRoots, results };
 }
-
 
