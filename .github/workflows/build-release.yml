@@ -181,7 +181,7 @@ jobs:
       - name: Build Tauri CLI (from vendor/tauri submodule)
         if: matrix.platform == 'ohos'
         run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
+          cargo build --release --locked --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli --no-default-features --features rustls
           echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
 
       - name: Cache readest Next.js

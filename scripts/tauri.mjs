@@ -14,7 +14,10 @@ export function tauriCommand(args) {
       args: [
         'run', '--locked', '--manifest-path',
         path.join(root, 'vendor/tauri/Cargo.toml'),
-        '-p', 'tauri-cli', '--bin', 'cargo-tauri', '--', ...args,
+        '-p', 'tauri-cli', '--bin', 'cargo-tauri',
+        // The pinned CLI's platform-certs dependency fails to compile on Linux.
+        // Use upstream's Rustls + bundled roots option; TLS verification stays on.
+        '--no-default-features', '--features', 'rustls', '--', ...args,
       ],
     };
   }

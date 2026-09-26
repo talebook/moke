@@ -60,6 +60,8 @@ Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的
 `pnpm tauri ohos ...` 使用 `vendor/tauri` 固定的官方 `feat/open-harmony`
 源码编译并运行 CLI；首次执行需要 Rust 工具链并会编译 CLI。npm 发布版 CLI
 不提供 `ohos` 子命令，其他平台命令仍使用 npm CLI。
+CLI 使用官方支持的 `rustls` feature 和内置 CA 根证书，避开当前锁定版本的
+`platform-certs` 编译错误；TLS 校验仍然启用，但不会读取系统自定义 CA。
 
 本次官方分支迁移仍有插件兼容阻塞，完整状态见
 [OHOS 验证记录](docs/ohos-upstream-validation.md)。解决阻塞并配置 OHOS SDK、
