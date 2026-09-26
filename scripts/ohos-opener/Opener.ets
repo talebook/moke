@@ -9,6 +9,7 @@ interface OpenRequest {
 }
 
 interface NativeOpener {
+  configureOhosAppStorage?: (filesDir: string, cacheDir: string) => void;
   registerOhosOpener(callback: (payload: string) => void): void;
   completeOhosOpener(id: number, error: string | null): void;
   isOhosOpenerPending(id: number): boolean;
@@ -22,6 +23,11 @@ export class OhosOpener {
 
   install(context: common.UIAbilityContext, moduleName: string): void {
     const native = loadNativeModule(`lib${moduleName}.so`) as NativeOpener;
+    // During `ohos dev`, ArkTS can be redeployed before the Rust library is rebuilt.
+    // Keep the existing library bootable until the new NAPI export is installed.
+    if (typeof native.configureOhosAppStorage === 'function') {
+      native.configureOhosAppStorage(context.filesDir, context.cacheDir);
+    }
     this.native = native;
     native.registerOhosOpener((payload: string): void => {
       this.dispatch(context, native, payload);

@@ -3,9 +3,24 @@
 use napi_derive_ohos::napi;
 use napi_ohos::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
-    Status,
+    Error, Result, Status,
 };
+use std::path::Path;
 use tauri_plugin_opener::ohos::{self, OpenRequest};
+
+/// Set XDG roots before RustAbility starts Tauri. The Linux-style `dirs`
+/// fallback on OHOS otherwise resolves AppData under /storage/Users/currentUser,
+/// where creating a file may work but renaming it is denied by the sandbox.
+#[napi]
+pub fn configure_ohos_app_storage(files_dir: String, cache_dir: String) -> Result<()> {
+    if !Path::new(&files_dir).is_absolute() || !Path::new(&cache_dir).is_absolute() {
+        return Err(Error::new(Status::InvalidArg, "OHOS app directories must be absolute"));
+    }
+    std::env::set_var("XDG_DATA_HOME", &files_dir);
+    std::env::set_var("XDG_CONFIG_HOME", &files_dir);
+    std::env::set_var("XDG_CACHE_HOME", &cache_dir);
+    Ok(())
+}
 
 #[napi]
 pub fn register_ohos_opener(

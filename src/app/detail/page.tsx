@@ -138,7 +138,10 @@ function DetailContent() {
     loadBookControllerRef.current = controller;
     loadBook(controller);
     return () => {
-      controller.abort();
+      // Tauri's HTTP plugin keeps the abort listener after a completed fetch.
+      // Aborting that finished request asks Rust to close an already released
+      // resource and surfaces an unhandled rejection in the Next dev overlay.
+      if (loadBookControllerRef.current === controller) controller.abort();
       onlineOpenControllerRef.current?.abort();
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
@@ -235,6 +238,7 @@ function DetailContent() {
       }
       setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
     } finally {
+      if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
       if (!controller.signal.aborted && seq === loadBookSeqRef.current) setLoading(false);
     }
   };

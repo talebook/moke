@@ -68,9 +68,10 @@ test('Cargo locks each adapted plugin once from the fork, matching the exact hos
 
 // Execute the actual adapter with native API mocks. This verifies dispatch and
 // completion semantics, but is not a substitute for the ArkTS SDK/device check.
-function adapterHarness() {
+function adapterHarness({ oldNative = false } = {}) {
   const calls = [];
   const replies = [];
+  const storage = [];
   let callback;
   let pending = true;
   const native = {
@@ -79,7 +80,10 @@ function adapterHarness() {
     isOhosOpenerPending() { return pending; },
     unregisterOhosOpener() { pending = false; },
   };
+  if (!oldNative) native.configureOhosAppStorage = (...args) => { storage.push(args); };
   const context = {
+    filesDir: '/data/storage/el2/base/haps/entry/files',
+    cacheDir: '/data/storage/el2/base/haps/entry/cache',
     async openLink(url) { calls.push(['link', url]); },
     async startAbility(want) { calls.push(['ability', want]); },
   };
@@ -98,7 +102,7 @@ function adapterHarness() {
   const adapter = new exported.OhosOpener();
   adapter.install(context, 'moke_lib');
   return {
-    adapter, context, calls, replies,
+    adapter, context, calls, replies, storage,
     expire() { pending = false; },
     async dispatch(kind, value) {
       callback(JSON.stringify({ id: 7, kind, value }));
@@ -109,6 +113,7 @@ function adapterHarness() {
 
 test('native adapter dispatches links, dialer, mail and read-only file Wants', async () => {
   const harness = adapterHarness();
+  assert.deepEqual(harness.storage, [[harness.context.filesDir, harness.context.cacheDir]]);
   await harness.dispatch('url', 'https://example.com');
   await harness.dispatch('url', 'tel:+123');
   await harness.dispatch('url', 'mailto:a@example.com');
@@ -120,6 +125,13 @@ test('native adapter dispatches links, dialer, mail and read-only file Wants', a
     ['ability', { action: 'ohos.want.action.viewData', uri: 'file://app/storage/books/test.epub', type: 'application/epub+zip', flags: 1 }],
   ]);
   assert.deepEqual(harness.replies, Array.from({ length: 4 }, () => [7, null]));
+});
+
+test('old native library without storage export can still start the Ability', async () => {
+  const harness = adapterHarness({ oldNative: true });
+  assert.deepEqual(harness.storage, []);
+  await harness.dispatch('url', 'https://example.com');
+  assert.deepEqual(harness.calls, [['link', 'https://example.com']]);
 });
 
 test('native adapter acknowledges only after the OS promise settles and forwards rejection', async () => {
