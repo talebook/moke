@@ -42,11 +42,11 @@ tauri = { path = "../vendor/tauri/crates/tauri", default-features = false, featu
   "compression",
   "dynamic-acl",
 ] }
-tauri-plugin-fs = "=2.5.1"
+tauri-plugin-fs = "=2.5.2"
 tauri-plugin-http = { version = "=2.5.9", features = ["cookies", "dangerous-settings", "unsafe-headers"] }
 tauri-plugin-os = "=2.3.2"
-tauri-plugin-shell = "=2.3.5"
-tauri-plugin-opener = "=2.5.4"
+tauri-plugin-shell = "=2.3.6"
+tauri-plugin-opener = "=2.5.5"
 tauri-plugin-webdriver = { version = "=0.2.1", optional = true }
 
 # Reader plugins — compiled unconditionally so the reader works on OHOS
@@ -90,8 +90,9 @@ openharmony-ability = { path = "../vendor/openharmony-ability/crates/ability" }
 openharmony-ability-derive = { path = "../vendor/openharmony-ability/crates/derive" }
 
 [patch.crates-io]
-# Only shell/opener use our OHOS adapter fork. Patching at this root also
-# unifies the Reader's transitive dependencies with the host's opener registry.
+# fs/shell/opener use our OHOS adapter fork. Patching at this root also
+# unifies the Reader's transitive plugins with the host's managed state.
+tauri-plugin-fs = { path = "../vendor/ohos-plugins/plugins/fs" }
 tauri-plugin-shell = { path = "../vendor/ohos-plugins/plugins/shell" }
 tauri-plugin-opener = { path = "../vendor/ohos-plugins/plugins/opener" }
 # turso_ext's build.rs checks `cfg!(target_os = "windows")` which evaluates

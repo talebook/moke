@@ -5,15 +5,30 @@ This migration pins `tauri-apps/tauri:feat/open-harmony` at
 template icons are unchanged. **This revision is not yet verified to build or
 run Moke on OHOS and should not be merged as a working OHOS migration.**
 
-## Shell/opener adapter (current revision)
+## fs/shell/opener compatibility (current revision)
 
-The developer requested a personal fork for these two plugins, with the Tauri
-stack otherwise official. `vendor/ohos-plugins` pins
-`hehetoshang/plugins-workspace:feat/moke-ohos-shell-opener` at `58312eb9`.
-It is based on official `feat/open-harmony` at `cc9ec9b4`; only `plugins/shell`
-and `plugins/opener` were changed. Both Cargo patches are applied at Moke's root,
+The developer requested a personal fork for shell/opener and subsequently
+approved extending it to fs after the full build exposed its missing OHOS
+backend. The Tauri stack stays official. `vendor/ohos-plugins` pins
+`hehetoshang/plugins-workspace:feat/moke-ohos-shell-opener` at `136e8eea`.
+It started from official `feat/open-harmony` at `cc9ec9b4`, then merged official
+`v2` at `3a019435` at the developer's request (52 upstream commits, no history
+rewrite). Compared with that v2 revision, only `plugins/fs`, `plugins/shell`
+and `plugins/opener` contain our changes. Cargo patches are applied at Moke's root,
 so Moke, Reader and shell resolve the **same** opener instance. Reader source
 and its submodule revision were not changed.
+
+For fs, `3d92be2b` enables the standard `Fs` type, export and state initialization
+on OHOS without changing Tauri's mobile classification. The JS file resolver
+uses the normal `resolve_path` scope validation for both paths and file URLs,
+not the Android/iOS native-URI shortcut. Existing permissions, deny rules and
+the OS sandbox remain in force. Native document-provider URIs are not added.
+See `vendor/ohos-plugins/plugins/fs/OHOS.md` for support boundaries.
+
+Moke pins the merged upstream Rust versions: fs 2.5.2, shell 2.3.6 and opener
+2.5.5. Upstream fs fixes, including malformed write-option rejection and line
+read error reporting, are retained. Existing JS dependency ranges remain
+unchanged; no new frontend API is required by this compatibility patch.
 
 The fork fixes the conflicting target cfgs and Android/iOS-only handles
 described below. It also avoids a second upstream blocker: Tauri's OHOS
@@ -48,15 +63,16 @@ not a claim that every Reader dependency has been replaced with upstream.
 
 - Four Rust std-only transport/validation tests pass, including native failure,
   missing adapter, timeout cleanup and UI-thread deadlock prevention.
-- Eight app tests pass: generated lifecycle/idempotence/fail-closed behavior,
+- Nine app tests pass: generated lifecycle/idempotence/fail-closed behavior,
   official-source wiring, native Want dispatch, read-only file permission,
-  deferred acknowledgment, native rejection and stale/destroyed requests.
+  deferred acknowledgment, native rejection, stale/destroyed requests and
+  single-instance fork resolution in the Cargo lockfile.
 - The actual NAPI binding and actual fork transport were cross-checked together
   in a small standalone harness with `cargo check --target
   aarch64-unknown-linux-ohos` (napi-ohos/napi-derive-ohos 1.2.0): passed.
 - `cargo tree --locked --target aarch64-unknown-linux-ohos -i
   tauri-plugin-opener` confirms Moke, Reader and shell share the pinned fork.
-- Final full frontend suite: 491 passed; lint passed with 23 existing warnings;
+- Final full frontend suite: 492 passed; lint passed with 23 existing warnings;
   TypeScript typecheck passed. Targeted lint and rustfmt checks also passed.
 - The developer's subsequent full check exposed a non-`Send` `Scope` retained
   across `.await` in both opener commands. Commit `58312eb9` limits each scope
@@ -67,10 +83,15 @@ not a claim that every Reader dependency has been replaced with upstream.
   on this host in 8.53 seconds (exit 0). Both plugins were checked against the
   official Tauri stack; remaining warnings originate in official Tauri/Wry.
   This supersedes the earlier incomplete 180-second check.
+- After merging official v2 and integrating fs, the combined locked OHOS
+  check for fs 2.5.2, shell 2.3.6 and opener 2.5.5 passed in 7.68 seconds
+  (exit 0). The fs routing regression suite passed all three tests. In addition
+  to upstream warnings, fs reports an unused `PathKind::Path` variant on OHOS.
 - These are not HAP/device results. Full app target checking and ArkTS
-  validation remain separate acceptance requirements. The current local Hvigor
-  task listing exposes only `default@ConfigureCmake`, not `CompileArkTS`; invoking
-  `CompileArkTS` exits with "task not found" before compiling the adapter.
+  validation remain separate acceptance requirements. The diagnostic invocation
+  of `CompileArkTS` exited with "task not found" before compiling the adapter;
+  this does not establish that the SDK is absent. The official full build uses
+  `assembleHap`, which remains to be validated.
 
 Reproduce the quick transport tests from `vendor/ohos-plugins` using the command
 in `plugins/opener/OHOS.md`. Reproduce app adapter tests with
@@ -79,7 +100,7 @@ in `plugins/opener/OHOS.md`. Reproduce app adapter tests with
 ```sh
 cargo check --locked --manifest-path src-tauri/Cargo.toml \
   --target aarch64-unknown-linux-ohos \
-  -p tauri-plugin-shell -p tauri-plugin-opener
+  -p tauri-plugin-fs -p tauri-plugin-shell -p tauri-plugin-opener
 ```
 
 Device acceptance still requires a newly built HAP, not the old installed dev
@@ -148,7 +169,8 @@ project-generation evidence, not a completed Moke HAP build.
   check disabled frontend startup and did not attach to QEMU (the independently
   tested HDC connection had to be re-established). Compilation was deliberately
   stopped; no current HAP was installed and no UI/IPC success is claimed.
-- Per developer direction, shell/opener compatibility is deferred, not fixed.
+- At this earlier preparation stage, shell/opener compatibility was deferred;
+  it has since been addressed by the fork described above.
   Re-downloadable package/archive caches and old generated Rust caches were
   removed; roughly 25 GiB was available afterwards. Code, QEMU disks and app
   data were preserved. The older frontend service was stopped to free ports
@@ -210,7 +232,7 @@ complete HAP/runtime test still remain after resolving native compatibility.
 - PR #15 GitHub Actions jobs did not start: their annotations report an
   account billing/spending-limit restriction. They provide no build evidence.
 
-To complete validation, resolve the plugin incompatibility, configure signing,
+To complete validation, resolve any remaining full-app build errors, configure signing,
 build the HAP using the pinned official CLI, and run the
 above checks on the recovered QEMU or an OHOS device. Preserve the official template
 icons; icon customization is outside this migration.

@@ -7962,9 +7962,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-fs"
-version = "2.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7ecc274121aca0c036a2b42d1cbe83d368d348f54e0bb8a735c2b1548e8f371"
+version = "2.5.2"
 dependencies = [
  "anyhow",
  "dunce",
@@ -8091,7 +8089,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-opener"
-version = "2.5.4"
+version = "2.5.5"
 dependencies = [
  "dunce",
  "glob",
@@ -8191,7 +8189,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-shell"
-version = "2.3.5"
+version = "2.3.6"
 dependencies = [
  "encoding_rs",
  "log",

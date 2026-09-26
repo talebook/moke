@@ -42,14 +42,28 @@ test('prepare copies only the app-owned adapter and can run twice', () => {
   }
 });
 
-test('Tauri/Wry remain official, only shell/opener share the dedicated plugin fork', () => {
+test('Tauri/Wry remain official, fs/shell/opener share the dedicated plugin fork', () => {
   const manifest = read('src-tauri/Cargo.toml');
   const patches = manifest.split('[patch.crates-io]')[1];
-  for (const name of ['shell', 'opener']) {
+  for (const name of ['fs', 'shell', 'opener']) {
     assert.ok(patches.includes(`tauri-plugin-${name} = { path = "../vendor/ohos-plugins/plugins/${name}" }`));
   }
   assert.match(read('.gitmodules'), /url = https:\/\/github.com\/tauri-apps\/wry.git/);
   assert.match(read('src-tauri/tauri.ohos.conf.json'), /beforeDevCommand.*prepare-ohos/);
+});
+
+test('Cargo locks each adapted plugin once from the fork, matching the exact host version', () => {
+  const manifest = read('src-tauri/Cargo.toml');
+  const packages = read('src-tauri/Cargo.lock').split('[[package]]');
+  for (const name of ['fs', 'shell', 'opener']) {
+    const crate = `tauri-plugin-${name}`;
+    const version = manifest.match(new RegExp(`^${crate} = "=([^\"]+)"`, 'm'))?.[1];
+    assert.ok(version, `${crate} must have an exact host version`);
+    const locked = packages.filter((entry) => entry.includes(`\nname = "${crate}"\n`));
+    assert.equal(locked.length, 1, `${crate} must resolve to one instance`);
+    assert.ok(locked[0].includes(`\nversion = "${version}"\n`));
+    assert.doesNotMatch(locked[0], /\nsource = /, `${crate} must use the patched submodule, not crates.io`);
+  }
 });
 
 // Execute the actual adapter with native API mocks. This verifies dispatch and
