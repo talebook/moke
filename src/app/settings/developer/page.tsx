@@ -94,7 +94,7 @@ export default function DeveloperSettingsPage() {
                 <span className="inline-flex flex-wrap items-center gap-1">
                   <span>在所有页面右下角显示</span>
                   <img
-                    src="/debug.avif"
+                    src="/debug.png"
                     alt="自定义调试图标"
                     className="h-4 w-4 object-contain"
                   />
@@ -158,7 +158,7 @@ function DevSection({ title, description, children }: { title: string; descripti
 function DebugIcon({ className }: { className?: string }) {
   return (
     <img
-      src="/debug.avif"
+      src="/debug.png"
       alt=""
       aria-hidden="true"
       className={`object-contain ${className ?? ''}`}

@@ -118,7 +118,7 @@ export function DebugLogPanel() {
         aria-label="调试日志"
       >
         <img
-          src="/debug.avif"
+          src="/debug.png"
           alt="调试日志"
           style={{ width: 20, height: 20, objectFit: 'contain' }}
         />
