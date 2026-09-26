@@ -1,0 +1,102 @@
+name: 问题反馈
+description: 反馈墨客公开稳定版中的功能异常或兼容性问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题。请尽量完整填写以下信息，以便快速定位和修复。
+
+        如果问题发生在 Moke Preview，请返回模板列表选择“Moke Preview 反馈”。请勿提交账号密码、访问码、服务器密钥或其他敏感信息。
+
+  - type: input
+    id: version
+    attributes:
+      label: 墨客版本
+      description: 可在应用的“关于”页面查看，请填写完整版本号。
+      placeholder: 例如 1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行平台
+      description: 请选择发生问题的平台。
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+        - iOS / iPadOS
+        - HarmonyOS NEXT
+        - Web
+    validations:
+      required: true
+
+  - type: input
+    id: system-version
+    attributes:
+      label: 系统版本
+      placeholder: 例如 Windows 11 24H2、macOS 15.6、Android 16
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 问题所在页面或功能
+      placeholder: 例如书库、书籍详情、离线阅读、设置
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 请清楚说明问题的表现、发生频率以及是否稳定复现。
+      placeholder: 请描述你遇到的问题……
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请按顺序列出可以触发问题的操作。
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 出现……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: 预期结果与实际结果
+      placeholder: |
+        预期结果：
+        实际结果：
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs-screenshots
+    attributes:
+      label: 日志或截图
+      description: 可直接拖入截图或粘贴错误信息和相关日志；提交前请移除个人信息和敏感内容。
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交确认
+      options:
+        - label: 我已确认该问题发生在墨客公开稳定版；Preview 问题应使用专用模板。
+          required: true
+        - label: 我已搜索现有 Issue，未发现相同问题。
+          required: true
+        - label: 我没有在内容中包含账号密码、访问码、服务器密钥或其他敏感信息。
+          required: true
