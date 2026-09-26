@@ -9,7 +9,7 @@ run Moke on OHOS and should not be merged as a working OHOS migration.**
 
 The developer requested a personal fork for these two plugins, with the Tauri
 stack otherwise official. `vendor/ohos-plugins` pins
-`hehetoshang/plugins-workspace:feat/moke-ohos-shell-opener` at `4a12c6d8`.
+`hehetoshang/plugins-workspace:feat/moke-ohos-shell-opener` at `58312eb9`.
 It is based on official `feat/open-harmony` at `cc9ec9b4`; only `plugins/shell`
 and `plugins/opener` were changed. Both Cargo patches are applied at Moke's root,
 so Moke, Reader and shell resolve the **same** opener instance. Reader source
@@ -58,10 +58,16 @@ not a claim that every Reader dependency has been replaced with upstream.
   tauri-plugin-opener` confirms Moke, Reader and shell share the pinned fork.
 - Final full frontend suite: 491 passed; lint passed with 23 existing warnings;
   TypeScript typecheck passed. Targeted lint and rustfmt checks also passed.
-- Full shell/opener target checking was attempted with a 180-second foreground
-  limit. It stopped while compiling dependencies (exit 124), before reaching a
-  plugin result. It is **not** a successful check or a diagnosed compiler error.
-- These are not HAP/device results. Full plugin/app target checking and ArkTS
+- The developer's subsequent full check exposed a non-`Send` `Scope` retained
+  across `.await` in both opener commands. Commit `58312eb9` limits each scope
+  to a synchronous lexical block and carries only the allow/deny result across
+  dispatch. Path-validation errors and all scope rules remain unchanged; no
+  `Runtime: Send` requirement or unsafe trait implementation was added.
+- After that fix, the exact locked shell/opener OHOS target check below passed
+  on this host in 8.53 seconds (exit 0). Both plugins were checked against the
+  official Tauri stack; remaining warnings originate in official Tauri/Wry.
+  This supersedes the earlier incomplete 180-second check.
+- These are not HAP/device results. Full app target checking and ArkTS
   validation remain separate acceptance requirements. The current local Hvigor
   task listing exposes only `default@ConfigureCmake`, not `CompileArkTS`; invoking
   `CompileArkTS` exits with "task not found" before compiling the adapter.
