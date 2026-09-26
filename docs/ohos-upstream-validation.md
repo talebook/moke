@@ -57,7 +57,21 @@ fix; changing the submodule URL and passing frontend tests does not resolve it.
   installed `org.houheya.moke` (package version `1.0.0`, target API 24) accepts
   `aa start -a EntryAbility -b org.houheya.moke` and has a running process, but
   its framebuffer shows a white content area. This older development package
-  is not built from this PR and is not evidence that this migration works.
+  depends on its matching development server. Launching it separately is not
+  a valid failure test for this migration, and it is not built from this PR.
+- Initially `pnpm tauri ohos dev --help` failed with `unrecognized subcommand
+  'ohos'`: the npm CLI does not ship OHOS support. `scripts/tauri.mjs` now routes
+  OHOS commands to the pinned official source CLI through Cargo; other
+  commands retain the npm CLI. This fixes command routing, not the native
+  plugin incompatibilities described above.
+- Retrying the help command through that dispatcher entered the official CLI
+  dependency build. It was interrupted before completion because the SDK
+  prerequisite was still missing; neither the CLI help nor an OHOS dev build
+  completed. The old installed app has not been uninstalled.
+- Previous local build logs identify an SDK under the earlier validation
+  task's `ohos-run/sdk/command-line-tools` directory, but that directory is
+  no longer present. No replacement SDK archive was found in the inspected
+  download/cache locations.
 - PR #15 GitHub Actions jobs did not start: their annotations report an
   account billing/spending-limit restriction. They provide no build evidence.
 

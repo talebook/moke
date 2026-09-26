@@ -55,6 +55,26 @@ pnpm build:reader
 
 Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的 sandbox iframe 内，不能接触顶层 Tauri IPC bridge。桌面 `allow_paths_in_scopes` 只能复用宿主已授权的 `fs_scope`，Moke 的 `open_reader` 也只为 AppData 书籍或文件选择器已授权路径扩展 scope。升级 Foliate、Reader 命令或 capability 时必须保留这些边界并运行 `tests/reader-only-build.test.mjs`。
 
+## OpenHarmony 开发命令
+
+`pnpm tauri ohos ...` 使用 `vendor/tauri` 固定的官方 `feat/open-harmony`
+源码编译并运行 CLI；首次执行需要 Rust 工具链并会编译 CLI。npm 发布版 CLI
+不提供 `ohos` 子命令，其他平台命令仍使用 npm CLI。
+
+本次官方分支迁移仍有插件兼容阻塞，完整状态见
+[OHOS 验证记录](docs/ohos-upstream-validation.md)。解决阻塞并配置 OHOS SDK、
+`ohpm`、Hvigor 和签名后，开发命令为：
+
+```bash
+pnpm tauri ohos init
+hdc tconn 127.0.0.1:5555
+pnpm tauri ohos dev --host 10.0.2.2
+```
+
+`10.0.2.2` 是当前 QEMU 用户网络访问宿主机的地址。dev 包依赖开发服务器，
+单独启动旧 dev 包出现白屏不能作为新版本运行失败的结论。验收必须使用当前
+提交重新构建安装的包，并同时验证开发服务器、Tauri IPC 和阅读流程。
+
 ## 相关链接
 
 - [Talebook 服务器](https://github.com/talebook/talebook) — 自托管电子书服务端，Moke 的数据来源
