@@ -9,6 +9,14 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 export function tauriCommand(args) {
   // Published npm binaries do not contain the official experimental OHOS CLI.
   if (args.find((arg) => !arg.startsWith('-')) === 'ohos') {
+    const subcommandIndex = args.indexOf('ohos') + 1;
+    const ohosArgs = ['init', 'build'].includes(args[subcommandIndex])
+      ? [
+          ...args.slice(0, subcommandIndex + 1),
+          '--config', 'src-tauri/tauri.ohos.conf.json',
+          ...args.slice(subcommandIndex + 1),
+        ]
+      : args;
     return {
       command: 'cargo',
       args: [
@@ -17,7 +25,7 @@ export function tauriCommand(args) {
         '-p', 'tauri-cli', '--bin', 'cargo-tauri',
         // The pinned CLI's platform-certs dependency fails to compile on Linux.
         // Use upstream's Rustls + bundled roots option; TLS verification stays on.
-        '--no-default-features', '--features', 'rustls', '--', ...args,
+        '--no-default-features', '--features', 'rustls', '--', ...ohosArgs,
       ],
     };
   }

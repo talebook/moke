@@ -72,7 +72,12 @@ Hvigor 和签名后，开发命令为：
 pnpm tauri ohos init
 hdc tconn 127.0.0.1:5555
 pnpm tauri ohos dev --host 10.0.2.2
+pnpm tauri ohos build --target aarch64
 ```
+
+OpenHarmony 使用独立包名 `org.houheya.moke_openharmony`；`pnpm tauri ohos init/build`
+会加载 `src-tauri/tauri.ohos.conf.json`。直接调用 `cargo tauri ohos build` 时需显式传入
+`--config src-tauri/tauri.ohos.conf.json`。
 
 `10.0.2.2` 是当前 QEMU 用户网络访问宿主机的地址。dev 包依赖开发服务器，
 单独启动旧 dev 包出现白屏不能作为新版本运行失败的结论。验收必须使用当前
