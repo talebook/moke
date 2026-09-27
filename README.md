@@ -57,8 +57,11 @@ Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的
 
 ## OpenHarmony 开发命令
 
-`pnpm tauri ohos ...` 使用 `vendor/tauri` 固定的官方 `feat/open-harmony`
-源码编译并运行 CLI；首次执行需要 Rust 工具链并会编译 CLI。npm 发布版 CLI
+`pnpm tauri ohos ...` 暂时使用 `vendor/tauri` 固定的
+`hehetoshang/tauri:app-name-fix`（`8269cb2d`）源码编译并运行 CLI。
+该分支基于官方 `feat/open-harmony`，修复了生成工程的应用名称和图标，
+对应上游 [PR #16151](https://github.com/tauri-apps/tauri/pull/16151)。
+首次执行需要 Rust 工具链并会编译 CLI。npm 发布版 CLI
 不提供 `ohos` 子命令，其他平台命令仍使用 npm CLI。
 CLI 使用官方支持的 `rustls` feature 和内置 CA 根证书，避开当前锁定版本的
 `platform-certs` 编译错误；TLS 校验仍然启用，但不会读取系统自定义 CA。

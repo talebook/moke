@@ -62,14 +62,14 @@ test('Windows OHOS preparation fixes the generated Hvigor CLI path', () => {
   }
 });
 
-test('OHOS 统一使用官方 Tauri 分支与官方模板图标', () => {
+test('OHOS 临时使用 Tauri app-name-fix 分支并保留模板后备图标', () => {
   const tauriSubmodule = gitmodules.match(
     /\[submodule "tauri"\]([\s\S]*?)(?=\n\[submodule |$)/,
   )?.[1];
   assert.ok(tauriSubmodule, 'vendor/tauri submodule configuration is missing');
-  assert.match(tauriSubmodule, /url = https:\/\/github\.com\/tauri-apps\/tauri\.git/);
-  assert.match(tauriSubmodule, /branch = feat\/open-harmony/);
-  assert.doesNotMatch(tauriSubmodule, /hehetoshang\/tauri|branch = dev/);
+  assert.match(tauriSubmodule, /url = https:\/\/github\.com\/hehetoshang\/tauri\.git/);
+  assert.match(tauriSubmodule, /branch = app-name-fix/);
+  assert.doesNotMatch(tauriSubmodule, /branch = dev/);
 
   for (const crate of [
     'tauri',

@@ -1,6 +1,37 @@
 # Official Tauri OpenHarmony migration: validation status
 
-This migration pins `tauri-apps/tauri:feat/open-harmony` at
+## Temporary app name and icon fix (2026-09-27)
+
+`vendor/tauri` now pins `hehetoshang/tauri:app-name-fix` at
+`8269cb2dabfab943c281bcc5e43773d4333feebf`, based on the official revision
+below. [Upstream PR #16151](https://github.com/tauri-apps/tauri/pull/16151)
+makes `ohos init` use the app name and the first configured PNG for the
+launcher. The existing Moke-specific Huawei bundle identifier patch remains
+in the CLI wrapper.
+
+Validation of this temporary pin:
+
+- All 15 OHOS preparation, CLI routing, and platform configuration tests passed.
+- The ARM64 release native build and Hvigor release HAP packaging succeeded.
+  The frontend assets were reused from the prior build because this change only
+  affects the native dependency and generated OHOS project.
+- The generated HAP uses the same `app_name` resource for the app and launcher
+  ability, and embeds the first configured PNG as `app_icon`.
+- Signing with the developer-provided Huawei debug profile and local signature
+  verification succeeded. This new package has not been tested on the device.
+
+Local packaging caveat: the generated Hvigor hook triggered an additional debug
+Rust build after the release build and exhausted disk space. After removing the
+failed debug cache, packaging was completed using the freshly built release
+library with that hook temporarily disabled in the local generated project. The
+hook was restored afterward; this workaround is not a source change.
+
+The following sections record the original migration's validation at the time it
+was performed.
+
+## Original migration validation
+
+The original migration pinned `tauri-apps/tauri:feat/open-harmony` at
 `e3bf6eb168bacc7bb5c8c32d923bb8beaf77c92b`. The official source and OHOS
 template icons are unchanged. The complete Moke Rust graph now passes both the
 OHOS target check and `ohrs build --arch arm64`, but **a HAP has not yet been
