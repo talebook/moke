@@ -2,9 +2,12 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { patchTauriOhosIdentifier } from './patch-tauri-ohos-identifier.mjs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
+const tauriBuildSource = path.join(root, 'vendor/tauri/crates/tauri-cli/src/build.rs');
 
 export function tauriCommand(args) {
   // Published npm binaries do not contain the official experimental OHOS CLI.
@@ -36,6 +39,11 @@ export function tauriCommand(args) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv.slice(2).includes('ohos')) {
+    const source = readFileSync(tauriBuildSource, 'utf8');
+    const patched = patchTauriOhosIdentifier(source);
+    if (patched !== source) writeFileSync(tauriBuildSource, patched);
+  }
   const { command, args } = tauriCommand(process.argv.slice(2));
   const child = spawn(command, args, { cwd: root, stdio: 'inherit' });
   const interrupt = () => child.kill('SIGINT');
