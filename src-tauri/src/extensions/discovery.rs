@@ -117,6 +117,29 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<(), String> {
         return Err("author 过长（超过 128 字符）".into());
     }
 
+    // 签名发布者元数据会进入签名 payload，先做严格的长度和来源校验。
+    if let Some(publisher) = &manifest.publisher {
+        if publisher.id.is_empty()
+            || publisher.id.len() > 128
+            || !publisher.id.chars().all(|character| {
+                character.is_ascii_lowercase()
+                    || character.is_ascii_digit()
+                    || matches!(character, '.' | '-' | '_')
+            })
+        {
+            return Err("publisher.id 格式无效".into());
+        }
+        if publisher.name.trim().is_empty() || publisher.name.len() > 128 {
+            return Err("publisher.name 无效（空或超过 128 字符）".into());
+        }
+        let source_is_allowed = publisher.source.starts_with("https://")
+            || publisher.source.starts_with("http://127.0.0.1")
+            || publisher.source.starts_with("http://localhost");
+        if publisher.source.len() > 512 || !source_is_allowed {
+            return Err("publisher.source 必须是 HTTPS URL（本机开发来源除外）".into());
+        }
+    }
+
     // 7. permissions：必须在白名单中
     for perm in &manifest.permissions {
         if !KNOWN_PERMISSIONS.contains(&perm.as_str()) {
@@ -238,6 +261,14 @@ fn validate_executable_path(path: &str) -> Result<(), String> {
     if path.contains('/') || path.contains('\\') {
         return Err("backend.executable 必须为纯文件名（不含路径分隔符）".into());
     }
+    let lower = path.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "signature.json" | "storage.json" | "uninstall.exe" | "installer.nsi"
+    ) || lower.ends_with("-setup.exe")
+    {
+        return Err("backend.executable 不能指向宿主生成或签名排除的文件".into());
+    }
     Ok(())
 }
 
@@ -317,5 +348,27 @@ mod tests {
     fn test_validate_executable_accepts_simple_name() {
         assert!(validate_executable_path("server.exe").is_ok());
         assert!(validate_executable_path("my-backend").is_ok());
+    }
+
+    #[test]
+    fn test_validate_manifest_rejects_insecure_publisher_source() {
+        let manifest = Manifest {
+            name: "sample-extension".into(),
+            version: "1.0.0".into(),
+            api_version: "1".into(),
+            display_name: "Sample".into(),
+            description: String::new(),
+            author: String::new(),
+            publisher: Some(super::super::PublisherConfig {
+                id: "org.example".into(),
+                name: "Example".into(),
+                source: "http://example.org/extension".into(),
+            }),
+            entry: None,
+            sidebar: None,
+            permissions: Vec::new(),
+            lucide_icons: Vec::new(),
+        };
+        assert!(validate_manifest(&manifest).is_err());
     }
 }

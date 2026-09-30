@@ -10,6 +10,11 @@ const MANIFEST_TEMPLATE = (name, display) => JSON.stringify({
   display_name: display,
   description: 'TODO: describe your extension',
   author: 'TODO: your name',
+  publisher: {
+    id: 'example.publisher',
+    name: 'TODO: publisher name',
+    source: `https://example.invalid/moke-extensions/${name}`,
+  },
   entry: { ui_port: 0 },
   sidebar: { label: display, icon: 'package', order: 100 },
   permissions: ['reader.events.subscribe', 'storage'],

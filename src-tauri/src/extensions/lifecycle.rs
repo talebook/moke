@@ -72,11 +72,23 @@ pub fn start_backend(
 ) -> Result<std::process::Child, String> {
     let exe_path = ext_dir.join(&backend.executable);
 
-    if !exe_path.exists() {
+    if !exe_path.is_file() {
         return Err(format!(
             "后端可执行文件不存在: {}",
             exe_path.display()
         ));
+    }
+    let metadata = std::fs::symlink_metadata(&exe_path)
+        .map_err(|e| format!("无法读取后端文件元数据「{}」: {e}", exe_path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err("后端可执行文件不允许使用符号链接".into());
+    }
+    let canonical_dir = std::fs::canonicalize(ext_dir)
+        .map_err(|e| format!("无法解析拓展目录「{}」: {e}", ext_dir.display()))?;
+    let canonical_exe = std::fs::canonicalize(&exe_path)
+        .map_err(|e| format!("无法解析后端文件「{}」: {e}", exe_path.display()))?;
+    if !canonical_exe.starts_with(&canonical_dir) {
+        return Err("后端可执行文件逃逸出拓展目录".into());
     }
 
     // 构建参数，替换 {EXT_PORT} 占位符
@@ -143,7 +155,6 @@ struct RuntimeStateFile {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedExtension {
-    token: String,
     port: u16,
 }
 
@@ -160,7 +171,6 @@ pub fn save_runtime_state(
             (
                 name.clone(),
                 PersistedExtension {
-                    token: ext.token.clone(),
                     port: ext.port,
                 },
             )
@@ -226,25 +236,35 @@ pub fn restore_runtime_state_inner(
             continue;
         }
 
-        let manifest: Manifest = match std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-        {
-            Some(m) => m,
-            None => {
-                log::warn!("拓展「{name}」的 manifest.json 无法解析，跳过恢复");
+        let manifest: Manifest = match super::discovery::read_and_validate_manifest(&manifest_path) {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                log::warn!("拓展「{name}」的 manifest.json 无效，跳过恢复: {error}");
                 continue;
             }
         };
 
+        let ext_dir = extensions_dir.join(&name);
+        if let Err(error) = super::trust::authorize_activation(
+            extensions_dir,
+            &ext_dir,
+            &manifest,
+            None,
+        ) {
+            log::warn!("拓展「{name}」的包、来源或权限已变化，保持禁用: {error}");
+            continue;
+        }
+
+        // Token 从不从磁盘恢复。每次应用启动都会生成新的会话凭据。
+        let token = generate_token();
+
         let backend_child = if let Some(entry) = &manifest.entry {
             if let Some(backend) = &entry.backend {
-                let ext_dir = extensions_dir.join(&name);
-                match start_backend(&ext_dir, backend, persisted.port, &persisted.token, api_port, ws_port) {
+                match start_backend(&ext_dir, backend, persisted.port, &token, api_port, ws_port) {
                     Ok(child) => Some(child),
                     Err(e) => {
                         log::warn!("恢复拓展「{name}」后端失败: {e}");
-                        None
+                        continue;
                     }
                 }
             } else {
@@ -261,14 +281,53 @@ pub fn restore_runtime_state_inner(
         enabled.insert(
             name.clone(),
             EnabledExtension {
-                token: persisted.token,
+                token,
                 port: persisted.port,
                 backend: Mutex::new(backend_child),
+                permissions: manifest.permissions.clone(),
             },
         );
 
         log::info!("已恢复拓展「{name}」, 端口 {}", persisted.port);
     }
 
+    drop(enabled);
+    if let Err(error) = save_runtime_state(extensions_dir, enabled_map) {
+        log::warn!("无法清除旧版持久化 token: {error}");
+    }
     restored_ports
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tokens_rotate_and_are_not_persisted() {
+        let first = generate_token();
+        let second = generate_token();
+        assert_ne!(first, second);
+
+        let directory = std::env::temp_dir().join(format!(
+            "moke-extension-runtime-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let enabled = Arc::new(Mutex::new(HashMap::from([(
+            "sample-extension".into(),
+            EnabledExtension {
+                token: first.clone(),
+                port: 19557,
+                backend: Mutex::new(None),
+                permissions: vec!["storage".into()],
+            },
+        )])));
+
+        save_runtime_state(&directory, &enabled).unwrap();
+        let raw = std::fs::read_to_string(directory.join(RUNTIME_STATE_FILE)).unwrap();
+        assert!(!raw.contains(&first));
+        assert!(!raw.contains("token"));
+        assert!(raw.contains("19557"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

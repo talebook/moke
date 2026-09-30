@@ -8,7 +8,7 @@
 build.bat
 ```
 
-脚本自动执行：编译 Rust 后端 → 收集文件到 dist/ → 调用 NSIS 生成 `reading-stats-setup.exe`。
+脚本自动执行：编译 Rust 后端 → 收集文件到 dist/ → 调用 NSIS 生成未签名的开发安装器。发布或启用原生后端前，仍须按下方手动步骤对 `dist/` 签名并重新打包。
 
 **前提条件:**
 - [Rust](https://rustup.rs/)（编译后端）
@@ -36,6 +36,12 @@ dist/
 
 ### 3. 生成安装器
 
+先使用包目录之外的 Ed25519 私钥生成签名（示例仓库不包含发布私钥）：
+
+```bash
+moke-ext sign --dir dist --key ../publisher.pem --key-id release-2026
+```
+
 ```bash
 makensis installer.nsi
 # → reading-stats-setup.exe
@@ -58,7 +64,7 @@ makensis installer.nsi
 └── ui/index.html
 ```
 
-然后在 Moke 中启用即可。
+对复制后的目录生成 `signature.json`，然后在 Moke 中启用。未签名的原生后端会被安全门禁阻断。
 
 ## 架构
 
