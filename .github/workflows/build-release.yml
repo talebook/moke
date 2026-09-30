@@ -59,7 +59,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Setup Java
-        if: matrix.platform == 'android'
+        if: matrix.platform == 'android' || matrix.platform == 'ohos'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -488,6 +488,10 @@ jobs:
         if: matrix.platform == 'ohos'
         run: node scripts/prepare-ohos.mjs
 
+      - name: Prepare OHOS release package identity
+        if: matrix.platform == 'ohos'
+        run: node scripts/prepare-ohos-release.mjs
+
       - name: Build OHOS HAP
         if: matrix.platform == 'ohos'
         run: cargo tauri ohos build --config src-tauri/tauri.ohos.conf.json
@@ -540,6 +544,17 @@ jobs:
           [ -n "$hap" ] || { echo 'OHOS HAP missing'; exit 1; }
           unzip -p "$hap" module.json | jq -e '.app.bundleName == "org.houheya.moke_openharmony"'
 
+      - name: Sign and verify OHOS release packages
+        if: matrix.platform == 'ohos'
+        env:
+          OHOS_KEYSTORE_BASE64: ${{ secrets.OHOS_KEYSTORE_BASE64 }}
+          OHOS_KEYSTORE_PASSWORD: ${{ secrets.OHOS_KEYSTORE_PASSWORD }}
+          OHOS_KEY_ALIAS: ${{ secrets.OHOS_KEY_ALIAS }}
+          OHOS_KEY_PASSWORD: ${{ secrets.OHOS_KEY_PASSWORD }}
+          OHOS_APP_CERT_BASE64: ${{ secrets.OHOS_APP_CERT_BASE64 }}
+          OHOS_PROFILE_BASE64: ${{ secrets.OHOS_PROFILE_BASE64 }}
+        run: python3 scripts/sign-ohos-release.py
+
       # ==================================
 
       - name: Normalize artifact filenames
@@ -563,7 +578,7 @@ jobs:
         if: ${{ matrix.platform == 'ohos' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/gen/ohos/**/*.hap
+          files: ohos-release-artifacts/*.hap
 
       - name: Create Release
         if: ${{ matrix.platform != 'android' && matrix.platform != 'ohos' && startsWith(github.ref, 'refs/tags/') }}
@@ -591,7 +606,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ohos-hap
-          path: src-tauri/gen/ohos/**/*.hap
+          path: ohos-release-artifacts/*.hap
           if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)
