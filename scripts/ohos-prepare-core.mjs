@@ -10,6 +10,8 @@ import { join } from 'node:path';
 // The @ohos-rs/ability files overlaid onto the ohpm-installed package. Kept in
 // sync with the actual layout under scripts/ohos-ability-patch/.
 export const DEFAULT_PATCH_FILES = [
+  'ability/RustAbility.ets',
+  'ability/type.ets',
   'webview/Utils.ets',
   'webview/DefaultWebview.ets',
   'components/DefaultXComponent.ets',
