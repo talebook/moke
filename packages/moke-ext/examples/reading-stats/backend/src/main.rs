@@ -1,8 +1,8 @@
 //! 阅读统计拓展 — 后端。
 //!
 //! 架构：
-//!   - 主线程： tiny_http 服务器，serve 静态文件 + /api/token + /api/stats
-//!   - 后台线程： WebSocket 客户端，连接宿主的 WS Server，订阅阅读事件并累计统计
+//!   - 主线程： tiny_http 服务器，serve 静态文件 + /api/stats
+//!   - 后台线程： WebSocket 客户端，使用进程环境中的会话凭据连接宿主
 //!   - 统计数据结构在 Arc<Mutex<>> 中共享，持久化到 stats.json
 //!
 //! 用法: server --ext-port PORT
@@ -10,7 +10,6 @@
 use std::collections::HashSet;
 use std::env;
 use std::fs;
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -118,19 +117,28 @@ fn json_response(data: serde_json::Value) -> Response<std::io::Cursor<Vec<u8>>> 
     let body = data.to_string();
     Response::from_string(body)
         .with_header(header("Content-Type", "application/json"))
-        .with_header(header("Access-Control-Allow-Origin", "*"))
+        .with_header(header("X-Content-Type-Options", "nosniff"))
+}
+
+fn has_expected_host(request: &tiny_http::Request, port: u16) -> bool {
+    let hosts: Vec<String> = request
+        .headers()
+        .iter()
+        .filter(|item| item.field.equiv("Host"))
+        .map(|item| item.value.to_string())
+        .collect();
+    expected_host_values(&hosts, port)
+}
+
+fn expected_host_values(hosts: &[String], port: u16) -> bool {
+    hosts == [format!("127.0.0.1:{port}")]
 }
 
 // ===========================================================================
 // 后台线程： WebSocket 客户端
 // ===========================================================================
 
-fn ws_client_loop(
-    stats: Arc<Mutex<Stats>>,
-    ws_port: u16,
-    token: String,
-    ext_name: String,
-) {
+fn ws_client_loop(stats: Arc<Mutex<Stats>>, ws_port: u16, token: String, ext_name: String) {
     let url = format!("ws://127.0.0.1:{ws_port}");
 
     loop {
@@ -217,7 +225,10 @@ fn handle_ws_event(stats: &Arc<Mutex<Stats>>, event: &str, data: &serde_json::Va
                 cover_url: data["cover_url"].as_str().unwrap_or("").into(),
                 language: data["language"].as_str().unwrap_or("").into(),
             });
-            eprintln!("[stats] 打开书籍: {}", s.current_book.as_ref().map(|b| &b.title[..]).unwrap_or("?"));
+            eprintln!(
+                "[stats] 打开书籍: {}",
+                s.current_book.as_ref().map(|b| &b.title[..]).unwrap_or("?")
+            );
         }
 
         "reader:book:closed" => {
@@ -227,7 +238,10 @@ fn handle_ws_event(stats: &Arc<Mutex<Stats>>, event: &str, data: &serde_json::Va
                 s.stop_reading();
                 s.current_book = None;
             }
-            eprintln!("[stats] 关闭书籍 (view_key={view_key}), 剩余活跃: {}", s.active_view_keys.len());
+            eprintln!(
+                "[stats] 关闭书籍 (view_key={view_key}), 剩余活跃: {}",
+                s.active_view_keys.len()
+            );
         }
 
         "reader:page:changed" => {
@@ -275,15 +289,21 @@ fn main() {
     }
 
     // 从环境变量读取宿主配置
-    let token = env::var("MOKE_EXT_TOKEN").unwrap_or_default();
-    let api_port: u16 = env::var("MOKE_API_PORT")
+    let token = env::var("MOKE_EXT_TOKEN")
         .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(19555);
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            eprintln!("错误: 缺少 MOKE_EXT_TOKEN 会话凭据");
+            std::process::exit(1);
+        });
     let ws_port: u16 = env::var("MOKE_WS_PORT")
         .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(19556);
+        .and_then(|value| value.parse().ok())
+        .filter(|port| *port > 0)
+        .unwrap_or_else(|| {
+            eprintln!("错误: 缺少有效的 MOKE_WS_PORT");
+            std::process::exit(1);
+        });
 
     // 加载已持久化的统计
     let stats = Arc::new(Mutex::new(load_stats()));
@@ -292,9 +312,8 @@ fn main() {
     {
         let stats = stats.clone();
         let ext_name = "reading-stats".to_string();
-        let ws_token = token.clone();
         thread::spawn(move || {
-            ws_client_loop(stats, ws_port, ws_token, ext_name);
+            ws_client_loop(stats, ws_port, token, ext_name);
         });
     }
 
@@ -304,27 +323,20 @@ fn main() {
         std::process::exit(1);
     });
 
-    eprintln!("阅读统计后端已启动:");
-    eprintln!("  HTTP: http://127.0.0.1:{port}");
-    eprintln!("  API 端口: {api_port}, WS 端口: {ws_port}");
+    eprintln!("阅读统计后端已启动: http://127.0.0.1:{port}");
 
     for request in server.incoming_requests() {
+        if !has_expected_host(&request, port) {
+            let _ = request.respond(
+                Response::from_string("Invalid Host")
+                    .with_status_code(403)
+                    .with_header(header("X-Content-Type-Options", "nosniff")),
+            );
+            continue;
+        }
         let url = request.url().to_string();
 
         match url.as_str() {
-            "/api/token" => {
-                let _ = request.respond(json_response(serde_json::json!({
-                    "token": token
-                })));
-                continue;
-            }
-            "/api/config" => {
-                let _ = request.respond(json_response(serde_json::json!({
-                    "api_port": api_port,
-                    "ws_port": ws_port,
-                })));
-                continue;
-            }
             "/api/stats" => {
                 let s = stats.lock().unwrap();
                 let _ = request.respond(json_response(serde_json::json!({
@@ -369,7 +381,7 @@ fn serve_static(request: tiny_http::Request, file_path: &std::path::Path) {
             let _ = request.respond(
                 Response::from_data(data)
                     .with_header(header("Content-Type", mime))
-                    .with_header(header("Access-Control-Allow-Origin", "*")),
+                    .with_header(header("X-Content-Type-Options", "nosniff")),
             );
         }
         Err(_) => {
@@ -438,6 +450,17 @@ mod tests {
         assert!(!is_path_traversal("index.html"));
         assert!(is_path_traversal("../secret.txt"));
         assert!(is_path_traversal(&urlencoding("%2e%2e%2f")));
+    }
+
+    #[test]
+    fn test_host_validation_rejects_rebinding_names() {
+        assert!(expected_host_values(&["127.0.0.1:19557".into()], 19557));
+        assert!(!expected_host_values(&["evil.example:19557".into()], 19557));
+        assert!(!expected_host_values(&["localhost:19557".into()], 19557));
+        assert!(!expected_host_values(
+            &["127.0.0.1:19557".into(), "evil.example:19557".into()],
+            19557,
+        ));
     }
 
     #[test]
