@@ -1,3 +1,5 @@
+import type { ClientOptions } from '@tauri-apps/plugin-http';
+
 export type AppPlatform = 'tauri' | 'web';
 
 type ApiEnvelope = {
@@ -5,7 +7,7 @@ type ApiEnvelope = {
   msg?: string;
 };
 
-export type TauriRequestInit = RequestInit & {
+export type TauriRequestInit = RequestInit & ClientOptions & {
   maxRedirections: number;
   connectTimeout?: number;
   danger: {
@@ -51,6 +53,25 @@ export function buildTauriRequestInit(options?: RequestInit): TauriRequestInit {
   // 会让"连接书库"等操作长时间卡在等待。显式传入的 connectTimeout
   // （如下载）不会被覆盖。
   if (!init.connectTimeout) init.connectTimeout = 8_000;
+  return init;
+}
+
+/** Android's VPN/Wi-Fi proxy settings are not discovered by reqwest. */
+export async function buildSystemProxyRequestInit(
+  url: string,
+  options: (RequestInit & ClientOptions) | undefined,
+  platform: string,
+  resolveProxy: (url: string) => Promise<string | null>,
+): Promise<TauriRequestInit> {
+  options?.signal?.throwIfAborted();
+  const init = buildTauriRequestInit(options);
+  if (platform === 'android' && init.proxy === undefined) {
+    // Query for each destination/request: exclusions and VPN changes must take
+    // effect without restarting Moke. null means the system selected DIRECT.
+    const proxy = await resolveProxy(url);
+    options?.signal?.throwIfAborted();
+    if (proxy) init.proxy = { all: proxy };
+  }
   return init;
 }
 

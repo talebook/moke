@@ -6,6 +6,7 @@ import {
   MokeApiError,
   buildTauriBinaryHeaders,
   buildTauriRequestInit,
+  buildSystemProxyRequestInit,
   cancelResponseBodyQuietly,
   drainResponseBodyQuietly,
   getErrorMessage,
@@ -14,6 +15,69 @@ import {
   readJsonResponse,
   resolveAppPlatform,
 } from '../src/lib/api-core.ts';
+
+test('Android 请求使用系统代理并保留认证、Range 和重定向限制', async () => {
+  const url = 'https://books.example.com/api/user/info';
+  const options = {
+    credentials: 'include',
+    headers: { Range: 'bytes=0-99' },
+    maxRedirections: 0,
+    connectTimeout: 30_000,
+  };
+  const init = await buildSystemProxyRequestInit(url, options, 'android', async (destination) => {
+    assert.equal(destination, url);
+    return 'http://127.0.0.1:7890';
+  });
+  assert.deepEqual(init.proxy, { all: 'http://127.0.0.1:7890' });
+  assert.equal(init.credentials, 'include');
+  assert.deepEqual(init.headers, options.headers);
+  assert.equal(init.maxRedirections, 0);
+  assert.equal(init.connectTimeout, 30_000);
+  assert.equal(options.proxy, undefined);
+});
+
+test('Android 每次请求重新查询代理，关闭 VPN 和排除地址立即恢复直连', async () => {
+  let enabled = true;
+  let lookups = 0;
+  const resolve = async (url) => {
+    lookups += 1;
+    return enabled && !url.includes('192.168.') ? 'http://127.0.0.1:7890' : null;
+  };
+  const remote = 'https://books.example.com/api/shelf';
+  assert.ok((await buildSystemProxyRequestInit(remote, undefined, 'android', resolve)).proxy);
+  assert.equal((await buildSystemProxyRequestInit('http://192.168.1.2/api/shelf', undefined, 'android', resolve)).proxy, undefined);
+  enabled = false;
+  assert.equal((await buildSystemProxyRequestInit(remote, undefined, 'android', resolve)).proxy, undefined);
+  assert.equal(lookups, 3);
+});
+
+test('其他平台和显式代理配置不调用 Android 桥接', async () => {
+  const resolve = async () => { throw new Error('unexpected Android lookup'); };
+  for (const platform of ['windows', 'macos', 'linux', 'ios', 'ohos']) {
+    const init = await buildSystemProxyRequestInit('https://books.example.com', undefined, platform, resolve);
+    assert.equal(init.proxy, undefined);
+  }
+  const proxy = { all: 'http://proxy.example.com:8080' };
+  const init = await buildSystemProxyRequestInit('https://books.example.com', { proxy }, 'android', resolve);
+  assert.deepEqual(init.proxy, proxy);
+});
+
+test('Android 代理查询异常不会静默绕过代理，取消后不会继续发出请求', async () => {
+  const url = 'https://books.example.com';
+  await assert.rejects(buildSystemProxyRequestInit(url, undefined, 'android', async () => {
+    throw new Error('proxy lookup failed');
+  }), /proxy lookup failed/);
+
+  const controller = new AbortController();
+  const options = { signal: controller.signal };
+  await assert.rejects(buildSystemProxyRequestInit(url, options, 'android', async () => {
+    controller.abort();
+    return 'http://127.0.0.1:7890';
+  }), { name: 'AbortError' });
+  await assert.rejects(buildSystemProxyRequestInit(url, options, 'android', async () => {
+    assert.fail('already cancelled requests must not query the proxy');
+  }), { name: 'AbortError' });
+});
 
 test('API 地址只接受绝对 HTTP(S) 地址', () => {
   assert.equal(isAbsoluteHttpUrl('http://192.168.1.2:8080/api/books'), true);
