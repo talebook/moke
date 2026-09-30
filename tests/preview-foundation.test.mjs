@@ -94,3 +94,21 @@ test('Preview bootstrap is statically isolated from privileged plugin and Reader
     assert.notEqual(permission, 'core:webview:allow-create-webview-window');
   }
 });
+
+
+test('OHOS Preview uses only compiled OHOS capabilities and isolated inline activation permissions', () => {
+  const config = readJson('src-tauri/tauri.preview.ohos.conf.json');
+  const capabilities = config.app.security.capabilities;
+  assert.deepEqual(capabilities.filter((capability) => typeof capability === 'string'), ['ohos']);
+  const bootstrap = capabilities.find((capability) => capability.identifier === 'preview-bootstrap');
+  assert.deepEqual(bootstrap.windows, ['preview-bootstrap']);
+  assert.deepEqual(bootstrap.permissions, previewBootstrapCapability.permissions);
+  assert.deepEqual(bootstrap.platforms, ['openHarmony']);
+  const main = capabilities.find((capability) => capability.identifier === 'ohos-preview-commands');
+  assert.deepEqual(main.windows, ['main']);
+  for (const permission of main.permissions) {
+    assert.ok(previewCapability.permissions.includes(permission));
+    assert.match(permission, /^allow-moke-(?:build-info|preview-)/);
+  }
+  assert.equal(config.identifier, readJson('src-tauri/tauri.ohos.conf.json').identifier);
+});

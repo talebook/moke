@@ -4321,6 +4321,7 @@ name = "moke"
 version = "0.1.0"
 dependencies = [
  "Readest",
+ "apple-native-keyring-store",
  "base64 0.22.1",
  "glob",
  "keyring",

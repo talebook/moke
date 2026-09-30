@@ -441,6 +441,23 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
+#[cfg(target_os = "ios")]
+fn device_keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
+    use apple_native_keyring_store::protected::{AccessPolicy, Cred};
+    // Bind the device identity to this device; never synchronize its private
+    // key through iCloud. Do not use keyring::Entry::new: v1 rejects iOS.
+    Cred::build(
+        DEVICE_KEYRING_SERVICE,
+        key_id,
+        AccessPolicy::AfterFirstUnlockThisDeviceOnly,
+        None,
+        false,
+    )
+    .map(|inner| keyring::Entry { inner })
+    .map_err(|_| "Unable to access the operating system credential store".to_string())
+}
+
+#[cfg(not(target_os = "ios"))]
 fn device_keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(DEVICE_KEYRING_SERVICE, key_id)
         .map_err(|_| "Unable to access the operating system credential store".to_string())
