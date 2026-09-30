@@ -63,6 +63,7 @@ fn main() {
         std::env::var("PROFILE").ok().as_deref(),
         std::env::var_os("CARGO_FEATURE_PREVIEW").is_some(),
         std::env::var("TAURI_CONFIG").ok().as_deref(),
+        std::env::var("CARGO_CFG_TARGET_ENV").ok().as_deref(),
     )
     .expect("refusing to build mismatched Preview frontend and native channels");
 

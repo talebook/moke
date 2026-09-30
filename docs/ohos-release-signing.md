@@ -28,11 +28,13 @@ Only a fully verified output directory is published. Workflows upload only its
 ## Package identity
 
 The current Huawei Profile is for `org.houheya.moke_openharmony`.
-`prepare-ohos-release.mjs` applies that identity to the generated native
-`AppScope/app.json5` before compilation. Public Preview builds retain the Tauri
-identifier `org.houheya.moke.preview`, Preview frontend, Cargo feature and
-entitlement checks. Other platforms are unaffected. An unexpected native package
-identity is rejected rather than silently changed.
+Both the Tauri configuration used for OHOS initialization/build and the generated
+`AppScope/app.json5` must use that same identity. `prepare-ohos-release.mjs`
+checks the generated identity without rewriting it. Public Preview builds use
+this OHOS-specific identifier while retaining the Preview frontend, Cargo feature
+and entitlement checks. The build-channel guard permits this identity only for
+the OHOS target and still requires the Preview frontend and feature to agree.
+Other platforms retain `org.houheya.moke.preview`.
 
 Preview and stable OHOS packages using this same native identity cannot be
 installed side by side. Installation/upgrade also depends on the device accepting

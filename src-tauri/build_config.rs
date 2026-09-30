@@ -23,6 +23,7 @@ pub(crate) fn validate_preview_build_channel(
     profile: Option<&str>,
     preview_feature: bool,
     tauri_config: Option<&str>,
+    target_env: Option<&str>,
 ) -> Result<(), String> {
     if profile != Some("release") && tauri_config.is_none() {
         return Ok(());
@@ -40,7 +41,12 @@ pub(crate) fn validate_preview_build_channel(
         .as_ref()
         .and_then(|value| value.pointer("/build/beforeBuildCommand"))
         .and_then(serde_json::Value::as_str);
-    let preview_config = identifier == Some(PREVIEW_IDENTIFIER);
+    // Huawei's distribution Profile fixes the OHOS package identity. Keep
+    // Preview's feature/frontend agreement mandatory even on this platform.
+    let preview_config = identifier == Some(PREVIEW_IDENTIFIER)
+        || (target_env == Some("ohos")
+            && preview_feature
+            && identifier == Some("org.houheya.moke_openharmony"));
     let preview_frontend = before_build.is_some_and(builds_preview_frontend);
 
     if preview_feature != preview_config || preview_feature != preview_frontend {
@@ -95,23 +101,69 @@ mod tests {
             "build":{"beforeBuildCommand":"pnpm build"}
         }"#;
 
-        assert!(validate_preview_build_channel(Some("release"), true, Some(preview)).is_ok());
-        assert!(validate_preview_build_channel(Some("release"), false, Some(stable)).is_ok());
-        assert!(validate_preview_build_channel(Some("release"), true, Some(stable)).is_err());
-        assert!(validate_preview_build_channel(Some("release"), false, Some(preview)).is_err());
-        assert!(validate_preview_build_channel(Some("release"), true, None).is_err());
+        assert!(validate_preview_build_channel(Some("release"), true, Some(preview), None).is_ok());
+        assert!(validate_preview_build_channel(Some("release"), false, Some(stable), None).is_ok());
+        assert!(validate_preview_build_channel(Some("release"), true, Some(stable), None).is_err());
+        assert!(
+            validate_preview_build_channel(Some("release"), false, Some(preview), None).is_err()
+        );
+        assert!(validate_preview_build_channel(Some("release"), true, None, None).is_err());
 
         let disguised_stable = r#"{
             "identifier":"org.houheya.moke.preview",
             "build":{"beforeBuildCommand":"pnpm build && echo build:preview"}
         }"#;
+        assert!(validate_preview_build_channel(
+            Some("release"),
+            true,
+            Some(disguised_stable),
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn ohos_distribution_identity_still_requires_preview_feature_and_frontend_agreement() {
+        let preview = r#"{
+            "identifier":"org.houheya.moke_openharmony",
+            "build":{"beforeBuildCommand":"pnpm build:preview"}
+        }"#;
+        let stable = r#"{
+            "identifier":"org.houheya.moke_openharmony",
+            "build":{"beforeBuildCommand":"pnpm build"}
+        }"#;
         assert!(
-            validate_preview_build_channel(Some("release"), true, Some(disguised_stable)).is_err()
+            validate_preview_build_channel(Some("release"), true, Some(preview), Some("ohos"))
+                .is_ok()
         );
+        assert!(
+            validate_preview_build_channel(Some("release"), false, Some(stable), Some("ohos"))
+                .is_ok()
+        );
+        assert!(validate_preview_build_channel(
+            Some("release"),
+            false,
+            Some(preview),
+            Some("ohos")
+        )
+        .is_err());
+        assert!(
+            validate_preview_build_channel(Some("release"), true, Some(stable), Some("ohos"))
+                .is_err()
+        );
+        for target_env in [None, Some("gnu"), Some("msvc")] {
+            assert!(validate_preview_build_channel(
+                Some("release"),
+                true,
+                Some(preview),
+                target_env
+            )
+            .is_err());
+        }
     }
 
     #[test]
     fn direct_debug_cargo_tests_do_not_require_a_tauri_cli_overlay() {
-        assert!(validate_preview_build_channel(Some("debug"), true, None).is_ok());
+        assert!(validate_preview_build_channel(Some("debug"), true, None, None).is_ok());
     }
 }
