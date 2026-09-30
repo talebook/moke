@@ -16,7 +16,9 @@ import {
 } from '@/lib/api-core';
 import {
   classifyOfflineRangeResponse,
+  createOfflineTransferRecoveryState,
   hasEpubCentralDirectory,
+  nextOfflineTransferRecovery,
   parseContentRange,
 } from '@/lib/offline-book-core';
 import {
@@ -38,6 +40,23 @@ function isRequestCancelled(error: unknown): boolean {
 
 function binaryTransferErrorDetail(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+async function waitForTransferRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
+  if (delayMs <= 0) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('The operation was aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function logBinaryTransferFailure(
@@ -527,8 +546,6 @@ export async function streamBookDownload(
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
   const requestedOffset = Math.max(0, options.resumeFrom || 0);
-  const headers = new Headers();
-  if (requestedOffset > 0) headers.set('Range', `bytes=${requestedOffset}-`);
 
   const fetchDownload = (requestHeaders: Headers) => request(
     url,
@@ -544,30 +561,54 @@ export async function streamBookDownload(
     },
     requestHeaders.has('Range') ? { expectedStatuses: [416] } : undefined,
   );
-  let response = await fetchDownload(headers);
-  let contentRange = parseContentRange(response.headers.get('content-range'));
-  let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
-  if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
-  if (rangeMode === 'retry-full') {
-    if (response.status === 416) {
-      await drainResponseBodyQuietly(response);
-    } else {
-      await cancelResponseBodyQuietly(response);
+
+  const openDownloadResponse = async (offset: number, ifRange?: string) => {
+    const requestHeaders = new Headers();
+    if (offset > 0) {
+      requestHeaders.set('Range', `bytes=${offset}-`);
+      if (ifRange) requestHeaders.set('If-Range', ifRange);
     }
-    await options.onRangeReset?.();
-    response = await fetchDownload(new Headers());
-    if (!response.ok) throw new Error(`http.${response.status}`);
-    contentRange = parseContentRange(response.headers.get('content-range'));
-    rangeMode = classifyOfflineRangeResponse(0, response.status, contentRange);
-  }
-  if (rangeMode === 'invalid') throw new Error('book.download.range.invalid');
-  const resumed = rangeMode === 'resume';
-  let received = resumed ? requestedOffset : 0;
-  if (rangeMode === 'restart') await options.onRangeReset?.();
-  const responseLength = Number(response.headers.get('content-length') || 0);
-  const total = contentRange?.total ?? (responseLength > 0 ? received + responseLength : null);
-  const sourceSignature = response.headers.get('etag') || response.headers.get('last-modified') || undefined;
-  const reader = response.body?.getReader();
+
+    let response = await fetchDownload(requestHeaders);
+    let contentRange = parseContentRange(response.headers.get('content-range'));
+    let rangeMode = classifyOfflineRangeResponse(offset, response.status, contentRange);
+    if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
+    if (rangeMode === 'retry-full') {
+      if (response.status === 416) {
+        await drainResponseBodyQuietly(response);
+      } else {
+        await cancelResponseBodyQuietly(response);
+      }
+      await options.onRangeReset?.();
+      response = await fetchDownload(new Headers());
+      if (!response.ok) throw new Error(`http.${response.status}`);
+      contentRange = parseContentRange(response.headers.get('content-range'));
+      rangeMode = classifyOfflineRangeResponse(0, response.status, contentRange);
+    }
+    if (rangeMode === 'invalid') throw new Error('book.download.range.invalid');
+    if (rangeMode === 'restart') await options.onRangeReset?.();
+
+    const resumed = rangeMode === 'resume';
+    const received = resumed ? offset : 0;
+    const responseLength = Number(response.headers.get('content-length') || 0);
+    return {
+      response,
+      resumed,
+      received,
+      total: contentRange?.total ?? (responseLength > 0 ? received + responseLength : null),
+      sourceSignature: response.headers.get('etag') || response.headers.get('last-modified') || undefined,
+      mimeType: response.headers.get('content-type') || 'application/octet-stream',
+    };
+  };
+
+  let active = await openDownloadResponse(requestedOffset);
+  const resumed = active.resumed;
+  let response = active.response;
+  let received = active.received;
+  let total = active.total;
+  let sourceSignature = active.sourceSignature;
+  let mimeType = active.mimeType;
+  let reader = response.body?.getReader();
 
   if (!reader) {
     let blob: Blob;
@@ -591,22 +632,70 @@ export async function streamBookDownload(
     if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
       throw new Error('book.epub.invalid');
     }
-    return { mimeType: response.headers.get('content-type') || 'application/octet-stream', size: received, sourceSignature, resumed };
+    return { mimeType, size: received, sourceSignature, resumed };
   }
 
   let tail: Uint8Array = new Uint8Array(0);
+  let recoveryState = createOfflineTransferRecoveryState(received);
   while (true) {
-    let result: ReadableStreamReadResult<Uint8Array>;
+    let result: ReadableStreamReadResult<Uint8Array> | undefined;
+    let transferError: unknown;
     try {
       result = await reader.read();
     } catch (error) {
       if (isRequestCancelled(error)) throw error;
+      transferError = error;
       logBinaryTransferFailure(url, response, error, received);
-      throw new Error('book.download.transfer_failed');
     }
 
-    const { done, value } = result;
-    if (done) break;
+    if (result?.done && (total == null || received === total)) break;
+    if (result?.done) {
+      transferError = new Error('response body ended before the declared length');
+      logBinaryTransferFailure(url, response, transferError, received);
+    }
+
+    if (transferError) {
+      // A few self-hosted servers/proxies close large bodies early even though
+      // they advertise the full Content-Length. Keep the same .part writer and
+      // continue with a validated Range response instead of requiring one user
+      // retry per truncated chunk.
+      if (total != null && received === total) break;
+      const recovery = nextOfflineTransferRecovery(recoveryState, received);
+      if (!recovery) throw new Error('book.download.transfer_failed');
+      recoveryState = recovery.state;
+      await waitForTransferRetry(recovery.delayMs, options.signal);
+      debugLog('warn', 'download', `↻ GET ${url} 正文中断，自动续传`, {
+        attempt: recoveryState.attempts,
+        resumeFrom: received,
+        total,
+      }, 'network');
+
+      const previousReceived = received;
+      let next = await openDownloadResponse(received, sourceSignature);
+      const representationChanged = next.resumed && (
+        (total != null && next.total != null && total !== next.total)
+        || (sourceSignature != null && next.sourceSignature != null && sourceSignature !== next.sourceSignature)
+      );
+      if (representationChanged) {
+        await cancelResponseBodyQuietly(next.response);
+        await options.onRangeReset?.();
+        next = await openDownloadResponse(0);
+      }
+
+      active = next;
+      response = active.response;
+      received = active.received;
+      if (received < previousReceived) tail = new Uint8Array(0);
+      total = active.resumed ? active.total ?? total : active.total;
+      sourceSignature = active.resumed ? active.sourceSignature ?? sourceSignature : active.sourceSignature;
+      mimeType = active.mimeType;
+      const nextReader = response.body?.getReader();
+      if (!nextReader) throw new Error('book.download.transfer_failed');
+      reader = nextReader;
+      continue;
+    }
+
+    const value = result?.value;
     if (!value) continue;
 
     try {
@@ -630,10 +719,5 @@ export async function streamBookDownload(
   if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
     throw new Error('book.epub.invalid');
   }
-  return {
-    mimeType: response.headers.get('content-type') || 'application/octet-stream',
-    size: received,
-    sourceSignature,
-    resumed,
-  };
+  return { mimeType, size: received, sourceSignature, resumed };
 }

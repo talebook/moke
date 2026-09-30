@@ -11,10 +11,12 @@ import {
 import {
   beginOfflineDownload,
   classifyOfflineRangeResponse,
+  createOfflineTransferRecoveryState,
   endOfflineDownload,
   hasEpubCentralDirectory,
   makeOfflineBookKey,
   makeOfflineRelativePath,
+  nextOfflineTransferRecovery,
   parseContentRange,
   sanitizeOfflineFileName,
   shouldResumeOfflineDownload,
@@ -222,6 +224,40 @@ test('Range 响应只接受合法 Content-Range', () => {
   assert.equal(classifyOfflineRangeResponse(100, 206, null), 'retry-full');
   assert.equal(classifyOfflineRangeResponse(0, 206, null), 'invalid');
   assert.equal(classifyOfflineRangeResponse(0, 206, parseContentRange('bytes 0-299/300')), 'full');
+});
+
+test('正文中断自动续传允许持续进展，并限制无进展重试', () => {
+  let recovery = createOfflineTransferRecoveryState(100);
+  let next = nextOfflineTransferRecovery(recovery, 200);
+  assert.ok(next);
+  assert.equal(next.delayMs, 0);
+  recovery = next.state;
+
+  next = nextOfflineTransferRecovery(recovery, 200);
+  assert.equal(next?.delayMs, 250);
+  recovery = next.state;
+  next = nextOfflineTransferRecovery(recovery, 200);
+  assert.equal(next?.delayMs, 500);
+  recovery = next.state;
+  next = nextOfflineTransferRecovery(recovery, 200);
+  assert.equal(next?.delayMs, 1000);
+  recovery = next.state;
+  assert.equal(nextOfflineTransferRecovery(recovery, 200), null);
+
+  // Any newly persisted bytes reset the consecutive no-progress budget.
+  next = nextOfflineTransferRecovery(recovery, 201);
+  assert.ok(next);
+  assert.equal(next.state.noProgressAttempts, 0);
+});
+
+test('正文中断自动续传有总次数上限', () => {
+  let recovery = createOfflineTransferRecoveryState(0);
+  for (let attempt = 1; attempt <= 128; attempt += 1) {
+    const next = nextOfflineTransferRecovery(recovery, attempt);
+    assert.ok(next);
+    recovery = next.state;
+  }
+  assert.equal(nextOfflineTransferRecovery(recovery, 129), null);
 });
 
 test('瞬时下载失败保留断点，校验和存储失败清理断点', () => {

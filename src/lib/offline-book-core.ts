@@ -89,6 +89,42 @@ export function parseContentRange(value: string | null): { start: number; end: n
 
 export type OfflineRangeResponseMode = 'full' | 'resume' | 'restart' | 'retry-full' | 'invalid';
 
+const MAX_AUTOMATIC_TRANSFER_RECOVERIES = 128;
+const MAX_NO_PROGRESS_TRANSFER_RECOVERIES = 3;
+
+export interface OfflineTransferRecoveryState {
+  attempts: number;
+  noProgressAttempts: number;
+  lastOffset: number;
+}
+
+export function createOfflineTransferRecoveryState(offset: number): OfflineTransferRecoveryState {
+  return { attempts: 0, noProgressAttempts: 0, lastOffset: Math.max(0, offset) };
+}
+
+/**
+ * Bound automatic Range recovery while allowing repeatedly truncated responses
+ * to finish as long as every request advances the on-disk partial file.
+ */
+export function nextOfflineTransferRecovery(
+  state: OfflineTransferRecoveryState,
+  offset: number,
+): { state: OfflineTransferRecoveryState; delayMs: number } | null {
+  const nextOffset = Math.max(0, offset);
+  const madeProgress = nextOffset > state.lastOffset;
+  const attempts = state.attempts + 1;
+  const noProgressAttempts = madeProgress ? 0 : state.noProgressAttempts + 1;
+  if (attempts > MAX_AUTOMATIC_TRANSFER_RECOVERIES
+    || noProgressAttempts > MAX_NO_PROGRESS_TRANSFER_RECOVERIES) return null;
+
+  return {
+    state: { attempts, noProgressAttempts, lastOffset: nextOffset },
+    // Progressing transfers can reconnect immediately. Repeated zero-byte
+    // failures back off so an unavailable server is not hammered.
+    delayMs: madeProgress ? 0 : Math.min(2_000, 250 * 2 ** (noProgressAttempts - 1)),
+  };
+}
+
 export function shouldResumeOfflineDownload(appPlatform?: string, status?: string): boolean {
   return appPlatform === 'tauri' && status !== 'completed';
 }
