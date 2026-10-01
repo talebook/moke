@@ -117,6 +117,9 @@ This policy applies to this private repository and its public build workflow in
   version bump. Update and validate the release tooling before the next Preview
   publication; the existing workflow's tag/package equality check must account
   for the public-to-internal version mapping.
+- In `hehetoshang/moke-preview-builds`, successful tagged builds publish a
+  non-prerelease GitHub Release and explicitly mark it as Latest. Keep the
+  Preview product name and channel. Manual builds retain Actions artifacts.
 
 ## Release publishing
 
