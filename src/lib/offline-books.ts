@@ -1,6 +1,7 @@
 'use client';
 
 import { debugLog } from './debug-log.ts';
+import { isSampleBook } from './sample-book-info.ts';
 import {
   hasEpubCentralDirectory,
   makeOfflineBookKey,
@@ -105,8 +106,10 @@ async function putOfflineBookRecord(record: OfflineBookRecord): Promise<void> {
 }
 
 function sameServer(left: string, right: string): boolean {
+  if (left === right) return true;
   try {
-    return new URL(left).origin === new URL(right).origin;
+    const origin = new URL(left).origin;
+    return origin !== 'null' && origin === new URL(right).origin;
   } catch {
     return left.replace(/\/+$/, '') === right.replace(/\/+$/, '');
   }
@@ -154,7 +157,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
     }
   }
   return records
-    .filter((record) => !serverUrl || sameServer(record.serverUrl, serverUrl))
+    .filter((record) => !serverUrl || sameServer(record.serverUrl, serverUrl) || isSampleBook(record))
     .map((record) => ({ ...record, format: formatFromRecord(record), size: record.size ?? record.blob?.size ?? 0 }))
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
@@ -178,7 +181,7 @@ export async function getOfflineBook(
       }
     } else {
       const records = await listOfflineBooks(serverUrl);
-      indexedRecord = records.find((record) => record.bookId === bookId)
+      indexedRecord = records.find((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))
         ?? await getById(makeOfflineBookKey(serverUrl, bookId));
     }
   } catch (error) {
@@ -237,7 +240,7 @@ export async function setOfflineBookShelfState(
   bookId: string,
   inShelf: boolean,
 ): Promise<void> {
-  const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId);
+  const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
   for (const record of records) {
     const updated = { ...record, inShelf };
     await putOfflineBookRecord(updated);
@@ -334,6 +337,7 @@ async function removeStoredBookFile(record: OfflineBookRecord): Promise<void> {
 }
 
 export async function syncOfflineDownloadState(serverUrl: string, bookId: string, downloaded: boolean): Promise<void> {
+  if (isSampleBook({ serverUrl, bookId })) return;
   const { request } = await import('@/lib/api');
   const response = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
     method: 'POST',
@@ -351,7 +355,7 @@ export async function deleteOfflineBook(
 ): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
   const records = format
     ? [await getOfflineBook(serverUrl, bookId, format)].filter(Boolean) as OfflineBookRecord[]
-    : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId);
+    : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
 
   for (const record of records) {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
@@ -369,7 +373,7 @@ export async function deleteOfflineBook(
   }
 
   // Only clear the server flag when no other local format remains.
-  if ((await listOfflineBooks(serverUrl)).some((record) => record.bookId === bookId)) return { remoteSynced: true };
+  if ((await listOfflineBooks(serverUrl)).some((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))) return { remoteSynced: true };
   try {
     await syncOfflineDownloadState(serverUrl, bookId, false);
     return { remoteSynced: true };

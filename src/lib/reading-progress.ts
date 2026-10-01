@@ -4,6 +4,7 @@ import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { debugLog } from '@/lib/debug-log';
 import { readingProgressForPersistence } from '@/lib/reading-progress-payload';
 import { useServerStore } from '@/lib/store/server';
+import { SAMPLE_BOOK } from '@/lib/sample-book-info';
 
 export interface ReadingProgressPayload {
   schema: 'moke.readest.progress.v1';
@@ -66,6 +67,7 @@ export function normalizeReaderProgressEvent(input: Record<string, unknown>): Re
 }
 
 export async function fetchReadingProgress(bookId: string | number, signal?: AbortSignal): Promise<ReadingProgressPayload | null> {
+  if (bookId === SAMPLE_BOOK.bookId) return null;
   const { serverUrl, capabilities } = useServerStore.getState();
   if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return null;
 
@@ -87,6 +89,7 @@ export async function fetchReadingProgress(bookId: string | number, signal?: Abo
 }
 
 export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload): Promise<void> {
+  if (bookId === SAMPLE_BOOK.bookId) return;
   const { serverUrl, capabilities } = useServerStore.getState();
   if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return;
 
