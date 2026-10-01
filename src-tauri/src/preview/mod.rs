@@ -4,6 +4,7 @@
 //! privileged Preview implementation behind this boundary so stable builds do
 //! not merely hide the UI: they omit the native code entirely.
 
+mod device_credential;
 pub(crate) mod entitlement;
 
 #[allow(unused_imports)]
