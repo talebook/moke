@@ -109,7 +109,8 @@ This policy applies to this private repository and its public build workflow in
   baseline.
 - Four-component versions are not SemVer. Before publishing, ensure the build
   tooling maps the public version to a supported internal version (for example,
-  public `1.0.1.10` to SemVer `1.0.1-preview.10`) and validates that mapping
+  public `1.0.1.10` to SemVer `1.0.1-10`). MSI requires a numeric-only
+  prerelease identifier between 1 and 65535. Validate the mapping
   consistently across package metadata, tags and artifacts. Do not write raw
   four-component versions into Cargo/Tauri SemVer fields or silently drop `N`.
 - Recording this policy does not itself authorize a release, tag creation or a
