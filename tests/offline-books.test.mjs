@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { SAMPLE_BOOK } from '../src/lib/sample-book-info.ts';
+import { deleteSampleBook, getSampleBook, importSampleBook } from '../src/lib/sample-book.ts';
 
 import {
   cacheOfflineMediaType,
@@ -8,6 +11,7 @@ import {
   listOfflineBooks,
   saveOfflineBook,
   saveOfflineBookStream,
+  setOfflineBookShelfState,
   shouldPreserveOfflinePartial,
 } from '../src/lib/offline-books.ts';
 import {
@@ -140,7 +144,7 @@ function installWebOfflineStore() {
   return indexedDB;
 }
 
-function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') {
+function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke', trackNativeBooks = false) {
   const indexedDB = createFakeIndexedDb();
   const calls = [];
   const recordedBooks = [];
@@ -160,9 +164,17 @@ function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') 
     __TAURI_INTERNALS__: {
       invoke: async (command, args = {}) => {
         calls.push({ command, args });
-        if (command === 'moke_list_downloaded_books') return [];
+        if (command === 'moke_list_downloaded_books') return trackNativeBooks
+          ? recordedBooks.map((book) => ({ ...book, filePath: `${appDataDir}/${book.relativePath}` }))
+          : [];
         if (command === 'moke_record_downloaded_book') {
           recordedBooks.push(args.book);
+          return null;
+        }
+        if (trackNativeBooks && command === 'moke_delete_downloaded_book_file') return null;
+        if (trackNativeBooks && command === 'moke_remove_downloaded_book') {
+          const index = recordedBooks.findIndex((book) => book.id === args.id);
+          if (index >= 0) recordedBooks.splice(index, 1);
           return null;
         }
         if (command === 'plugin:path|resolve_directory') return appDataDir;
@@ -200,6 +212,116 @@ function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') 
   };
   return { calls, indexedDB, recordedBooks };
 }
+
+const sampleEpub = readFileSync(new URL('../public/samples/moke-sample.epub', import.meta.url));
+
+test('示例书默认不导入，读取状态不加载内置文件', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 0);
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.ok(sampleEpub.length < 4096);
+  assert.equal(await hasEpubCentralDirectory(new Blob([sampleEpub])), true);
+});
+
+test('示例书显式导入、并发导入和重新读取始终只有一本', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.equal(url, SAMPLE_BOOK.assetPath);
+    return new Response(sampleEpub);
+  });
+  const [first, second] = await Promise.all([importSampleBook(), importSampleBook()]);
+  assert.equal(first.id, second.id);
+  assert.equal(first.inShelf, true);
+  assert.equal(first.blob.size, sampleEpub.length);
+  assert.equal(store.records.size, 1);
+  assert.equal(fetch.mock.callCount(), 1);
+  // Reopen the same persisted database through another factory owner.
+  globalThis.window = { indexedDB: { open: (...args) => store.open(...args) } };
+  assert.equal((await getSampleBook()).id, first.id);
+  assert.equal((await importSampleBook()).id, first.id);
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('示例书跨服务器可见，删除不碰其他书籍、不发网络请求，并可重新导入', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  await importSampleBook();
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://books.test', blob: new Blob(['ordinary book']) });
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://other.test', bookId: 'other', blob: new Blob(['other book']) });
+  assert.equal((await listOfflineBooks('https://books.test')).length, 2);
+  assert.equal((await listOfflineBooks('https://unrelated.test')).length, 1);
+  await deleteSampleBook();
+  await deleteSampleBook();
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 2);
+  assert.equal(fetch.mock.callCount(), 1);
+  await importSampleBook();
+  assert.equal(store.records.size, 3);
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('示例文件读取失败或损坏不留下记录，失败后可以重试', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 500 }));
+  await assert.rejects(importSampleBook(), /无法读取/);
+  assert.equal(store.records.size, 0);
+  fetch.mock.mockImplementation(async () => new Response('not an EPUB'));
+  await assert.rejects(importSampleBook(), /文件无效/);
+  assert.equal(store.records.size, 0);
+  fetch.mock.mockImplementation(async () => new Response(sampleEpub));
+  await importSampleBook();
+  assert.equal(store.records.size, 1);
+});
+
+test('导入未完成时删除，会等保存结束后删除而不会重新出现', async (t) => {
+  const store = installWebOfflineStore();
+  let finishFetch;
+  const started = Promise.withResolvers();
+  t.mock.method(globalThis, 'fetch', () => new Promise((resolve) => {
+    finishFetch = resolve;
+    started.resolve();
+  }));
+  const importing = importSampleBook();
+  await started.promise;
+  const deleting = deleteSampleBook();
+  finishFetch(new Response(sampleEpub));
+  await Promise.all([importing, deleting]);
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 0);
+});
+
+test('跨服务器列出示例不会扩大单本读取、书架修改和删除的范围', async (t) => {
+  installWebOfflineStore();
+  t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  await importSampleBook();
+  assert.equal(await getOfflineBook('https://books.test', SAMPLE_BOOK.bookId), null);
+  await setOfflineBookShelfState('https://books.test', SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://books.test', blob: new Blob(['other']) });
+  await setOfflineBookShelfState('https://books.test', SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await deleteOfflineBook('https://books.test', SAMPLE_BOOK.bookId);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, false);
+});
+
+test('Tauri 示例书登记原生索引，删除同时移除原生文件和两个索引', async (t) => {
+  const { calls, indexedDB, recordedBooks } = installTauriOfflineStore('/app/data', true);
+  t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  const book = await importSampleBook();
+  assert.equal(book.blob, undefined);
+  assert.ok(book.filePath.startsWith('/app/data/books/'));
+  assert.equal(recordedBooks.length, 1);
+  await deleteSampleBook();
+  assert.equal(recordedBooks.length, 0);
+  assert.equal(indexedDB.records.size, 0);
+  assert.equal(await getSampleBook(), null);
+  assert.ok(calls.some((call) => call.command === 'moke_delete_downloaded_book_file' && call.args.id === book.id));
+  assert.ok(calls.some((call) => call.command === 'moke_remove_downloaded_book' && call.args.id === book.id));
+});
 
 test('离线书籍键会隔离服务器、书籍和格式', () => {
   assert.equal(makeOfflineBookKey('https://a.example', '12'), 'https://a.example::12');
