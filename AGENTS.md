@@ -120,6 +120,9 @@ This policy applies to this private repository and its public build workflow in
 - In `hehetoshang/moke-preview-builds`, successful tagged builds publish a
   non-prerelease GitHub Release and explicitly mark it as Latest. Keep the
   Preview product name and channel. Manual builds retain Actions artifacts.
+- Android APKs must be aligned, release-signed with the existing Android key,
+  and verified before upload. Publish only the verified signed APKs; updater
+  signing and OHOS signing are separate from Android package signing.
 
 ## Release publishing
 
