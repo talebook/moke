@@ -104,7 +104,7 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
         writer = new ComicProgressWriter(api.save);
         reader = new Reader(host.current, {
           manifest: { id: manifest.id, title: manifest.title, pages: manifest.pages.map(page => ({
-            ...page, src: comicPlaceholder(page.index),
+            ...page, src: comicPlaceholder(page.index, page.width, page.height),
           })) },
           initialProgress: { pageIndex: restoreComicPage(manifest, localProgress.current ?? progress) },
           config: { animations: !eink, preload: 1 },

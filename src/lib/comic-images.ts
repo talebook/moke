@@ -1,7 +1,11 @@
 // An inert, local placeholder lets the unmodified reader retain its layout and
 // page explorer. Only this host adapter obtains authenticated image bytes.
-const PLACEHOLDER = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-export const comicPlaceholder = (index: number) => `${PLACEHOLDER}#comic-${index}`;
+export function comicPlaceholder(index: number, width: number, height: number) {
+  // Trusted manifest dimensions give the inert placeholder the same intrinsic
+  // size as the page, including in the reader's original-size scroll mode.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"/>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}#comic-${index}`;
+}
 
 export function bindComicImages(
   host: HTMLElement,
@@ -12,6 +16,7 @@ export function bindComicImages(
   let active = true;
   let running = 0;
   const images = new Map<HTMLImageElement, number>();
+  const placeholders = new Map<number, string>();
   const queued = new Set<number>();
   const loading = new Set<number>();
   const cache = new Map<number, { url: string; size: number }>();
@@ -35,7 +40,7 @@ export function bindComicImages(
       if ([...images].some(([img, value]) => value === index && (visible.has(img) || img.closest('.kr-preload')))) continue;
       cache.delete(index);
       bytes -= item.size;
-      for (const [img, value] of images) if (value === index) img.src = comicPlaceholder(index);
+      for (const [img, value] of images) if (value === index) img.src = placeholders.get(index)!;
       URL.revokeObjectURL(item.url);
     }
   }
@@ -73,7 +78,9 @@ export function bindComicImages(
       if (!images.has(img)) {
         const match = img.getAttribute('src')?.match(/#comic-(\d+)$/);
         if (!match) return;
-        images.set(img, Number(match[1]));
+        const index = Number(match[1]);
+        placeholders.set(index, img.getAttribute('src')!);
+        images.set(img, index);
         observers.observe(img);
       }
       const index = images.get(img)!;

@@ -534,6 +534,10 @@ function DetailContent() {
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (!book) return;
     if (resolveBookReader(book, useSettingsStore.getState().readerPreference) === 'comic') {
+      if (targetAnnotation) {
+        setMessage('漫画不支持笔记精确定位，请使用在线阅读。');
+        return;
+      }
       setComicOffline(true);
       setComicOpen(true);
       return;
@@ -963,6 +967,7 @@ function DetailContent() {
             capabilityCheckedAt={capabilities.annotationApiCheckedAt}
             downloaded={downloaded}
             openingReader={openingReader}
+            locationUnsupportedReason={readerKind === 'comic' ? '漫画不支持笔记精确定位，请使用在线阅读' : undefined}
             onLocate={handleOfflineRead}
             onAuthRequired={handleAnnotationAuthRequired}
           />
