@@ -29,6 +29,7 @@ interface AnnotationPanelProps {
   capabilityCheckedAt: number | null;
   downloaded: boolean;
   openingReader: boolean;
+  locationUnsupportedReason?: string;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
   onAuthRequired: () => void;
 }
@@ -58,6 +59,7 @@ export function AnnotationPanel({
   capabilityCheckedAt,
   downloaded,
   openingReader,
+  locationUnsupportedReason,
   onLocate,
   onAuthRequired,
 }: AnnotationPanelProps) {
@@ -324,6 +326,7 @@ export function AnnotationPanel({
                 annotation={annotation}
                 downloaded={downloaded}
                 openingReader={openingReader}
+                locationUnsupportedReason={locationUnsupportedReason}
                 onLocate={onLocate}
               />
             ))}
@@ -338,11 +341,13 @@ function AnnotationCard({
   annotation,
   downloaded,
   openingReader,
+  locationUnsupportedReason,
   onLocate,
 }: {
   annotation: BookAnnotation;
   downloaded: boolean;
   openingReader: boolean;
+  locationUnsupportedReason?: string;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
 }) {
   const meta = TYPE_META[annotation.annotation_type];
@@ -352,7 +357,7 @@ function AnnotationCard({
     annotation.sources.map((source) => source.source_position).filter((value): value is string => Boolean(value)),
   ));
   const canLocate = hasReadestAnnotationLocation(annotation);
-  const locateDisabled = !downloaded || openingReader;
+  const locateDisabled = Boolean(locationUnsupportedReason) || !downloaded || openingReader;
 
   return (
     <article className="rounded-2xl border border-border/60 bg-background/65 p-4">
@@ -387,9 +392,9 @@ function AnnotationCard({
             disabled={locateDisabled}
             onClick={() => void onLocate(annotation)}
             className="inline-flex items-center gap-1 font-semibold text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
-            title={!downloaded ? '请先下载书籍' : openingReader ? '阅读器正在打开' : '在阅读器中定位'}
+            title={locationUnsupportedReason || (!downloaded ? '请先下载书籍' : openingReader ? '阅读器正在打开' : '在阅读器中定位')}
           >
-            <MapPin className="h-3.5 w-3.5" /> {!downloaded ? '下载后可定位' : openingReader ? '打开中' : '精确定位'}
+            <MapPin className="h-3.5 w-3.5" /> {locationUnsupportedReason || (!downloaded ? '下载后可定位' : openingReader ? '打开中' : '精确定位')}
           </button>
         ) : (
           <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400">

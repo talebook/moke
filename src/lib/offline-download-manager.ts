@@ -10,6 +10,7 @@ export interface OfflineDownloadSnapshot {
   serverUrl?: string;
   bookId?: string;
   title?: string;
+  media_type?: string;
   format?: string;
   downloadedBytes?: number;
   totalBytes?: number | null;
@@ -203,7 +204,7 @@ export function subscribeOfflineDownload(key: string, listener: (snapshot: Offli
 
 export interface StartOfflineDownloadOptions {
   key: string;
-  metadata?: Pick<OfflineDownloadSnapshot, 'serverUrl' | 'bookId' | 'title' | 'format' | 'downloadedBytes' | 'totalBytes'>;
+  metadata?: Pick<OfflineDownloadSnapshot, 'serverUrl' | 'bookId' | 'title' | 'media_type' | 'format' | 'downloadedBytes' | 'totalBytes'>;
   run: (
     onProgress: (progress: number) => void,
     signal: AbortSignal,

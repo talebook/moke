@@ -35,6 +35,7 @@ export function mergeOfflineDownloadItems(
       serverUrl: record.serverUrl,
       bookId: record.bookId,
       title: record.title,
+      media_type: record.media_type,
       format: record.format,
       status: 'completed',
       progress: 100,

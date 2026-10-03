@@ -27,7 +27,7 @@ test('online opening does not enter the offline download manager', () => {
 
 test('primary actions keep the original width while download is a fixed icon button', () => {
   const groupStart = detail.indexOf('data-testid="book-primary-action-group"');
-  const groupEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', groupStart);
+  const groupEnd = detail.indexOf('{!offlineMode && !canOpenPrimary &&', groupStart);
   assert.ok(groupStart >= 0 && groupEnd > groupStart);
   const group = detail.slice(groupStart, groupEnd);
 
@@ -48,7 +48,7 @@ test('primary actions keep the original width while download is a fixed icon but
 
 test('offline mode exposes only the local primary action', () => {
   const actionsStart = detail.indexOf('{offlineMode ? (');
-  const actionsEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', actionsStart);
+  const actionsEnd = detail.indexOf('{!offlineMode && !canOpenPrimary &&', actionsStart);
   assert.ok(actionsStart >= 0 && actionsEnd > actionsStart);
   const actions = detail.slice(actionsStart, actionsEnd);
 
