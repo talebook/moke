@@ -54,3 +54,14 @@
 - updater 默认仍使用稳定 tag 及 `talebook/moke/releases/download`，继续支持 macOS，签名缺失时仍成功跳过；不接入 Preview tag 解析或 Darwin 排除选项。重复资产、无效签名与无效版本现在会失败，新增测试覆盖这些行为。
 - 示例书使用已有离线存储和阅读器契约；Web 验证仅覆盖导入/删除、离线书库和本地书架。原生阅读器打开、退出、设备文件释放需桌面/移动原生环境验证。
 - iOS 名称校验默认路径不变；可明确指定其他构建配置，既有产品名不匹配校验继续生效。
+
+## TB-312 stable identity correction
+
+The remediation restores OHOS stable to `org.houheya.moke`, removes the
+app-specific underscore exception, and checks that identity in the unsigned HAP.
+The source Preview remains `org.houheya.moke_openharmony`. The source's Huawei
+debug Profile is bound to that Preview identifier and cannot sign stable as-is.
+No signing Profile, credential or permission is changed. A Profile authorized
+for the existing stable identity and the original signer is required to verify
+an upgrade with data retained; signed-device upgrade and side-by-side installation
+remain unverified until those artifacts and devices are available.

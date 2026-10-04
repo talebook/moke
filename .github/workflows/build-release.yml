@@ -186,10 +186,6 @@ jobs:
       # [patch.crates-io]（cargo-mobile2 feat/ohos、wry/tao feat/open-harmony）。
       # readest 的 Cargo.toml path 依赖也指向 ../vendor/tauri/crates/tauri，所以直接用
       # 子模块编译 CLI 能保证 CLI 与库版本一致。
-      - name: Allow Huawei OpenHarmony bundle identifier in Tauri CLI
-        if: matrix.platform == 'ohos'
-        run: node scripts/patch-tauri-ohos-identifier.mjs
-
       - name: Build Tauri CLI (from vendor/tauri submodule)
         if: matrix.platform == 'ohos'
         run: |
@@ -546,7 +542,7 @@ jobs:
         run: |
           hap=$(find src-tauri/gen/ohos -name 'entry-default-unsigned.hap' -print -quit)
           [ -n "$hap" ] || { echo 'OHOS HAP missing'; exit 1; }
-          unzip -p "$hap" module.json | jq -e '.app.bundleName == "org.houheya.moke_openharmony"'
+          unzip -p "$hap" module.json | jq -e '.app.bundleName == "org.houheya.moke"'
 
       # ==================================
 
