@@ -11,10 +11,10 @@ export interface ReaderReturnContext {
   offlineMode: boolean;
 }
 
-function returnMarker(nonce: string, context: ReaderReturnContext): string {
+function returnMarker(nonce: string, context: ReaderReturnContext, createdAt: number): string {
   // The live context also binds the source tuple. Editing a stored receipt to
   // another valid list entry cannot reuse the original browsing authority.
-  return `${MARKER_PREFIX}${JSON.stringify([nonce, context.activeServerId, context.serverUrl, context.offlineMode])}`;
+  return `${MARKER_PREFIX}${JSON.stringify([nonce, createdAt, context.activeServerId, context.serverUrl, context.offlineMode])}`;
 }
 
 /** Both values belong to one live browsing context, not the saved server list.
@@ -51,7 +51,7 @@ export function clearReaderReturn(channel?: ReaderReturnChannel): void {
 
 export function prepareReaderReturn(
   context: ReaderReturnContext,
-  channel: ReaderReturnChannel = browserReaderReturnChannel(),
+  channel?: ReaderReturnChannel,
   now = Date.now(),
 ): void {
   clearReaderReturn(channel);
@@ -60,14 +60,15 @@ export function prepareReaderReturn(
     || (context.serverUrl && normalizeServerAddress(context.serverUrl) !== context.serverUrl)) {
     throw new Error('连接信息已改变，请重新连接服务器后打开阅读器');
   }
-  const nonce = crypto.randomUUID();
-  const value = JSON.stringify({ version: 1, nonce, createdAt: now,
-    activeServerId: context.activeServerId, serverUrl: context.serverUrl, offlineMode: context.offlineMode });
   try {
-    channel.storage.setItem(STORAGE_KEY, value);
-    if (channel.storage.getItem(STORAGE_KEY) !== value) throw new Error('reader.return.storage');
-    channel.setMarker(returnMarker(nonce, context));
-    if (channel.getMarker() !== returnMarker(nonce, context)) throw new Error('reader.return.marker');
+    const current = channel ?? browserReaderReturnChannel();
+    const nonce = crypto.randomUUID();
+    const value = JSON.stringify({ version: 1, nonce, createdAt: now,
+      activeServerId: context.activeServerId, serverUrl: context.serverUrl, offlineMode: context.offlineMode });
+    current.storage.setItem(STORAGE_KEY, value);
+    if (current.storage.getItem(STORAGE_KEY) !== value) throw new Error('reader.return.storage');
+    current.setMarker(returnMarker(nonce, context, now));
+    if (current.getMarker() !== returnMarker(nonce, context, now)) throw new Error('reader.return.marker');
   } catch {
     clearReaderReturn(channel);
     throw new Error('无法保存阅读器返回信息，当前连接已保留。请检查本次会话的存储权限后重试。');
@@ -79,18 +80,19 @@ export function prepareReaderReturn(
  */
 export function takeReaderReturn(
   savedServers: SavedServer[],
-  channel: ReaderReturnChannel = browserReaderReturnChannel(),
+  channel?: ReaderReturnChannel,
   now = Date.now(),
 ): ReaderReturnContext | null {
   try {
-    const raw = channel.storage.getItem(STORAGE_KEY);
-    const marker = channel.getMarker();
-    const arrival = channel.getArrival();
+    const current = channel ?? browserReaderReturnChannel();
+    const raw = current.storage.getItem(STORAGE_KEY);
+    const marker = current.getMarker();
+    const arrival = current.getArrival();
     clearReaderReturn(channel);
     if (!raw || arrival.pathname !== '/library' || arrival.navigationType !== 'navigate') return null;
     const data = JSON.parse(raw);
     if (!data || data.version !== 1 || typeof data.nonce !== 'string'
-      || !/^[0-9a-f-]{36}$/.test(data.nonce) || marker !== returnMarker(data.nonce, data)
+      || !/^[0-9a-f-]{36}$/.test(data.nonce) || marker !== returnMarker(data.nonce, data, data.createdAt)
       || !Number.isFinite(data.createdAt) || data.createdAt > now || now - data.createdAt >= READER_RETURN_TTL_MS
       || typeof data.offlineMode !== 'boolean' || typeof data.serverUrl !== 'string') return null;
     if (data.activeServerId === null) {

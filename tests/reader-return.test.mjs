@@ -30,7 +30,7 @@ test('one-use return receipt contains only source identity and preserves the lit
 });
 
 test('cold contexts, wrong paths, reload/history, stale/future/deleted/forged-source receipts do not reactivate a server', () => {
-  for (const scenario of ['cold','root','welcome','reload','back','expired','future','deleted','wrong-origin','forged-other','wrong-nonce','corrupt']) {
+  for (const scenario of ['cold','root','welcome','reload','back','expired','future','deleted','wrong-origin','forged-other','forged-expiry','wrong-nonce','corrupt']) {
     const tab=channel();
     prepareReaderReturn(online,tab,1000);
     let servers=[a,b], now=1001;
@@ -45,6 +45,7 @@ test('cold contexts, wrong paths, reload/history, stale/future/deleted/forged-so
     const key=[...tab.state.values.keys()][0];
     if(scenario==='wrong-origin'){const data=JSON.parse(tab.state.values.get(key));data.serverUrl=b.url;tab.state.values.set(key,JSON.stringify(data));}
     if(scenario==='forged-other'){const data=JSON.parse(tab.state.values.get(key));data.activeServerId=b.id;data.serverUrl=b.url;tab.state.values.set(key,JSON.stringify(data));}
+    if(scenario==='forged-expiry'){const data=JSON.parse(tab.state.values.get(key));data.createdAt=1001;tab.state.values.set(key,JSON.stringify(data));}
     if(scenario==='wrong-nonce')tab.state.marker+='-invalid';
     if(scenario==='corrupt')tab.state.values.set(key,'{bad');
     assert.equal(takeReaderReturn(servers,tab,now),null,scenario);
@@ -58,6 +59,18 @@ test('denied return storage prevents reader launch and removes the browsing-cont
   tab.storage.setItem=()=>{throw new Error('denied');};
   assert.throws(()=>prepareReaderReturn(online,tab),/无法保存/);
   assert.equal(tab.state.marker,'');
+});
+
+test('a denied sessionStorage getter clears an old marker and reports a recoverable launch error', () => {
+  const previous=globalThis.window;
+  globalThis.window={name:'moke-reader-return:old',get sessionStorage(){throw new Error('denied getter');}};
+  try {
+    assert.throws(()=>prepareReaderReturn(online),/无法保存/);
+    assert.equal(window.name,'');
+    window.name='moke-reader-return:old';
+    assert.equal(takeReaderReturn([a,b]),null);
+    assert.equal(window.name,'');
+  }finally{if(previous===undefined)delete globalThis.window;else globalThis.window=previous;}
 });
 
 test('online document return confirms only A before hydration; cold restart only loads the list', async () => {
