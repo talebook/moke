@@ -1,13 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
-import { requestAnimatedBack } from '@/lib/native-back';
+import { requireClosedReaders } from '@/lib/reader-source';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
 interface TalebookLoginResponse {
@@ -15,8 +15,7 @@ interface TalebookLoginResponse {
   msg?: string;
 }
 
-async function login(username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
-  const { serverUrl } = useServerStore.getState();
+async function login(serverUrl: string, signal: AbortSignal, username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
@@ -34,14 +33,14 @@ async function login(username: string, password: string, captchaData?: any): Pro
   const response = await request(`${serverUrl}/api/user/sign_in`, {
     method: 'POST',
     body,
-    credentials: 'include',
+    credentials: 'include', signal,
   });
   return response.json();
 }
 
 export default function LoginPage() {
   const router = useRouter();
-  const { logout, serverTitle, setConnected } = useServerStore();
+  const { logout, serverTitle, setConnected, serverUrl, connectionId, sessionId } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -50,19 +49,27 @@ export default function LoginPage() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
-  const { serverUrl } = useServerStore.getState();
+
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => { controller.current?.abort(); }, []);
+  const current = () => useServerStore.getState().connectionId === connectionId && useServerStore.getState().sessionId === sessionId;
 
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password.trim() || loading || !serverUrl) return;
+    const abort = new AbortController(); controller.current = abort;
     setLoading(true);
     setError('');
 
     try {
-      const res = await login(username, password, captchaData);
+      await requireClosedReaders();
+      if (!current() || abort.signal.aborted) return;
+      const res = await login(serverUrl, abort.signal, username, password, captchaData);
+      if (!current() || abort.signal.aborted) return;
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
-        const info = await fetchCurrentUser();
+        const info = await fetchCurrentUser(serverUrl, abort.signal);
+        if (!current() || abort.signal.aborted) return;
         if (!info.isLogin || !info.user) {
           logout();
           setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
@@ -73,7 +80,9 @@ export default function LoginPage() {
         setConnected('', info.user);
         router.push('/shelf');
       } else if (res.err === 'user.private.not_valid') {
-        router.push('/access');
+        const state = useServerStore.getState();
+        const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
+        if (candidate) { state.requireAccess(candidate.requestId); router.push(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`); }
       } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
         setError(res.msg || '请输入人机验证码');
         setShowCaptcha(true);
@@ -81,8 +90,7 @@ export default function LoginPage() {
         setError(res.msg || '登录失败，请检查用户名和密码');
       }
     } catch (loginError) {
-      console.error('[LoginPage] login flow failed:', loginError);
-      setError('无法连接服务器');
+      if (current() && !abort.signal.aborted) setError(loginError instanceof Error ? loginError.message : '无法连接服务器');
     } finally {
       setLoading(false);
     }
@@ -93,7 +101,7 @@ export default function LoginPage() {
       <div className="relative w-full max-w-[410px] my-8 overflow-hidden rounded-[32px] app-glass p-10">
         <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
         <div className="relative">
-        <button type="button" onClick={() => requestAnimatedBack('/')} aria-label="返回" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => { controller.current?.abort(); router.replace('/welcome'); }} aria-label="返回" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div className="flex justify-center mb-8">

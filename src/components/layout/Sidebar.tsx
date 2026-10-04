@@ -128,9 +128,10 @@ export function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-white/10">
+        {!offlineMode && <Link href="/welcome" className="mb-3 flex items-center justify-center min-h-11 rounded-lg bg-white/10 text-sm text-primary-foreground">服务器列表</Link>}
         {offlineMode ? (
           <Link href="/welcome" className="flex items-center justify-center rounded-lg bg-white/10 px-3 py-2.5 text-sm text-primary-foreground hover:bg-white/15">
-            连接服务器
+            服务器列表
           </Link>
         ) : user ? (
           <Link

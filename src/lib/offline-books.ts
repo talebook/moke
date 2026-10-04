@@ -218,6 +218,10 @@ export async function getOfflineBook(
           indexedRecord = await getById(makeOfflineBookKey(serverUrl, bookId, format));
         }
       }
+      if (!indexedRecord) {
+        const records = await listOfflineBooks(serverUrl);
+        indexedRecord = records.find((record) => record.bookId === bookId && formatFromRecord(record) === normalizeOfflineFormat(format)) ?? null;
+      }
     } else {
       const records = await listOfflineBooks(serverUrl);
       indexedRecord = records.find((record) => record.bookId === bookId)
@@ -243,7 +247,8 @@ export async function getOfflineBook(
       && sameServer(record.serverUrl, serverUrl)
       && (!wantedFormat || formatFromRecord(record) === wantedFormat)
     )) ?? (indexedRecord
-      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName)
+      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName
+        && record.bookId === bookId && sameServer(record.serverUrl, indexedRecord.serverUrl))
       : undefined);
     if (!nativeRecord) return null;
 

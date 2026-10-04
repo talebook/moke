@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverServerCapabilities } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -13,8 +13,21 @@ const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { serverUrl, offlineMode, hasHydrated, capabilities, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  const { serverUrl, offlineMode, hasHydrated, capabilities, connectionId, sessionId, loadServers, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  const previousPath = useRef(pathname);
+  useEffect(() => {
+    const previous = previousPath.current;
+    previousPath.current = pathname;
+    // Route transitions, rather than component cleanup, also work with Strict
+    // Mode effect replay and Next's cached Activity pages.
+    if ((previous === '/access' && pathname !== '/access')
+      || (previous === '/welcome' && pathname !== '/welcome' && pathname !== '/access')) {
+      useServerStore.getState().cancelConnection();
+    }
+  }, [pathname]);
   const [discoveryServerUrl, capabilitiesCheckedAt] = getServerDiscoveryInputs(serverUrl, capabilities);
+
+  useEffect(() => { if (!useServerStore.getState().hasHydrated) void loadServers(); }, [loadServers]);
 
   // 拓展管理页面是本地功能，不需要连接服务器
   const isExtensionPath = pathname.startsWith('/extensions');
@@ -43,24 +56,34 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     if (isServerCapabilitiesFresh(capabilitiesCheckedAt)) return;
 
     let cancelled = false;
+    const abort = new AbortController();
+    const isCurrent = () => !cancelled && useServerStore.getState().connectionId === connectionId
+      && useServerStore.getState().sessionId === sessionId;
 
     const checkAccess = async () => {
       const userAtSyncStart = useServerStore.getState().user;
 
       try {
-        const welcome = await checkWelcomeRequirement(discoveryServerUrl);
-        if (!cancelled && welcome.needsAccessCode) {
+        const welcome = await checkWelcomeRequirement(discoveryServerUrl, abort.signal);
+        if (!isCurrent()) return;
+        if (welcome.err !== 'ok') throw new Error(welcome.msg || '访问码状态检查失败');
+        if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
-          router.replace('/access');
+          const state = useServerStore.getState();
+          const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
+          if (candidate) {
+            state.requireAccess(candidate.requestId);
+            router.replace(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`);
+          } else router.replace('/welcome');
           return;
         }
 
         const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
-          fetchCurrentUser(),
-          fetchServerInfo(),
+          fetchCurrentUser(discoveryServerUrl, abort.signal),
+          fetchServerInfo(discoveryServerUrl, abort.signal),
           discoverServerCapabilities(discoveryServerUrl),
         ]);
-        if (cancelled) return;
+        if (!isCurrent()) return;
 
         const currentState = useServerStore.getState();
         if (currentState.serverUrl !== discoveryServerUrl) return;
@@ -100,7 +123,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         // Welcome/network failures are transient. Preserve the last confirmed
         // user, title, and capability snapshot for the next sync attempt.
-        console.error('[ServerProvider] sync error:', e);
+        if (isCurrent()) console.warn('[ServerProvider] sync error:', e);
       }
     };
 
@@ -108,8 +131,15 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
+  }, [capabilitiesCheckedAt, connectionId, sessionId, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
 
-  return <>{children}</>;
+  // Protected pages must not start requests while loading or redirecting an
+  // absent runtime connection (including return from a full-document reader).
+  if (!PUBLIC_PATHS.includes(pathname) && !isExtensionPath && !isEmbeddedReaderPath
+    && (!hasHydrated || (!serverUrl && !offlineMode))) {
+    return <div role="status" className="flex min-h-screen items-center justify-center">正在加载连接信息…</div>;
+  }
+  return <Fragment key={`${connectionId}:${sessionId}:${offlineMode}`}>{children}</Fragment>;
 }

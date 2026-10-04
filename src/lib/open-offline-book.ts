@@ -1,6 +1,8 @@
 'use client';
 
 import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-policy';
+import { assertReaderContext, openReaderFromSource, requireClosedReaders } from '@/lib/reader-source';
+import { useServerStore } from '@/lib/store/server';
 import type { OfflineBookRecord } from '@/lib/offline-books';
 import { getDebugPanelLaunchState } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -22,6 +24,7 @@ export async function openOfflineBook(
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri' || !record.filePath) {
     throw new Error('book.offline.desktop_only');
   }
+  const source = { serverUrl: record.serverUrl, bookId: record.bookId, sessionId: useServerStore.getState().sessionId };
 
   if (useSettingsStore.getState().readerPreference === 'system') {
     await openBookWithSystemDefault(record.id);
@@ -33,7 +36,7 @@ export async function openOfflineBook(
   // be no active authenticated server session, and the saved record can belong
   // to a server other than the currently connected one.
   const [restoreProgress, platform] = await Promise.all([
-    fetchReadingProgress(record.bookId),
+    fetchReadingProgress(record.bookId, undefined, record.serverUrl),
     getMokeRuntimePlatform(),
   ]);
   const common = {
@@ -43,6 +46,7 @@ export async function openOfflineBook(
     mokeBookId: record.bookId,
     restoreProgress,
   };
+  assertReaderContext(source, useServerStore.getState());
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(
@@ -53,8 +57,8 @@ export async function openOfflineBook(
     return;
   }
 
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('open_reader', common);
+  await requireClosedReaders();
+  await openReaderFromSource(source, common);
 }
 
 export async function openBookWithSystemDefault(recordId: string): Promise<void> {

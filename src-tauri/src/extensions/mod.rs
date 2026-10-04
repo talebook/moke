@@ -524,6 +524,17 @@ fn ext_reader_event(
     app.emit(&full_event, &data)
         .map_err(|e| format!("发送事件失败: {e}"))?;
 
+    // Host progress must identify the actual IPC caller. Keep the Reader and
+    // extension protocol unchanged; this envelope is private to Moke's main UI.
+    app.emit_to(
+        "main",
+        "moke:reader:event",
+        serde_json::json!({
+            "window": source_window.label(), "event": event, "data": data,
+        }),
+    )
+    .map_err(|e| format!("发送宿主阅读事件失败: {e}"))?;
+
     Ok(())
 }
 

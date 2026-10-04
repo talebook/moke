@@ -17,6 +17,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
+import { assertReaderContext, openReaderFromSource, requireClosedReaders } from '@/lib/reader-source';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
@@ -82,7 +83,7 @@ function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
-  const { serverUrl, offlineMode, capabilities, user } = useServerStore();
+  const { serverUrl, offlineMode, capabilities, user, sessionId } = useServerStore();
   const [comicOffline, setComicOffline] = useState(false);
   const [comicOpen, setComicOpen] = useState(false);
   const closeComic = useCallback(() => setComicOpen(false), []);
@@ -473,7 +474,7 @@ function DetailContent() {
         // Remote progress is optional; a stalled progress endpoint must not
         // hold a successfully probed book on the connecting screen forever.
         retryOnlineRead(
-          (signal) => fetchReadingProgress(book.id, signal),
+          (signal) => fetchReadingProgress(book.id, signal, serverUrl),
           () => false,
           controller.signal,
           8_000,
@@ -481,6 +482,7 @@ function DetailContent() {
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;
+      assertReaderContext({ serverUrl, bookId: String(book.id), sessionId }, useServerStore.getState());
       // The preflight may have validated a same-host HTTP → HTTPS upgrade.
       // Keep progress identity on the saved server URL, but authorize the resolved source.
       const sourceServerUrl = new URL(source.url).origin;
@@ -492,7 +494,7 @@ function DetailContent() {
           debugPanel: getDebugPanelLaunchState(),
           mokeBookId: String(book.id),
           restoreProgress,
-          serverUrl: useServerStore.getState().serverUrl,
+          serverUrl,
           sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
@@ -502,8 +504,8 @@ function DetailContent() {
 
       await openAndRecordBookRead({
         open: async () => {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('open_reader', {
+          await requireClosedReaders();
+          await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: source.url,
             eink: useSettingsStore.getState().eink,
             debugPanel: getDebugPanelLaunchState(),
@@ -598,7 +600,7 @@ function DetailContent() {
         loadRecord,
         loadProgress: async () => targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : fetchReadingProgress(book.id),
+          : fetchReadingProgress(book.id, undefined, serverUrl),
         loadPlatform: getMokeRuntimePlatform,
         beforeSingleWebviewOpen: async (record) => {
           if (!record?.filePath) return;
@@ -609,6 +611,7 @@ function DetailContent() {
         },
       });
       const { record, platform: currentPlatform } = prepared;
+      assertReaderContext({ serverUrl, bookId: String(book.id), sessionId }, useServerStore.getState());
       if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
         return;
@@ -635,7 +638,7 @@ function DetailContent() {
           restoreProgress,
           // The explicit navigation id lets the reader skip only startup and
           // annotation relocations; genuine page turns still sync directly.
-          serverUrl: useServerStore.getState().serverUrl,
+          serverUrl,
           runtimePlatform: currentPlatform,
         });
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
@@ -644,8 +647,8 @@ function DetailContent() {
 
       await openAndRecordBookRead({
         open: async () => {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('open_reader', {
+          await requireClosedReaders();
+          await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
             debugPanel: getDebugPanelLaunchState(),

@@ -1,5 +1,6 @@
 'use client';
 
+import { requireClosedReaders } from '@/lib/reader-source';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -20,7 +21,7 @@ import { Select } from '@/components/ui/Select';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, leaveOfflineMode, user, disconnect, logout } = useServerStore();
+  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
@@ -54,7 +55,7 @@ export default function SettingsPage() {
 
     const loadServerInfo = async () => {
       try {
-        const data = await fetchServerInfo();
+        const data = await fetchServerInfo(serverUrl);
         if (!cancelled) {
           setServerVersion(data.version || '未知');
         }
@@ -72,18 +73,20 @@ export default function SettingsPage() {
     };
   }, [offlineMode, serverUrl]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
+    try { await requireClosedReaders(); } catch (error) { window.alert((error as Error).message); return; }
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/welcome');
   };
 
   const handleConnectServer = () => {
-    leaveOfflineMode();
     router.push('/welcome');
   };
 
   const handleLogout = async () => {
+    const context = useServerStore.getState();
+    try { await requireClosedReaders(); } catch (error) { window.alert((error as Error).message); return; }
     if (serverUrl) {
       try {
         await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
@@ -91,6 +94,7 @@ export default function SettingsPage() {
         console.warn('Failed to sign out on server:', error);
       }
     }
+    if (useServerStore.getState().connectionId !== context.connectionId || useServerStore.getState().sessionId !== context.sessionId) return;
     logout();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/login');
@@ -153,16 +157,17 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
+          <SettingsLinkRow icon={PlugZap} label="服务器列表" description="加入并保存多个服务器，点击条目连接" href="/welcome" />
           <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
             {offlineMode ? (
               <ActionRow
                 icon={PlugZap}
-                label="连接服务器"
+                label="服务器列表"
                 onClick={handleConnectServer}
               />
             ) : (
               <>
-              <SettingsRow label="连接服务器" value={serverUrl} />
+              <SettingsRow label="当前服务器" value={serverUrl} />
               <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
               <SettingsRow label="服务器版本" value={serverVersion} />
               <ActionRow
