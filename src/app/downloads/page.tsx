@@ -150,12 +150,13 @@ export default function DownloadsPage() {
         serverUrl: item.serverUrl,
         bookId: item.bookId,
         title: item.title,
+        media_type: item.media_type,
         format: item.format,
         downloadedBytes: canResume ? item.downloadedBytes : 0,
         totalBytes: item.totalBytes,
       },
       run: (onProgress, signal, onTransfer) => downloadAndSaveOfflineBook({
-        serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!,
+        serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, media_type: item.media_type, format: item.format!,
         onProgress, onTransfer, signal, resume: canResume, preservePartialOnFailure: true,
       }),
       onCancel: () => removeOfflinePartial({

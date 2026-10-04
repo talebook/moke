@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 
+const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
@@ -135,7 +136,7 @@ for (const viewport of [
   test(`online and download actions retain one-row layout on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installTauriHttpMock(page);
-    await page.goto(`http://127.0.0.1:3000/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
 
     const group = page.getByTestId('book-primary-action-group');
     const online = page.getByTestId('online-read-action');
@@ -188,7 +189,7 @@ for (const viewport of [
   test(`offline mode exposes only its local reading action on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installTauriHttpMock(page, { offlineMode: true });
-    await page.goto(`http://127.0.0.1:3000/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
 
     const offlineRead = page.getByTestId('offline-read-primary-action');
     const cover = page.locator('.book-cover-shadow');

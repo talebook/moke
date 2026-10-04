@@ -25,6 +25,7 @@ import { Check, Download, ListChecks } from 'lucide-react';
 import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
+  media_type?: string;
   id: string | number;
   title: string;
   authors?: Array<{ name: string }>;
@@ -71,14 +72,16 @@ function SearchContent() {
     () => results.filter((book) => hasFormat(book, activeFilter)),
     [activeFilter, results],
   );
+  const resultIds = JSON.stringify(results.map((book) => String(book.id)));
 
-  // Clear selection when results change
+  // A readstate refresh changes metadata, not the result set. Resetting on
+  // every new array closes the menu that requested that refresh.
   useEffect(() => {
     setSelectedIds(new Set());
     setBatchMode(false);
     setContextMenu(null);
     lastSelectedIdRef.current = null;
-  }, [activeFilter, results, query]);
+  }, [activeFilter, resultIds, query, serverUrl, offlineMode, searchScope]);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -237,6 +240,7 @@ function SearchContent() {
       await startManagedOfflineBookDownload({
         serverUrl,
         bookId: id,
+        media_type: book.media_type,
         title: book.title,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: Boolean(book.state?.wants),
@@ -340,6 +344,7 @@ function SearchContent() {
           await startManagedOfflineBookDownload({
             serverUrl,
             bookId: id,
+            media_type: book.media_type,
             title: book.title,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: Boolean(book.state?.wants),

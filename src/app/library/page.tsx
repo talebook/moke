@@ -29,6 +29,7 @@ import { BookOpen, Check, Download, ListChecks, X } from 'lucide-react';
 import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
+  media_type?: string;
   id: string | number;
   title: string;
   authors?: Array<{ name: string }>;
@@ -466,6 +467,7 @@ export default function LibraryPage() {
         serverUrl,
         bookId: id,
         title: book.title,
+        media_type: book.media_type,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: Boolean(book.state?.wants),
         coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
@@ -636,6 +638,7 @@ export default function LibraryPage() {
             serverUrl,
             bookId: id,
             title: book.title,
+            media_type: book.media_type,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: Boolean(book.state?.wants),
             coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
