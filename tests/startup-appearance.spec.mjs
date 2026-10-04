@@ -1,6 +1,8 @@
 import { test, expect as baseExpect } from '@playwright/test';
 import { installLibraryLayoutMock, LAYOUT_BOOK, LAYOUT_OFFLINE_BOOK } from './helpers/library-layout.mjs';
 
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
+
 // Run against pnpm dev-preview. Native licensing/window/book calls are mocked;
 // this measures frontend frames, not OS-level window composition or real Reader.
 // Cold dev-server compilation plus bootstrap/main/detail document loads can
@@ -43,7 +45,7 @@ for (const appearance of ['light', 'dark', 'eink']) {
     await page.route('**/readest/reader?**', (route) => route.fulfill({
       contentType: 'text/html; charset=utf-8', body: '<!doctype html><h1>模拟阅读器就绪</h1>',
     }));
-    await page.goto('http://127.0.0.1:3000/', { waitUntil: 'commit' });
+    await page.goto(`${APP_URL}/`, { waitUntil: 'commit' });
     await expect(page.getByRole('heading', { name: '模拟阅读器就绪' })).toBeVisible();
     const trace = await page.evaluate(() => ({
       frames: JSON.parse(sessionStorage.getItem('startup-frames') || '[]'),
@@ -70,7 +72,7 @@ for (const appearance of ['light', 'dark', 'eink']) {
 for (const state of ['inactive', 'error']) {
   test(`Preview ${state} still blocks automatic reading and exposes recovery`, async ({ page }) => {
     await installLibraryLayoutMock(page, { startup: true, previewState: state, previewDelayMs: 100 });
-    await page.goto('http://127.0.0.1:3000/', { waitUntil: 'commit' });
+    await page.goto(`${APP_URL}/`, { waitUntil: 'commit' });
     await expect(page.getByRole('heading', { name: 'Moke Preview 授权' })).toBeVisible();
     await expect(page.getByTestId('app-startup-screen')).toHaveCount(0);
     expect(await page.evaluate(() => sessionStorage.getItem('layout-reader-opens'))).toBeNull();
@@ -81,7 +83,7 @@ for (const state of ['inactive', 'error']) {
 
 test('missing offline book exits the startup screen with a usable error', async ({ page }) => {
   await installLibraryLayoutMock(page, { startup: true, offlineMode: true, nativeRuntime: 'android', nativeNavigation: true });
-  await page.goto('http://127.0.0.1:3000/', { waitUntil: 'commit' });
+  await page.goto(`${APP_URL}/`, { waitUntil: 'commit' });
   await expect(page.getByText('书籍详情加载失败，请检查服务器连接。', { exact: true })).toBeVisible();
   await expect(page.getByTestId('app-startup-screen')).toHaveCount(0);
 });
@@ -92,7 +94,7 @@ for (const readerFailure of [false, true]) {
       startup: true, offlineMode: true, nativeRuntime: 'linux',
       nativeBooks: [LAYOUT_OFFLINE_BOOK], readerFailure,
     });
-    await page.goto('http://127.0.0.1:3000/', { waitUntil: 'commit' });
+    await page.goto(`${APP_URL}/`, { waitUntil: 'commit' });
     await expect(page.getByRole('heading', { name: LAYOUT_BOOK.title })).toBeVisible();
     await expect(page).not.toHaveURL(/continue=1/);
     await expect(page.getByTestId('app-startup-screen')).toHaveCount(0);

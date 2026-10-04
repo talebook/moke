@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installLibraryLayoutMock, LAYOUT_BOOK } from './helpers/library-layout.mjs';
 
-const APP_URL = 'http://127.0.0.1:3000';
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 const viewports = [
   { width: 320, height: 640 },
   { width: 390, height: 844 },
@@ -78,8 +78,7 @@ for (const viewport of viewports) {
     await expect(card).toHaveAttribute('href', '/detail?id=42&continue=1');
     await expect(page.locator('.book-card-motion')).toBeVisible();
     const gap = await card.evaluate((element) => element.parentElement.nextElementSibling.firstElementChild.getBoundingClientRect().top - element.getBoundingClientRect().bottom);
-    expect(gap).toBeGreaterThanOrEqual(8);
-    expect(gap).toBeLessThanOrEqual(16);
+    expect(gap).toBeCloseTo(viewport.width < 768 ? 12 : 16, 0);
     const history = page.getByRole('link', { name: '查看历史记录' });
     await history.focus();
     await expect(history).toBeFocused();
@@ -97,8 +96,7 @@ test('offline and empty shelf keep the header and continue card compact', async 
   await expect(page.getByRole('link', { name: '查看历史记录' })).toHaveCount(0);
   await expect(page.getByText('书架还是空的', { exact: true })).toBeVisible();
   const gap = await page.getByRole('link', { name: `继续阅读《${LAYOUT_BOOK.title}》` }).evaluate((element) => element.parentElement.nextElementSibling.firstElementChild.getBoundingClientRect().top - element.getBoundingClientRect().bottom);
-  expect(gap).toBeGreaterThanOrEqual(8);
-  expect(gap).toBeLessThanOrEqual(16);
+  expect(gap).toBeCloseTo(12, 0);
 });
 
 test('shelf without a continue entry retains normal top padding', async ({ page }) => {

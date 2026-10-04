@@ -15,30 +15,32 @@ export async function installLibraryLayoutMock(page, {
   offlineMode = false, empty = false, continueReading = true, bookCount = 1,
   nativeRuntime = 'linux', nativeBooks = [], startup = false, nativeNavigation = false,
   previewState = 'active', previewDelayMs = 0, bookLoadDelayMs = 0, readerHandoffDelayMs = 100,
-  readerFailure = false,
+  readerFailure = false, returnBookPayload = null,
   windowLabel = 'main', bootstrapHandoff = false,
   theme = 'system', eink = false,
 } = {}) {
   const books = empty ? [] : Array.from({ length: bookCount }, (_, index) => bookCount === 1
     ? LAYOUT_BOOK : { ...LAYOUT_BOOK, id: String(index + 1), title: `测试书籍 ${index + 1}` });
   const payloads = {
+    '/api/book/42': { err: 'ok', book: LAYOUT_BOOK },
     '/api/shelf': { err: 'ok', books },
     '/api/library': { err: 'ok', books, total: books.length },
     '/api/search': { err: 'ok', books },
     '/api/book/nav': { err: 'ok', navs: [] },
     '/api/network/sources': { err: 'ok', items: [] },
-    '/api/user/info': { err: 'ok', user: { id: 1, username: 'layout-test', extra: {} }, sys: { title: '布局测试书库' } },
+    '/api/user/info': { err: 'ok', user: { id: 1, is_login: true, username: 'layout-test', extra: {} }, sys: { title: '布局测试书库' } },
     '/api/welcome': { err: 'not_invited' },
   };
   await page.route(`${LAYOUT_SERVER_URL}/**`, (route) => route.fulfill({
     json: payloads[new URL(route.request().url()).pathname] || { err: 'ok' },
   }));
-  await page.addInitScript(({ serverUrl, payloads, offlineMode, continueReading, book, nativeRuntime, nativeBooks, startup, nativeNavigation, previewState, previewDelayMs, bookLoadDelayMs, readerHandoffDelayMs, readerFailure, windowLabel, bootstrapHandoff, theme, eink }) => {
+  await page.addInitScript(({ serverUrl, payloads, offlineMode, continueReading, book, nativeRuntime, nativeBooks, startup, nativeNavigation, previewState, previewDelayMs, bookLoadDelayMs, readerHandoffDelayMs, readerFailure, windowLabel, bootstrapHandoff, theme, eink, returnBookPayload }) => {
     localStorage.setItem('moke-privacy-consent', '2026-08-14');
     localStorage.setItem('moke-server-storage', JSON.stringify({ state: {
       serverUrl, offlineMode, hasHydrated: true, isConnected: !offlineMode,
       user: { id: 1, username: 'layout-test' },
       capabilities: {
+        annotationApiStatus: 'unchecked', annotationApiCheckedAt: null,
         shelfApi: true, networkSourcesApi: true, readingStateApi: true,
         readingProgressApi: true, readingStatsApi: true, checkedAt: Date.now(),
       },
@@ -86,7 +88,10 @@ export async function installLibraryLayoutMock(page, {
         if (command === 'plugin:http|fetch_send') {
           const url = requests.get(args.rid);
           const id = nextId++;
-          bodies.set(id, JSON.stringify(payloads[new URL(url).pathname] || { err: 'ok' }));
+          const path = new URL(url).pathname;
+          const payload = path === '/api/book/42' && sessionStorage.getItem('returning') && returnBookPayload
+            ? returnBookPayload : payloads[path] || { err: 'ok' };
+          bodies.set(id, JSON.stringify(payload));
           return { status: 200, statusText: 'OK', url, rid: id, headers: [['content-type', 'application/json']] };
         }
         if (command === 'plugin:http|fetch_read_body') {
@@ -122,5 +127,5 @@ export async function installLibraryLayoutMock(page, {
       transformCallback: () => nextId++, unregisterCallback: () => {}, convertFileSrc: (path) => path,
     };
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
-  }, { serverUrl: LAYOUT_SERVER_URL, payloads, offlineMode, continueReading, book: LAYOUT_BOOK, nativeRuntime, nativeBooks, startup, nativeNavigation, previewState, previewDelayMs, bookLoadDelayMs, readerHandoffDelayMs, readerFailure, windowLabel, bootstrapHandoff, theme, eink });
+  }, { serverUrl: LAYOUT_SERVER_URL, payloads, offlineMode, continueReading, book: LAYOUT_BOOK, nativeRuntime, nativeBooks, startup, nativeNavigation, previewState, previewDelayMs, bookLoadDelayMs, readerHandoffDelayMs, readerFailure, windowLabel, bootstrapHandoff, theme, eink, returnBookPayload });
 }

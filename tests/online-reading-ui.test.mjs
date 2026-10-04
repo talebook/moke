@@ -61,6 +61,6 @@ test('offline mode exposes only the local primary action', () => {
   const remoteBranch = detail.indexOf('const useSystemReader', handlerStart);
   const offlineHandler = detail.slice(handlerStart, remoteBranch);
   assert.match(offlineHandler, /if \(offlineMode\) \{/);
-  assert.match(offlineHandler, /await openOfflineBook\(record, router\.push\)/);
+  assert.match(offlineHandler, /await openOfflineBook\(record, router\.push, controller\.signal(?:,|\))/);
   assert.doesNotMatch(offlineHandler, /resolveTalebookOnlineSource|recordBookRead|request\(/);
 });

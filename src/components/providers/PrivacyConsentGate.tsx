@@ -70,7 +70,7 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   };
 
   if (state === 'loading') {
-    return <AppStartupScreen />;
+    return <AppStartupScreen message={pathname === '/detail' ? '正在加载书籍详情…' : '正在打开墨客…'} />;
   }
 
   return (

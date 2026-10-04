@@ -1,6 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect as baseExpect } from '@playwright/test';
 
-const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
+// Shared-host dev hydration and native module imports can exceed five seconds.
+const expect = baseExpect.configure({ timeout: 15_000 });
+
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
@@ -58,6 +61,7 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
     });
 
     window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       invoke: async (command, args = {}) => {
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;
@@ -86,6 +90,11 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
           }
           responseBody.sent = true;
           return [...new TextEncoder().encode(responseBody.body), 0];
+        }
+        if (command === 'moke_build_info') return { channel: 'preview', previewCompiled: true };
+        if (command === 'moke_preview_entitlement_status') {
+          const expiresAt = Math.floor(Date.now() / 1000) + 600;
+          return { state: 'active', serviceConfigured: true, deviceId: 'fixture-device', subject: 'fixture', capabilities: ['foundation'], expiresAt, offlineUntil: expiresAt };
         }
         if (command.startsWith('plugin:http|fetch_cancel')) return null;
         if (command === 'plugin:event|listen') return nextRid++;
@@ -136,7 +145,7 @@ for (const viewport of [
   test(`online and download actions retain one-row layout on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installTauriHttpMock(page);
-    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${APP_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
 
     const group = page.getByTestId('book-primary-action-group');
     const online = page.getByTestId('online-read-action');
@@ -189,7 +198,7 @@ for (const viewport of [
   test(`offline mode exposes only its local reading action on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installTauriHttpMock(page, { offlineMode: true });
-    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${APP_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
 
     const offlineRead = page.getByTestId('offline-read-primary-action');
     const cover = page.locator('.book-cover-shadow');

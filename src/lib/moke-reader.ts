@@ -173,7 +173,9 @@ export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
   platformOverride?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
   if (!isSafeAppNavigationPath(href)) {
     console.warn('Refusing unsafe full-document navigation:', href);
     return;
@@ -189,6 +191,7 @@ export async function navigateFullDocument(
     try {
       currentPlatform = await getMokeRuntimePlatform();
     } catch (error) {
+      if (signal?.aborted) return;
       // If the runtime probe fails (e.g. IPC unavailable in dev mode), never
       // block navigation — fall through to the client router.
       console.warn('Unable to detect runtime platform, using router navigation:', error);
@@ -196,6 +199,7 @@ export async function navigateFullDocument(
       return;
     }
   }
+  if (signal?.aborted) return;
   if (!isSingleWebviewRuntime(currentPlatform)) {
     fallback(href);
     return;
@@ -206,6 +210,7 @@ export async function navigateFullDocument(
     try {
       window.location.assign(href);
     } catch (error) {
+      if (signal?.aborted) return;
       console.warn('Full-document navigation failed, using router navigation:', error);
       fallback(href);
     }
@@ -213,8 +218,10 @@ export async function navigateFullDocument(
   }
   try {
     const { invoke } = await import('@tauri-apps/api/core');
+    if (signal?.aborted) return;
     await invoke('moke_navigate', { path: href });
   } catch (error) {
+    if (signal?.aborted) return;
     console.warn('Falling back to client-side navigation:', error);
     fallback(href);
   }
@@ -443,6 +450,7 @@ export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
   platformOverride?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  await navigateFullDocument(href, navigate, platformOverride);
+  await navigateFullDocument(href, navigate, platformOverride, signal);
 }

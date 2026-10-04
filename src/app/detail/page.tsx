@@ -4,7 +4,7 @@ import { retryOnlineRead } from '@/lib/online-retry';
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, ChevronRight, Star, FileText, HardDrive, Calendar, BookOpen, Building2, Barcode, Tags, Users, LibraryBig, FileBadge2, Bookmark, Download, Loader2, Trash2 } from 'lucide-react';
-import { requestAnimatedBack } from '@/lib/native-back';
+import { APP_BACK_EVENT, requestAnimatedBack } from '@/lib/native-back';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, MokeApiError, readApiJson, request } from '@/lib/api';
 import { cacheOfflineMediaType, deleteOfflineBook, getOfflineBook, listOfflineBooks, removeOfflinePartial, setOfflineBookShelfState, type OfflineBookRecord } from '@/lib/offline-books';
@@ -52,33 +52,7 @@ import { resolveBookReader } from '@/lib/book-reader-policy';
 import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
 import { rememberContinueReading } from '@/lib/continue-reading';
 import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
-
-interface BookDetail {
-  media_type?: string;
-  id: string;
-  title: string;
-  authors?: string[] | Array<{ name: string }>;
-  author?: string;
-  author_sort?: string;
-  img?: string;
-  thumb?: string;
-  rating?: number | { value: number; count: number };
-  tags?: string[] | Array<{ name: string }>;
-  publisher?: string;
-  pubdate?: string;
-  description?: string;
-  comments?: string;
-  files?: Array<{ format: string; size: number }>;
-  isbn?: string;
-  series?: string;
-  language?: string;
-  state?: {
-    read_state?: number;
-    online_read?: number;
-    download?: number;
-    wants?: boolean | number;
-  };
-}
+import { detailReturnIdentityKey, rememberDetailReturn, takeDetailReturn, type BookDetail, type DetailReturnSnapshot } from '@/lib/book-detail-return';
 
 function DetailContent() {
   const searchParams = useSearchParams();
@@ -94,6 +68,9 @@ function DetailContent() {
   const [book, setBook] = useState<BookDetail | null>(null);
   const [offlineRecord, setOfflineRecord] = useState<OfflineBookRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshingDetail, setRefreshingDetail] = useState(false);
+  const [readerStage, setReaderStage] = useState('正在打开上次阅读的书籍…');
+  const returnSnapshotRef = useRef<{ key: string; snapshot: DetailReturnSnapshot | null } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [metaExpanded, setMetaExpanded] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState('epub');
@@ -112,11 +89,14 @@ function DetailContent() {
   // 请求序号 + abort：详情页 id 跳转（同一组件实例复用）或卸载时终止在途请求，
   // 防止 A 的慢响应把 B 的书显示在页面上。
   const loadBookSeqRef = useRef(0);
+  const loadBookPendingRef = useRef(true);
   const loadBookControllerRef = useRef<AbortController | null>(null);
   const openingReaderRef = useRef(false);
   const continueStartedRef = useRef<string | null>(null);
   const [continuePending, setContinuePending] = useState(continueRequested);
-  const onlineOpenControllerRef = useRef<AbortController | null>(null);
+  const readerOpenControllerRef = useRef<AbortController | null>(null);
+  const detailIdentity = { serverUrl, accountId: user ? String(user.id) : 'guest', bookId: id || '', offlineMode, source: continueSourceServer || '' };
+  const detailIdentityKey = detailReturnIdentityKey(detailIdentity);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
   const tagNames = normalizeNames(book?.tags);
@@ -152,13 +132,34 @@ function DetailContent() {
     loadBookControllerRef.current?.abort();
     const controller = new AbortController();
     loadBookControllerRef.current = controller;
+    openingReaderRef.current = false;
+    setOpeningReader(false);
+    setOpeningOnline(false);
     loadBook(controller);
+    // A document can enter bfcache without React unmounting. Invalidate pending
+    // openers there as well as on route/book/session changes. Consuming continue
+    // is deliberately absent from these lifecycle dependencies.
+    const cancelReaderOpen = () => {
+      readerOpenControllerRef.current?.abort();
+      readerOpenControllerRef.current = null;
+      openingReaderRef.current = false;
+    };
+    const cancelForBack = () => {
+      cancelReaderOpen();
+      setContinuePending(false);
+      setOpeningReader(false);
+      setOpeningOnline(false);
+    };
+    window.addEventListener(APP_BACK_EVENT, cancelForBack);
+    window.addEventListener('pagehide', cancelReaderOpen);
     return () => {
       controller.abort();
-      onlineOpenControllerRef.current?.abort();
+      cancelReaderOpen();
+      window.removeEventListener(APP_BACK_EVENT, cancelForBack);
+      window.removeEventListener('pagehide', cancelReaderOpen);
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
-  }, [continueSourceServer, id, offlineMode, serverUrl]);
+  }, [continueSourceServer, id, offlineMode, serverUrl, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,6 +205,10 @@ function DetailContent() {
     const restoreDetail = () => {
       if (new URLSearchParams(window.location.search).get('continue') !== '1') {
         setContinuePending(false);
+        if (!readerOpenControllerRef.current) {
+          setOpeningReader(false);
+          setOpeningOnline(false);
+        }
       }
     };
     window.addEventListener('pageshow', restoreDetail);
@@ -224,7 +229,28 @@ function DetailContent() {
 
   const loadBook = async (controller: AbortController) => {
     const seq = ++loadBookSeqRef.current;
-    setLoading(true);
+    // The load effect runs before the continue effect in the same commit.
+    // A new source/session can still have the previous book in that render;
+    // don't start an opener until the new detail request has committed.
+    loadBookPendingRef.current = true;
+    setMessage('');
+    setOfflineRecord(null);
+    if (returnSnapshotRef.current?.key !== detailIdentityKey) {
+      returnSnapshotRef.current = { key: detailIdentityKey, snapshot: continueRequested ? null
+        : takeDetailReturn(detailIdentity, window.history.state?.mokeDetailReturn) };
+    }
+    const cached = returnSnapshotRef.current.snapshot;
+    if (cached) {
+      setBook(cached.book);
+      setSelectedFormat(cached.selectedFormat);
+      setInShelf(cached.inShelf);
+      setDownloaded(cached.downloaded);
+    } else {
+      setBook(null);
+    }
+    setLoading(!cached);
+    setRefreshingDetail(Boolean(cached));
+    setReaderStage('正在打开上次阅读的书籍…');
     try {
       if (offlineMode) {
         const localRecords = (await listOfflineBooks(continueSourceServer || serverUrl || undefined))
@@ -249,11 +275,12 @@ function DetailContent() {
       }
       const res = await request(`${serverUrl}/api/book/${id}`, { credentials: 'include', signal: controller.signal });
       const data = await readApiJson<{ err?: string; msg?: string; book?: BookDetail; data?: BookDetail }>(res, '书籍详情解析失败。', ['ok', 'user.need_login']);
+      if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       if (data.err === 'user.need_login') {
+        setBook(null);
         router.push('/login');
         return;
       }
-      if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
       const nextBook = data.book || data.data;
       if (data.err === 'ok' && nextBook) {
         setBook(nextBook);
@@ -279,7 +306,12 @@ function DetailContent() {
       }
       setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
     } finally {
-      if (!controller.signal.aborted && seq === loadBookSeqRef.current) setLoading(false);
+      if (!controller.signal.aborted && seq === loadBookSeqRef.current) {
+        loadBookPendingRef.current = false;
+        setLoading(false);
+        setRefreshingDetail(false);
+        returnSnapshotRef.current = { key: detailIdentityKey, snapshot: null };
+      }
     }
   };
 
@@ -317,7 +349,7 @@ function DetailContent() {
   };
 
   const toggleShelf = async () => {
-    if (!book || shelfUpdating) return;
+    if (loadBookPendingRef.current || !book || shelfUpdating) return;
 
     const nextInShelf = !inShelf;
     setShelfUpdating(true);
@@ -369,7 +401,7 @@ function DetailContent() {
   };
 
   const handleDownload = async () => {
-    if (!book || downloading) return;
+    if (loadBookPendingRef.current || !book || downloading) return;
     setDownloading(true);
     setDownloadProgress(0);
     setMessage('');
@@ -459,7 +491,8 @@ function DetailContent() {
   };
 
   const handleOnlineRead = async () => {
-    if (!book) return;
+    if (loadBookPendingRef.current) return;
+    if (!book || String(book.id) !== id) return;
     const reader = resolveBookReader(book, useSettingsStore.getState().readerPreference);
     if (reader === 'comic') {
       rememberCurrentBook();
@@ -471,7 +504,7 @@ function DetailContent() {
       if (downloaded || await handleDownload()) return await handleOfflineRead();
       return;
     }
-    if (!book || !onlineFormat) {
+    if (!onlineFormat) {
       setMessage('当前书籍格式暂不支持在线阅读，请下载后阅读。');
       return;
     }
@@ -482,17 +515,16 @@ function DetailContent() {
     }
 
     const controller = new AbortController();
-    onlineOpenControllerRef.current?.abort();
-    onlineOpenControllerRef.current = controller;
+    readerOpenControllerRef.current?.abort();
+    readerOpenControllerRef.current = controller;
     openingReaderRef.current = true;
     setOpeningReader(true);
     setOpeningOnline(true);
     setMessage('');
 
     const finishOpening = () => {
-      if (onlineOpenControllerRef.current === controller) {
-        onlineOpenControllerRef.current = null;
-      }
+      if (controller.signal.aborted || readerOpenControllerRef.current !== controller) return;
+      readerOpenControllerRef.current = null;
       openingReaderRef.current = false;
       setOpeningReader(false);
       setOpeningOnline(false);
@@ -500,6 +532,7 @@ function DetailContent() {
     };
 
     try {
+      setReaderStage('正在连接在线书籍并恢复阅读进度…');
       const [source, restoreProgress, currentPlatform] = await Promise.all([
         resolveTalebookOnlineSource(
           request,
@@ -522,6 +555,7 @@ function DetailContent() {
       // The preflight may have validated a same-host HTTP → HTTPS upgrade.
       // Keep progress identity on the saved server URL, but authorize the resolved source.
       const sourceServerUrl = new URL(source.url).origin;
+      setReaderStage('正在打开阅读器…');
 
       if (isSingleWebviewRuntime(currentPlatform)) {
         const href = buildEmbeddedReaderUrl({
@@ -535,13 +569,15 @@ function DetailContent() {
           runtimePlatform: currentPlatform,
         });
         rememberCurrentBook();
-        await openEmbeddedReaderBook(href, router.push, currentPlatform);
-        return true;
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, controller.signal);
+        return !controller.signal.aborted;
       }
 
       await openAndRecordBookRead({
+        signal: controller.signal,
         open: async () => {
           const { invoke } = await import('@tauri-apps/api/core');
+          if (controller.signal.aborted) return;
           await invoke('open_reader', {
             filePath: source.url,
             eink: useSettingsStore.getState().eink,
@@ -572,7 +608,8 @@ function DetailContent() {
   };
 
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
-    if (!book) return;
+    if (loadBookPendingRef.current) return;
+    if (!book || String(book.id) !== id) return;
     if (resolveBookReader(book, useSettingsStore.getState().readerPreference) === 'comic') {
       if (targetAnnotation) {
         setMessage('漫画不支持笔记精确定位，请使用在线阅读。');
@@ -589,41 +626,52 @@ function DetailContent() {
       return;
     }
 
+    const controller = new AbortController();
+    readerOpenControllerRef.current?.abort();
+    readerOpenControllerRef.current = controller;
     openingReaderRef.current = true;
     setOpeningReader(true);
     setMessage('');
     let annotationNavigationId: string | undefined;
 
     const finishOpening = () => {
+      if (controller.signal.aborted || readerOpenControllerRef.current !== controller) return;
+      readerOpenControllerRef.current = null;
       openingReaderRef.current = false;
       setOpeningReader(false);
       setMessage((current) => current === openingMessage ? '' : current);
     };
 
     try {
+      setReaderStage('正在读取本地书籍…');
       const loadRecord = async () => offlineMode && offlineRecord?.format === selectedFormat
         ? offlineRecord
         : getOfflineBook(activeServerUrl, id!, selectedFormat);
       if (offlineMode) {
         const record = await loadRecord();
+        if (controller.signal.aborted) return;
         if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
           setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
         }
         rememberCurrentBook(record.format);
-        return await openOfflineBook(record, router.push);
+        return await openOfflineBook(record, router.push, controller.signal, (stage) => {
+          if (!controller.signal.aborted && readerOpenControllerRef.current === controller) setReaderStage(stage);
+        });
       }
 
       const useSystemReader = useSettingsStore.getState().readerPreference === 'system'
         && !targetAnnotation;
       if (useSystemReader) {
         const record = await loadRecord();
+        if (controller.signal.aborted) return;
         if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
           setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
         }
         await openAndRecordBookRead({
-          open: () => openBookWithSystemDefault(record.id),
+          signal: controller.signal,
+          open: () => openBookWithSystemDefault(record.id, controller.signal),
           onOpened: () => {
             rememberCurrentBook(record.format);
             setOpeningReader(false);
@@ -637,11 +685,13 @@ function DetailContent() {
         return;
       }
 
+      setReaderStage('正在读取书籍并恢复阅读进度…');
       const prepared = await prepareEmbeddedBookOpen({
+        signal: controller.signal,
         loadRecord,
         loadProgress: async () => targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : fetchReadingProgress(book.id),
+          : fetchReadingProgress(book.id, controller.signal),
         loadPlatform: getMokeRuntimePlatform,
         beforeSingleWebviewOpen: async (record) => {
           if (!record?.filePath) return;
@@ -651,7 +701,9 @@ function DetailContent() {
           console.warn('Read record could not be saved before navigation:', error);
         },
       });
+      if (controller.signal.aborted) return;
       const { record, platform: currentPlatform } = prepared;
+      setReaderStage('正在打开阅读器…');
       if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
         return;
@@ -682,13 +734,15 @@ function DetailContent() {
           runtimePlatform: currentPlatform,
         });
         rememberCurrentBook(record.format);
-        await openEmbeddedReaderBook(href, router.push, currentPlatform);
-        return true;
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, controller.signal);
+        return !controller.signal.aborted;
       }
 
       await openAndRecordBookRead({
+        signal: controller.signal,
         open: async () => {
           const { invoke } = await import('@tauri-apps/api/core');
+          if (controller.signal.aborted) return;
           await invoke('open_reader', {
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
@@ -712,6 +766,7 @@ function DetailContent() {
       });
     } catch (e) {
       if (annotationNavigationId) clearAnnotationLocateProgressSuppression(annotationNavigationId);
+      if (controller.signal.aborted) return;
       console.error('Failed to open book:', e);
       setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
@@ -721,6 +776,7 @@ function DetailContent() {
 
   const rememberCurrentBook = (format = selectedFormat) => {
     if (!book || !activeServerUrl) return;
+    rememberDetailReturn(detailIdentity, { book, selectedFormat: format, inShelf, downloaded });
     rememberContinueReading({
       serverUrl: activeServerUrl,
       mode: offlineMode ? 'offline' : 'online',
@@ -733,7 +789,7 @@ function DetailContent() {
   };
 
   useEffect(() => {
-    if (!continueRequested || loading || !book || openingReaderRef.current) return;
+    if (!continueRequested || loading || loadBookPendingRef.current || !book || String(book.id) !== id || openingReaderRef.current) return;
     const launchKey = `${activeServerUrl}:${book.id}`;
     if (continueStartedRef.current === launchKey) return;
 
@@ -761,9 +817,13 @@ function DetailContent() {
 
     // Native navigation is deferred; retain the screen through that gap.
     // Errors and independent desktop reader windows leave detail usable.
-    void open().then((navigating) => {
-      if (!navigating) setContinuePending(false);
-    }, () => setContinuePending(false));
+    const opening = open();
+    const controller = readerOpenControllerRef.current;
+    void opening.then((navigating) => {
+      if (!controller?.signal.aborted && !navigating) setContinuePending(false);
+    }, () => {
+      if (!controller?.signal.aborted) setContinuePending(false);
+    });
     // Each opener intentionally uses the current render's book/session state;
     // continueStartedRef makes this launch effect one-shot for that book.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -780,7 +840,7 @@ function DetailContent() {
   ]);
 
   const handleDeleteDownload = async () => {
-    if (!book || deletingDownload) return;
+    if (loadBookPendingRef.current || !book || deletingDownload) return;
 
     setDeletingDownload(true);
     setMessage('');
@@ -801,7 +861,7 @@ function DetailContent() {
     }
   };
 
-  if (continuePending && (loading || book)) return <AppStartupScreen />;
+  if (continuePending && (loading || book)) return <AppStartupScreen message={readerStage} />;
 
   if (loading) {
     return (
@@ -859,7 +919,7 @@ function DetailContent() {
                   <button
                     data-testid="offline-read-primary-action"
                     onClick={() => void handleOfflineRead()}
-                    disabled={openingReader}
+                    disabled={openingReader || refreshingDetail}
                     aria-busy={openingReader}
                     className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 md:mt-6 md:w-[220px]"
                   >
@@ -878,7 +938,7 @@ function DetailContent() {
                     <button
                       data-testid="online-read-action"
                       onClick={() => void handleOnlineRead()}
-                      disabled={openingReader || downloading || !canOpenPrimary}
+                      disabled={openingReader || downloading || refreshingDetail || !canOpenPrimary}
                       className="inline-flex h-full min-w-0 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-md transition-all duration-200 hover:bg-primary/90 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <BookOpen className="h-4 w-4 shrink-0" />
@@ -887,7 +947,7 @@ function DetailContent() {
                     <button
                       data-testid="offline-download-action"
                       onClick={() => void (downloaded ? handleOfflineRead() : handleDownload())}
-                      disabled={downloading || openingReader}
+                      disabled={downloading || openingReader || refreshingDetail}
                       aria-label={downloadActionLabel}
                       aria-busy={downloading || (openingReader && !openingOnline)}
                       title={downloadActionLabel}
@@ -926,6 +986,7 @@ function DetailContent() {
                         return (
                           <button
                             key={fmt}
+                            disabled={refreshingDetail}
                             onClick={() => setSelectedFormat(fmt)}
                             className={`h-7 px-2.5 rounded-lg text-xs font-medium transition-all border ${
                               isActive
@@ -948,7 +1009,7 @@ function DetailContent() {
             )}
             <button
               onClick={toggleShelf}
-              disabled={shelfUpdating}
+              disabled={shelfUpdating || refreshingDetail}
               className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-semibold text-foreground transition-all duration-200 hover:bg-muted active:scale-[0.98] disabled:opacity-60 md:w-[220px]"
             >
               <Bookmark className="w-4 h-4" fill={inShelf ? 'currentColor' : 'none'} />
@@ -957,13 +1018,14 @@ function DetailContent() {
             {downloaded && (
               <button
                 onClick={() => setShowDeleteConfirm(true)}
-                disabled={deletingDownload}
+                disabled={deletingDownload || refreshingDetail}
                 className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 text-sm font-semibold text-destructive transition-all duration-200 hover:bg-destructive/15 active:scale-[0.98] disabled:opacity-60 md:w-[220px]"
               >
                 <Trash2 className="w-4 h-4" />
                 {deletingDownload ? '删除中' : '删除下载书籍'}
               </button>
             )}
+            {refreshingDetail && <p role="status" className="mt-3 text-xs text-muted-foreground">正在更新书籍信息…</p>}
             {message && <p className="mt-3 w-full px-1 text-xs leading-relaxed text-muted-foreground md:w-[220px]">{message}</p>}
           </div>
 
@@ -1100,14 +1162,14 @@ function DetailContent() {
             <div className="mt-6 flex gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                disabled={deletingDownload}
+                disabled={deletingDownload || refreshingDetail}
                 className="h-10 flex-1 rounded-xl border border-amber-950/10 bg-white/60 text-sm font-medium text-foreground transition hover:bg-muted disabled:opacity-60"
               >
                 取消
               </button>
               <button
                 onClick={handleDeleteDownload}
-                disabled={deletingDownload}
+                disabled={deletingDownload || refreshingDetail}
                 className="h-10 flex-1 rounded-xl bg-destructive text-sm font-medium text-destructive-foreground transition hover:opacity-90 disabled:opacity-60"
               >
                 {deletingDownload ? '删除中' : '确认删除'}
@@ -1165,7 +1227,7 @@ function formatFileSize(size: number) {
 
 export default function DetailPage() {
   return (
-    <Suspense fallback={<AppStartupScreen />}>
+    <Suspense fallback={<AppStartupScreen message="正在加载书籍详情…" />}>
       <DetailContent />
     </Suspense>
   );

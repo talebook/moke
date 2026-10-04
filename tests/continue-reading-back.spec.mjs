@@ -1,6 +1,8 @@
 import { test, expect as baseExpect } from '@playwright/test';
 import { installLibraryLayoutMock, LAYOUT_BOOK, LAYOUT_OFFLINE_BOOK, LAYOUT_SERVER_URL } from './helpers/library-layout.mjs';
 
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
+
 // This exercises the Tauri frontend with a simulated native book/navigation
 // bridge. It deliberately returns during Reader startup, before key interception.
 const expect = baseExpect.configure({ timeout: 15_000 });
@@ -17,7 +19,7 @@ for (const entry of ['startup', 'card', 'shortcut']) {
       contentType: 'text/html; charset=utf-8',
       body: '<!doctype html><meta charset="utf-8"><title>模拟阅读器启动</title><h1>模拟阅读器启动</h1>',
     }));
-    await page.goto(`http://127.0.0.1:3000/${entry === 'startup' ? '' : 'shelf'}`, { waitUntil: 'commit' });
+    await page.goto(`${APP_URL}/${entry === 'startup' ? '' : 'shelf'}`, { waitUntil: 'commit' });
     if (entry === 'card') {
       await page.getByRole('link', { name: `继续阅读《${LAYOUT_BOOK.title}》` }).click();
     } else if (entry === 'shortcut') {

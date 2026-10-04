@@ -84,8 +84,18 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
     });
 
     window.__TAURI_INTERNALS__ = {
+      metadata: {
+        currentWindow: { label: 'main' },
+        currentWebview: { label: 'main' },
+      },
       invoke: async (command, args = {}) => {
         commands.push(command);
+        if (command === 'moke_build_info') return { channel: 'preview', previewCompiled: true };
+        if (command === 'moke_preview_entitlement_status') {
+          const expiresAt = Math.floor(Date.now() / 1000) + 600;
+          return { state: 'active', serviceConfigured: true, deviceId: 'fixture-device', subject: 'fixture',
+            capabilities: ['foundation'], expiresAt, offlineUntil: expiresAt, message: 'fixture' };
+        }
         if (command === 'moke_runtime_platform') return 'linux';
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;

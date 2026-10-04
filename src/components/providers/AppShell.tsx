@@ -20,6 +20,7 @@ import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/develop
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
 import { NativeBackNavigation } from './NativeBackNavigation';
 import { PrivacyConsentGate } from './PrivacyConsentGate';
+import { AppStartupProvider } from '@/components/ui/AppStartupScreen';
 
 declare global {
   interface Window {
@@ -303,7 +304,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <div className="moke-app-root">
         <NativeBackNavigation />
-        <PrivacyConsentGate>{children}</PrivacyConsentGate>
+        <AppStartupProvider>
+          <PrivacyConsentGate>{children}</PrivacyConsentGate>
+        </AppStartupProvider>
       </div>
       <DebugLogPanel />
     </>

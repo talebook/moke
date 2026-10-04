@@ -166,10 +166,10 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     }
   };
 
-  if (!status && !error) return <AppStartupScreen />;
+  if (!status && !error) return <AppStartupScreen message="正在验证使用资格…" />;
 
   if (isEntitled && windowLabel !== 'main') {
-    if (!error) return <AppStartupScreen />;
+    if (!error) return <AppStartupScreen message="正在进入墨客…" />;
     return (
       <div className="fixed inset-0 z-[180] flex items-center justify-center app-warm-bg px-4 text-sm text-muted-foreground">
         <div className="w-full max-w-md rounded-3xl border border-border bg-background p-6 text-center shadow-2xl">

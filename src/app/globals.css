@@ -1021,6 +1021,35 @@ html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(
   }
 }
 
+/* Keep the progress line still while the old/new messages scroll vertically. */
+.moke-progress-text {
+  display: grid;
+  height: 1.5rem;
+  line-height: 1.5rem;
+  overflow: hidden;
+  max-width: 100%;
+}
+.moke-progress-text > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.moke-progress-text-old { animation: moke-progress-out 260ms ease-in-out both; }
+.moke-progress-text-new { animation: moke-progress-in 260ms ease-in-out both; }
+@keyframes moke-progress-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+@keyframes moke-progress-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce), (update: slow), (max-color: 1) {
+  .moke-progress-text-old { display: none; }
+  .moke-progress-text-new { animation: none; }
+}
+[data-eink='true'] .moke-progress-text-old { display: none; }
+[data-eink='true'] .moke-progress-text-new { animation: none; }
+
 /* The pinned comic reader owns page layout; Moke owns the viewport/safe areas. */
 .moke-comic-reader { position: fixed; inset: 0; z-index: 100; background: #111827; color: #f8fafc; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .moke-comic-host, .moke-comic-host .kr-reader { width: 100%; height: 100%; }

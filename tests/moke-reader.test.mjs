@@ -8,6 +8,7 @@ import {
   getNativeTopSafeAreaInset,
   isSingleWebviewRuntime,
   isSafeAppNavigationPath,
+  navigateFullDocument,
   openEmbeddedReaderHome,
   requiresMokeNavigate,
   resolveRuntimeCategory,
@@ -23,6 +24,89 @@ test('OHOS uses the single-WebView reader flow', () => {
   assert.equal(isSingleWebviewRuntime('ios'), true);
   assert.equal(isSingleWebviewRuntime('linux'), false);
   assert.equal(isSingleWebviewRuntime('windows'), false);
+});
+
+test('cancelled navigation suppresses delayed platform success/failure and native rejection fallback', async () => {
+  const originalWindow = globalThis.window;
+  const originalPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  const originalWarn = console.warn;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  console.warn = () => {};
+  try {
+    for (const fail of [false, true]) {
+      const controller = new AbortController();
+      const native = [];
+      const fallback = [];
+      let release;
+      const platform = new Promise((resolve, reject) => { release = () => fail ? reject(new Error('fixture platform failure')) : resolve('android'); });
+      globalThis.window = { __TAURI_INTERNALS__: { invoke: (command, args) => {
+        if (command === 'moke_runtime_platform' || command === 'plugin:os|platform') return platform;
+        native.push({ command, args });
+      } } };
+      const navigation = navigateFullDocument('/detail?id=42&continue=1', (href) => fallback.push(href), undefined, controller.signal);
+      controller.abort();
+      release();
+      await navigation;
+      assert.deepEqual(native, []);
+      assert.deepEqual(fallback, []);
+    }
+
+    const controller = new AbortController();
+    const fallback = [];
+    let rejectNative;
+    let started;
+    const pending = new Promise((_, reject) => { rejectNative = reject; });
+    const invoked = new Promise((resolve) => { started = resolve; });
+    globalThis.window = { __TAURI_INTERNALS__: { invoke: () => { started(); return pending; } } };
+    const navigation = navigateFullDocument('/detail?id=42', (href) => fallback.push(href), 'android', controller.signal);
+    await invoked;
+    controller.abort();
+    rejectNative(new Error('fixture navigation failure'));
+    await navigation;
+    assert.deepEqual(fallback, []);
+  } finally {
+    globalThis.window = originalWindow;
+    console.warn = originalWarn;
+    if (originalPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    else process.env.NEXT_PUBLIC_APP_PLATFORM = originalPlatform;
+  }
+});
+
+test('navigation checks cancellation after import and retains uncancelled native/router/iOS paths', async () => {
+  const originalWindow = globalThis.window;
+  const originalPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  const originalWarn = console.warn;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  console.warn = () => {};
+  try {
+    const native = [];
+    const fallback = [];
+    const assigned = [];
+    globalThis.window = {
+      __TAURI_INTERNALS__: { invoke: async (command, args) => { native.push({ command, args }); } },
+      location: { assign: (href) => assigned.push(href) },
+    };
+    const controller = new AbortController();
+    const cancelled = navigateFullDocument('/detail?id=42', (href) => fallback.push(href), 'android', controller.signal);
+    controller.abort();
+    await cancelled;
+    assert.deepEqual(native, []);
+    assert.deepEqual(fallback, []);
+    await navigateFullDocument('/detail?id=42', (href) => fallback.push(href), 'android');
+    assert.deepEqual(native, [{ command: 'moke_navigate', args: { path: '/detail?id=42' } }]);
+    await navigateFullDocument('/detail?id=43', (href) => fallback.push(href), 'linux');
+    assert.deepEqual(fallback, ['/detail?id=43']);
+    await navigateFullDocument('/readest/reader?file=book', (href) => fallback.push(href), 'ios');
+    assert.deepEqual(assigned, ['/readest/reader?file=book']);
+    globalThis.window.__TAURI_INTERNALS__.invoke = async () => { throw new Error('fixture navigation failure'); };
+    await navigateFullDocument('/detail?id=44', (href) => fallback.push(href), 'android');
+    assert.deepEqual(fallback, ['/detail?id=43', '/detail?id=44']);
+  } finally {
+    globalThis.window = originalWindow;
+    console.warn = originalWarn;
+    if (originalPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    else process.env.NEXT_PUBLIC_APP_PLATFORM = originalPlatform;
+  }
 });
 
 test('Android and OpenHarmony use native full-document navigation', () => {
