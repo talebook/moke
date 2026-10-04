@@ -2,6 +2,7 @@
 
 import { debugLog } from './debug-log.ts';
 import { isSampleBook } from './sample-book-info.ts';
+import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
   hasEpubCentralDirectory,
   makeOfflineBookKey,
@@ -391,6 +392,22 @@ export async function syncOfflineDownloadState(serverUrl: string, bookId: string
 }
 
 export async function deleteOfflineBook(
+  serverUrl: string,
+  bookId: string,
+  format?: string,
+): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
+  if (isSampleBook({ serverUrl, bookId })) {
+    return withSampleBookOperation(async () => {
+      // Also cover deletion through the library, not just developer settings.
+      // A successful deletion invalidates earlier imports across reloads.
+      invalidateSampleBookImports();
+      return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+    });
+  }
+  return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+}
+
+async function deleteOfflineBookUncoordinated(
   serverUrl: string,
   bookId: string,
   format?: string,

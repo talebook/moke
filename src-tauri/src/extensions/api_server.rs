@@ -1,12 +1,12 @@
 //! 拓展 REST API Server。
 //!
-//! 基于 `tiny_http` 提供 REST 接口，供拓展（外部进程）调用。
+//! 有界 TCP 传输层提供 REST 接口，tiny_http 仅用于格式化响应。
 //! 监听 `127.0.0.1`（仅本地可达），通过 token 认证拓展身份。
 
-use super::EnabledExtension;
+use super::{http_transport, EnabledExtension};
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::net::TcpListener;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,10 +17,8 @@ use tauri::Manager;
 pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
 /// 同时阻塞等待阅读器命令回执的请求上限，避免耗尽 API 请求线程。
 pub(crate) const MAX_CONCURRENT_COMMAND_WAITS: usize = 32;
-/// REST 请求处理线程上限。未认证慢请求不能无限创建线程。
-pub(crate) const MAX_CONCURRENT_API_REQUESTS: usize = 32;
 /// REST JSON 请求体上限；认证前先检查 Content-Length，读取时再次限流。
-pub(crate) const MAX_API_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_API_REQUEST_BODY_BYTES: usize = http_transport::MAX_BODY_BYTES;
 const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
 const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
 
@@ -291,27 +289,6 @@ pub struct ServerContext {
     pub pending_commands: Arc<Mutex<PendingCommands>>,
 }
 
-struct ApiRequestSlot {
-    active: Arc<AtomicUsize>,
-}
-
-impl Drop for ApiRequestSlot {
-    fn drop(&mut self) {
-        self.active.fetch_sub(1, Ordering::Release);
-    }
-}
-
-fn try_acquire_api_request_slot(active: &Arc<AtomicUsize>) -> Option<ApiRequestSlot> {
-    active
-        .fetch_update(Ordering::Acquire, Ordering::Relaxed, |current| {
-            (current < MAX_CONCURRENT_API_REQUESTS).then_some(current + 1)
-        })
-        .ok()
-        .map(|_| ApiRequestSlot {
-            active: active.clone(),
-        })
-}
-
 // ---------------------------------------------------------------------------
 // 启动
 // ---------------------------------------------------------------------------
@@ -321,7 +298,7 @@ fn try_acquire_api_request_slot(active: &Arc<AtomicUsize>) -> Option<ApiRequestS
 pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
     let mut port = start_port;
     let server = loop {
-        match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
+        match TcpListener::bind(format!("127.0.0.1:{port}")) {
             Ok(s) => break s,
             Err(_e) if port < start_port + 10 => {
                 log::warn!(
@@ -334,30 +311,11 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
         }
     };
 
-    let actual_port = server.server_addr().to_ip().unwrap().port();
+    let actual_port = server.local_addr().unwrap().port();
     log::info!("拓展 API Server 已启动: http://127.0.0.1:{actual_port}");
 
     std::thread::spawn(move || {
-        let active_requests = Arc::new(AtomicUsize::new(0));
-        for request in server.incoming_requests() {
-            let Some(slot) = try_acquire_api_request_slot(&active_requests) else {
-                let response = tiny_http::Response::from_string(
-                    serde_json::json!({
-                        "code": "SERVER_BUSY",
-                        "error": "拓展 API 请求过多",
-                    })
-                    .to_string(),
-                )
-                .with_status_code(503);
-                let _ = request.respond(response);
-                continue;
-            };
-            let ctx = ctx.clone();
-            std::thread::spawn(move || {
-                let _slot = slot;
-                handle_request(request, ctx);
-            });
-        }
+        http_transport::serve(server, move |request| handle_request(request, ctx.clone()));
     });
 
     actual_port
@@ -367,7 +325,7 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
 // 路由分发
 // ---------------------------------------------------------------------------
 
-fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
+fn handle_request(mut request: http_transport::Request, ctx: Arc<ServerContext>) {
     // 先提取所有需要的数据（immutable borrows），然后读取 body（mutable borrow）
     let url = request.url().to_string();
     let method = request.method().clone();
@@ -480,7 +438,7 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
 }
 
 fn read_request_body(
-    request: &mut tiny_http::Request,
+    request: &mut http_transport::Request,
     method: &tiny_http::Method,
 ) -> Result<String, ApiError> {
     let Some(declared) = validate_declared_body_length(method, request.body_length())? else {
@@ -489,11 +447,15 @@ fn read_request_body(
     let mut bytes = Vec::with_capacity(declared.min(MAX_API_REQUEST_BODY_BYTES));
     request
         .as_reader()
+        .map_err(|_| ApiError::bad_request("INVALID_BODY", "无法读取请求体"))?
         .take((MAX_API_REQUEST_BODY_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| ApiError::bad_request("INVALID_BODY", "无法读取请求体"))?;
     if bytes.len() > MAX_API_REQUEST_BODY_BYTES {
         return Err(ApiError::payload_too_large("请求体超过 1 MiB 上限"));
+    }
+    if bytes.len() != declared {
+        return Err(ApiError::bad_request("INVALID_BODY", "请求体未完整发送"));
     }
     String::from_utf8(bytes)
         .map_err(|_| ApiError::bad_request("INVALID_BODY", "请求体必须是 UTF-8"))
@@ -514,7 +476,11 @@ fn validate_declared_body_length(
     Ok(Some(declared))
 }
 
-fn respond_api_error(request: tiny_http::Request, error: ApiError, cors_header: tiny_http::Header) {
+fn respond_api_error(
+    request: http_transport::Request,
+    error: ApiError,
+    cors_header: tiny_http::Header,
+) {
     let body = serde_json::json!({
         "code": error.code,
         "error": error.message,
@@ -1188,18 +1154,6 @@ mod tests {
         );
         assert_eq!(error.status, 429);
         assert_eq!(error.code, "TOO_MANY_PENDING_COMMANDS");
-    }
-
-    #[test]
-    fn api_request_slots_are_bounded_and_released() {
-        let active = Arc::new(AtomicUsize::new(0));
-        let mut slots = Vec::new();
-        for _ in 0..MAX_CONCURRENT_API_REQUESTS {
-            slots.push(try_acquire_api_request_slot(&active).unwrap());
-        }
-        assert!(try_acquire_api_request_slot(&active).is_none());
-        slots.pop();
-        assert!(try_acquire_api_request_slot(&active).is_some());
     }
 
     #[test]
