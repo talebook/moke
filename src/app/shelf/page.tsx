@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
-import { BookOpen, History, Search } from 'lucide-react';
+import { BookOpen, History, Play, Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
@@ -23,6 +23,13 @@ import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
 import { BookCoverFallback } from '@/components/book/BookCoverFallback';
+import {
+  CONTINUE_READING_CHANGED_EVENT,
+  continueReadingHref,
+  getContinueReading,
+  resolveContinueReading,
+  type ContinueReadingEntry,
+} from '@/lib/continue-reading';
 
 interface BookItem {
   id: string | number;
@@ -187,6 +194,33 @@ export default function ShelfPage() {
   const lastSelectedIdRef = useRef<string | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
+  const [continueReading, setContinueReading] = useState<ContinueReadingEntry | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const mode = offlineMode ? 'offline' : 'online';
+    const syncLocal = () => {
+      if (!cancelled) setContinueReading(getContinueReading(serverUrl, mode));
+    };
+    const handleChange = (event: Event) => {
+      const entry = (event as CustomEvent<ContinueReadingEntry>).detail;
+      if (!cancelled && entry?.mode === mode) setContinueReading(entry);
+      else syncLocal();
+    };
+    syncLocal();
+    window.addEventListener(CONTINUE_READING_CHANGED_EVENT, handleChange);
+
+    if (serverUrl && !offlineMode && !getContinueReading(serverUrl, 'online')) {
+      void resolveContinueReading(request, serverUrl)
+        .then((entry) => { if (!cancelled && entry) setContinueReading(entry); })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CONTINUE_READING_CHANGED_EVENT, handleChange);
+    };
+  }, [offlineMode, serverUrl]);
 
   // Clear selection whenever the underlying book list changes (server change, reload, etc.)
   useEffect(() => {
@@ -423,6 +457,23 @@ export default function ShelfPage() {
     router.push(`/search?scope=shelf&q=${encodeURIComponent(query)}`);
   };
 
+  const continueBook = continueReading
+    ? books.find((book) => String(book.id) === continueReading.bookId)
+    : undefined;
+  const continueTitle = continueBook?.title || continueReading?.title || '上次阅读的书';
+  const continueAuthor = continueBook?.author
+    || continueBook?.authors?.map((author) => author.name).filter(Boolean).join('、')
+    || continueReading?.author;
+  const continueCover = continueBook?.img || continueBook?.thumb || continueReading?.cover;
+  const continueCoverUrl = continueReading
+    ? resolveServerAssetUrl(serverUrl, continueCover)
+    : '';
+  const continueProgress = continueReading?.progress === undefined
+    ? undefined
+    : Math.max(0, Math.min(100, Math.round(
+      continueReading.progress <= 1 ? continueReading.progress * 100 : continueReading.progress,
+    )));
+
   return (
     <DesktopLayout>
       <div className="moke-shelf-bg flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
@@ -473,6 +524,49 @@ export default function ShelfPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto no-scrollbar">
+          {continueReading && (
+            <div className="px-4 pt-5 sm:px-6 md:px-8 md:pt-8">
+              <Link
+                href={continueReadingHref(continueReading)}
+                aria-label={`继续阅读《${continueTitle}》`}
+                className="group flex items-center gap-4 rounded-[24px] border border-amber-950/10 bg-white/65 eink-bordered p-3 shadow-[0_18px_50px_-38px_rgba(74,57,35,0.8)] backdrop-blur transition hover:bg-white/80 active:scale-[0.995] sm:p-4"
+              >
+                <div className="h-[84px] w-14 shrink-0 overflow-hidden rounded-xl bg-muted shadow-sm">
+                  {continueCoverUrl ? (
+                    <AuthImage
+                      src={continueCoverUrl}
+                      alt={continueTitle}
+                      className="h-full w-full object-cover"
+                      loading="eager"
+                      fallback={<BookCoverFallback title={continueTitle} seed={continueReading.bookId} textClassName="text-xs" />}
+                    />
+                  ) : (
+                    <BookCoverFallback title={continueTitle} seed={continueReading.bookId} textClassName="text-xs" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-primary">
+                    <BookOpen className="h-3.5 w-3.5" />
+                    <span>继续阅读</span>
+                  </div>
+                  <p className="truncate text-base font-semibold text-foreground">{continueTitle}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {continueAuthor || (continueReading.page && continueReading.totalPages
+                      ? `第 ${continueReading.page} / ${continueReading.totalPages} 页`
+                      : '从上次位置继续')}
+                  </p>
+                  {continueProgress !== undefined && (
+                    <div className="mt-2 h-1.5 max-w-sm overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${continueProgress}%` }} />
+                    </div>
+                  )}
+                </div>
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm transition group-hover:scale-105">
+                  <Play className="h-4 w-4 translate-x-px" fill="currentColor" />
+                </span>
+              </Link>
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />

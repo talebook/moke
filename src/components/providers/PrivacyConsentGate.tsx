@@ -9,6 +9,7 @@ import {
   PRIVACY_CONSENT_CHANGED_EVENT,
 } from '@/lib/privacy-consent';
 import { PreviewEntitlementGate } from './PreviewEntitlementGate';
+import { ContinueReadingLauncher } from './ContinueReadingLauncher';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
 import { ServerProvider } from './ServerProvider';
 
@@ -39,7 +40,9 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
     return (
       <PreviewEntitlementGate>
         <ServerProvider>
-          <ReaderProgressProvider>{children}</ReaderProgressProvider>
+          <ContinueReadingLauncher>
+            <ReaderProgressProvider>{children}</ReaderProgressProvider>
+          </ContinueReadingLauncher>
         </ServerProvider>
       </PreviewEntitlementGate>
     );

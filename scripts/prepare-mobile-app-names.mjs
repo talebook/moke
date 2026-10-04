@@ -4,6 +4,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -128,6 +129,27 @@ export function prepareAndroidAppNames(root = projectRoot) {
       path.join(destinationDir, 'strings.xml'),
     );
   }
+
+  const shortcutSource = path.join(sourceRoot, 'xml', 'shortcuts.xml');
+  const shortcutDestination = path.join(generatedResources, 'xml', 'shortcuts.xml');
+  mkdirSync(path.dirname(shortcutDestination), { recursive: true });
+  copyFileSync(shortcutSource, shortcutDestination);
+
+  const manifestPath = path.join(
+    root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml',
+  );
+  const manifest = readFileSync(manifestPath, 'utf8');
+  if (!manifest.includes('android.app.shortcuts')) {
+    const activityPattern = /(<activity\b[^>]*android:name="[^"]*MainActivity"[^>]*>)([\s\S]*?)(<\/activity>)/;
+    if (!activityPattern.test(manifest)) {
+      throw new Error(`${manifestPath} does not contain the generated MainActivity`);
+    }
+    const patched = manifest.replace(
+      activityPattern,
+      '$1$2\n            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />\n        $3',
+    );
+    writeFileSync(manifestPath, patched);
+  }
 }
 
 export function verifyIosAppNames(root = projectRoot, configPath = 'src-tauri/tauri.conf.json') {
@@ -218,7 +240,7 @@ if (invokedDirectly) {
   const [platform] = positionals;
   if (platform === 'android') {
     prepareAndroidAppNames();
-    console.log('[app-names] Added Android default and Chinese app names');
+    console.log('[android-resources] Added localized app names and launcher shortcuts');
   } else if (platform === 'ios') {
     prepareIosAppNames(projectRoot, spawnSync, values.config);
     console.log('[app-names] Added and verified iOS Chinese app names');

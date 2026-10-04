@@ -26,6 +26,7 @@ declare global {
     MokeWindowMode?: {
       isInMultiWindowMode: () => boolean;
       showStatusBar?: (darkMode: boolean) => void;
+      consumeContinueReadingLaunch?: () => boolean;
     };
   }
 }

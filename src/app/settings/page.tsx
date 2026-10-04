@@ -27,6 +27,8 @@ export default function SettingsPage() {
   const setDownloadDirectory = useSettingsStore((s) => s.setDownloadDirectory);
   const readerPreference = useSettingsStore((s) => s.readerPreference);
   const setReaderPreference = useSettingsStore((s) => s.setReaderPreference);
+  const continueReadingOnLaunch = useSettingsStore((s) => s.continueReadingOnLaunch);
+  const setContinueReadingOnLaunch = useSettingsStore((s) => s.setContinueReadingOnLaunch);
   const [directorySupported, setDirectorySupported] = useState<boolean | null>(null);
   const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
@@ -201,11 +203,18 @@ export default function SettingsPage() {
             )}
           </SettingsSection>
 
-          {directorySupported && (
-            <SettingsSection title="阅读" description="选择打开已下载书籍时使用的阅读器">
+          <SettingsSection title="阅读" description="管理继续阅读入口与阅读器偏好">
+            <ToggleRow
+              icon={BookOpen}
+              label="启动时继续上次阅读"
+              description="打开 Moke 后直接进入最近阅读的书籍；默认关闭"
+              checked={continueReadingOnLaunch}
+              onChange={setContinueReadingOnLaunch}
+            />
+            {directorySupported && (
               <ReaderPreferenceRow value={readerPreference} onChange={setReaderPreference} />
-            </SettingsSection>
-          )}
+            )}
+          </SettingsSection>
 
           <SettingsSection title="应用" description="查看应用信息与后续扩展入口">
             <SettingsRow label="应用版本" value={APP_VERSION} />

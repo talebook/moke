@@ -48,6 +48,7 @@ import {
   resolveTalebookOnlineSource,
 } from '@/lib/online-reading';
 import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
+import { rememberContinueReading } from '@/lib/continue-reading';
 
 interface BookDetail {
   id: string;
@@ -78,6 +79,8 @@ interface BookDetail {
 function DetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
+  const continueRequested = searchParams.get('continue') === '1';
+  const continueSourceServer = searchParams.get('source');
   const router = useRouter();
   const { serverUrl, offlineMode, capabilities, user } = useServerStore();
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -89,6 +92,7 @@ function DetailContent() {
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloaded, setDownloaded] = useState(false);
+  const [offlineAvailabilityChecked, setOfflineAvailabilityChecked] = useState(false);
   const [deletingDownload, setDeletingDownload] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [openingReader, setOpeningReader] = useState(false);
@@ -102,6 +106,8 @@ function DetailContent() {
   const loadBookSeqRef = useRef(0);
   const loadBookControllerRef = useRef<AbortController | null>(null);
   const openingReaderRef = useRef(false);
+  const continueStartedRef = useRef<string | null>(null);
+  const [continuePending, setContinuePending] = useState(continueRequested);
   const onlineOpenControllerRef = useRef<AbortController | null>(null);
   const coverUrl = book ? resolveServerAssetUrl(serverUrl, book.img || book.thumb) : '';
   const authorNames = normalizeNames(book?.authors, book?.author);
@@ -142,10 +148,11 @@ function DetailContent() {
       onlineOpenControllerRef.current?.abort();
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
-  }, [id, offlineMode, serverUrl]);
+  }, [continueSourceServer, id, offlineMode, serverUrl]);
 
   useEffect(() => {
     let cancelled = false;
+    setOfflineAvailabilityChecked(false);
 
     const checkOffline = async () => {
       try {
@@ -157,17 +164,26 @@ function DetailContent() {
         if (!cancelled) {
           setDownloaded(false);
         }
+      } finally {
+        if (!cancelled) setOfflineAvailabilityChecked(true);
       }
     };
 
     if (activeServerUrl && id) {
       checkOffline();
+    } else {
+      setOfflineAvailabilityChecked(true);
     }
 
     return () => {
       cancelled = true;
     };
   }, [activeServerUrl, id, selectedFormat]);
+
+  useEffect(() => {
+    continueStartedRef.current = null;
+    setContinuePending(continueRequested);
+  }, [continueRequested, id]);
 
   useEffect(() => {
     if (!downloadKey) return;
@@ -186,7 +202,8 @@ function DetailContent() {
     setLoading(true);
     try {
       if (offlineMode) {
-        const localRecords = (await listOfflineBooks(serverUrl || undefined)).filter((item) => item.bookId === id);
+        const localRecords = (await listOfflineBooks(continueSourceServer || serverUrl || undefined))
+          .filter((item) => item.bookId === id);
         const record = localRecords.find((item) => item.coverDataUrl) ?? localRecords[0];
         if (!record) throw new Error('book.offline.missing');
         if (controller.signal.aborted || seq !== loadBookSeqRef.current) return;
@@ -475,6 +492,7 @@ function DetailContent() {
           sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
+        rememberCurrentBook();
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;
       }
@@ -492,6 +510,7 @@ function DetailContent() {
           });
         },
         onOpened: () => {
+          rememberCurrentBook();
           setOpeningReader(false);
           setOpeningOnline(false);
         },
@@ -540,6 +559,7 @@ function DetailContent() {
           setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
         }
+        rememberCurrentBook(record.format);
         await openOfflineBook(record, router.push);
         return;
       }
@@ -554,7 +574,10 @@ function DetailContent() {
         }
         await openAndRecordBookRead({
           open: () => openBookWithSystemDefault(record.id),
-          onOpened: () => setOpeningReader(false),
+          onOpened: () => {
+            rememberCurrentBook(record.format);
+            setOpeningReader(false);
+          },
           record: () => recordBookRead(request, serverUrl, book.id),
           onRecordError: (error) => {
             console.warn('Book opened in the system app, but the read record could not be saved:', error);
@@ -608,6 +631,7 @@ function DetailContent() {
           serverUrl: useServerStore.getState().serverUrl,
           runtimePlatform: currentPlatform,
         });
+        rememberCurrentBook(record.format);
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
         return;
       }
@@ -626,7 +650,10 @@ function DetailContent() {
         // The independent reader window is already usable. Release the
         // visible loading state now, while openingReaderRef continues to
         // block duplicate opens until the record request settles.
-        onOpened: () => setOpeningReader(false),
+        onOpened: () => {
+          rememberCurrentBook(record.format);
+          setOpeningReader(false);
+        },
         record: () => recordBookRead(request, serverUrl, book.id),
         onRecordError: (error) => {
           console.warn('Reader opened, but the read record could not be saved:', error);
@@ -641,6 +668,51 @@ function DetailContent() {
       finishOpening();
     }
   };
+
+  const rememberCurrentBook = (format = selectedFormat) => {
+    if (!book || !activeServerUrl) return;
+    rememberContinueReading({
+      serverUrl: activeServerUrl,
+      mode: offlineMode ? 'offline' : 'online',
+      bookId: String(book.id),
+      title: book.title,
+      author: authorNames.join('、') || undefined,
+      cover: book.img || book.thumb,
+      format,
+    });
+  };
+
+  useEffect(() => {
+    if (!continueRequested || loading || !book || openingReaderRef.current) return;
+    const launchKey = `${activeServerUrl}:${book.id}`;
+    if (continueStartedRef.current === launchKey) return;
+
+    let open: (() => Promise<void>) | null = null;
+    if (offlineMode || downloaded) open = () => handleOfflineRead();
+    else if (onlineFormat) open = handleOnlineRead;
+    else if (!offlineAvailabilityChecked) return;
+
+    continueStartedRef.current = launchKey;
+    if (!open) {
+      setMessage('这本书暂不支持直接在线阅读，请先下载后再继续。');
+      setContinuePending(false);
+      return;
+    }
+
+    void open().finally(() => setContinuePending(false));
+    // Each opener intentionally uses the current render's book/session state;
+    // continueStartedRef makes this launch effect one-shot for that book.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    activeServerUrl,
+    book,
+    continueRequested,
+    downloaded,
+    offlineAvailabilityChecked,
+    offlineMode,
+    loading,
+    onlineFormat,
+  ]);
 
   const handleDeleteDownload = async () => {
     if (!book || deletingDownload) return;
@@ -669,6 +741,17 @@ function DetailContent() {
       <DesktopLayout>
         <div className="flex items-center justify-center px-4 py-16 sm:px-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
+        </div>
+      </DesktopLayout>
+    );
+  }
+
+  if (continuePending && book) {
+    return (
+      <DesktopLayout>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
+          <p className="text-sm text-muted-foreground">正在继续阅读《{book.title}》…</p>
         </div>
       </DesktopLayout>
     );
