@@ -1,9 +1,10 @@
 import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './tests',
-  timeout: 90000,
+  // The dev server compiles routes on demand, including on slower ARM hosts.
+  timeout: 180000,
   workers: 1,
-  expect: { timeout: 15000 },
+  expect: { timeout: 45000 },
   use: {
     headless: true,
     navigationTimeout: 60000,
