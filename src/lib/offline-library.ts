@@ -7,6 +7,7 @@ export interface OfflineLibraryBook {
   img?: string;
   files: Array<{ format: string; size: number }>;
   timestamp: number;
+  state: { wants: boolean };
 }
 
 export function buildOfflineLibrary(records: readonly OfflineBookRecord[]): OfflineLibraryBook[] {
@@ -15,6 +16,7 @@ export function buildOfflineLibrary(records: readonly OfflineBookRecord[]): Offl
     const key = `${record.serverUrl}::${record.bookId}`;
     const existing = books.get(key);
     if (existing) {
+      existing.state.wants ||= record.inShelf === true;
       if (!existing.img && record.coverDataUrl) existing.img = record.coverDataUrl;
       if (!existing.files.some((file) => file.format === record.format)) {
         existing.files.push({ format: record.format, size: record.size });
@@ -29,6 +31,7 @@ export function buildOfflineLibrary(records: readonly OfflineBookRecord[]): Offl
       ...(record.coverDataUrl ? { img: record.coverDataUrl } : {}),
       files: [{ format: record.format, size: record.size }],
       timestamp: Math.floor(record.updatedAt / 1000),
+      state: { wants: record.inShelf === true },
     });
   }
   return [...books.values()].sort((left, right) => right.timestamp - left.timestamp);
