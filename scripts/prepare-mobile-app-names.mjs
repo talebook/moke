@@ -8,6 +8,7 @@ import {
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const pbxObjectIdPattern = '[A-F0-9]{24}';
@@ -129,7 +130,7 @@ export function prepareAndroidAppNames(root = projectRoot) {
   }
 }
 
-export function verifyIosAppNames(root = projectRoot) {
+export function verifyIosAppNames(root = projectRoot, configPath = 'src-tauri/tauri.conf.json') {
   const appleRoot = path.join(root, 'src-tauri', 'gen', 'apple');
   const appDirectory = findIosAppDirectory(appleRoot);
   const generatedAppRoot = path.join(appleRoot, appDirectory);
@@ -152,7 +153,7 @@ export function verifyIosAppNames(root = projectRoot) {
   const pbxprojPath = path.join(appleRoot, xcodeProject, 'project.pbxproj');
   const pbxproj = readFileSync(pbxprojPath, 'utf8');
   const tauriConfig = JSON.parse(
-    readFileSync(path.join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'),
+    readFileSync(path.resolve(root, configPath), 'utf8'),
   );
   assertDefaultIosAppName(infoPlist, pbxproj, tauriConfig.productName, infoPlistPath);
 
@@ -163,7 +164,7 @@ export function verifyIosAppNames(root = projectRoot) {
   }
 }
 
-export function prepareIosAppNames(root = projectRoot, run = spawnSync) {
+export function prepareIosAppNames(root = projectRoot, run = spawnSync, configPath = 'src-tauri/tauri.conf.json') {
   const appleRoot = path.join(root, 'src-tauri', 'gen', 'apple');
   const appDirectory = findIosAppDirectory(appleRoot);
   const sourceRoot = path.join(root, 'src-tauri', 'mobile', 'ios');
@@ -203,22 +204,26 @@ export function prepareIosAppNames(root = projectRoot, run = spawnSync) {
     throw new Error(`xcodegen exited with status ${result.status}`);
   }
 
-  verifyIosAppNames(root);
+  verifyIosAppNames(root, configPath);
 }
 
 const invokedDirectly = process.argv[1]
   && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
-  const platform = process.argv[2];
+  const { values, positionals } = parseArgs({
+    options: { config: { type: 'string' } },
+    allowPositionals: true,
+  });
+  const [platform] = positionals;
   if (platform === 'android') {
     prepareAndroidAppNames();
     console.log('[app-names] Added Android default and Chinese app names');
   } else if (platform === 'ios') {
-    prepareIosAppNames();
+    prepareIosAppNames(projectRoot, spawnSync, values.config);
     console.log('[app-names] Added and verified iOS Chinese app names');
   } else {
-    console.error('Usage: node scripts/prepare-mobile-app-names.mjs <android|ios>');
+    console.error('Usage: node scripts/prepare-mobile-app-names.mjs <android|ios> [--config path]');
     process.exitCode = 1;
   }
 }
