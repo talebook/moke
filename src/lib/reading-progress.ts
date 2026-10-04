@@ -65,8 +65,10 @@ export function normalizeReaderProgressEvent(input: Record<string, unknown>): Re
   };
 }
 
-export async function fetchReadingProgress(bookId: string | number, signal?: AbortSignal): Promise<ReadingProgressPayload | null> {
-  const { serverUrl, capabilities } = useServerStore.getState();
+export async function fetchReadingProgress(bookId: string | number, signal?: AbortSignal, sourceServerUrl?: string): Promise<ReadingProgressPayload | null> {
+  const active = useServerStore.getState();
+  const serverUrl = sourceServerUrl ?? active.serverUrl;
+  const capabilities = active.serverUrl === serverUrl ? active.capabilities : { checkedAt: null, readingProgressApi: true };
   if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return null;
 
   try {
@@ -80,14 +82,16 @@ export async function fetchReadingProgress(bookId: string | number, signal?: Abo
     if (!progress || progress.schema !== 'moke.readest.progress.v1') return null;
     return readingProgressForPersistence(progress as ReadingProgressPayload);
   } catch (error) {
-    markProgressUnsupported(error);
+    markProgressUnsupported(error, serverUrl);
     debugLog('warn', 'reading-progress', `读取阅读进度失败: ${bookId}`, getErrorMessage(error));
     return null;
   }
 }
 
-export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload): Promise<void> {
-  const { serverUrl, capabilities } = useServerStore.getState();
+export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload, sourceServerUrl?: string): Promise<void> {
+  const active = useServerStore.getState();
+  const serverUrl = sourceServerUrl ?? active.serverUrl;
+  const capabilities = active.serverUrl === serverUrl ? active.capabilities : { checkedAt: null, readingProgressApi: true };
   if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return;
 
   try {
@@ -99,17 +103,17 @@ export async function saveReadingProgress(bookId: string | number, progress: Rea
     });
     await readApiJson<ReadingProgressResponse>(response);
   } catch (error) {
-    markProgressUnsupported(error);
+    markProgressUnsupported(error, serverUrl);
     debugLog('warn', 'reading-progress', `保存阅读进度失败: ${bookId}`, getErrorMessage(error));
   }
 }
 
-function markProgressUnsupported(error: unknown) {
+function markProgressUnsupported(error: unknown, sourceServerUrl: string) {
   if (!(error instanceof MokeApiError)) return;
   if (error.status !== 404 && error.code !== 'page.not_found' && error.code !== 'handler.not_found' && error.code !== 'api.not_found') return;
 
   const { capabilities, setServerCapabilities } = useServerStore.getState();
-  if (!capabilities.readingProgressApi) return;
+  if (useServerStore.getState().serverUrl !== sourceServerUrl || !capabilities.readingProgressApi) return;
 
   setServerCapabilities({
     ...capabilities,

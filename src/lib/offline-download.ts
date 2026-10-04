@@ -65,6 +65,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
         onProgress: options.onProgress,
         onTransfer: options.onTransfer,
         signal: options.signal,
+        serverUrl: options.serverUrl,
         resumeFrom: writer.position,
         onRangeReset: () => writer.truncate(),
         validateEpub: false,
@@ -76,6 +77,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
   const blob = await downloadBookBlob(options.bookId, format, {
     onProgress: options.onProgress,
     signal: options.signal,
+    serverUrl: options.serverUrl,
   });
   options.onTransfer?.(blob.size, blob.size);
   await saveOfflineBook({

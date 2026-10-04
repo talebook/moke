@@ -17,6 +17,14 @@
       ]
     },
     {
+      "identifier": "fs:allow-fstat",
+      "allow": [
+        {
+          "path": "$APPDATA/books/.servers/**"
+        }
+      ]
+    },
+    {
       "identifier": "fs:allow-mkdir",
       "allow": [
         {

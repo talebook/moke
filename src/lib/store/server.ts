@@ -1,48 +1,31 @@
 import { create } from 'zustand';
-import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
-// Relative `.ts` imports keep this store directly executable by the Node test
-// runner; it cannot resolve the application's `@/` alias.
-import {
-  safeGetLocalStorageItem,
-  safeRemoveLocalStorageItem,
-  safeSetLocalStorageItem,
-} from '../browser-storage.ts';
-import {
-  didServerSessionChange,
-  invalidateServerCapabilities,
-  type ReaderInfo,
-} from '../server-session.ts';
-import {
-  DEFAULT_SERVER_CAPABILITIES,
-  mergePersistedServerCapabilities,
-  type PersistedServerCapabilities,
-  type ServerCapabilities,
-} from '../server-capabilities.ts';
+import { didServerSessionChange, invalidateServerCapabilities, type ReaderInfo } from '../server-session.ts';
+import { DEFAULT_SERVER_CAPABILITIES, type ServerCapabilities } from '../server-capabilities.ts';
+import { clearReadStateCache } from '../reading-state.ts';
+import { normalizeServerAddress } from '../server-url.ts';
+import { emptyRegistry, type SavedServer, type ServerRegistryRepository, type StorageResult } from '../server-registry.ts';
+import { createServerRepository, writeActiveServerMirror } from '../server-storage.ts';
+import { requireClosedReaders } from '../reader-source.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
 export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
 export type { ServerCapabilities } from '../server-capabilities.ts';
 
-// ArkWeb may expose localStorage but reject access for the tauri:// custom
-// scheme. Zustand otherwise treats storage as unavailable and skips hydration
-// entirely, leaving the app on its initial loading screen forever. Keep the
-// store usable in that case; persistence resumes automatically on platforms
-// where localStorage is available.
-const safeLocalStorage: StateStorage = {
-  getItem: safeGetLocalStorageItem,
-  setItem: safeSetLocalStorageItem,
-  removeItem: safeRemoveLocalStorageItem,
-};
-
 function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): ServerCapabilities {
-  return {
-    ...invalidateServerCapabilities(capabilities),
-    annotationApiStatus: 'unchecked',
-    annotationApiCheckedAt: null,
-  };
+  return { ...invalidateServerCapabilities(capabilities), annotationApiStatus: 'unchecked', annotationApiCheckedAt: null };
 }
 
+interface Candidate { id: string; url: string; requestId: number; needsAccessCode: boolean }
 interface ServerState {
+  savedServers: SavedServer[];
+  lastUsedServerId: string | null;
+  storageError: string;
+  storageBusy: boolean;
+  saving: boolean;
+  activeServerId: string | null;
+  candidate: Candidate | null;
+  connectionId: number;
+  sessionId: number;
   offlineMode: boolean;
   serverUrl: string;
   serverTitle: string;
@@ -54,6 +37,13 @@ interface ServerState {
   isConnected: boolean;
   token: string;
   user: ReaderInfo | null;
+  loadServers: () => Promise<void>;
+  recoverServers: () => Promise<void>;
+  saveServer: (value: string) => Promise<StorageResult<SavedServer>>;
+  beginConnection: (id: string) => Candidate | null;
+  cancelConnection: (requestId?: number) => void;
+  requireAccess: (requestId: number) => void;
+  activateCandidate: (requestId: number) => Promise<boolean>;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
   enterOfflineMode: () => void;
   leaveOfflineMode: () => void;
@@ -65,123 +55,135 @@ interface ServerState {
   logout: () => void;
   disconnect: () => void;
 }
+const disconnected = {
+  serverUrl: '', serverTitle: '', activeServerId: null, capabilities: DEFAULT_SERVER_CAPABILITIES,
+  protocol: 'http' as const, host: '', port: '', isConnected: false, token: '', user: null,
+};
 
-// ArkWeb 上 zustand persist 的异步 hydration 后置回调可能不触发
-// （onRehydrateStorage 的 post-callback 丢失），导致 hasHydrated 卡在
-// false、根页面无限转圈。因此：
-// 1. 同步读取 localStorage 初始化 serverUrl（不依赖异步 hydration）；
-// 2. hasHydrated 初始即为 true；
-// 3. merge 时强制 hasHydrated: true，防止持久化的旧值覆盖。
-function readPersistedServerUrl(): string {
-  if (typeof window === 'undefined') return '';
-  try {
-    const raw = safeGetLocalStorageItem('moke-server-storage');
-    if (!raw) return '';
-    const parsed = JSON.parse(raw) as { state?: { serverUrl?: string } };
-    return parsed?.state?.serverUrl || '';
-  } catch {
-    return '';
-  }
+export function createServerStore(repository: ServerRegistryRepository = createServerRepository()) {
+  let loading: Promise<void> | null = null;
+  let requestNumber = 0;
+  return create<ServerState>()((set, get) => ({
+    ...emptyRegistry(), ...disconnected, candidate: null, connectionId: 0, sessionId: 0,
+    hasHydrated: false, storageError: '', storageBusy: false, saving: false,
+    loadServers: async () => {
+      if (loading || get().saving) return loading ?? undefined;
+      set({ hasHydrated: false, storageError: '', storageBusy: true });
+      // ArkWeb/native IPC must not strand the entire UI on a hydration spinner.
+      // Keep recovery locked until this operation settles so a late file write
+      // cannot race a new recovery or save.
+      const timer = setTimeout(() => set({ hasHydrated: true,
+        storageError: '服务器存储操作超时，原数据保留。请等待操作结束后重试，或重启应用。' }), 8000);
+      loading = (async () => {
+        const result = await repository.load();
+        if (result.ok) set({ ...result.value, hasHydrated: true, storageError: '' });
+        else set({ storageError: result.error, hasHydrated: true });
+      })();
+      try { await loading; } finally { clearTimeout(timer); loading = null; set({ storageBusy: false }); }
+    },
+    recoverServers: async () => {
+      if (get().saving || loading) return;
+      set({ saving: true });
+      try {
+        const result = await repository.recover();
+        if (result.ok) set({ ...result.value, storageError: '', hasHydrated: true });
+        else set({ storageError: result.error });
+      } finally { set({ saving: false }); }
+    },
+    saveServer: async (value) => {
+      if (get().saving || !get().hasHydrated || get().storageError) return { ok: false, error: '请先完成服务器列表加载或恢复' };
+      let url: string;
+      try { url = normalizeServerAddress(value); }
+      catch (error) { return { ok: false, error: (error as Error).message }; }
+      const existing = get().savedServers.find((s) => s.url === url);
+      if (existing) return { ok: true, value: existing };
+      const server = { id: crypto.randomUUID(), url, title: '', addedAt: new Date().toISOString() };
+      set({ saving: true });
+      try {
+        const { savedServers, lastUsedServerId, offlineMode } = get();
+        const result = await repository.save({ savedServers: [...savedServers, server], lastUsedServerId, offlineMode });
+        if (!result.ok) return result;
+        set({ savedServers: result.value.savedServers });
+        return { ok: true, value: server };
+      } finally { set({ saving: false }); }
+    },
+    beginConnection: (id) => {
+      const server = get().savedServers.find((s) => s.id === id);
+      if (!server || get().saving || get().storageError) return null;
+      const candidate = { id, url: server.url, requestId: ++requestNumber, needsAccessCode: false };
+      set({ candidate });
+      return candidate;
+    },
+    cancelConnection: (requestId) => {
+      if (requestId !== undefined && get().candidate?.requestId !== requestId) return;
+      ++requestNumber;
+      set({ candidate: null });
+    },
+    requireAccess: (requestId) => {
+      const candidate = get().candidate;
+      if (candidate?.requestId === requestId) set({ candidate: { ...candidate, needsAccessCode: true } });
+    },
+    activateCandidate: async (requestId) => {
+      const candidate = get().candidate;
+      if (candidate?.requestId !== requestId || get().saving) return false;
+      set({ saving: true });
+      try {
+        await requireClosedReaders();
+        if (get().candidate?.requestId !== requestId) return false;
+        const { savedServers, offlineMode, lastUsedServerId } = get();
+        const result = await repository.save({ savedServers, lastUsedServerId: candidate.id, offlineMode: false });
+        if (!result.ok) throw new Error(result.error);
+        if (get().candidate?.requestId !== requestId) {
+          const restored = await repository.save({ savedServers, lastUsedServerId, offlineMode });
+          if (!restored.ok) set({ storageError: restored.error });
+          return false;
+        }
+        const url = new URL(candidate.url);
+        clearReadStateCache();
+        set({ ...disconnected, serverUrl: candidate.url, activeServerId: candidate.id,
+          serverTitle: savedServers.find((s) => s.id === candidate.id)?.title || '',
+          protocol: url.protocol === 'https:' ? 'https' : 'http', host: url.hostname, port: url.port,
+          isConnected: true, offlineMode: false, candidate: null, lastUsedServerId: candidate.id,
+          connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
+        writeActiveServerMirror(candidate.url);
+        return true;
+      } finally { set({ saving: false }); }
+    },
+    // Legacy test/integration entry point: only updates the active runtime snapshot.
+    setServer: (protocol, host, port) => {
+      clearReadStateCache();
+      set({ ...disconnected, serverUrl: normalizeServerAddress(`${protocol}://${host}${port ? `:${port}` : ''}`),
+        protocol, host, port, offlineMode: false, isConnected: true,
+        connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
+    },
+    enterOfflineMode: () => { clearReadStateCache(); set({ offlineMode: true, candidate: null, sessionId: get().sessionId + 1 }); },
+    leaveOfflineMode: () => set({ offlineMode: false, sessionId: get().sessionId + 1 }),
+    setConnected: (token, user) => {
+      clearReadStateCache();
+      set({ isConnected: true, token, user, sessionId: get().sessionId + 1, capabilities: invalidateCapabilitiesForSession(get().capabilities) });
+    },
+    setUser: (user) => {
+      const changed = didServerSessionChange(get().user, user);
+      if (changed) clearReadStateCache();
+      set({ isConnected: Boolean(get().serverUrl), token: user ? get().token : '', user,
+        sessionId: get().sessionId + (changed ? 1 : 0),
+        capabilities: changed ? invalidateCapabilitiesForSession(get().capabilities) : get().capabilities });
+    },
+    setServerTitle: (serverTitle) => set({ serverTitle }),
+    setServerCapabilities: (capabilities) => set({ capabilities }),
+    setHasHydrated: (hasHydrated) => set({ hasHydrated }),
+    logout: () => {
+      clearReadStateCache();
+      set({ isConnected: Boolean(get().serverUrl), token: '', user: null, sessionId: get().sessionId + 1,
+        capabilities: invalidateCapabilitiesForSession(get().capabilities) });
+    },
+    disconnect: () => {
+      clearReadStateCache();
+      ++requestNumber;
+      writeActiveServerMirror('');
+      set({ ...disconnected, offlineMode: false, candidate: null,
+        connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
+    },
+  }));
 }
-
-export const useServerStore = create<ServerState>()(
-  persist(
-    (set) => ({
-      offlineMode: false,
-      serverUrl: readPersistedServerUrl(),
-      serverTitle: '',
-      capabilities: DEFAULT_SERVER_CAPABILITIES,
-      protocol: 'http',
-      host: '',
-      port: '8080',
-      hasHydrated: true,
-      isConnected: false,
-      token: '',
-      user: null,
-      setServer: (protocol, host, port) => {
-        const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
-        set({ serverUrl: url, offlineMode: false, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
-      },
-      enterOfflineMode: () => set({ offlineMode: true, isConnected: false }),
-      leaveOfflineMode: () => set({ offlineMode: false }),
-      setConnected: (token, user) => {
-        set((state) => ({
-          isConnected: true,
-          token,
-          user,
-          // A completed sign-in can replace the server cookie even when the
-          // same account was cached locally. Re-confirm auth-dependent APIs.
-          capabilities: invalidateCapabilitiesForSession(state.capabilities),
-        }));
-      },
-      setUser: (user) => {
-        set((state) => ({
-          isConnected: Boolean(state.serverUrl),
-          token: user ? state.token : '',
-          user,
-          capabilities: didServerSessionChange(state.user, user)
-            ? invalidateCapabilitiesForSession(state.capabilities)
-            : state.capabilities,
-        }));
-      },
-      setServerTitle: (serverTitle) => {
-        set({ serverTitle });
-      },
-      setServerCapabilities: (capabilities) => {
-        set({ capabilities });
-      },
-      setHasHydrated: (hasHydrated) => {
-        set({ hasHydrated });
-      },
-      logout: () => {
-        set((state) => ({
-          isConnected: Boolean(state.serverUrl),
-          token: '',
-          user: null,
-          capabilities: invalidateCapabilitiesForSession(state.capabilities),
-        }));
-      },
-      disconnect: () => {
-        set({ serverUrl: '', offlineMode: false, serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
-      },
-    }),
-    {
-      name: 'moke-server-storage',
-      storage: createJSONStorage(() => safeLocalStorage),
-      // 持久化数据里的 hasHydrated 可能被卡住时的旧状态污染（false），
-      // merge 时强制为 true；其余字段仍按持久化值恢复。
-      merge: (persistedState, currentState) => {
-        const persisted = (persistedState ?? {}) as Partial<ServerState>;
-        const persistedCapabilities = persisted.capabilities as PersistedServerCapabilities | undefined;
-        return {
-          ...currentState,
-          ...persisted,
-          capabilities: mergePersistedServerCapabilities(
-            currentState.capabilities,
-            persistedCapabilities,
-          ),
-          hasHydrated: true,
-        };
-      },
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
-      },
-    }
-  )
-);
-
-// OHOS ArkWeb 上 persist 的 `onRehydrateStorage` 后置回调可能不触发
-// （postRehydrationCallback 丢失），导致 hasHydrated 卡在 false、根页面
-// 无限转圈。用 persist 的 onFinishHydration 监听 + 超时兜底双保险，
-// 确保 hasHydrated 一定会变为 true（此时 hydration 已完成，serverUrl
-// 已从 localStorage 恢复）。
-if (typeof window !== 'undefined') {
-  useServerStore.persist.onFinishHydration(() => {
-    useServerStore.getState().setHasHydrated(true);
-  });
-  window.setTimeout(() => {
-    if (!useServerStore.getState().hasHydrated) {
-      useServerStore.getState().setHasHydrated(true);
-    }
-  }, 600);
-}
+export const useServerStore = createServerStore();

@@ -28,8 +28,10 @@ const READ_STATE_CONCURRENCY = 6;
 const READ_STATE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const readStateCache = new Map<string, { value: number; ts: number }>();
+let cacheGeneration = 0;
 
 export function clearReadStateCache() {
+  cacheGeneration += 1;
   readStateCache.clear();
 }
 
@@ -45,6 +47,7 @@ async function fetchReadState(
   }
 
   let state = 0;
+  const generation = cacheGeneration;
   try {
     const res = await fetchLike(`${serverUrl}/api/book/${bookId}/readstate`, {
       credentials: 'include',
@@ -57,7 +60,7 @@ async function fetchReadState(
     state = 0;
   }
 
-  readStateCache.set(cacheKey, { value: state, ts: Date.now() });
+  if (generation === cacheGeneration) readStateCache.set(cacheKey, { value: state, ts: Date.now() });
   return state;
 }
 

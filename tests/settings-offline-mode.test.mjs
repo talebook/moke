@@ -16,8 +16,8 @@ test('设置页在离线书库区域进入 Moke 离线模式，不再打开 Read
   assert.ok(offlineAction > offlineSection && offlineAction < appSection);
   assert.match(source, /enterOfflineMode\(\);\s*router\.push\('\/shelf'\)/);
   assert.match(source, /<SettingsSection title="连接与数据"/);
-  assert.match(source, /offlineMode\s*\?\s*\(\s*<ActionRow\s+icon=\{PlugZap\}\s+label="连接服务器"/);
-  assert.match(source, /leaveOfflineMode\(\);\s*router\.push\('\/welcome'\)/);
+  assert.match(source, /offlineMode\s*\?\s*\(\s*<ActionRow\s+icon=\{PlugZap\}\s+label="服务器列表"/);
+  assert.doesNotMatch(source, /leaveOfflineMode\(\);\s*router\.push\('\/welcome'\)/);
   assert.match(source, /!offlineMode\s*&&\s*<ActionRow\s+icon=\{BookOpen\}\s+label="进入离线模式"/);
   assert.doesNotMatch(source, /返回离线书架/);
   assert.doesNotMatch(source, /openEmbeddedReaderHome|打开内嵌阅读器/);

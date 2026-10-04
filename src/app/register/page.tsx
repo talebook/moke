@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -11,7 +11,7 @@ import { requestAnimatedBack } from '@/lib/native-back';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl } = useServerStore();
+  const { serverTitle, serverUrl, connectionId, sessionId } = useServerStore();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,8 +19,13 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
 
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  const current = () => useServerStore.getState().connectionId === connectionId && useServerStore.getState().sessionId === sessionId;
+
   const handleRegister = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password.trim() || loading || !serverUrl) return;
+    const abort = new AbortController(); controller.current = abort;
     setLoading(true);
     setError('');
     try {
@@ -42,9 +47,10 @@ export default function RegisterPage() {
       const res = await request(`${serverUrl}/api/user/sign_up`, {
         method: 'POST',
         body,
-        credentials: 'include',
+        credentials: 'include', signal: abort.signal,
       });
       const data = await res.json();
+      if (!current() || abort.signal.aborted) return;
       if (data.err === 'ok') {
         setShowCaptcha(false);
         router.push('/login');
@@ -55,7 +61,7 @@ export default function RegisterPage() {
         setError(data.msg || '注册失败');
       }
     } catch {
-      setError('无法连接服务器');
+      if (current() && !abort.signal.aborted) setError('无法连接服务器');
     } finally {
       setLoading(false);
     }

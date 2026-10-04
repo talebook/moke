@@ -11,7 +11,7 @@ import {
 } from '../src/lib/api-log.ts';
 
 const welcomeSource = readFileSync(
-  fileURLToPath(new URL('../src/app/welcome/page.tsx', import.meta.url)),
+  fileURLToPath(new URL('../src/lib/server-connection.ts', import.meta.url)),
   'utf8',
 );
 
@@ -91,18 +91,18 @@ test('MokeApiError 真实错误对象只输出自身 code 和 HTTP 状态', () =
 test('welcome 两条失败分支只记录元数据，同时保留服务端文案给用户', () => {
   assert.match(
     welcomeSource,
-    /logErrorMetadata\('WelcomePage validateServerConnection failed', result\)/,
+    /logErrorMetadata\('ServerConnection validation failed', validation\)/,
   );
   assert.match(
     welcomeSource,
-    /logErrorMetadata\('WelcomePage checkWelcomeRequirement failed', welcome\)/,
+    /logErrorMetadata\('ServerConnection welcome failed', welcome\)/,
   );
   assert.doesNotMatch(
     welcomeSource,
     /console\.error\('\[WelcomePage\] (?:validateServerConnection|checkWelcomeRequirement) failed:',/,
   );
-  assert.match(welcomeSource, /setError\(result\.msg \|\| '服务器校验失败'\)/);
-  assert.match(welcomeSource, /setError\(welcome\.msg \|\| '访问码状态检查失败'\)/);
+  assert.match(welcomeSource, /throw new Error\(validation\.msg \|\| '连接失败，请检查服务器地址和网络'\)/);
+  assert.match(welcomeSource, /throw new Error\(welcome\.msg \|\| '访问码状态检查失败'\)/);
 
   const calls = [];
   logErrorMetadata(
