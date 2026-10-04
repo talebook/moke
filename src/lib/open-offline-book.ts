@@ -53,6 +53,7 @@ export async function openOfflineBook(
       buildEmbeddedReaderUrl({ ...common, serverUrl: record.serverUrl }),
       navigate,
       platform,
+      source,
     );
     return;
   }

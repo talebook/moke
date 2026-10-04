@@ -13,7 +13,7 @@ const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { serverUrl, offlineMode, hasHydrated, capabilities, connectionId, sessionId, loadServers, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  const { serverUrl, offlineMode, hasHydrated, readerReturnTo, capabilities, connectionId, sessionId, loadServers, setServerTitle, setUser, setServerCapabilities } = useServerStore();
   const previousPath = useRef(pathname);
   useEffect(() => {
     const previous = previousPath.current;
@@ -28,6 +28,12 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   const [discoveryServerUrl, capabilitiesCheckedAt] = getServerDiscoveryInputs(serverUrl, capabilities);
 
   useEffect(() => { if (!useServerStore.getState().hasHydrated) void loadServers(); }, [loadServers]);
+
+  useEffect(() => {
+    if (!hasHydrated || !readerReturnTo) return;
+    if (pathname === readerReturnTo) useServerStore.setState({ readerReturnTo: null });
+    else router.replace(readerReturnTo);
+  }, [hasHydrated, pathname, readerReturnTo, router]);
 
   // 拓展管理页面是本地功能，不需要连接服务器
   const isExtensionPath = pathname.startsWith('/extensions');
@@ -138,7 +144,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   // Protected pages must not start requests while loading or redirecting an
   // absent runtime connection (including return from a full-document reader).
   if (!PUBLIC_PATHS.includes(pathname) && !isExtensionPath && !isEmbeddedReaderPath
-    && (!hasHydrated || (!serverUrl && !offlineMode))) {
+    && (!hasHydrated || (readerReturnTo && pathname !== readerReturnTo) || (!serverUrl && !offlineMode))) {
     return <div role="status" className="flex min-h-screen items-center justify-center">正在加载连接信息…</div>;
   }
   return <Fragment key={`${connectionId}:${sessionId}:${offlineMode}`}>{children}</Fragment>;

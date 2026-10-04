@@ -24,7 +24,7 @@ test('save A/B persists both, never changes active/offline state, and preserves 
   const disk = storage();
   const store = createServerStore(new ServerRegistryRepository(disk));
   await store.getState().loadServers();
-  store.getState().enterOfflineMode();
+  await store.getState().enterOfflineMode();
   const a = await store.getState().saveServer('https://a.example.test');
   const b = await store.getState().saveServer('http://b.example.test:8080');
   assert.equal(a.ok && b.ok, true);

@@ -5,7 +5,9 @@ import { clearReadStateCache } from '../reading-state.ts';
 import { normalizeServerAddress } from '../server-url.ts';
 import { emptyRegistry, type SavedServer, type ServerRegistryRepository, type StorageResult } from '../server-registry.ts';
 import { createServerRepository, writeActiveServerMirror } from '../server-storage.ts';
-import { requireClosedReaders } from '../reader-source.ts';
+import { requireClosedReaders, withClosedReaderSession } from '../reader-source.ts';
+import { clearReaderReturn, takeReaderReturn, type ReaderReturnChannel } from '../reader-return.ts';
+import { checkSavedServer } from '../server-connection.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
 export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
@@ -34,6 +36,8 @@ interface ServerState {
   host: string;
   port: string;
   hasHydrated: boolean;
+  readerReturnTo: '/shelf' | null;
+  readerReturnError: string;
   isConnected: boolean;
   token: string;
   user: ReaderInfo | null;
@@ -45,7 +49,7 @@ interface ServerState {
   requireAccess: (requestId: number) => void;
   activateCandidate: (requestId: number) => Promise<boolean>;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
-  enterOfflineMode: () => void;
+  enterOfflineMode: () => Promise<void>;
   leaveOfflineMode: () => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
@@ -60,12 +64,12 @@ const disconnected = {
   protocol: 'http' as const, host: '', port: '', isConnected: false, token: '', user: null,
 };
 
-export function createServerStore(repository: ServerRegistryRepository = createServerRepository()) {
+export function createServerStore(repository: ServerRegistryRepository = createServerRepository(), returnChannel?: ReaderReturnChannel) {
   let loading: Promise<void> | null = null;
   let requestNumber = 0;
   return create<ServerState>()((set, get) => ({
     ...emptyRegistry(), ...disconnected, candidate: null, connectionId: 0, sessionId: 0,
-    hasHydrated: false, storageError: '', storageBusy: false, saving: false,
+    hasHydrated: false, readerReturnTo: null, readerReturnError: '', storageError: '', storageBusy: false, saving: false,
     loadServers: async () => {
       if (loading || get().saving) return loading ?? undefined;
       set({ hasHydrated: false, storageError: '', storageBusy: true });
@@ -76,13 +80,47 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         storageError: '服务器存储操作超时，原数据保留。请等待操作结束后重试，或重启应用。' }), 8000);
       loading = (async () => {
         const result = await repository.load();
-        if (result.ok) set({ ...result.value, hasHydrated: true, storageError: '' });
-        else set({ storageError: result.error, hasHydrated: true });
+        if (!result.ok) { clearReaderReturn(returnChannel); set({ storageError: result.error, hasHydrated: true }); return; }
+        clearTimeout(timer);
+        set({ ...result.value, hasHydrated: false, storageError: '' });
+        // A cold launch only loads the list. A live Reader return consumes its
+        // one-use browsing-context receipt before confirming the connection.
+        let context = null;
+        try { context = takeReaderReturn(result.value.savedServers, returnChannel); } catch { clearReaderReturn(returnChannel); }
+        const previous = get();
+        const requestAtStart = requestNumber;
+        if (context && !previous.serverUrl && !previous.offlineMode && !previous.candidate) {
+          const abort = new AbortController();
+          const timeout = setTimeout(() => abort.abort(new Error('返回连接确认超时')), 20_000);
+          try {
+            if (!context.offlineMode) {
+              const { validateServerConnection, checkWelcomeRequirement } = await import('../api.ts');
+              const checked = await checkSavedServer(context.serverUrl,
+                { validate: validateServerConnection, welcome: checkWelcomeRequirement }, abort.signal);
+              if (checked.needsAccessCode) throw new Error('需要重新确认访问码');
+            }
+            if (requestNumber === requestAtStart && get().connectionId === previous.connectionId
+              && get().sessionId === previous.sessionId && !get().candidate) {
+              const url = context.serverUrl ? new URL(context.serverUrl) : null;
+              set({ ...disconnected, ...context, isConnected: Boolean(context.serverUrl),
+                protocol: url?.protocol === 'https:' ? 'https' : 'http', host: url?.hostname ?? '', port: url?.port ?? '',
+                connectionId: previous.connectionId + 1, sessionId: previous.sessionId + 1,
+                readerReturnTo: context.offlineMode ? '/shelf' : null });
+              writeActiveServerMirror(context.serverUrl);
+            }
+          } catch {
+            if (requestNumber === requestAtStart && get().sessionId === previous.sessionId) {
+              set({ readerReturnError: '阅读器返回连接确认失败，请点击原服务器条目重试。服务器列表已保留。' });
+            }
+          } finally { clearTimeout(timeout); }
+        }
+        set({ hasHydrated: true });
       })();
       try { await loading; } finally { clearTimeout(timer); loading = null; set({ storageBusy: false }); }
     },
     recoverServers: async () => {
       if (get().saving || loading) return;
+      clearReaderReturn(returnChannel);
       set({ saving: true });
       try {
         const result = await repository.recover();
@@ -110,8 +148,9 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     beginConnection: (id) => {
       const server = get().savedServers.find((s) => s.id === id);
       if (!server || get().saving || get().storageError) return null;
+      clearReaderReturn(returnChannel);
       const candidate = { id, url: server.url, requestId: ++requestNumber, needsAccessCode: false };
-      set({ candidate });
+      set({ candidate, readerReturnTo: null, readerReturnError: '' });
       return candidate;
     },
     cancelConnection: (requestId) => {
@@ -139,6 +178,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
           return false;
         }
         const url = new URL(candidate.url);
+        clearReaderReturn(returnChannel);
         clearReadStateCache();
         set({ ...disconnected, serverUrl: candidate.url, activeServerId: candidate.id,
           serverTitle: savedServers.find((s) => s.id === candidate.id)?.title || '',
@@ -151,20 +191,26 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     },
     // Legacy test/integration entry point: only updates the active runtime snapshot.
     setServer: (protocol, host, port) => {
+      clearReaderReturn(returnChannel);
       clearReadStateCache();
       set({ ...disconnected, serverUrl: normalizeServerAddress(`${protocol}://${host}${port ? `:${port}` : ''}`),
         protocol, host, port, offlineMode: false, isConnected: true,
         connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
     },
-    enterOfflineMode: () => { clearReadStateCache(); set({ offlineMode: true, candidate: null, sessionId: get().sessionId + 1 }); },
-    leaveOfflineMode: () => set({ offlineMode: false, sessionId: get().sessionId + 1 }),
+    enterOfflineMode: () => withClosedReaderSession(async () => {
+      clearReaderReturn(returnChannel);
+      clearReadStateCache();
+      set({ offlineMode: true, candidate: null, readerReturnTo: null, readerReturnError: '', sessionId: get().sessionId + 1 });
+    }),
+    leaveOfflineMode: () => { clearReaderReturn(returnChannel); set({ offlineMode: false, sessionId: get().sessionId + 1 }); },
     setConnected: (token, user) => {
+      clearReaderReturn(returnChannel);
       clearReadStateCache();
       set({ isConnected: true, token, user, sessionId: get().sessionId + 1, capabilities: invalidateCapabilitiesForSession(get().capabilities) });
     },
     setUser: (user) => {
       const changed = didServerSessionChange(get().user, user);
-      if (changed) clearReadStateCache();
+      if (changed) { clearReaderReturn(returnChannel); clearReadStateCache(); }
       set({ isConnected: Boolean(get().serverUrl), token: user ? get().token : '', user,
         sessionId: get().sessionId + (changed ? 1 : 0),
         capabilities: changed ? invalidateCapabilitiesForSession(get().capabilities) : get().capabilities });
@@ -173,15 +219,17 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     setServerCapabilities: (capabilities) => set({ capabilities }),
     setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     logout: () => {
+      clearReaderReturn(returnChannel);
       clearReadStateCache();
       set({ isConnected: Boolean(get().serverUrl), token: '', user: null, sessionId: get().sessionId + 1,
         capabilities: invalidateCapabilitiesForSession(get().capabilities) });
     },
     disconnect: () => {
+      clearReaderReturn(returnChannel);
       clearReadStateCache();
       ++requestNumber;
       writeActiveServerMirror('');
-      set({ ...disconnected, offlineMode: false, candidate: null,
+      set({ ...disconnected, offlineMode: false, candidate: null, readerReturnTo: null, readerReturnError: '',
         connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
     },
   }));

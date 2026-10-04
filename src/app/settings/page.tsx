@@ -126,9 +126,11 @@ export default function SettingsPage() {
     } catch { showToast('恢复默认目录失败', 'error'); }
   };
 
-  const handleEnterOfflineMode = () => {
-    enterOfflineMode();
-    router.push('/shelf');
+  const handleEnterOfflineMode = async () => {
+    try {
+      await enterOfflineMode();
+      router.push('/shelf');
+    } catch (error) { window.alert((error as Error).message); }
   };
 
   return (

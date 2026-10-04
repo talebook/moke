@@ -129,7 +129,7 @@ export default function WelcomePage() {
           <h2 className="text-xl font-semibold mb-4 text-card-foreground">服务器</h2>
           <p className="text-sm text-muted-foreground mb-5">加入只保存地址；点击已保存条目连接。</p>
           <div role="status" aria-live="polite" className="text-sm mb-3 text-foreground">{notice}</div>
-          {error && <p id="server-error" role="alert" className="text-sm text-destructive mb-4 break-words">{error}</p>}
+          {(error || store.readerReturnError) && <p id="server-error" role="alert" className="text-sm text-destructive mb-4 break-words">{error || store.readerReturnError}</p>}
           {!store.hasHydrated ? <p role="status">正在加载服务器列表…</p> : store.storageError ? (
             <div role="alert" className="text-sm space-y-3">
               <p className="break-words">{store.storageError}</p>
@@ -171,7 +171,7 @@ export default function WelcomePage() {
           </div>}
           <button data-dom-id="btn-copy-demo-link" className={`${buttonStyle} w-full mt-4`} onClick={() => void handleCopyDemoLink()}>{demoLinkCopied ? '已复制' : '复制链接'}</button>
           <button data-dom-id="btn-offline-mode" className={`${buttonStyle} w-full mt-4`} disabled={Boolean(connectingId) || store.saving} onClick={async () => {
-            try { await requireClosedReaders(); store.enterOfflineMode(); router.push('/shelf'); } catch (failure) { setError((failure as Error).message); }
+            try { await store.enterOfflineMode(); router.push('/shelf'); } catch (failure) { setError((failure as Error).message); }
           }}>进入离线模式</button>
         </div>
         <div className="mt-6 text-xs text-muted-foreground flex gap-4">

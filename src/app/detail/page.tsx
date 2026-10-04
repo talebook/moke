@@ -498,7 +498,7 @@ function DetailContent() {
           sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
-        await openEmbeddedReaderBook(href, router.push, currentPlatform);
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { serverUrl, bookId: String(book.id), sessionId });
         return;
       }
 
@@ -641,7 +641,7 @@ function DetailContent() {
           serverUrl,
           runtimePlatform: currentPlatform,
         });
-        await openEmbeddedReaderBook(href, router.push, currentPlatform);
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { serverUrl, bookId: String(book.id), sessionId });
         return;
       }
 

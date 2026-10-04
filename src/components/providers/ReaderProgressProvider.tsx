@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress } from '@/lib/reading-progress';
 import { clearAnnotationLocateProgressSuppressionFromPayload, shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
-import { sourceForReaderEvent, registerReaderProgressFlush } from '@/lib/reader-source';
+import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush } from '@/lib/reader-source';
 import { createReaderProgressQueue } from '@/lib/reader-progress-queue';
 
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
@@ -23,7 +23,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
           clearAnnotationLocateProgressSuppressionFromPayload(payload.data);
           return;
         }
-        if (payload.event === 'book:closed') { void queue.flush(); return; }
+        if (payload.event === 'book:closed') { retireReaderWindow(payload.window); void queue.flush(); return; }
         if (payload.event !== 'page:changed') return;
         const progress = normalizeReaderProgressEvent(payload.data);
         if (!progress) return;

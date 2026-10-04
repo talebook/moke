@@ -1,4 +1,6 @@
 import type { ReadingProgressPayload } from './reading-progress';
+import { assertReaderContext, withClosedReaderSession, type ReaderSource } from './reader-source.ts';
+import { clearReaderReturn, prepareReaderReturn } from './reader-return.ts';
 
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
@@ -443,6 +445,17 @@ export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
   platformOverride?: string,
+  source?: ReaderSource,
 ): Promise<void> {
-  await navigateFullDocument(href, navigate, platformOverride);
+  await withClosedReaderSession(async () => {
+    const { useServerStore } = await import('./store/server.ts');
+    const context = useServerStore.getState();
+    if (source) assertReaderContext(source, context);
+    if (context.candidate) throw new Error('正在变更连接，请稍候再试');
+    // Keep Readest's existing literal /library return contract. The one-use
+    // receipt stays in the live browsing context, never in a URL or list file.
+    prepareReaderReturn(context);
+    try { await navigateFullDocument(href, navigate, platformOverride); }
+    catch (error) { clearReaderReturn(); throw error; }
+  });
 }
