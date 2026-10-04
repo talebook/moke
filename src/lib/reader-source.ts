@@ -7,6 +7,7 @@ export function assertReaderContext(source: ReaderSource, current: { sessionId: 
 }
 const windows = new Map<string, ReaderSource>();
 let readerOpening = false;
+let readerSessionChanging = false;
 const opening = new Map<string, ReaderSource>();
 const progressFlushes = new Set<() => Promise<void>>();
 export function registerReaderProgressFlush(flush: () => Promise<void>): () => void {
@@ -40,6 +41,11 @@ export function isReaderWindow(label: string): boolean {
 /** Reader UI owns closing and flushing. A failed check leaves the active server untouched. */
 export async function requireClosedReaders(): Promise<void> {
   if (readerOpening) throw new Error('阅读器正在打开，请稍候再试。当前连接已保留。');
+  if (readerSessionChanging) throw new Error('正在变更登录状态，请稍候再试。当前连接已保留。');
+  await checkClosedReaders();
+}
+
+async function checkClosedReaders(): Promise<void> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
   const { getAllWindows } = await import('@tauri-apps/api/window');
   if ((await getAllWindows()).some((win) => isReaderWindow(win.label))) {
@@ -48,11 +54,21 @@ export async function requireClosedReaders(): Promise<void> {
   await Promise.all([...progressFlushes].map((flush) => flush()));
 }
 
+/** Reserve the Reader boundary before checking windows and changing the cookie session. */
+export async function withClosedReaderSession<T>(change: () => Promise<T>): Promise<T> {
+  if (readerOpening || readerSessionChanging) throw new Error('阅读器或登录状态正在变更，请稍候再试');
+  readerSessionChanging = true;
+  try {
+    await checkClosedReaders();
+    return await change();
+  } finally { readerSessionChanging = false; }
+}
+
 export async function openReaderFromSource(
   source: ReaderSource,
   args: Record<string, unknown>,
 ): Promise<void> {
-  if (readerOpening) throw new Error('阅读器正在打开，请稍候再试');
+  if (readerOpening || readerSessionChanging) throw new Error('阅读器或登录状态正在变更，请稍候再试');
   readerOpening = true;
   // No window with another origin may share a book-id-only opening receipt.
   let cancel = () => {};

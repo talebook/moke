@@ -5,7 +5,7 @@ import { ServerRegistryRepository, SERVER_STORAGE_KEY, parseServerRegistry, seri
 import { createServerStore } from '../src/lib/store/server.ts';
 import { checkSavedServer, readConnectionWelcome } from '../src/lib/server-connection.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
-import { assertReaderContext, bindReaderWindow, sourceForReaderEvent } from '../src/lib/reader-source.ts';
+import { assertReaderContext, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders } from '../src/lib/reader-source.ts';
 
 function storage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -219,4 +219,20 @@ test('delayed reader preparation cannot open after a session change or during a 
   assert.doesNotThrow(() => assertReaderContext(source, { sessionId: 1, candidate: null }));
   assert.throws(() => assertReaderContext(source, { sessionId: 2, candidate: null }), /状态已改变/);
   assert.throws(() => assertReaderContext(source, { sessionId: 1, candidate: { url: 'http://b.test' } }), /状态已改变/);
+});
+
+test('authentication reserves the Reader boundary and releases it on success and failure', async () => {
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const wait = new Promise(resolve => { release = resolve; });
+  const change = withClosedReaderSession(async () => { entered(); await wait; });
+  await started;
+  await assert.rejects(openReaderFromSource({ serverUrl: 'http://a.test', bookId: '42', sessionId: 1 }, {}), /状态正在变更/);
+  await assert.rejects(requireClosedReaders(), /正在变更登录状态/);
+  await assert.rejects(withClosedReaderSession(async () => {}), /状态正在变更/);
+  release(); await change;
+  await assert.doesNotReject(requireClosedReaders());
+  await assert.rejects(withClosedReaderSession(async () => { throw new Error('login failed'); }), /login failed/);
+  await assert.doesNotReject(requireClosedReaders());
 });

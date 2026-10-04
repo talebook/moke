@@ -1,6 +1,6 @@
 'use client';
 
-import { requireClosedReaders } from '@/lib/reader-source';
+import { requireClosedReaders, withClosedReaderSession } from '@/lib/reader-source';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -86,18 +86,21 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     const context = useServerStore.getState();
-    try { await requireClosedReaders(); } catch (error) { window.alert((error as Error).message); return; }
-    if (serverUrl) {
-      try {
-        await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-      } catch (error) {
-        console.warn('Failed to sign out on server:', error);
-      }
-    }
-    if (useServerStore.getState().connectionId !== context.connectionId || useServerStore.getState().sessionId !== context.sessionId) return;
-    logout();
-    safeRemoveLocalStorageItem('moke-auth-token');
-    router.push('/login');
+    try {
+      await withClosedReaderSession(async () => {
+        if (serverUrl) {
+          try {
+            await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
+          } catch (error) {
+            console.warn('Failed to sign out on server:', error);
+          }
+        }
+        if (useServerStore.getState().connectionId !== context.connectionId || useServerStore.getState().sessionId !== context.sessionId) return;
+        logout();
+        safeRemoveLocalStorageItem('moke-auth-token');
+        router.push('/login');
+      });
+    } catch (error) { window.alert((error as Error).message); }
   };
 
   const handleSelectDownloadDirectory = async () => {

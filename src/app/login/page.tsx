@@ -7,7 +7,7 @@ import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
-import { requireClosedReaders } from '@/lib/reader-source';
+import { withClosedReaderSession } from '@/lib/reader-source';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
 interface TalebookLoginResponse {
@@ -61,34 +61,35 @@ export default function LoginPage() {
     setError('');
 
     try {
-      await requireClosedReaders();
-      if (!current() || abort.signal.aborted) return;
-      const res = await login(serverUrl, abort.signal, username, password, captchaData);
-      if (!current() || abort.signal.aborted) return;
-
-      if (res.err === 'ok') {
-        setShowCaptcha(false);
-        const info = await fetchCurrentUser(serverUrl, abort.signal);
+      await withClosedReaderSession(async () => {
         if (!current() || abort.signal.aborted) return;
-        if (!info.isLogin || !info.user) {
-          logout();
-          setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
-          return;
-        }
+        const res = await login(serverUrl, abort.signal, username, password, captchaData);
+        if (!current() || abort.signal.aborted) return;
 
-        safeRemoveLocalStorageItem('moke-auth-token');
-        setConnected('', info.user);
-        router.push('/shelf');
-      } else if (res.err === 'user.private.not_valid') {
-        const state = useServerStore.getState();
-        const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
-        if (candidate) { state.requireAccess(candidate.requestId); router.push(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`); }
-      } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
-        setError(res.msg || '请输入人机验证码');
-        setShowCaptcha(true);
-      } else {
-        setError(res.msg || '登录失败，请检查用户名和密码');
-      }
+        if (res.err === 'ok') {
+          setShowCaptcha(false);
+          const info = await fetchCurrentUser(serverUrl, abort.signal);
+          if (!current() || abort.signal.aborted) return;
+          if (!info.isLogin || !info.user) {
+            logout();
+            setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
+            return;
+          }
+
+          safeRemoveLocalStorageItem('moke-auth-token');
+          setConnected('', info.user);
+          router.push('/shelf');
+        } else if (res.err === 'user.private.not_valid') {
+          const state = useServerStore.getState();
+          const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
+          if (candidate) { state.requireAccess(candidate.requestId); router.push(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`); }
+        } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
+          setError(res.msg || '请输入人机验证码');
+          setShowCaptcha(true);
+        } else {
+          setError(res.msg || '登录失败，请检查用户名和密码');
+        }
+      });
     } catch (loginError) {
       if (current() && !abort.signal.aborted) setError(loginError instanceof Error ? loginError.message : '无法连接服务器');
     } finally {
