@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  cacheOfflineMediaType,
   deleteOfflineBook,
   getOfflineBook,
+  listOfflineBooks,
   saveOfflineBook,
   saveOfflineBookStream,
   shouldPreserveOfflinePartial,
@@ -543,4 +545,70 @@ test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显�
   };
 
   assert.equal(await getOfflineBook('https://a.example', '42'), null);
+});
+
+
+test('offline downloads retain classification and online refresh stays within server/book identity', async () => {
+  const store = installWebOfflineStore();
+  const first = { serverUrl: 'https://a.test', bookId: '42', title: 'Comic', format: 'pdf', fileName: 'comic.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']), media_type: 'comic' };
+  await saveOfflineBook(first);
+  await saveOfflineBook({ ...first, serverUrl: 'https://b.test' });
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'comic');
+  await cacheOfflineMediaType('https://a.test', '42', 'ebook');
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
+  assert.equal(store.records.get('https://b.test::42::pdf').media_type, 'comic');
+  await cacheOfflineMediaType('https://a.test', '42', undefined);
+  assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
+});
+
+for (const path of ['get', 'list']) {
+  for (const existing of [false, true]) {
+    for (const classificationFirst of [false, true]) {
+      test(`native ${path} merges classification (${existing ? 'old row' : 'no row'}, ${classificationFirst ? 'classification first' : 'recovery first'})`, async () => {
+        const indexedDB = createFakeIndexedDb();
+        const native = {
+          id: 'https://a.example::42::pdf', serverUrl: 'https://a.example:443', bookId: '42',
+          title: 'Comic PDF', fileName: 'comic.pdf', filePath: '/app-data/books/comic.pdf', updatedAt: 123,
+        };
+        if (existing) indexedDB.records.set(native.id, { ...native, format: 'pdf', media_type: 'ebook', size: 1 });
+        let releaseNative;
+        let reachedNative;
+        const pendingNative = new Promise(resolve => { releaseNative = resolve; });
+        const started = new Promise(resolve => { reachedNative = resolve; });
+        process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+        globalThis.window = { indexedDB, __TAURI_INTERNALS__: {
+          invoke: async command => {
+            assert.equal(command, 'moke_list_downloaded_books');
+            reachedNative();
+            return pendingNative;
+          },
+        } };
+        const read = () => path === 'get'
+          ? getOfflineBook('https://a.example', '42', 'pdf')
+          : listOfflineBooks('https://a.example').then(rows => rows.find(row => row.bookId === '42'));
+        const recovering = read();
+        await started;
+        if (classificationFirst) await cacheOfflineMediaType('https://a.example', '42', 'comic');
+        releaseNative([native]);
+        const recovered = await recovering;
+        if (classificationFirst) assert.equal(recovered.media_type, 'comic', 'return value must merge the new type');
+        else await cacheOfflineMediaType('https://a.example', '42', 'comic');
+        assert.equal(indexedDB.records.get(native.id).media_type, 'comic');
+        assert.equal((await read()).media_type, 'comic');
+        assert.equal((await listOfflineBooks()).length, 1, 'classification metadata must not appear as a download');
+      });
+    }
+  }
+}
+
+test('classification persists without a downloaded row and newer refresh wins over cached old type', async () => {
+  const indexedDB = installWebOfflineStore();
+  await cacheOfflineMediaType('https://a.example', '42', 'comic');
+  assert.deepEqual(await listOfflineBooks(), []);
+  assert.equal(await getOfflineBook('https://a.example', '42'), null);
+  await cacheOfflineMediaType('https://a.example:443', '42', 'ebook');
+  await saveOfflineBook({ serverUrl: 'https://a.example', bookId: '42', title: 'Changed type', format: 'pdf',
+    fileName: 'book.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']) });
+  assert.equal((await getOfflineBook('https://a.example', '42', 'pdf')).media_type, 'ebook');
+  assert.equal(indexedDB.records.get('https://a.example::42::pdf').media_type, 'ebook');
 });
