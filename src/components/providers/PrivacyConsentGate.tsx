@@ -12,6 +12,7 @@ import { PreviewEntitlementGate } from './PreviewEntitlementGate';
 import { ContinueReadingLauncher } from './ContinueReadingLauncher';
 import { ReaderProgressProvider } from './ReaderProgressProvider';
 import { ServerProvider } from './ServerProvider';
+import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
 
 type ConsentState = 'loading' | 'pending' | 'accepted' | 'declined';
 
@@ -69,7 +70,7 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   };
 
   if (state === 'loading') {
-    return <div className="min-h-dvh app-warm-bg" aria-label="正在加载隐私设置" />;
+    return <AppStartupScreen />;
   }
 
   return (

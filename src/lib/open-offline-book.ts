@@ -12,17 +12,18 @@ import {
   openEmbeddedReaderBook,
 } from '@/lib/moke-reader';
 
+/** Return true when Reader takes over the current document. */
 export async function openOfflineBook(
   record: OfflineBookRecord,
   navigate: (href: string) => void,
-): Promise<void> {
+): Promise<boolean> {
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri' || !record.filePath) {
     throw new Error('book.offline.desktop_only');
   }
 
   if (useSettingsStore.getState().readerPreference === 'system') {
     await openBookWithSystemDefault(record.id);
-    return;
+    return false;
   }
 
   // Progress recovery and the immutable runtime probe are independent. Offline
@@ -48,11 +49,12 @@ export async function openOfflineBook(
       navigate,
       platform,
     );
-    return;
+    return true;
   }
 
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('open_reader', common);
+  return false;
 }
 
 export async function openBookWithSystemDefault(recordId: string): Promise<void> {

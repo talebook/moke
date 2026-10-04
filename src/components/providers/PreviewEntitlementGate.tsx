@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyRound, LoaderCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { KeyRound, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
 import {
   assertPreviewNativeBuild,
   effectiveEntitlementState,
@@ -165,27 +166,23 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     }
   };
 
+  if (!status && !error) return <AppStartupScreen />;
+
   if (isEntitled && windowLabel !== 'main') {
+    if (!error) return <AppStartupScreen />;
     return (
       <div className="fixed inset-0 z-[180] flex items-center justify-center app-warm-bg px-4 text-sm text-muted-foreground">
-        {error ? (
-          <div className="w-full max-w-md rounded-3xl border border-border bg-background p-6 text-center shadow-2xl">
-            <ShieldAlert className="mx-auto mb-3 h-7 w-7 text-destructive" />
-            <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>
-            <button
-              type="button"
-              onClick={retryHandoff}
-              className="h-10 rounded-2xl bg-primary px-5 font-semibold text-primary-foreground transition hover:opacity-90"
-            >
-              重试续期并启动
-            </button>
-          </div>
-        ) : (
-          <>
-            <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-            正在启动已授权的 Preview 工作区…
-          </>
-        )}
+        <div className="w-full max-w-md rounded-3xl border border-border bg-background p-6 text-center shadow-2xl">
+          <ShieldAlert className="mx-auto mb-3 h-7 w-7 text-destructive" />
+          <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>
+          <button
+            type="button"
+            onClick={retryHandoff}
+            className="h-10 rounded-2xl bg-primary px-5 font-semibold text-primary-foreground transition hover:opacity-90"
+          >
+            重试续期并启动
+          </button>
+        </div>
       </div>
     );
   }
@@ -242,13 +239,6 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
             </p>
           </div>
         </div>
-
-        {!status && !error && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-            正在检查 Preview 授权…
-          </div>
-        )}
 
         {status && (
           <div className="space-y-4">

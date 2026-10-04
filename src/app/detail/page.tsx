@@ -49,6 +49,7 @@ import {
 } from '@/lib/online-reading';
 import { tauriRangeFetch } from '@/lib/tauri-range-fetch';
 import { rememberContinueReading } from '@/lib/continue-reading';
+import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
 
 interface BookDetail {
   id: string;
@@ -181,9 +182,24 @@ function DetailContent() {
   }, [activeServerUrl, id, selectedFormat]);
 
   useEffect(() => {
+    // Removing the consumed URL flag must keep the startup screen in place
+    // while the asynchronous reader handoff is still preparing this book.
+    if (!continueRequested && continueStartedRef.current === `${activeServerUrl}:${id}`) return;
     continueStartedRef.current = null;
     setContinuePending(continueRequested);
-  }, [continueRequested, id]);
+  }, [activeServerUrl, continueRequested, id]);
+
+  useEffect(() => {
+    // A WebView may restore the old document from its back/forward cache.
+    // Its consumed launch URL now represents an ordinary book detail.
+    const restoreDetail = () => {
+      if (new URLSearchParams(window.location.search).get('continue') !== '1') {
+        setContinuePending(false);
+      }
+    };
+    window.addEventListener('pageshow', restoreDetail);
+    return () => window.removeEventListener('pageshow', restoreDetail);
+  }, []);
 
   useEffect(() => {
     if (!downloadKey) return;
@@ -494,7 +510,7 @@ function DetailContent() {
         });
         rememberCurrentBook();
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
-        return;
+        return true;
       }
 
       await openAndRecordBookRead({
@@ -560,8 +576,7 @@ function DetailContent() {
           return;
         }
         rememberCurrentBook(record.format);
-        await openOfflineBook(record, router.push);
-        return;
+        return await openOfflineBook(record, router.push);
       }
 
       const useSystemReader = useSettingsStore.getState().readerPreference === 'system'
@@ -633,7 +648,7 @@ function DetailContent() {
         });
         rememberCurrentBook(record.format);
         await openEmbeddedReaderBook(href, router.push, currentPlatform);
-        return;
+        return true;
       }
 
       await openAndRecordBookRead({
@@ -687,19 +702,30 @@ function DetailContent() {
     const launchKey = `${activeServerUrl}:${book.id}`;
     if (continueStartedRef.current === launchKey) return;
 
-    let open: (() => Promise<void>) | null = null;
+    let open: (() => Promise<boolean | void>) | null = null;
     if (offlineMode || downloaded) open = () => handleOfflineRead();
     else if (onlineFormat) open = handleOnlineRead;
     else if (!offlineAvailabilityChecked) return;
 
     continueStartedRef.current = launchKey;
+    // Consume the one-shot launch request before leaving this document. Native
+    // BACK during Reader startup can reload this history entry; keeping
+    // continue=1 here would launch Reader again instead of showing the detail.
+    // replaceState updates Next's search params without interrupting the opener.
+    const detailParams = new URLSearchParams(searchParams);
+    detailParams.delete('continue');
+    window.history.replaceState(null, '', `/detail?${detailParams.toString()}`);
     if (!open) {
       setMessage('这本书暂不支持直接在线阅读，请先下载后再继续。');
       setContinuePending(false);
       return;
     }
 
-    void open().finally(() => setContinuePending(false));
+    // Native navigation is deferred; retain the screen through that gap.
+    // Errors and independent desktop reader windows leave detail usable.
+    void open().then((navigating) => {
+      if (!navigating) setContinuePending(false);
+    }, () => setContinuePending(false));
     // Each opener intentionally uses the current render's book/session state;
     // continueStartedRef makes this launch effect one-shot for that book.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -736,22 +762,13 @@ function DetailContent() {
     }
   };
 
+  if (continuePending && (loading || book)) return <AppStartupScreen />;
+
   if (loading) {
     return (
       <DesktopLayout>
         <div className="flex items-center justify-center px-4 py-16 sm:px-8">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-        </div>
-      </DesktopLayout>
-    );
-  }
-
-  if (continuePending && book) {
-    return (
-      <DesktopLayout>
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-          <p className="text-sm text-muted-foreground">正在继续阅读《{book.title}》…</p>
         </div>
       </DesktopLayout>
     );
@@ -1020,7 +1037,7 @@ function DetailContent() {
             capabilityCheckedAt={capabilities.annotationApiCheckedAt}
             downloaded={downloaded}
             openingReader={openingReader}
-            onLocate={handleOfflineRead}
+            onLocate={async (annotation) => { await handleOfflineRead(annotation); }}
             onAuthRequired={handleAnnotationAuthRequired}
           />
         )}
@@ -1107,13 +1124,7 @@ function formatFileSize(size: number) {
 
 export default function DetailPage() {
   return (
-    <Suspense fallback={
-      <DesktopLayout>
-        <div className="flex items-center justify-center px-4 py-16 sm:px-8">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-        </div>
-      </DesktopLayout>
-    }>
+    <Suspense fallback={<AppStartupScreen />}>
       <DetailContent />
     </Suspense>
   );

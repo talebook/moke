@@ -687,25 +687,27 @@ export default function LibraryPage() {
   return (
     <DesktopLayout>
       {/* ── Header ── */}
-      <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:flex-row md:items-center md:px-8 md:py-5">
-        <div className="shrink-0">
-          {activeTab === 'local' ? (
-            <>
-              <p className="text-xs font-medium text-primary/80">共 {total} 本藏书</p>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">全部藏书</h1>
-            </>
-          ) : (
-            <>
-              <p className="text-xs font-medium text-primary/80">在线书库</p>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">在线书库</h1>
-            </>
-          )}
+      <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-3 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0">
+            {activeTab === 'local' ? (
+              <>
+                <p className="text-xs font-medium text-primary/80">共 {total} 本藏书</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">全部藏书</h1>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-medium text-primary/80">在线书库</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">在线书库</h1>
+              </>
+            )}
+          </div>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
         </div>
-        <div className="hidden flex-1 md:block" />
 
-        <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+        <div className="flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-[390px]">
           {/* Search — switches mode per tab */}
-          <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <input
@@ -726,7 +728,6 @@ export default function LibraryPage() {
               {activeTab === 'online' && networkSearchLoading ? '搜索中' : '搜索'}
             </button>
           </div>
-          <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1 shrink-0" />
         </div>
       </header>
 

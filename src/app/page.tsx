@@ -6,6 +6,7 @@ import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { request } from '@/lib/api';
+import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
 import {
   continueReadingHref,
   getContinueReading,
@@ -25,11 +26,15 @@ export default function HomePage() {
     const historyTimeout = window.setTimeout(() => controller.abort(), 3_000);
 
     const navigate = (target: string) => {
-      if (cancelled) return;
-      // On single-WebView runtimes (OHOS/Android), App Router's RSC navigation
-      // over the custom scheme can leave this page stuck on its spinner.
-      void navigateFullDocument(target, router.replace);
-      navigationTimer = window.setTimeout(() => router.replace(target), 1_500);
+      // Let an effect cleanup cancel a stale launch before issuing native
+      // navigation, including React's development setup/cleanup cycle.
+      queueMicrotask(() => {
+        if (cancelled) return;
+        // On single-WebView runtimes (OHOS/Android), App Router's RSC navigation
+        // over the custom scheme can leave this page stuck on its spinner.
+        void navigateFullDocument(target, router.replace);
+        navigationTimer = window.setTimeout(() => router.replace(target), 1_500);
+      });
     };
 
     void (async () => {
@@ -56,9 +61,5 @@ export default function HomePage() {
     };
   }, [continueReadingOnLaunch, hasHydrated, offlineMode, serverUrl, router]);
 
-  return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-    </div>
-  );
+  return <AppStartupScreen />;
 }
