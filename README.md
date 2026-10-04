@@ -1,21 +1,62 @@
-# Moke
+<div align="center">
+  <img src="public/logo/logo.png" width="96" height="96" alt="Moke 应用图标" />
+  <h1>Moke · 墨客</h1>
+  <p>连接你的 Talebook 书库，让阅读触手可及。</p>
+  <p>
+    <a href="https://github.com/talebook/moke/releases"><img src="https://img.shields.io/github/v/release/talebook/moke" alt="最新稳定版本" /></a>
+    <a href="https://github.com/talebook/moke/actions/workflows/ci.yml"><img src="https://github.com/talebook/moke/actions/workflows/ci.yml/badge.svg" alt="CI 状态" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GPLv3 许可证" /></a>
+  </p>
+  <p>
+    <a href="https://github.com/talebook/moke/releases">下载安装</a> ·
+    <a href="#快速开始">快速开始</a> ·
+    <a href="https://github.com/talebook/moke/issues">问题反馈</a> ·
+    <a href="CONTRIBUTING.md">参与贡献</a>
+  </p>
+</div>
 
-**Moke** 是 [Talebook](https://github.com/talebook/talebook) 自托管电子书服务器的桌面客户端。在电脑上浏览、搜索、下载你的电子书库，内嵌专业阅读器，离线也能随时打开阅读。
+**Moke** 是为 [Talebook](https://github.com/talebook/talebook) 自托管电子书服务器打造的开源客户端，基于 Next.js、React 和 Tauri 构建，提供桌面与移动平台安装包。你可以浏览、搜索自己的书库，下载书籍离线阅读，或通过内嵌的 [readest-reader](https://github.com/hehetoshang/readest-reader) 在线阅读 EPUB。
 
-## 功能
+> 使用前请准备一个可访问的 Talebook 服务器。Moke 是客户端，书库管理与账号服务由 Talebook 提供。
 
-- **书库浏览** — 按分类、标签、作者、出版商等方式浏览服务器上的电子书
-- **元数据搜索** — 快速检索书名、作者、简介等元数据
-- **离线下载** — 将书籍下载到本地，断网也能阅读
-- **专业阅读** — 内嵌 readest 阅读器，支持 EPUB、PDF 等多种格式
-- **漫画阅读** — 按服务端书籍类型打开 Talebook 同款漫画阅读器，在线支持 CBZ/ZIP/CBR/RAR，保存并恢复页码；[格式与离线限制](docs/COMIC_READING.md)
-- **在线阅读** — 支持 Talebook 授权 EPUB 的按需 Range 读取，无需先下载整本书
-- **局域网友好** — 支持自签名证书和纯 HTTP 局域网服务器
-- **完整认证** — 支持访问码、登录、注册等 Talebook 服务器的全部认证方式
+[应用预览](#应用预览) · [主要功能](#主要功能) · [安装](#安装) · [快速开始](#快速开始) · [本地开发](#本地开发) · [贡献与反馈](#贡献与反馈) · [许可证](#许可证)
+
+## 应用预览
+
+### 桌面书库
+
+![Moke 桌面书库：侧边导航、格式与分类筛选，以及书籍封面网格](docs/screenshots/library-desktop.png)
+
+<details>
+  <summary>查看书籍详情与移动端书库</summary>
+
+### 书籍详情
+
+![Moke 书籍详情：封面、作者、出版信息、格式和内容简介](docs/screenshots/book-detail-desktop.png)
+
+### 移动端书库
+
+<img src="docs/screenshots/library-mobile.png" width="320" alt="Moke 移动端书库：双列封面网格与底部导航" />
+
+</details>
+
+截图来自当前代码的 Web 开发预览，使用虚构书库与原创示例封面；原生应用的窗口和可用操作可能有所不同。[截图来源与更新方法](docs/screenshots/README.md)。
+
+## 主要功能
+
+- **浏览与搜索**：按分类、标签、作者、出版商浏览书库，检索书名、作者与简介。
+- **多种视图**：在封面网格、列表和桌面表格之间切换，查看书籍详情。
+- **离线阅读**：将书籍下载到本地，在书架中打开已下载的书籍。
+- **内嵌阅读器**：集成 readest-reader，支持 EPUB、PDF 等多种格式。
+- **漫画阅读**：按服务端书籍类型打开 Talebook 同款漫画阅读器，在线支持 CBZ/ZIP/CBR/RAR，保存并恢复页码；[格式与离线限制](docs/COMIC_READING.md)。
+- **在线 EPUB**：通过 Talebook 授权的 Range 接口按需读取，无需先下载整本书。
+- **局域网连接**：支持纯 HTTP 与自签名 HTTPS 的自托管服务器。
+- **账号与访问控制**：支持访问码、登录和注册，遵循服务器权限设置。
+- **墨水屏模式**：提供高对比度界面，减少阴影与装饰效果。
 
 ## 安装
 
-从 [Releases](../../releases) 页面下载对应平台的安装包：
+前往 [GitHub Releases](https://github.com/talebook/moke/releases) 下载适合设备的安装包，具体可用平台以对应版本的发布资产为准。
 
 | 平台 | 安装包格式 |
 |---|---|
@@ -28,40 +69,70 @@
 
 > **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+ / HarmonyOS NEXT 5.0+（API 12）
 
-## 使用
+OpenHarmony 安装包目前处于 alpha 阶段，建议在测试设备上体验；iOS/iPadOS 和 OpenHarmony 的签名、安装要求见对应版本的发布说明。
 
-1. 启动 Moke，输入你的 Talebook 服务器地址（例如 `http://192.168.1.100:8080` 或 `https://mytalebook.example.com`）
-2. 根据服务器设置，输入访问码或登录账号
-3. 开始浏览、搜索、下载和阅读
+## 快速开始
 
-书籍详情页会把“在线阅读”和“下载后阅读”分开显示。在线 EPUB 只按需读取当前页面所需字节，不写入离线书库；服务器不支持安全 Range 接口、权限失效或网络异常时，可重试或明确改为下载后阅读。下载的书籍存储在本地，在书架页面可以离线打开阅读。
+1. **连接服务器**：启动 Moke，输入 Talebook 地址，例如 `http://192.168.1.100:8080` 或 `https://mytalebook.example.com`。
+2. **完成认证**：根据服务器配置输入访问码，或登录账号。
+3. **浏览书库**：打开「书库」，通过搜索、格式和分类筛选找到书籍。
+4. **开始阅读**：在原生应用的书籍详情页选择「在线阅读」，或点击旁边的下载按钮「下载后阅读」。已下载的书籍可以离线打开。
 
-在线阅读要求 Talebook 提供 `talebook.reader.bootstrap.v1` 与逐书授权的 `/read/resource/<id>.epub?revision=...` 接口。Moke 会拒绝跨服务器资源、重定向、异常 MIME、缺失 Range/ETag 及资源版本变化，不会把 Cookie 或 Token 放入书籍 URL。
+在线 EPUB 按需读取，不会自动加入离线书库。服务器不支持在线阅读接口、权限失效或网络异常时，可以重试，或明确选择下载后阅读。在线阅读的接口要求和兼容性说明见 [Reader 集成文档](docs/reader-development.md#在线阅读兼容性)。
 
-## Reader 开发与构建
+## 本地开发
 
-Reader 是独立递归子模块。全新检出或从旧 Readest 子模块迁移后执行：
+推荐使用 **Node.js 24**（与 CI 一致）和 **pnpm 9.15.9**（由 `package.json` 固定）。运行桌面应用还需要 Rust 工具链和 [Tauri 系统依赖](https://v2.tauri.app/start/prerequisites/)。
+
+### Web 界面开发
+
+只开发 Moke 的书库与设置界面时，可以先启动 Web 预览：
+
+```bash
+git clone https://github.com/talebook/moke.git
+cd moke
+pnpm install --frozen-lockfile
+pnpm dev-web
+```
+
+打开 <http://localhost:3000>。Web 预览用于界面开发，原生文件访问、离线阅读和内嵌 Reader 联调需要完整应用环境；连接真实服务器时还需满足浏览器的跨域访问要求。
+
+### Reader 开发与构建
+
+完整应用需要初始化递归子模块并安装 Reader 依赖，详见 [Reader 开发与构建](docs/reader-development.md)。完成准备后：
 
 ```bash
 git submodule sync --recursive
 git submodule update --init --recursive
+cd readest
 pnpm install --frozen-lockfile
-cd readest && pnpm install --frozen-lockfile && cd ..
-pnpm build:reader
+pnpm setup:vendors
+cd ..
 ```
 
-`pnpm build:reader` 会自动执行 Reader app 的 `setup-vendors` 子脚本，生成 PDF.js、SimpleCC 和 Jieba 资源；只启动开发服务器时可先在 `readest/` 执行根脚本 `pnpm setup:vendors`（它会转调上述 app 子脚本）。`.env.moke-reader` 已随 Reader 仓库提交，无需本地创建。产物位于 `readest/out/readest`，Moke 打包时复制到 `/readest`。开发服务器通过 `pnpm dev:reader` 启动在 `http://localhost:3001/readest/reader`。协议、鉴权、错误和版本兼容说明见子模块的 `docs/MOKE_CONTRACT.md`；`mokeServerUrl` 始终是用户配置的 Talebook 地址，不是 Reader 服务地址。
+然后使用以下命令：
 
-真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。经过脱敏的环境、命令轮廓与实测结果见子模块的 `docs/E2E_EVIDENCE.md`。
+| 命令 | 用途 |
+|---|---|
+| `pnpm tauri dev` | 启动桌面应用，同时启动 Moke 与 Reader 开发服务 |
+| `pnpm tauri build` | 构建生产安装包，自动构建并复制 Reader 资源 |
+| `pnpm lint` | 检查 ESLint 规则 |
+| `pnpm typecheck` | 检查 TypeScript 类型 |
+| `pnpm test` | 运行 API、离线存储和平台分支等测试 |
 
-Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的 sandbox iframe 内，不能接触顶层 Tauri IPC bridge。桌面 `allow_paths_in_scopes` 只能复用宿主已授权的 `fs_scope`，Moke 的 `open_reader` 也只为 AppData 书籍或文件选择器已授权路径扩展 scope。升级 Foliate、Reader 命令或 capability 时必须保留这些边界并运行 `tests/reader-only-build.test.mjs`。
+测试前至少执行 `git submodule update --init readest`，Reader 契约测试会读取子模块内容。详细的环境准备、代码规范和提交流程见 [贡献指南](CONTRIBUTING.md)。
 
-## 相关链接
+## 贡献与反馈
 
-- [Talebook 服务器](https://github.com/talebook/talebook) — 自托管电子书服务端，Moke 的数据来源
-- [readest-reader](https://github.com/hehetoshang/readest-reader) — 从 Readest 抽离、按 `moke.readest.embed.v1` 契约集成的专业阅读器
-- [报告 Bug](../../issues) — 发现 Bug？请告诉我们
-- [参与贡献](CONTRIBUTING.md) — 开发者贡献指南
+- [报告 Bug 或提出建议](https://github.com/talebook/moke/issues)：请附上应用版本、系统环境与复现步骤。
+- [参与贡献](CONTRIBUTING.md)：了解开发流程与提交规范。
+- [安全政策](SECURITY.md)：安全漏洞请通过私密渠道报告。
+- [隐私政策](PRIVACY.md)：了解应用的数据处理方式。
+
+## 相关项目
+
+- [Talebook](https://github.com/talebook/talebook)：自托管电子书服务端，提供书库与账号服务。
+- [readest-reader](https://github.com/hehetoshang/readest-reader)：从 Readest 抽离、按 `moke.readest.embed.v1` 契约集成的阅读器。
 
 ## 开发者
 
@@ -86,7 +157,8 @@ Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的
 
 ### 感谢以下用户的打赏支持
 
-- 微信用户金海先生
+- 金海先生
+- 千成
 
 ## 说明
 
@@ -94,4 +166,4 @@ Reader 原生命令仅授予顶层 Reader UI；书稿必须保持在 Foliate 的
 
 ## 许可证
 
-GPLv3
+Moke 使用 [GNU General Public License v3.0](LICENSE) 许可证。
