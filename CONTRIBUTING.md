@@ -4,7 +4,7 @@
 
 ## 报告 Bug
 
-发现 Bug 请通过 [GitHub Issues](../../issues) 提交，提交时请包含以下信息：
+发现 Bug 请通过 [GitHub Issues](https://github.com/talebook/moke/issues) 提交，提交时请包含以下信息：
 
 - **问题描述** — 发生了什么？预期应该发生什么？
 - **复现步骤** — 详细的操作步骤，能稳定复现最好
@@ -41,8 +41,8 @@
 
 ### 环境要求
 
-- **Node.js** 22+
-- **pnpm** 10+
+- **Node.js** 24（推荐，与 CI 一致）
+- **pnpm** 9.15.9（与 `package.json` 的 `packageManager` 一致）
 - **Rust** 工具链（[rustup](https://rustup.rs/)）
 - **Windows** — 需要 Visual Studio 2022 Build Tools（"使用 C++ 的桌面开发" 工作负荷）
 - **macOS** — 需要 Xcode Command Line Tools
@@ -52,10 +52,17 @@
 
 ```bash
 git clone https://github.com/talebook/moke.git
-cd talebook_client
-pnpm install
-cd readest && pnpm install && cd ..
+cd moke
+git submodule sync --recursive
+git submodule update --init --recursive
+pnpm install --frozen-lockfile
+cd readest
+pnpm install --frozen-lockfile
+pnpm setup:vendors
+cd ..
 ```
+
+只开发书库和设置界面时，可以暂不初始化子模块，直接安装根目录依赖并运行 `pnpm dev-web`。运行 Reader 契约测试至少需要初始化 `readest` 子模块；完整桌面联调需要上述全部准备步骤，详见 [Reader 开发与构建](docs/reader-development.md)。
 
 ### 开发命令
 
@@ -71,8 +78,7 @@ pnpm test           # API、离线存储和平台分支基础测试
 ### 构建
 
 ```bash
-pnpm build && pnpm build:reader && pnpm copy:reader
-pnpm tauri build    # 生产桌面安装包
+pnpm tauri build    # 自动构建 Moke、Reader 并复制资源，生成生产桌面安装包
 ```
 
 
