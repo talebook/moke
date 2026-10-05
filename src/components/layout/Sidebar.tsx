@@ -130,7 +130,7 @@ export function Sidebar() {
       <div className="px-4 py-4 border-t border-white/10">
         {offlineMode ? (
           <Link href="/welcome" className="flex items-center justify-center rounded-lg bg-white/10 px-3 py-2.5 text-sm text-primary-foreground hover:bg-white/15">
-            连接服务器
+            加入服务器
           </Link>
         ) : user ? (
           <Link

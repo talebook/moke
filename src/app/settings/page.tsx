@@ -20,7 +20,7 @@ import { Select } from '@/components/ui/Select';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, leaveOfflineMode, user, disconnect, logout } = useServerStore();
+  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
@@ -79,7 +79,6 @@ export default function SettingsPage() {
   };
 
   const handleConnectServer = () => {
-    leaveOfflineMode();
     router.push('/welcome');
   };
 
@@ -153,16 +152,16 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
-          <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
+          <SettingsSection title="连接与数据" description={offlineMode ? '加入 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
             {offlineMode ? (
               <ActionRow
                 icon={PlugZap}
-                label="连接服务器"
+                label="加入服务器"
                 onClick={handleConnectServer}
               />
             ) : (
               <>
-              <SettingsRow label="连接服务器" value={serverUrl} />
+              <SettingsRow label="当前服务器" value={serverUrl} />
               <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
               <SettingsRow label="服务器版本" value={serverVersion} />
               <ActionRow

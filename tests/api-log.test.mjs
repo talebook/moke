@@ -11,7 +11,7 @@ import {
 } from '../src/lib/api-log.ts';
 
 const welcomeSource = readFileSync(
-  fileURLToPath(new URL('../src/app/welcome/page.tsx', import.meta.url)),
+  fileURLToPath(new URL('../src/lib/join-server.ts', import.meta.url)),
   'utf8',
 );
 
@@ -91,34 +91,34 @@ test('MokeApiError 真实错误对象只输出自身 code 和 HTTP 状态', () =
 test('welcome 两条失败分支只记录元数据，同时保留服务端文案给用户', () => {
   assert.match(
     welcomeSource,
-    /logErrorMetadata\('WelcomePage validateServerConnection failed', result\)/,
+    /logErrorMetadata\('JoinServer validateServerConnection failed', validation\)/,
   );
   assert.match(
     welcomeSource,
-    /logErrorMetadata\('WelcomePage checkWelcomeRequirement failed', welcome\)/,
+    /logErrorMetadata\('JoinServer checkWelcomeRequirement failed', welcome\)/,
   );
   assert.doesNotMatch(
     welcomeSource,
-    /console\.error\('\[WelcomePage\] (?:validateServerConnection|checkWelcomeRequirement) failed:',/,
+    /console\.error\('\[JoinServer\] (?:validateServerConnection|checkWelcomeRequirement) failed:',/,
   );
-  assert.match(welcomeSource, /setError\(result\.msg \|\| '服务器校验失败'\)/);
-  assert.match(welcomeSource, /setError\(welcome\.msg \|\| '访问码状态检查失败'\)/);
+  assert.match(welcomeSource, /throw new Error\(validation\.msg \|\|/);
+  assert.match(welcomeSource, /throw new Error\(welcome\.msg \|\|/);
 
   const calls = [];
   logErrorMetadata(
-    'WelcomePage validateServerConnection failed',
+    'JoinServer validateServerConnection failed',
     { err: 'http.503', msg: 'validate raw msg token=first-secret' },
     (...args) => calls.push(args),
   );
   logErrorMetadata(
-    'WelcomePage checkWelcomeRequirement failed',
+    'JoinServer checkWelcomeRequirement failed',
     { err: 'server.invalid_response', msg: 'welcome raw msg token=second-secret' },
     (...args) => calls.push(args),
   );
 
   assert.deepEqual(calls, [
-    ['[WelcomePage validateServerConnection failed] err=%s', 'http.503'],
-    ['[WelcomePage checkWelcomeRequirement failed] err=%s', 'server.invalid_response'],
+    ['[JoinServer validateServerConnection failed] err=%s', 'http.503'],
+    ['[JoinServer checkWelcomeRequirement failed] err=%s', 'server.invalid_response'],
   ]);
   assert.doesNotMatch(JSON.stringify(calls), /first-secret|second-secret/);
 });
