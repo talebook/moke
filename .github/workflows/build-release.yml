@@ -236,15 +236,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # The stock tauri-cli renders the adaptive-icon foreground full-bleed,
-      # which the Android system mask crops. Use the vendored tauri CLI
-      # (with the safe-zone fix) so the APK ships a properly centered icon.
-      - name: Build Tauri CLI (from vendor/tauri submodule)
-        if: matrix.platform == 'android'
-        run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
-          echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
-
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
         run: pnpm tauri android init
@@ -253,14 +244,10 @@ jobs:
         if: matrix.platform == 'android'
         run: node scripts/prepare-mobile-app-names.mjs android
 
-      # tauri android init scaffolds gen/android with Tauri's DEFAULT launcher icons.
-      # Regenerate them from src-tauri/icons/icon.png: since gen/android already
-      # exists, `tauri icon` writes straight into gen/android/app/src/main/res/
-      # (mipmaps + adaptive-icon xml), so the APK ships with Moke's icon instead of
-      # the default Tauri logo.
-      - name: Generate Android launcher icons
+      # Replace the scaffold's default icons with the reviewed platform assets.
+      - name: Copy committed Android launcher icons
         if: matrix.platform == 'android'
-        run: cargo tauri icon src-tauri/icons/icon.png
+        run: node scripts/prepare-mobile-icons.mjs android
 
       # `tauri android init` scaffolds a default MainActivity that lacks the
       # KeyDownInterceptor interface readest's native-bridge plugin requires, so
@@ -454,16 +441,10 @@ jobs:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
-      # ohos init 用模板默认图标（蓝底系统图标）。`tauri icon` 现在支持
-      # OpenHarmony：gen/ohos 已存在，它会把 Moke 图标写进
-      # gen/ohos/{entry,AppScope}/resources/base/media（foreground/background/
-      # startIcon），否则 APK 会带默认图标。CLI 来自上面编译的 vendor/tauri。
-      - name: Generate OpenHarmony launcher icons
+      # Copy the same reviewed layered assets to AppScope and entry resources.
+      - name: Copy committed OpenHarmony launcher icons
         if: matrix.platform == 'ohos'
-        run: cargo tauri icon src-tauri/icons/icon.png
-        env:
-          OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
-          HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
+        run: node scripts/prepare-mobile-icons.mjs ohos
 
       # 提前 ohpm install，让 scripts/prepare-ohos.mjs 能改到
       # oh_modules/@ohos-rs/ability 里的文件（补 domStorageAccess(true) +
