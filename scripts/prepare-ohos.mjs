@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_PATCH_FILES, prepareOhos } from './ohos-prepare-core.mjs';
+import { DEFAULT_PATCH_FILES, ensureWindowsHvigorCli, prepareOhos } from './ohos-prepare-core.mjs';
+import { prepareOpener } from './ohos-opener-prepare.mjs';
 
 const ohosRoot = fileURLToPath(new URL('../src-tauri/gen/ohos', import.meta.url));
 
@@ -14,6 +15,17 @@ if (!existsSync(manifestPath)) {
   console.warn(`[prepare-ohos] Skipping missing generated manifest: ${manifestPath}`);
   process.exit(0);
 }
+
+const hvigorCliStatus = ensureWindowsHvigorCli(ohosRoot);
+if (hvigorCliStatus === 'missing') {
+  throw new Error('[prepare-ohos] Generated entry/hvigorfile.ts is missing. Run `pnpm tauri ohos init`.');
+}
+if (hvigorCliStatus === 'patched') {
+  console.log('[prepare-ohos] Fixed generated Windows Hvigor CLI path.');
+}
+
+prepareOpener(ohosRoot, fileURLToPath(new URL('./ohos-opener/Opener.ets', import.meta.url)));
+console.log('[prepare-ohos] Installed app-owned shell/opener UIAbility adapter.');
 
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
 const permissions = (manifest.module.requestPermissions ??= []);

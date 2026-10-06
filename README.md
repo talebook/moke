@@ -126,6 +126,37 @@ cd ..
 
 测试前至少执行 `git submodule update --init readest`，Reader 契约测试会读取子模块内容。详细的环境准备、代码规范和提交流程见 [贡献指南](CONTRIBUTING.md)。
 
+## OpenHarmony 开发命令
+
+`pnpm tauri ohos ...` 暂时使用 `vendor/tauri` 固定的
+`hehetoshang/tauri:app-name-fix`（`8269cb2d`）源码编译并运行 CLI。
+该分支基于官方 `feat/open-harmony`，修复了生成工程的应用名称和图标，
+对应上游 [PR #16151](https://github.com/tauri-apps/tauri/pull/16151)。
+首次执行需要 Rust 工具链并会编译 CLI。npm 发布版 CLI
+不提供 `ohos` 子命令，其他平台命令仍使用 npm CLI。
+CLI 使用官方支持的 `rustls` feature 和内置 CA 根证书，避开当前锁定版本的
+`platform-certs` 编译错误；TLS 校验仍然启用，但不会读取系统自定义 CA。
+
+本次官方分支迁移的 Rust 插件兼容层已通过完整 OHOS target check 和
+`ohrs build --arch arm64`，但 HAP 组装、安装和设备运行仍待验证。完整状态见
+[OHOS 验证记录](docs/ohos-upstream-validation.md)。配置 OHOS SDK、`ohpm`、
+Hvigor 和签名后，开发命令为：
+
+```bash
+pnpm tauri ohos init
+hdc tconn 127.0.0.1:5555
+pnpm tauri ohos dev --host 10.0.2.2
+pnpm tauri ohos build --target aarch64
+```
+
+OpenHarmony 使用独立包名 `org.houheya.moke_openharmony`；`pnpm tauri ohos init/build`
+会加载 `src-tauri/tauri.ohos.conf.json`。直接调用 `cargo tauri ohos build` 时需显式传入
+`--config src-tauri/tauri.ohos.conf.json`。
+
+`10.0.2.2` 是当前 QEMU 用户网络访问宿主机的地址。dev 包依赖开发服务器，
+单独启动旧 dev 包出现白屏不能作为新版本运行失败的结论。验收必须使用当前
+提交重新构建安装的包，并同时验证开发服务器、Tauri IPC 和阅读流程。
+
 ## 贡献与反馈
 
 - [报告 Bug 或提出建议](https://github.com/talebook/moke/issues)：请附上应用版本、系统环境与复现步骤。

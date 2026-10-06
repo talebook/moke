@@ -153,7 +153,9 @@ function DetailContent() {
     window.addEventListener(APP_BACK_EVENT, cancelForBack);
     window.addEventListener('pagehide', cancelReaderOpen);
     return () => {
-      controller.abort();
+      // A completed Tauri HTTP request has already released its native resource.
+      // Abort only a pending request, then invalidate Reader handoffs and listeners.
+      if (loadBookControllerRef.current === controller) controller.abort();
       cancelReaderOpen();
       window.removeEventListener(APP_BACK_EVENT, cancelForBack);
       window.removeEventListener('pagehide', cancelReaderOpen);
@@ -306,6 +308,7 @@ function DetailContent() {
       }
       setMessage(getErrorMessage(error, '书籍详情加载失败，请检查服务器连接。'));
     } finally {
+      if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
       if (!controller.signal.aborted && seq === loadBookSeqRef.current) {
         loadBookPendingRef.current = false;
         setLoading(false);

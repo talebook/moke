@@ -140,10 +140,10 @@
                   "identifier": {
                     "anyOf": [
                       {
-                        "description": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\nOn Windows the webview data folder access is denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`",
+                        "description": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\n\n- On Windows the access to webview data folder `$APPLOCALDATA/EBWebView` is denied.\n- On Linux the access to webview data paths inside `$APPLOCALDATA` are denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`",
                         "type": "string",
                         "const": "fs:default",
-                        "markdownDescription": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\nOn Windows the webview data folder access is denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`"
+                        "markdownDescription": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\n\n- On Windows the access to webview data folder `$APPLOCALDATA/EBWebView` is denied.\n- On Linux the access to webview data paths inside `$APPLOCALDATA` are denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`"
                       },
                       {
                         "description": "This allows non-recursive read access to metadata of the application folders, including file listing and statistics.\n#### This permission set includes:\n\n- `read-meta`\n- `scope-app-index`",
@@ -1046,10 +1046,22 @@
                         "markdownDescription": "This allows full recursive write access to the complete `$VIDEO` folder, files and subdirectories.\n#### This permission set includes:\n\n- `write-all`\n- `scope-video-recursive`"
                       },
                       {
+                        "description": "This permissions allows to create the application specific directories.\n\n#### This permission set includes:\n\n- `allow-mkdir`\n- `scope-app-index`",
+                        "type": "string",
+                        "const": "fs:create-app-specific-dirs",
+                        "markdownDescription": "This permissions allows to create the application specific directories.\n\n#### This permission set includes:\n\n- `allow-mkdir`\n- `scope-app-index`"
+                      },
+                      {
                         "description": "This denies access to dangerous Tauri relevant files and folders by default.\n#### This permission set includes:\n\n- `deny-webview-data-linux`\n- `deny-webview-data-windows`",
                         "type": "string",
                         "const": "fs:deny-default",
                         "markdownDescription": "This denies access to dangerous Tauri relevant files and folders by default.\n#### This permission set includes:\n\n- `deny-webview-data-linux`\n- `deny-webview-data-windows`"
+                      },
+                      {
+                        "description": "This permission allows recursive read functionality on the application\nspecific base directories.\n\n#### This permission set includes:\n\n- `allow-read-dir`\n- `allow-read-file`\n- `allow-read-text-file`\n- `allow-read-text-file-lines`\n- `allow-read-text-file-lines-next`\n- `allow-exists`\n- `scope-app-recursive`",
+                        "type": "string",
+                        "const": "fs:read-app-specific-dirs-recursive",
+                        "markdownDescription": "This permission allows recursive read functionality on the application\nspecific base directories.\n\n#### This permission set includes:\n\n- `allow-read-dir`\n- `allow-read-file`\n- `allow-read-text-file`\n- `allow-read-text-file-lines`\n- `allow-read-text-file-lines-next`\n- `allow-exists`\n- `scope-app-recursive`"
                       },
                       {
                         "description": "Enables the copy_file command without any pre-configured scope.",
@@ -1214,12 +1226,6 @@
                         "markdownDescription": "Enables the write_text_file command without any pre-configured scope."
                       },
                       {
-                        "description": "This permissions allows to create the application specific directories.\n",
-                        "type": "string",
-                        "const": "fs:create-app-specific-dirs",
-                        "markdownDescription": "This permissions allows to create the application specific directories.\n"
-                      },
-                      {
                         "description": "Denies the copy_file command without any pre-configured scope.",
                         "type": "string",
                         "const": "fs:deny-copy-file",
@@ -1364,16 +1370,16 @@
                         "markdownDescription": "Denies the watch command without any pre-configured scope."
                       },
                       {
-                        "description": "This denies read access to the\n`$APPLOCALDATA` folder on linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
+                        "description": "This denies access to the following paths\n\n- `$APPLOCALDATA/CacheStorage/**`\n- `$APPLOCALDATA/cookies`\n- `$APPLOCALDATA/hsts-storage.sqlite`\n- `$APPLOCALDATA/serviceworkers/**`\n- `$APPLOCALDATA/WebKitCache/**`\n- `$APPLOCALDATA/databases/**`\n- `$APPLOCALDATA/localstorage/**`\n- `$APPLOCALDATA/mediakeys/**`\n- `$APPLOCALDATA/storage/**`\n\non linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
                         "type": "string",
                         "const": "fs:deny-webview-data-linux",
-                        "markdownDescription": "This denies read access to the\n`$APPLOCALDATA` folder on linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
+                        "markdownDescription": "This denies access to the following paths\n\n- `$APPLOCALDATA/CacheStorage/**`\n- `$APPLOCALDATA/cookies`\n- `$APPLOCALDATA/hsts-storage.sqlite`\n- `$APPLOCALDATA/serviceworkers/**`\n- `$APPLOCALDATA/WebKitCache/**`\n- `$APPLOCALDATA/databases/**`\n- `$APPLOCALDATA/localstorage/**`\n- `$APPLOCALDATA/mediakeys/**`\n- `$APPLOCALDATA/storage/**`\n\non linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
                       },
                       {
-                        "description": "This denies read access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
+                        "description": "This denies access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
                         "type": "string",
                         "const": "fs:deny-webview-data-windows",
-                        "markdownDescription": "This denies read access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
+                        "markdownDescription": "This denies access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
                       },
                       {
                         "description": "Denies the write command without any pre-configured scope.",
@@ -1398,12 +1404,6 @@
                         "type": "string",
                         "const": "fs:read-all",
                         "markdownDescription": "This enables all read related commands without any pre-configured accessible paths."
-                      },
-                      {
-                        "description": "This permission allows recursive read functionality on the application\nspecific base directories. \n",
-                        "type": "string",
-                        "const": "fs:read-app-specific-dirs-recursive",
-                        "markdownDescription": "This permission allows recursive read functionality on the application\nspecific base directories. \n"
                       },
                       {
                         "description": "This enables directory read and file metadata related commands without any pre-configured accessible paths.",
@@ -2516,6 +2516,522 @@
     "Identifier": {
       "description": "Permission identifier",
       "oneOf": [
+        {
+          "description": "Enables the allow_paths_in_scopes command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-allow-paths-in-scopes",
+          "markdownDescription": "Enables the allow_paths_in_scopes command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-book-presence",
+          "markdownDescription": "Enables the clear_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clip_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clip-url",
+          "markdownDescription": "Enables the clip_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-download-file",
+          "markdownDescription": "Enables the download_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ext_reader_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ext-reader-event",
+          "markdownDescription": "Enables the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the extract_epub_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-extract-epub-cover-full",
+          "markdownDescription": "Enables the extract_epub_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the extract_mobi_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-extract-mobi-cover-full",
+          "markdownDescription": "Enables the extract_mobi_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_executable_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-executable-dir",
+          "markdownDescription": "Enables the get_executable_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_announce command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-announce",
+          "markdownDescription": "Enables the localsend_announce command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_cancel_receive command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-cancel-receive",
+          "markdownDescription": "Enables the localsend_cancel_receive command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_cancel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-cancel-send",
+          "markdownDescription": "Enables the localsend_cancel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_get_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-get-status",
+          "markdownDescription": "Enables the localsend_get_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_list_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-list-devices",
+          "markdownDescription": "Enables the localsend_list_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-respond",
+          "markdownDescription": "Enables the localsend_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_send_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-send-files",
+          "markdownDescription": "Enables the localsend_send_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-start",
+          "markdownDescription": "Enables the localsend_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the localsend_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-localsend-stop",
+          "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-build-info",
+          "markdownDescription": "Enables the moke_build_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-delete-downloaded-book-file",
+          "markdownDescription": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_download_storage_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-download-storage-stats",
+          "markdownDescription": "Enables the moke_download_storage_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_get_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-get-download-directory",
+          "markdownDescription": "Enables the moke_get_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_list_downloaded_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-list-downloaded-books",
+          "markdownDescription": "Enables the moke_list_downloaded_books command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-navigate",
+          "markdownDescription": "Enables the moke_navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_open_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-open-downloaded-book",
+          "markdownDescription": "Enables the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_activate command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-activate",
+          "markdownDescription": "Enables the moke_preview_activate command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-enter-app",
+          "markdownDescription": "Enables the moke_preview_enter_app command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_entitlement_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-entitlement-status",
+          "markdownDescription": "Enables the moke_preview_entitlement_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_refresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-refresh",
+          "markdownDescription": "Enables the moke_preview_refresh command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-preview-update-authorization",
+          "markdownDescription": "Enables the moke_preview_update_authorization command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_record_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-record-downloaded-book",
+          "markdownDescription": "Enables the moke_record_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_remove_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-remove-downloaded-book",
+          "markdownDescription": "Enables the moke_remove_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_reset_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-reset-download-directory",
+          "markdownDescription": "Enables the moke_reset_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_reveal_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-reveal-downloaded-book",
+          "markdownDescription": "Enables the moke_reveal_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_runtime_platform command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-runtime-platform",
+          "markdownDescription": "Enables the moke_runtime_platform command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_select_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-select-download-directory",
+          "markdownDescription": "Enables the moke_select_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-reader",
+          "markdownDescription": "Enables the open_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_epub_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-epub-full",
+          "markdownDescription": "Enables the parse_epub_full command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_epub_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-epub-metadata",
+          "markdownDescription": "Enables the parse_epub_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the parse_mobi_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-parse-mobi-metadata",
+          "markdownDescription": "Enables the parse_mobi_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-dir",
+          "markdownDescription": "Enables the read_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_server command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-start-server",
+          "markdownDescription": "Enables the start_server command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the update_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-update-book-presence",
+          "markdownDescription": "Enables the update_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the upload_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-upload-file",
+          "markdownDescription": "Enables the upload_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the allow_paths_in_scopes command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-allow-paths-in-scopes",
+          "markdownDescription": "Denies the allow_paths_in_scopes command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-book-presence",
+          "markdownDescription": "Denies the clear_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clip_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clip-url",
+          "markdownDescription": "Denies the clip_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-download-file",
+          "markdownDescription": "Denies the download_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ext_reader_event command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ext-reader-event",
+          "markdownDescription": "Denies the ext_reader_event command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the extract_epub_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-extract-epub-cover-full",
+          "markdownDescription": "Denies the extract_epub_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the extract_mobi_cover_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-extract-mobi-cover-full",
+          "markdownDescription": "Denies the extract_mobi_cover_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_executable_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-executable-dir",
+          "markdownDescription": "Denies the get_executable_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_announce command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-announce",
+          "markdownDescription": "Denies the localsend_announce command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_cancel_receive command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-cancel-receive",
+          "markdownDescription": "Denies the localsend_cancel_receive command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_cancel_send command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-cancel-send",
+          "markdownDescription": "Denies the localsend_cancel_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_get_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-get-status",
+          "markdownDescription": "Denies the localsend_get_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_list_devices command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-list-devices",
+          "markdownDescription": "Denies the localsend_list_devices command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_respond command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-respond",
+          "markdownDescription": "Denies the localsend_respond command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_send_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-send-files",
+          "markdownDescription": "Denies the localsend_send_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-start",
+          "markdownDescription": "Denies the localsend_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the localsend_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-localsend-stop",
+          "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_build_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-build-info",
+          "markdownDescription": "Denies the moke_build_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-delete-downloaded-book-file",
+          "markdownDescription": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_download_storage_stats command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-download-storage-stats",
+          "markdownDescription": "Denies the moke_download_storage_stats command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_get_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-get-download-directory",
+          "markdownDescription": "Denies the moke_get_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_list_downloaded_books command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-list-downloaded-books",
+          "markdownDescription": "Denies the moke_list_downloaded_books command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_navigate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-navigate",
+          "markdownDescription": "Denies the moke_navigate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_open_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-open-downloaded-book",
+          "markdownDescription": "Denies the moke_open_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_activate command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-activate",
+          "markdownDescription": "Denies the moke_preview_activate command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_enter_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-enter-app",
+          "markdownDescription": "Denies the moke_preview_enter_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_entitlement_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-entitlement-status",
+          "markdownDescription": "Denies the moke_preview_entitlement_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_refresh command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-refresh",
+          "markdownDescription": "Denies the moke_preview_refresh command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_preview_update_authorization command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-preview-update-authorization",
+          "markdownDescription": "Denies the moke_preview_update_authorization command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_record_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-record-downloaded-book",
+          "markdownDescription": "Denies the moke_record_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_remove_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-remove-downloaded-book",
+          "markdownDescription": "Denies the moke_remove_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_reset_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-reset-download-directory",
+          "markdownDescription": "Denies the moke_reset_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_reveal_downloaded_book command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-reveal-downloaded-book",
+          "markdownDescription": "Denies the moke_reveal_downloaded_book command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_runtime_platform command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-runtime-platform",
+          "markdownDescription": "Denies the moke_runtime_platform command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_select_download_directory command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-select-download-directory",
+          "markdownDescription": "Denies the moke_select_download_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-reader",
+          "markdownDescription": "Denies the open_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_epub_full command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-epub-full",
+          "markdownDescription": "Denies the parse_epub_full command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_epub_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-epub-metadata",
+          "markdownDescription": "Denies the parse_epub_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the parse_mobi_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-parse-mobi-metadata",
+          "markdownDescription": "Denies the parse_mobi_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_dir command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-dir",
+          "markdownDescription": "Denies the read_dir command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_server command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-start-server",
+          "markdownDescription": "Denies the start_server command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the update_book_presence command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-update-book-presence",
+          "markdownDescription": "Denies the update_book_presence command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the upload_file command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-upload-file",
+          "markdownDescription": "Denies the upload_file command without any pre-configured scope."
+        },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
@@ -4653,10 +5169,10 @@
           "markdownDescription": "Denies the get_storage_info command without any pre-configured scope."
         },
         {
-          "description": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\nOn Windows the webview data folder access is denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`",
+          "description": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\n\n- On Windows the access to webview data folder `$APPLOCALDATA/EBWebView` is denied.\n- On Linux the access to webview data paths inside `$APPLOCALDATA` are denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`",
           "type": "string",
           "const": "fs:default",
-          "markdownDescription": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\nOn Windows the webview data folder access is denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`"
+          "markdownDescription": "This set of permissions describes the what kind of\nfile system access the `fs` plugin has enabled or denied by default.\n\n#### Granted Permissions\n\nThis default permission set enables read access to the\napplication specific directories (AppConfig, AppData, AppLocalData, AppCache,\nAppLog) and all files and sub directories created in it.\nThe location of these directories depends on the operating system,\nwhere the application is run.\n\nIn general these directories need to be manually created\nby the application at runtime, before accessing files or folders\nin it is possible.\n\nTherefore, it is also allowed to create all of these folders via\nthe `mkdir` command.\n\n#### Denied Permissions\n\nThis default permission set prevents access to critical components\nof the Tauri application by default.\n\n- On Windows the access to webview data folder `$APPLOCALDATA/EBWebView` is denied.\n- On Linux the access to webview data paths inside `$APPLOCALDATA` are denied.\n\n#### This default permission set includes:\n\n- `create-app-specific-dirs`\n- `read-app-specific-dirs-recursive`\n- `deny-default`"
         },
         {
           "description": "This allows non-recursive read access to metadata of the application folders, including file listing and statistics.\n#### This permission set includes:\n\n- `read-meta`\n- `scope-app-index`",
@@ -5559,10 +6075,22 @@
           "markdownDescription": "This allows full recursive write access to the complete `$VIDEO` folder, files and subdirectories.\n#### This permission set includes:\n\n- `write-all`\n- `scope-video-recursive`"
         },
         {
+          "description": "This permissions allows to create the application specific directories.\n\n#### This permission set includes:\n\n- `allow-mkdir`\n- `scope-app-index`",
+          "type": "string",
+          "const": "fs:create-app-specific-dirs",
+          "markdownDescription": "This permissions allows to create the application specific directories.\n\n#### This permission set includes:\n\n- `allow-mkdir`\n- `scope-app-index`"
+        },
+        {
           "description": "This denies access to dangerous Tauri relevant files and folders by default.\n#### This permission set includes:\n\n- `deny-webview-data-linux`\n- `deny-webview-data-windows`",
           "type": "string",
           "const": "fs:deny-default",
           "markdownDescription": "This denies access to dangerous Tauri relevant files and folders by default.\n#### This permission set includes:\n\n- `deny-webview-data-linux`\n- `deny-webview-data-windows`"
+        },
+        {
+          "description": "This permission allows recursive read functionality on the application\nspecific base directories.\n\n#### This permission set includes:\n\n- `allow-read-dir`\n- `allow-read-file`\n- `allow-read-text-file`\n- `allow-read-text-file-lines`\n- `allow-read-text-file-lines-next`\n- `allow-exists`\n- `scope-app-recursive`",
+          "type": "string",
+          "const": "fs:read-app-specific-dirs-recursive",
+          "markdownDescription": "This permission allows recursive read functionality on the application\nspecific base directories.\n\n#### This permission set includes:\n\n- `allow-read-dir`\n- `allow-read-file`\n- `allow-read-text-file`\n- `allow-read-text-file-lines`\n- `allow-read-text-file-lines-next`\n- `allow-exists`\n- `scope-app-recursive`"
         },
         {
           "description": "Enables the copy_file command without any pre-configured scope.",
@@ -5727,12 +6255,6 @@
           "markdownDescription": "Enables the write_text_file command without any pre-configured scope."
         },
         {
-          "description": "This permissions allows to create the application specific directories.\n",
-          "type": "string",
-          "const": "fs:create-app-specific-dirs",
-          "markdownDescription": "This permissions allows to create the application specific directories.\n"
-        },
-        {
           "description": "Denies the copy_file command without any pre-configured scope.",
           "type": "string",
           "const": "fs:deny-copy-file",
@@ -5877,16 +6399,16 @@
           "markdownDescription": "Denies the watch command without any pre-configured scope."
         },
         {
-          "description": "This denies read access to the\n`$APPLOCALDATA` folder on linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
+          "description": "This denies access to the following paths\n\n- `$APPLOCALDATA/CacheStorage/**`\n- `$APPLOCALDATA/cookies`\n- `$APPLOCALDATA/hsts-storage.sqlite`\n- `$APPLOCALDATA/serviceworkers/**`\n- `$APPLOCALDATA/WebKitCache/**`\n- `$APPLOCALDATA/databases/**`\n- `$APPLOCALDATA/localstorage/**`\n- `$APPLOCALDATA/mediakeys/**`\n- `$APPLOCALDATA/storage/**`\n\non linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
           "type": "string",
           "const": "fs:deny-webview-data-linux",
-          "markdownDescription": "This denies read access to the\n`$APPLOCALDATA` folder on linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
+          "markdownDescription": "This denies access to the following paths\n\n- `$APPLOCALDATA/CacheStorage/**`\n- `$APPLOCALDATA/cookies`\n- `$APPLOCALDATA/hsts-storage.sqlite`\n- `$APPLOCALDATA/serviceworkers/**`\n- `$APPLOCALDATA/WebKitCache/**`\n- `$APPLOCALDATA/databases/**`\n- `$APPLOCALDATA/localstorage/**`\n- `$APPLOCALDATA/mediakeys/**`\n- `$APPLOCALDATA/storage/**`\n\non linux as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
         },
         {
-          "description": "This denies read access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
+          "description": "This denies access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered.",
           "type": "string",
           "const": "fs:deny-webview-data-windows",
-          "markdownDescription": "This denies read access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
+          "markdownDescription": "This denies access to the\n`$APPLOCALDATA/EBWebView` folder on windows as the webview data and configuration values are stored here.\nAllowing access can lead to sensitive information disclosure and should be well considered."
         },
         {
           "description": "Denies the write command without any pre-configured scope.",
@@ -5911,12 +6433,6 @@
           "type": "string",
           "const": "fs:read-all",
           "markdownDescription": "This enables all read related commands without any pre-configured accessible paths."
-        },
-        {
-          "description": "This permission allows recursive read functionality on the application\nspecific base directories. \n",
-          "type": "string",
-          "const": "fs:read-app-specific-dirs-recursive",
-          "markdownDescription": "This permission allows recursive read functionality on the application\nspecific base directories. \n"
         },
         {
           "description": "This enables directory read and file metadata related commands without any pre-configured accessible paths.",
@@ -6489,10 +7005,10 @@
           "markdownDescription": "Denies the log command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-text-selection-suppressed`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-set-multicast-lock`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-has-ambient-light-sensor`\n- `allow-start-ambient-light-updates`\n- `allow-stop-ambient-light-updates`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-show-file-picker`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-selection-suppressed`\n- `allow-read-share-clip-html`\n- `allow-icloud-container-status`\n- `allow-icloud-ensure-downloaded`",
           "type": "string",
           "const": "native-bridge:default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-text-selection-suppressed`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-auth-with-safari`\n- `allow-auth-with-custom-tab`\n- `allow-copy-uri-to-path`\n- `allow-save-image-to-gallery`\n- `allow-use-background-audio`\n- `allow-set-multicast-lock`\n- `allow-install-package`\n- `allow-set-system-ui-visibility`\n- `allow-get-status-bar-height`\n- `allow-get-sys-fonts-list`\n- `allow-intercept-keys`\n- `allow-lock-screen-orientation`\n- `allow-iap-is-available`\n- `allow-iap-initialize`\n- `allow-iap-fetch-products`\n- `allow-iap-purchase-product`\n- `allow-iap-restore-purchases`\n- `allow-get-system-color-scheme`\n- `allow-get-safe-area-insets`\n- `allow-get-screen-brightness`\n- `allow-set-screen-brightness`\n- `allow-has-ambient-light-sensor`\n- `allow-start-ambient-light-updates`\n- `allow-stop-ambient-light-updates`\n- `allow-get-external-sdcard-path`\n- `allow-open-external-url`\n- `allow-show-lookup-popover`\n- `allow-get-lookup-dictionary`\n- `allow-clear-lookup-dictionary`\n- `allow-select-directory`\n- `allow-show-file-picker`\n- `allow-get-storefront-region-code`\n- `allow-request-manage-storage-permission`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-check-permissions`\n- `allow-request-permissions`\n- `allow-checkPermissions`\n- `allow-requestPermissions`\n- `allow-set-sync-passphrase`\n- `allow-get-sync-passphrase`\n- `allow-clear-sync-passphrase`\n- `allow-is-sync-keychain-available`\n- `allow-set-secure-item`\n- `allow-get-secure-item`\n- `allow-clear-secure-item`\n- `allow-refresh-eink-screen`\n- `allow-update-reading-widget`\n- `allow-capture-webview-region`\n- `allow-set-selection-suppressed`\n- `allow-read-share-clip-html`\n- `allow-icloud-container-status`\n- `allow-icloud-ensure-downloaded`"
         },
         {
           "description": "Enables the auth_with_custom_tab command without any pre-configured scope.",
@@ -6615,6 +7131,12 @@
           "markdownDescription": "Enables the get_system_color_scheme command without any pre-configured scope."
         },
         {
+          "description": "Enables the has_ambient_light_sensor command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-has-ambient-light-sensor",
+          "markdownDescription": "Enables the has_ambient_light_sensor command without any pre-configured scope."
+        },
+        {
           "description": "Enables the iap_fetch_products command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-iap-fetch-products",
@@ -6645,6 +7167,18 @@
           "markdownDescription": "Enables the iap_restore_purchases command without any pre-configured scope."
         },
         {
+          "description": "Enables the icloud_container_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-icloud-container-status",
+          "markdownDescription": "Enables the icloud_container_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the icloud_ensure_downloaded command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-icloud-ensure-downloaded",
+          "markdownDescription": "Enables the icloud_ensure_downloaded command without any pre-configured scope."
+        },
+        {
           "description": "Enables the install_package command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-install-package",
@@ -6673,6 +7207,12 @@
           "type": "string",
           "const": "native-bridge:allow-open-external-url",
           "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_share_clip_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-read-share-clip-html",
+          "markdownDescription": "Enables the read_share_clip_html command without any pre-configured scope."
         },
         {
           "description": "Enables the refresh_eink_screen command without any pre-configured scope.",
@@ -6723,6 +7263,12 @@
           "markdownDescription": "Enables the select_directory command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_multicast_lock command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-set-multicast-lock",
+          "markdownDescription": "Enables the set_multicast_lock command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_screen_brightness command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-set-screen-brightness",
@@ -6733,6 +7279,12 @@
           "type": "string",
           "const": "native-bridge:allow-set-secure-item",
           "markdownDescription": "Enables the set_secure_item command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_selection_suppressed command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-set-selection-suppressed",
+          "markdownDescription": "Enables the set_selection_suppressed command without any pre-configured scope."
         },
         {
           "description": "Enables the set_sync_passphrase command without any pre-configured scope.",
@@ -6747,16 +7299,28 @@
           "markdownDescription": "Enables the set_system_ui_visibility command without any pre-configured scope."
         },
         {
-          "description": "Enables the set_text_selection_suppressed command without any pre-configured scope.",
+          "description": "Enables the show_file_picker command without any pre-configured scope.",
           "type": "string",
-          "const": "native-bridge:allow-set-text-selection-suppressed",
-          "markdownDescription": "Enables the set_text_selection_suppressed command without any pre-configured scope."
+          "const": "native-bridge:allow-show-file-picker",
+          "markdownDescription": "Enables the show_file_picker command without any pre-configured scope."
         },
         {
           "description": "Enables the show_lookup_popover command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:allow-show-lookup-popover",
           "markdownDescription": "Enables the show_lookup_popover command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start_ambient_light_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-start-ambient-light-updates",
+          "markdownDescription": "Enables the start_ambient_light_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop_ambient_light_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:allow-stop-ambient-light-updates",
+          "markdownDescription": "Enables the stop_ambient_light_updates command without any pre-configured scope."
         },
         {
           "description": "Enables the update_reading_widget command without any pre-configured scope.",
@@ -6891,6 +7455,12 @@
           "markdownDescription": "Denies the get_system_color_scheme command without any pre-configured scope."
         },
         {
+          "description": "Denies the has_ambient_light_sensor command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-has-ambient-light-sensor",
+          "markdownDescription": "Denies the has_ambient_light_sensor command without any pre-configured scope."
+        },
+        {
           "description": "Denies the iap_fetch_products command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-iap-fetch-products",
@@ -6921,6 +7491,18 @@
           "markdownDescription": "Denies the iap_restore_purchases command without any pre-configured scope."
         },
         {
+          "description": "Denies the icloud_container_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-icloud-container-status",
+          "markdownDescription": "Denies the icloud_container_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the icloud_ensure_downloaded command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-icloud-ensure-downloaded",
+          "markdownDescription": "Denies the icloud_ensure_downloaded command without any pre-configured scope."
+        },
+        {
           "description": "Denies the install_package command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-install-package",
@@ -6949,6 +7531,12 @@
           "type": "string",
           "const": "native-bridge:deny-open-external-url",
           "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_share_clip_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-read-share-clip-html",
+          "markdownDescription": "Denies the read_share_clip_html command without any pre-configured scope."
         },
         {
           "description": "Denies the refresh_eink_screen command without any pre-configured scope.",
@@ -6999,6 +7587,12 @@
           "markdownDescription": "Denies the select_directory command without any pre-configured scope."
         },
         {
+          "description": "Denies the set_multicast_lock command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-set-multicast-lock",
+          "markdownDescription": "Denies the set_multicast_lock command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_screen_brightness command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-set-screen-brightness",
@@ -7009,6 +7603,12 @@
           "type": "string",
           "const": "native-bridge:deny-set-secure-item",
           "markdownDescription": "Denies the set_secure_item command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_selection_suppressed command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-set-selection-suppressed",
+          "markdownDescription": "Denies the set_selection_suppressed command without any pre-configured scope."
         },
         {
           "description": "Denies the set_sync_passphrase command without any pre-configured scope.",
@@ -7023,16 +7623,28 @@
           "markdownDescription": "Denies the set_system_ui_visibility command without any pre-configured scope."
         },
         {
-          "description": "Denies the set_text_selection_suppressed command without any pre-configured scope.",
+          "description": "Denies the show_file_picker command without any pre-configured scope.",
           "type": "string",
-          "const": "native-bridge:deny-set-text-selection-suppressed",
-          "markdownDescription": "Denies the set_text_selection_suppressed command without any pre-configured scope."
+          "const": "native-bridge:deny-show-file-picker",
+          "markdownDescription": "Denies the show_file_picker command without any pre-configured scope."
         },
         {
           "description": "Denies the show_lookup_popover command without any pre-configured scope.",
           "type": "string",
           "const": "native-bridge:deny-show-lookup-popover",
           "markdownDescription": "Denies the show_lookup_popover command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start_ambient_light_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-start-ambient-light-updates",
+          "markdownDescription": "Denies the start_ambient_light_updates command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop_ambient_light_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "native-bridge:deny-stop-ambient-light-updates",
+          "markdownDescription": "Denies the stop_ambient_light_updates command without any pre-configured scope."
         },
         {
           "description": "Denies the update_reading_widget command without any pre-configured scope.",

@@ -78,6 +78,16 @@ function installMokeDocumentTransitionGuard(
 const mokeDocumentTransitionGuardScript = `(${installMokeDocumentTransitionGuard.toString()})(${shouldAllowReaderExitTransition.toString()});`;
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+const mobileDevHmrOrigin = process.env.NODE_ENV === 'development' && isNativeAppBuild && process.env.TAURI_DEV_HOST
+  ? `ws://${process.env.TAURI_DEV_HOST}:3000`
+  : null;
+
+// Tauri proxies mobile dev pages through tauri://localhost, but it cannot
+// proxy Next's WebSocket. Next sees the custom scheme and otherwise attempts
+// wss://localhost, repeatedly reloading before hydration can settle.
+const mobileDevHmrScript = mobileDevHmrOrigin
+  ? `(function(){if(location.protocol!=='tauri:')return;var NativeWebSocket=window.WebSocket;var origin=${JSON.stringify(mobileDevHmrOrigin)};function DevWebSocket(url,protocols){var target=String(url);if(target.indexOf('/_next/hmr')!==-1&&target.indexOf('://localhost/')!==-1){target=origin+target.slice(target.indexOf('/_next/hmr'));}return protocols===undefined?new NativeWebSocket(target):new NativeWebSocket(target,protocols);}DevWebSocket.prototype=NativeWebSocket.prototype;Object.setPrototypeOf(DevWebSocket,NativeWebSocket);window.WebSocket=DevWebSocket;})();`
+  : null;
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -98,6 +108,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {mobileDevHmrScript && <script dangerouslySetInnerHTML={{ __html: mobileDevHmrScript }} />}
         <script dangerouslySetInnerHTML={{ __html: mokeDocumentTransitionGuardScript }} />
         {/* Apply the persisted theme before hydration so the first paint is
             already dark when dark mode is on (no flash of white). Reads the
