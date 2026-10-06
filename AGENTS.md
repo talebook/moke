@@ -86,6 +86,44 @@ For future work, prefer implementing generally useful features on a normal branc
 first, then merge `main` into Preview. Use promotion only when a feature genuinely needs Preview
 validation before it is ready for the stable product.
 
+## Preview version numbering
+
+For Preview publications, follow this policy instead of the stable/dev numbering
+rules below. An explicit Preview request already selects the Preview channel.
+This policy applies to this private repository and its public build workflow in
+`hehetoshang/moke-preview-builds`.
+
+- The public Preview version has four integer components: `X.Y.Z.N`. The first
+  three track the stable release baseline in `talebook/moke`; `N` is the Preview
+  revision and starts at `1`.
+- Within the same baseline, increment only `N` by one. Treat it as an integer,
+  without digit rollover: `1.0.0.9` becomes `1.0.0.10`.
+- When a newer stable release advances the baseline, adopt that exact version
+  and restart `N` at `1`: upstream `1.0.1` means Preview `1.0.1.1`, **not**
+  `1.0.2.1`. Do not add an extra patch increment to the upstream version.
+- Before selecting a version, refresh `talebook/moke` stable tags/releases and
+  Preview tags/releases in both Preview repositories. Exclude upstream draft
+  and prerelease versions, compare numeric components, use the highest existing
+  revision for the chosen baseline, and check both tags and releases for
+  collisions. Never overwrite an existing version or move backward to an older
+  baseline.
+- Four-component versions are not SemVer. Before publishing, ensure the build
+  tooling maps the public version to a supported internal version (for example,
+  public `1.0.1.10` to SemVer `1.0.1-10`). MSI requires a numeric-only
+  prerelease identifier between 1 and 65535. Validate the mapping
+  consistently across package metadata, tags and artifacts. Do not write raw
+  four-component versions into Cargo/Tauri SemVer fields or silently drop `N`.
+- Recording this policy does not itself authorize a release, tag creation or a
+  version bump. Update and validate the release tooling before the next Preview
+  publication; the existing workflow's tag/package equality check must account
+  for the public-to-internal version mapping.
+- In `hehetoshang/moke-preview-builds`, successful tagged builds publish a
+  non-prerelease GitHub Release and explicitly mark it as Latest. Keep the
+  Preview product name and channel. Manual builds retain Actions artifacts.
+- Android APKs must be aligned, release-signed with the existing Android key,
+  and verified before upload. Publish only the verified signed APKs; updater
+  signing and OHOS signing are separate from Android package signing.
+
 ## Release publishing
 
 When a user asks you to publish a version, follow these rules strictly:

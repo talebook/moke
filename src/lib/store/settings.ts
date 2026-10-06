@@ -33,6 +33,9 @@ interface SettingsState {
   /** Desktop app used to open downloaded books. */
   readerPreference: ReaderPreference;
   setReaderPreference: (readerPreference: ReaderPreference) => void;
+  /** Open the most recently read book when Moke starts. Disabled by default. */
+  continueReadingOnLaunch: boolean;
+  setContinueReadingOnLaunch: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -46,6 +49,8 @@ export const useSettingsStore = create<SettingsState>()(
       setDownloadDirectory: (downloadDirectory) => set({ downloadDirectory }),
       readerPreference: 'embedded',
       setReaderPreference: (readerPreference) => set({ readerPreference }),
+      continueReadingOnLaunch: false,
+      setContinueReadingOnLaunch: (continueReadingOnLaunch) => set({ continueReadingOnLaunch }),
     }),
     { name: 'moke-settings' }
   )

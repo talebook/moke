@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
-import { ArrowLeft, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, BookOpen, FlaskConical, Lock, Trash2, AlertTriangle, Eye, RefreshCw, Download } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { useUpdateStore } from '@/lib/store/update';
 import { useDebugLogStore, debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
 import { requestAnimatedBack } from '@/lib/native-back';
+import { deleteSampleBook, getSampleBook, importSampleBook } from '@/lib/sample-book';
+import { useServerStore } from '@/lib/store/server';
+import { navigateFullDocument } from '@/lib/moke-reader';
 
 export default function DeveloperSettingsPage() {
   const unlocked = useDeveloperStore((s) => s.unlocked);
@@ -115,6 +119,10 @@ export default function DeveloperSettingsPage() {
             />
           </DevSection>
 
+          <DevSection title="示例书籍" description="内置一本简短示例，手动导入后可在离线书库阅读">
+            <SampleBookPanel />
+          </DevSection>
+
           <DevSection title="崩溃测试" description="主动触发异常，用于验证崩溃捕获与上报">
             <ActionRow
               icon={FlaskConical}
@@ -140,6 +148,68 @@ export default function DeveloperSettingsPage() {
         </div>
       </div>
     </DesktopLayout>
+  );
+}
+
+function SampleBookPanel() {
+  const router = useRouter();
+  const [imported, setImported] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getSampleBook().then((book) => {
+      if (!cancelled) setImported(Boolean(book));
+    }).catch(() => {
+      if (!cancelled) setError('无法读取示例书籍状态，请重试。');
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const toggleSampleBook = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      if (imported === true) await deleteSampleBook();
+      else if (imported === false) await importSampleBook();
+      setImported(Boolean(await getSampleBook()));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '操作失败，请重试。');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <ActionRow
+        icon={imported ? Trash2 : BookOpen}
+        label={busy ? '处理中…' : imported === true ? '删除示例书籍' : imported === false ? '导入示例书籍' : error ? '重试读取状态' : '读取状态中…'}
+        description={imported ? '删除本地导入的示例书籍，可随时重新导入' : '仅导入一本小体积 EPUB，不需要连接服务器'}
+        tone={imported ? 'danger' : 'default'}
+        disabled={busy || (imported === null && !error)}
+        onClick={() => void toggleSampleBook()}
+      />
+      {error && <p role="alert" className="px-4 py-2 text-xs text-destructive">{error}</p>}
+      {imported && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            useServerStore.getState().enterOfflineMode();
+            void navigateFullDocument('/library', router.push);
+          }}
+          className="mx-4 my-3 text-sm text-primary hover:underline disabled:opacity-50"
+        >
+          在离线书库查看
+        </button>
+      )}
+    </>
   );
 }
 
@@ -296,11 +366,13 @@ function DevRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ActionRow({ icon: Icon, label, description, tone = 'default', onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; description: string; tone?: 'default' | 'danger'; onClick: () => void }) {
+function ActionRow({ icon: Icon, label, description, tone = 'default', disabled = false, onClick }: { icon: React.ComponentType<{ className?: string }>; label: string; description: string; tone?: 'default' | 'danger'; disabled?: boolean; onClick: () => void }) {
   return (
     <button
+      type="button"
+      disabled={disabled}
       onClick={onClick}
-      className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
+      className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-left transition-all duration-200 active:scale-[0.99] group disabled:opacity-50 disabled:cursor-not-allowed ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
     >
       <div className={`p-2 rounded-lg bg-white/60 border border-amber-950/10 shrink-0 transition-colors duration-200 ${tone === 'danger' ? 'group-hover:border-destructive/20' : ''}`}>
         <Icon className={`w-4 h-4 ${tone === 'danger' ? 'text-destructive' : 'text-muted-foreground'}`} />

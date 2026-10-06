@@ -443,3 +443,43 @@ test('JSON 响应体读取超时仍作为无法验证的记录失败', async (t)
   t.mock.timers.tick(100);
   await assert.rejects(pending, /book\.read_record\.timeout/);
 });
+test('cancelled preparation skips the read-history write after delayed prerequisites', async () => {
+  const controller = new AbortController();
+  const writes = [];
+  let release;
+  const platform = new Promise((resolve) => { release = resolve; });
+  const preparing = prepareEmbeddedBookOpen({
+    signal: controller.signal,
+    loadRecord: async () => ({ filePath: 'fixture.epub' }),
+    loadProgress: async () => null,
+    loadPlatform: () => platform,
+    beforeSingleWebviewOpen: async () => { writes.push('read'); },
+  });
+  controller.abort();
+  release('android');
+  await preparing;
+  assert.deepEqual(writes, []);
+});
+
+test('cancelled desktop opener and record completion cannot update a later opening', async () => {
+  for (const phase of ['open', 'record']) {
+    const controller = new AbortController();
+    const events = [];
+    let release;
+    let started;
+    const entered = new Promise((resolve) => { started = resolve; });
+    const pending = new Promise((resolve, reject) => { release = () => phase === 'record' ? reject(new Error('fixture record failure')) : resolve(); });
+    const opening = openAndRecordBookRead({
+      signal: controller.signal,
+      open: async () => { events.push('open'); if (phase === 'open') { started(); await pending; } },
+      onOpened: () => events.push('opened'),
+      record: async () => { events.push('record'); started(); await pending; },
+      onRecordError: () => events.push('error'),
+    });
+    await entered;
+    controller.abort();
+    release();
+    await opening;
+    assert.deepEqual(events, phase === 'open' ? ['open'] : ['open', 'opened', 'record']);
+  }
+});

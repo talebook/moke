@@ -59,7 +59,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Setup Java
-        if: matrix.platform == 'android'
+        if: matrix.platform == 'android' || matrix.platform == 'ohos'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -236,15 +236,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # The stock tauri-cli renders the adaptive-icon foreground full-bleed,
-      # which the Android system mask crops. Use the vendored tauri CLI
-      # (with the safe-zone fix) so the APK ships a properly centered icon.
-      - name: Build Tauri CLI (from vendor/tauri submodule)
-        if: matrix.platform == 'android'
-        run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
-          echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
-
       - name: Initialize Tauri Android project
         if: matrix.platform == 'android'
         run: pnpm tauri android init
@@ -253,14 +244,10 @@ jobs:
         if: matrix.platform == 'android'
         run: node scripts/prepare-mobile-app-names.mjs android
 
-      # tauri android init scaffolds gen/android with Tauri's DEFAULT launcher icons.
-      # Regenerate them from src-tauri/icons/icon.png: since gen/android already
-      # exists, `tauri icon` writes straight into gen/android/app/src/main/res/
-      # (mipmaps + adaptive-icon xml), so the APK ships with Moke's icon instead of
-      # the default Tauri logo.
-      - name: Generate Android launcher icons
+      # Replace the scaffold's default icons with the reviewed platform assets.
+      - name: Copy committed Android launcher icons
         if: matrix.platform == 'android'
-        run: cargo tauri icon src-tauri/icons/icon.png
+        run: node scripts/prepare-mobile-icons.mjs android
 
       # `tauri android init` scaffolds a default MainActivity that lacks the
       # KeyDownInterceptor interface readest's native-bridge plugin requires, so
@@ -454,6 +441,11 @@ jobs:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
+      # Copy the same reviewed layered assets to AppScope and entry resources.
+      - name: Copy committed OpenHarmony launcher icons
+        if: matrix.platform == 'ohos'
+        run: node scripts/prepare-mobile-icons.mjs ohos
+
       # 提前 ohpm install，让 scripts/prepare-ohos.mjs 能改到
       # oh_modules/@ohos-rs/ability 里的文件（补 domStorageAccess(true) +
       # back-key 处理：MainPage.onBackPress / AppStorage 注册 / backwardIfPossible，
@@ -476,6 +468,10 @@ jobs:
       - name: Apply OHOS back-key patch
         if: matrix.platform == 'ohos'
         run: node scripts/prepare-ohos.mjs
+
+      - name: Prepare OHOS release package identity
+        if: matrix.platform == 'ohos'
+        run: node scripts/prepare-ohos-release.mjs
 
       - name: Build OHOS HAP
         if: matrix.platform == 'ohos'
@@ -529,6 +525,17 @@ jobs:
           [ -n "$hap" ] || { echo 'OHOS HAP missing'; exit 1; }
           unzip -p "$hap" module.json | jq -e '.app.bundleName == "org.houheya.moke_openharmony"'
 
+      - name: Sign and verify OHOS release packages
+        if: matrix.platform == 'ohos'
+        env:
+          OHOS_KEYSTORE_BASE64: ${{ secrets.OHOS_KEYSTORE_BASE64 }}
+          OHOS_KEYSTORE_PASSWORD: ${{ secrets.OHOS_KEYSTORE_PASSWORD }}
+          OHOS_KEY_ALIAS: ${{ secrets.OHOS_KEY_ALIAS }}
+          OHOS_KEY_PASSWORD: ${{ secrets.OHOS_KEY_PASSWORD }}
+          OHOS_APP_CERT_BASE64: ${{ secrets.OHOS_APP_CERT_BASE64 }}
+          OHOS_PROFILE_BASE64: ${{ secrets.OHOS_PROFILE_BASE64 }}
+        run: python3 scripts/sign-ohos-release.py
+
       # ==================================
 
       - name: Normalize artifact filenames
@@ -552,7 +559,7 @@ jobs:
         if: ${{ matrix.platform == 'ohos' && startsWith(github.ref, 'refs/tags/') }}
         uses: softprops/action-gh-release@v2
         with:
-          files: src-tauri/gen/ohos/**/*.hap
+          files: ohos-release-artifacts/*.hap
 
       - name: Create Release
         if: ${{ matrix.platform != 'android' && matrix.platform != 'ohos' && startsWith(github.ref, 'refs/tags/') }}
@@ -580,7 +587,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ohos-hap
-          path: src-tauri/gen/ohos/**/*.hap
+          path: ohos-release-artifacts/*.hap
           if-no-files-found: error
 
       - name: Upload Tauri artifact (Push / PR)

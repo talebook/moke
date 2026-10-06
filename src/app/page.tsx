@@ -1,32 +1,83 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useServerStore } from '@/lib/store/server';
+import { useSettingsStore } from '@/lib/store/settings';
 import { navigateFullDocument } from '@/lib/moke-reader';
+import { request } from '@/lib/api';
+import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
+import { APP_BACK_EVENT } from '@/lib/native-back';
+import {
+  continueReadingHref,
+  getContinueReading,
+  resolveContinueReading,
+} from '@/lib/continue-reading';
 
 export default function HomePage() {
   const router = useRouter();
   const { serverUrl, offlineMode, hasHydrated } = useServerStore();
+  const continueReadingOnLaunch = useSettingsStore((state) => state.continueReadingOnLaunch);
+  const [message, setMessage] = useState('正在打开墨客…');
 
   useEffect(() => {
     if (!hasHydrated) return;
-    const target = serverUrl || offlineMode ? '/shelf' : '/welcome';
-    // On single-WebView runtimes (OHOS), App Router's RSC navigation over the
-    // custom scheme can leave this page stuck on its blank loading spinner.
-    // Use the native full-document navigation there; fall back to the router.
-    // A timeout guard guarantees the spinner never persists even if the
-    // native navigation hangs (e.g. IPC never settling in dev mode).
-    navigateFullDocument(target, router.replace);
-    const timer = window.setTimeout(() => {
-      router.replace(target);
-    }, 1500);
-    return () => window.clearTimeout(timer);
-  }, [hasHydrated, offlineMode, serverUrl, router]);
+    let cancelled = false;
+    const controller = new AbortController();
+    // The history request timeout must not invalidate a legitimate navigation.
+    const navigationController = new AbortController();
+    let navigationTimer: number | undefined;
+    const historyTimeout = window.setTimeout(() => controller.abort(), 3_000);
+    const cancelLaunch = () => {
+      cancelled = true;
+      controller.abort();
+      navigationController.abort();
+      window.clearTimeout(historyTimeout);
+      if (navigationTimer !== undefined) window.clearTimeout(navigationTimer);
+    };
+    // BACK may start a slow route transition while Home is still mounted.
+    // Invalidate the launch immediately, before its safety timer can win.
+    window.addEventListener(APP_BACK_EVENT, cancelLaunch);
+    window.addEventListener('pagehide', cancelLaunch);
 
-  return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
-    </div>
-  );
+    const navigate = (target: string) => {
+      // Let an effect cleanup cancel a stale launch before issuing native
+      // navigation, including React's development setup/cleanup cycle.
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setMessage(target.startsWith('/detail?') ? '正在打开上次阅读的书籍…' : '正在进入墨客…');
+        // On single-WebView runtimes (OHOS/Android), App Router's RSC navigation
+        // over the custom scheme can leave this page stuck on its spinner.
+        void navigateFullDocument(target, router.replace, undefined, navigationController.signal);
+        navigationTimer = window.setTimeout(() => {
+          if (!navigationController.signal.aborted) router.replace(target);
+        }, 1_500);
+      });
+    };
+
+    void (async () => {
+      const fallback = serverUrl || offlineMode ? '/shelf' : '/welcome';
+      if (!continueReadingOnLaunch || (!serverUrl && !offlineMode)) {
+        navigate(fallback);
+        return;
+      }
+
+      try {
+        if (!cancelled) setMessage('正在读取阅读记录…');
+        const entry = getContinueReading(serverUrl, offlineMode ? 'offline' : 'online')
+          ?? (!offlineMode ? await resolveContinueReading(request, serverUrl, controller.signal) : null);
+        navigate(entry ? continueReadingHref(entry) : fallback);
+      } catch {
+        navigate(fallback);
+      }
+    })();
+
+    return () => {
+      cancelLaunch();
+      window.removeEventListener(APP_BACK_EVENT, cancelLaunch);
+      window.removeEventListener('pagehide', cancelLaunch);
+    };
+  }, [continueReadingOnLaunch, hasHydrated, offlineMode, serverUrl, router]);
+
+  return <AppStartupScreen message={message} />;
 }

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "org.houheya.moke_openharmony",
+  "app": {
+    "security": {
+      "capabilities": [
+        "ohos",
+        {
+          "identifier": "preview-bootstrap",
+          "description": "Minimal capability for the locked Preview activation window.",
+          "windows": [
+            "preview-bootstrap"
+          ],
+          "permissions": [
+            "core:default",
+            "allow-moke-build-info",
+            "allow-moke-preview-activate",
+            "allow-moke-preview-entitlement-status",
+            "allow-moke-preview-enter-app",
+            "allow-moke-preview-refresh"
+          ],
+          "platforms": [
+            "openHarmony"
+          ]
+        },
+        {
+          "identifier": "ohos-preview-commands",
+          "description": "Preview status commands for the authorized OHOS main window.",
+          "windows": [
+            "main"
+          ],
+          "platforms": [
+            "openHarmony"
+          ],
+          "permissions": [
+            "allow-moke-build-info",
+            "allow-moke-preview-entitlement-status",
+            "allow-moke-preview-refresh",
+            "allow-moke-preview-update-authorization"
+          ]
+        }
+      ]
+    }
+  }
+}

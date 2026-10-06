@@ -180,23 +180,25 @@ export async function prepareEmbeddedBookOpen<TRecord, TProgress>({
   loadPlatform,
   beforeSingleWebviewOpen,
   onBeforeSingleWebviewOpenError,
+  signal,
 }: {
   loadRecord: () => Promise<TRecord>;
   loadProgress: () => Promise<TProgress>;
   loadPlatform: () => Promise<string>;
   beforeSingleWebviewOpen?: (record: TRecord, platform: string) => Promise<void>;
   onBeforeSingleWebviewOpenError?: (error: unknown) => void;
+  signal?: AbortSignal;
 }): Promise<{ record: TRecord; restoreProgress: TProgress; platform: string }> {
   const recordPromise = Promise.resolve().then(loadRecord);
   const progressPromise = Promise.resolve().then(loadProgress);
   const platformPromise = Promise.resolve().then(loadPlatform);
   const beforeOpenPromise = beforeSingleWebviewOpen
     ? Promise.all([recordPromise, platformPromise]).then(async ([record, platform]) => {
-        if (!isSingleWebviewRuntime(platform)) return;
+        if (signal?.aborted || !isSingleWebviewRuntime(platform)) return;
         try {
           await beforeSingleWebviewOpen(record, platform);
         } catch (error) {
-          onBeforeSingleWebviewOpenError?.(error);
+          if (!signal?.aborted) onBeforeSingleWebviewOpenError?.(error);
         }
       })
     : Promise.resolve();
@@ -215,17 +217,21 @@ export async function openAndRecordBookRead({
   record,
   onOpened,
   onRecordError,
+  signal,
 }: {
   open: () => Promise<void>;
   record: () => Promise<void>;
   onOpened?: () => void;
   onRecordError?: (error: unknown) => void;
+  signal?: AbortSignal;
 }): Promise<void> {
+  if (signal?.aborted) return;
   await open();
+  if (signal?.aborted) return;
   onOpened?.();
   try {
     await record();
   } catch (error) {
-    onRecordError?.(error);
+    if (!signal?.aborted) onRecordError?.(error);
   }
 }

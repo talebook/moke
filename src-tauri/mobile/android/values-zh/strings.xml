@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">墨客</string>
     <string name="main_activity_title">墨客</string>
+    <string name="continue_reading_shortcut_short_label">继续阅读</string>
+    <string name="continue_reading_shortcut_long_label">继续阅读上次的书</string>
 </resources>

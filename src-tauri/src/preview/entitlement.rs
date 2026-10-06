@@ -441,9 +441,8 @@ fn atomic_write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String>
     write_result
 }
 
-fn device_keyring_entry(key_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(DEVICE_KEYRING_SERVICE, key_id)
-        .map_err(|_| "Unable to access the operating system credential store".to_string())
+fn device_keyring_entry(key_id: &str) -> Result<super::device_credential::Entry, String> {
+    super::device_credential::entry(DEVICE_KEYRING_SERVICE, key_id)
 }
 
 fn identity_from_file(file: DeviceIdentityFile) -> Result<DeviceIdentity, String> {

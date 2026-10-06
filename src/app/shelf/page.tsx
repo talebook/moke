@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
-import { BookOpen, History, Search } from 'lucide-react';
+import { BookOpen, History, Play, Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { getErrorMessage, readApiJson, request } from '@/lib/api';
 import { cn, resolveServerAssetUrl } from '@/lib/utils';
@@ -16,14 +16,23 @@ import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookCon
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
-import { listOfflineBooks } from '@/lib/offline-books';
+import { listOfflineBooks, setOfflineBookShelfState } from '@/lib/offline-books';
+import { SAMPLE_BOOK } from '@/lib/sample-book-info';
 import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { Check, Download, ListChecks } from 'lucide-react';
 import { BookCoverFallback } from '@/components/book/BookCoverFallback';
+import {
+  CONTINUE_READING_CHANGED_EVENT,
+  continueReadingHref,
+  getContinueReading,
+  resolveContinueReading,
+  type ContinueReadingEntry,
+} from '@/lib/continue-reading';
 
 interface BookItem {
+  media_type?: string;
   id: string | number;
   title: string;
   authors?: Array<{ name: string }>;
@@ -186,6 +195,33 @@ export default function ShelfPage() {
   const lastSelectedIdRef = useRef<string | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; bookId: string } | null>(null);
+  const [continueReading, setContinueReading] = useState<ContinueReadingEntry | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const mode = offlineMode ? 'offline' : 'online';
+    const syncLocal = () => {
+      if (!cancelled) setContinueReading(getContinueReading(serverUrl, mode));
+    };
+    const handleChange = (event: Event) => {
+      const entry = (event as CustomEvent<ContinueReadingEntry>).detail;
+      if (!cancelled && entry?.mode === mode) setContinueReading(entry);
+      else syncLocal();
+    };
+    syncLocal();
+    window.addEventListener(CONTINUE_READING_CHANGED_EVENT, handleChange);
+
+    if (serverUrl && !offlineMode && !getContinueReading(serverUrl, 'online')) {
+      void resolveContinueReading(request, serverUrl)
+        .then((entry) => { if (!cancelled && entry) setContinueReading(entry); })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(CONTINUE_READING_CHANGED_EVENT, handleChange);
+    };
+  }, [offlineMode, serverUrl]);
 
   // Clear selection whenever the underlying book list changes (server change, reload, etc.)
   useEffect(() => {
@@ -280,17 +316,25 @@ export default function ShelfPage() {
   }, [selectedIds, batchMode]);
 
   // ── Single-item actions (from right-click / long-press menu) ────────────
+  const updateShelf = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) {
+      await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, id, false);
+      return { err: 'ok' };
+    }
+    const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ shelf: false }),
+    });
+    return res.json();
+  };
+
   const removeFromShelf = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     try {
-      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ shelf: false }),
-      });
-      const data = await res.json();
+      const data = await updateShelf(id);
       if (data.err === 'ok') {
         toast(`已移出《${book.title}》`);
         await loadBooks();
@@ -303,6 +347,7 @@ export default function ShelfPage() {
   };
 
   const downloadOne = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) return;
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -315,6 +360,7 @@ export default function ShelfPage() {
         serverUrl,
         bookId: id,
         title: book.title,
+        media_type: book.media_type,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: true,
         coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
@@ -336,7 +382,7 @@ export default function ShelfPage() {
       icon: <Check className="w-3.5 h-3.5" />,
       onClick: () => removeFromShelf(String(book.id)),
     },
-    ...(isTauriApp
+    ...(isTauriApp && book.id !== SAMPLE_BOOK.bookId
       ? [{
           key: 'download',
           label: '下载',
@@ -366,12 +412,7 @@ export default function ShelfPage() {
 
     if (action === 'remove-shelf') {
       const results = await Promise.allSettled(
-        ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ shelf: false }),
-        }).then((r) => r.json())),
+        ids.map(updateShelf),
       );
       for (const r of results) {
         if (r.status === 'fulfilled' && r.value?.err === 'ok') ok++;
@@ -385,6 +426,7 @@ export default function ShelfPage() {
     } else if (action === 'download') {
       let skipped = 0;
       for (const id of ids) {
+        if (id === SAMPLE_BOOK.bookId) continue;
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -394,6 +436,7 @@ export default function ShelfPage() {
             serverUrl,
             bookId: id,
             title: book.title,
+            media_type: book.media_type,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: true,
             coverUrl: resolveServerAssetUrl(serverUrl, book.img || book.thumb),
@@ -417,41 +460,37 @@ export default function ShelfPage() {
     router.push(`/search?scope=shelf&q=${encodeURIComponent(query)}`);
   };
 
+  const continueBook = continueReading
+    ? books.find((book) => String(book.id) === continueReading.bookId)
+    : undefined;
+  const continueTitle = continueBook?.title || continueReading?.title || '上次阅读的书';
+  const continueAuthor = continueBook?.author
+    || continueBook?.authors?.map((author) => author.name).filter(Boolean).join('、')
+    || continueReading?.author;
+  const continueCover = continueBook?.img || continueBook?.thumb || continueReading?.cover;
+  const continueCoverUrl = continueReading
+    ? resolveServerAssetUrl(serverUrl, continueCover)
+    : '';
+  const continueProgress = continueReading?.progress === undefined
+    ? undefined
+    : Math.max(0, Math.min(100, Math.round(
+      continueReading.progress <= 1 ? continueReading.progress * 100 : continueReading.progress,
+    )));
+
   return (
     <DesktopLayout>
-      <div className="moke-shelf-bg flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
+      <div className="moke-shelf-bg flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
         <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:gap-6">
-            <div>
-              <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
-                <BookOpen className="h-3.5 w-3.5" />
-                <span>{books.length > 0 ? `${books.length} 本藏书` : '私人阅读空间'}</span>
-              </div>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
-            </div>
-            <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="search"
-                    placeholder="搜索书籍"
-                    value={shelfSearchQ}
-                    onChange={(e) => setShelfSearchQ(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submitShelfSearch(); }}
-                    className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
-                  />
+          <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  <span>{books.length > 0 ? `${books.length} 本藏书` : '私人阅读空间'}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={submitShelfSearch}
-                  disabled={!shelfSearchQ.trim()}
-                  className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                    搜索
-                </button>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
               </div>
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex shrink-0 items-center justify-end gap-2">
                 {!offlineMode && <Link
                   href="/user/history"
                   aria-label="查看历史记录"
@@ -463,16 +502,80 @@ export default function ShelfPage() {
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
+            <div className="flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-[390px]">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="search"
+                  placeholder="搜索书籍"
+                  value={shelfSearchQ}
+                  onChange={(e) => setShelfSearchQ(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitShelfSearch(); }}
+                  className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={submitShelfSearch}
+                disabled={!shelfSearchQ.trim()}
+                className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                搜索
+              </button>
+            </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto no-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto no-scrollbar">
+          {continueReading && (
+            <div className="px-4 pt-5 sm:px-6 md:px-8 md:pt-8">
+              <Link
+                href={continueReadingHref(continueReading)}
+                aria-label={`继续阅读《${continueTitle}》`}
+                className="group flex items-center gap-4 rounded-[24px] border border-amber-950/10 bg-white/65 eink-bordered p-3 shadow-[0_18px_50px_-38px_rgba(74,57,35,0.8)] backdrop-blur transition hover:bg-white/80 active:scale-[0.995] sm:p-4"
+              >
+                <div className="h-[84px] w-14 shrink-0 overflow-hidden rounded-xl bg-muted shadow-sm">
+                  {continueCoverUrl ? (
+                    <AuthImage
+                      src={continueCoverUrl}
+                      alt={continueTitle}
+                      className="h-full w-full object-cover"
+                      loading="eager"
+                      fallback={<BookCoverFallback title={continueTitle} seed={continueReading.bookId} textClassName="text-xs" />}
+                    />
+                  ) : (
+                    <BookCoverFallback title={continueTitle} seed={continueReading.bookId} textClassName="text-xs" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-primary">
+                    <BookOpen className="h-3.5 w-3.5" />
+                    <span>继续阅读</span>
+                  </div>
+                  <p className="truncate text-base font-semibold text-foreground">{continueTitle}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {continueAuthor || (continueReading.page && continueReading.totalPages
+                      ? `第 ${continueReading.page} / ${continueReading.totalPages} 页`
+                      : '从上次位置继续')}
+                  </p>
+                  {continueProgress !== undefined && (
+                    <div className="mt-2 h-1.5 max-w-sm overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${continueProgress}%` }} />
+                    </div>
+                  )}
+                </div>
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm transition group-hover:scale-105">
+                  <Play className="h-4 w-4 translate-x-px" fill="currentColor" />
+                </span>
+              </Link>
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center h-64">
               <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
             </div>
           ) : books.length === 0 ? (
-            <div className="flex min-h-[420px] items-center justify-center px-4 py-16 text-center sm:px-8 md:min-h-[520px] md:py-24">
+            <div className={cn('flex items-center justify-center px-4 text-center sm:px-6 md:px-8', continueReading ? 'py-3 md:py-4' : 'min-h-[420px] py-16 md:min-h-[520px] md:py-24')}>
               <div className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-amber-950/10 bg-white/65 eink-bordered px-5 py-10 shadow-[0_24px_70px_-45px_rgba(74,57,35,0.65)] backdrop-blur sm:rounded-[32px] sm:px-8 sm:py-12">
                 <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
                 <div className="relative mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-primary/15 to-amber-200/40 text-primary shadow-inner dark:to-amber-900/40">
@@ -485,7 +588,7 @@ export default function ShelfPage() {
               </div>
             </div>
           ) : (
-            <div className="px-4 py-5 sm:px-6 md:px-8 md:py-8">
+            <div className={cn('px-4 pb-5 sm:px-6 md:px-8 md:pb-8', continueReading ? 'pt-3 md:pt-4' : 'pt-5 md:pt-8')}>
               {viewMode === 'rows' ? (
                 <BookTable
                   books={books as BookRow[]}
@@ -521,7 +624,7 @@ export default function ShelfPage() {
         totalCount={books.length}
         canAddShelf={false}
         canRemoveShelf
-        canDownload={isTauriApp}
+        canDownload={isTauriApp && Array.from(selectedIds).some((id) => id !== SAMPLE_BOOK.bookId)}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}

@@ -7,12 +7,14 @@ import {
   shouldSuppressAnnotationReaderProgress,
 } from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
+import { getContinueReading, rememberContinueReading } from '@/lib/continue-reading';
 import { useServerStore } from '@/lib/store/server';
 
 const SAVE_DELAY_MS = 1200;
 
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
   const serverUrl = useServerStore((s) => s.serverUrl);
+  const offlineMode = useServerStore((s) => s.offlineMode);
   const progressSupported = useServerStore((s) => s.capabilities.readingProgressApi);
   const capabilityChecked = useServerStore((s) => Boolean(s.capabilities.checkedAt));
   const pendingRef = useRef(new Map<string, ReadingProgressPayload>());
@@ -20,8 +22,11 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
 
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
-    if (!serverUrl) return;
-    if (capabilityChecked && !progressSupported) return;
+    const progressServerUrl = offlineMode
+      ? (getContinueReading('', 'offline')?.serverUrl || serverUrl)
+      : serverUrl;
+    if (!progressServerUrl) return;
+    if (!offlineMode && capabilityChecked && !progressSupported) return;
 
     const eventApi = import('@tauri-apps/api/event');
     const reportListenError = (error: unknown) => {
@@ -33,9 +38,17 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
         return listen<Record<string, unknown>>('reader:page:changed', (event) => {
           const progress = normalizeReaderProgressEvent(event.payload);
           if (!progress) return;
-          if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
+          if (shouldSuppressAnnotationReaderProgress(progressServerUrl, progress)) return;
 
           const bookId = progress.moke_book_id;
+          rememberContinueReading({
+            serverUrl: progressServerUrl,
+            mode: offlineMode ? 'offline' : 'online',
+            bookId,
+            progress: progress.progress ?? progress.fraction,
+            page: progress.page,
+            totalPages: progress.total_pages,
+          });
           pendingRef.current.set(bookId, progress);
 
           const existingTimer = timersRef.current.get(bookId);
@@ -68,7 +81,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
       timersRef.current.clear();
       pendingRef.current.clear();
     };
-  }, [capabilityChecked, progressSupported, serverUrl]);
+  }, [capabilityChecked, offlineMode, progressSupported, serverUrl]);
 
   return <>{children}</>;
 }

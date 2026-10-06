@@ -33,3 +33,14 @@ test('离线书库保留下载记录中的封面，并可从同一本书的其�
 
   assert.equal(books[0].img, 'data:image/jpeg;base64,cover');
 });
+
+test('离线书库合并多个格式的本地书架状态，并保持不同服务器隔离', () => {
+  const common = { bookId: '1', title: '书', fileName: '', mimeType: '', size: 10, updatedAt: 1000 };
+  const books = buildOfflineLibrary([
+    { ...common, id: 'epub', serverUrl: 'https://a.test', format: 'epub', inShelf: false },
+    { ...common, id: 'pdf', serverUrl: 'https://a.test', format: 'pdf', inShelf: true },
+    { ...common, id: 'other', serverUrl: 'https://b.test', format: 'epub', inShelf: false },
+  ]);
+  assert.equal(books[0].state.wants, true);
+  assert.equal(books[1].state.wants, false);
+});

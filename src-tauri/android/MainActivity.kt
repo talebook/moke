@@ -14,6 +14,7 @@
 
 package org.houheya.moke
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -34,6 +35,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var interceptPageTurnerKeysEnabled = false
     private var keyLearnModeEnabled = false
     private var lastExitBackPressedAt = 0L
+    @Volatile private var continueReadingRequested = false
 
     private class WindowModeBridge(activity: MainActivity) {
         private val activityRef = WeakReference<MainActivity>(activity)
@@ -46,10 +48,15 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         fun showStatusBar(darkMode: Boolean) {
             activityRef.get()?.showMokeStatusBar(darkMode)
         }
+
+        @JavascriptInterface
+        fun consumeContinueReadingLaunch(): Boolean =
+            activityRef.get()?.consumeContinueReadingLaunch() ?: false
     }
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
+        private const val CONTINUE_READING_ACTION = "org.houheya.moke.action.CONTINUE_READING"
         private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf", "/library", "/user")
     }
 
@@ -147,6 +154,34 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
             } catch (_: IllegalStateException) {
                 // The Activity may be destroyed after post() but before this
                 // runnable reaches the WebView thread.
+            }
+        }
+    }
+
+    @Synchronized
+    private fun consumeContinueReadingLaunch(): Boolean {
+        val requested = continueReadingRequested
+        continueReadingRequested = false
+        return requested
+    }
+
+    private fun notifyContinueReadingRequested() {
+        val webView = wv ?: return
+        webView.post {
+            if (wv !== webView) return@post
+            try {
+                if (isEmbeddedReaderRoute()) {
+                    // The Readest document does not mount Moke's launcher. Go
+                    // back to the shell; the pending flag is consumed there.
+                    webView.evaluateJavascript("""window.location.assign("/");""", null)
+                } else {
+                    webView.evaluateJavascript(
+                        """window.dispatchEvent(new Event("moke:continue-reading-request"));""",
+                        null,
+                    )
+                }
+            } catch (_: IllegalStateException) {
+                // The Activity may be destroyed before the posted callback.
             }
         }
     }
@@ -261,9 +296,18 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        continueReadingRequested = intent?.action == CONTINUE_READING_ACTION
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         showMokeStatusBar(darkMode = false)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action != CONTINUE_READING_ACTION) return
+        continueReadingRequested = true
+        notifyContinueReadingRequested()
     }
 
     override fun onDestroy() {

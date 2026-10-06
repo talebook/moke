@@ -44,7 +44,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run tests
-        run: pnpm test
+        run: |
+          pnpm test
+          python3 -m unittest discover -s tests -p 'test_ohos_release.py'
 
       - name: Run ESLint
         run: pnpm lint

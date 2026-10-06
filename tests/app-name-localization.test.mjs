@@ -254,11 +254,12 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
   );
 });
 
-test('Android 默认与中文名称资源会复制到生成项目', () => {
+test('Android 名称与继续阅读快捷方式资源会接入生成项目', () => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
   const sourceRoot = path.join(temporaryRoot, 'src-tauri', 'mobile', 'android');
   mkdirSync(path.join(sourceRoot, 'values'), { recursive: true });
   mkdirSync(path.join(sourceRoot, 'values-zh'), { recursive: true });
+  mkdirSync(path.join(sourceRoot, 'xml'), { recursive: true });
   writeFileSync(
     path.join(sourceRoot, 'values', 'strings.xml'),
     '<resources><string name="app_name">Moke</string></resources>',
@@ -266,6 +267,18 @@ test('Android 默认与中文名称资源会复制到生成项目', () => {
   writeFileSync(
     path.join(sourceRoot, 'values-zh', 'strings.xml'),
     '<resources><string name="app_name">墨客</string></resources>',
+  );
+  writeFileSync(
+    path.join(sourceRoot, 'xml', 'shortcuts.xml'),
+    '<shortcuts><shortcut android:shortcutId="continue_reading" /></shortcuts>',
+  );
+  const generatedMain = path.join(
+    temporaryRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main',
+  );
+  mkdirSync(generatedMain, { recursive: true });
+  writeFileSync(
+    path.join(generatedMain, 'AndroidManifest.xml'),
+    '<manifest><application><activity android:name=".MainActivity"><intent-filter /></activity></application></manifest>',
   );
 
   prepareAndroidAppNames(temporaryRoot);
@@ -280,6 +293,14 @@ test('Android 默认与中文名称资源会复制到生成项目', () => {
   );
   assert.match(generatedDefault, />Moke</);
   assert.match(generatedChinese, />墨客</);
+  assert.match(
+    readFileSync(path.join(generatedMain, 'res', 'xml', 'shortcuts.xml'), 'utf8'),
+    /continue_reading/,
+  );
+  assert.match(
+    readFileSync(path.join(generatedMain, 'AndroidManifest.xml'), 'utf8'),
+    /android:name="android\.app\.shortcuts" android:resource="@xml\/shortcuts"/,
+  );
 });
 
 test('iOS 名称资源会复制并验证 XcodeGen Resources 接线', () => {
@@ -329,6 +350,20 @@ test('iOS 默认显示名优先使用 CFBundleDisplayName，缺失时回退 CFBu
 
   writeInfoPlist(appRoot);
   assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot));
+});
+
+test('iOS Preview 校验使用传入的构建配置，同时继续拒绝产品名不匹配', () => {
+  const { temporaryRoot, appleRoot } = createIosFixture();
+  const configPath = 'src-tauri/tauri.preview.ci.conf.json';
+  writeFileSync(path.join(temporaryRoot, configPath), '{"productName":"Moke Preview"}\n');
+  prepareIosAppNames(temporaryRoot, () => {
+    writeXcodeGenProjectFixture(appleRoot, { productName: 'Moke Preview' });
+    return { status: 0 };
+  }, configPath);
+  assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot, configPath));
+  assert.throws(() => verifyIosAppNames(temporaryRoot), /does not resolve CFBundleName to Moke/);
+  writeXcodeGenProjectFixture(appleRoot, { productName: 'Wrong' });
+  assert.throws(() => verifyIosAppNames(temporaryRoot, configPath), /to Moke Preview/);
 });
 
 test('iOS prepare 在 XcodeGen 不可用时失败', () => {
