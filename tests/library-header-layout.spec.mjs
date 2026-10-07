@@ -5,6 +5,7 @@ const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 const viewports = [
   { width: 320, height: 640 },
   { width: 390, height: 844 },
+  { width: 767, height: 1024 },
   { width: 768, height: 1024 },
   { width: 1024, height: 768 },
   { width: 1280, height: 900 },
@@ -22,20 +23,36 @@ async function expectHeaderLayout(page) {
     return {
       title: rect(header.querySelector('h1')), toggle: rect(toggle),
       search: rect(header.querySelector('input[type="search"]')),
+      searchGroup: rect(header.querySelector('input[type="search"]').parentElement.parentElement),
       history: history ? rect(history) : null,
       contentRight: header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight),
       overflow: document.documentElement.scrollWidth > innerWidth,
     };
   });
-  expect(layout.toggle.bottom).toBeLessThan(layout.search.y);
   expect(layout.toggle.x).toBeGreaterThan(layout.title.right);
   expect(layout.toggle.y).toBeLessThan(layout.title.bottom);
   expect(layout.toggle.bottom).toBeGreaterThan(layout.title.y);
   expect(layout.toggle.right).toBeCloseTo(layout.contentRight, 0);
   expect(layout.overflow).toBe(false);
+  if (page.viewportSize().width < 768) {
+    expect(layout.search.y).toBeGreaterThan(layout.title.bottom);
+    expect(layout.toggle.bottom).toBeLessThan(layout.search.y);
+  } else {
+    expect(layout.search.x).toBeGreaterThan(layout.title.right);
+    expect(layout.searchGroup.right).toBeLessThan(layout.history?.x ?? layout.toggle.x);
+    expect(layout.search.y).toBeLessThan(layout.title.bottom);
+    expect(layout.search.bottom).toBeGreaterThan(layout.title.y);
+    expect(layout.search.y).toBeLessThan(layout.toggle.bottom);
+    expect(layout.search.bottom).toBeGreaterThan(layout.toggle.y);
+  }
   if (layout.history) {
-    expect(layout.history.bottom).toBeLessThan(layout.search.y);
     expect(layout.history.x).toBeGreaterThan(layout.title.right);
+    if (page.viewportSize().width < 768) {
+      expect(layout.history.bottom).toBeLessThan(layout.search.y);
+    } else {
+      expect(layout.search.y).toBeLessThan(layout.history.bottom);
+      expect(layout.search.bottom).toBeGreaterThan(layout.history.y);
+    }
   }
 }
 

@@ -366,16 +366,16 @@ function SearchContent() {
   return (
     <DesktopLayout>
       <div className="flex h-full min-h-0 flex-col">
-        <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-3 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div className="min-w-0">
+        <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-3 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,390px)_auto] md:items-center md:px-8 md:py-5">
+          <div className="flex min-w-0 items-center justify-between gap-3 md:contents">
+            <div className="min-w-0 md:col-start-1 md:row-start-1">
               <p className="text-xs font-medium text-primary/80">{isShelfScope ? '当前书架' : '探索书库'}</p>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">{isShelfScope ? '搜索书架' : '搜索书库'}</h1>
             </div>
-            <ViewModeToggle value={viewMode} onChange={setViewMode} />
+            <ViewModeToggle value={viewMode} onChange={setViewMode} className="md:col-start-3 md:row-start-1" />
           </div>
 
-          <div className="flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-[390px]">
+          <div className="flex w-full min-w-0 items-center gap-2 md:col-start-2 md:row-start-1 md:w-auto">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

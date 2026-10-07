@@ -481,16 +481,16 @@ export default function ShelfPage() {
     <DesktopLayout>
       <div className="moke-shelf-bg flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
         <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
-          <div className="flex flex-col gap-3">
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="min-w-0">
+          <div className="flex flex-col gap-3 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,390px)_auto] md:items-center">
+            <div className="flex min-w-0 items-center justify-between gap-3 md:contents">
+              <div className="min-w-0 md:col-start-1 md:row-start-1">
                 <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
                   <BookOpen className="h-3.5 w-3.5" />
                   <span>{books.length > 0 ? `${books.length} 本藏书` : '私人阅读空间'}</span>
                 </div>
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
               </div>
-              <div className="flex shrink-0 items-center justify-end gap-2">
+              <div className="flex shrink-0 items-center justify-end gap-2 md:col-start-3 md:row-start-1">
                 {!offlineMode && <Link
                   href="/user/history"
                   aria-label="查看历史记录"
@@ -502,7 +502,7 @@ export default function ShelfPage() {
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
             </div>
-            <div className="flex w-full min-w-0 items-center gap-2 md:ml-auto md:w-[390px]">
+            <div className="flex w-full min-w-0 items-center gap-2 md:col-start-2 md:row-start-1 md:w-auto">
               <div className="relative min-w-0 flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                 <input
