@@ -15,6 +15,7 @@
   "bundle": {
     "active": false,
     "targets": [],
+    "icon": ["icons/ohos/app_icon.png"],
     "createUpdaterArtifacts": false
   },
   "plugins": {
