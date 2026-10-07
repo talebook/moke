@@ -946,7 +946,6 @@ html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(
 
     html:not([data-eink='true']) .book-cover-motion {
       transform-origin: 50% 100%;
-      will-change: transform;
       transition-property: transform, box-shadow, filter !important;
       transition-duration: 420ms, 420ms, 280ms !important;
       transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1), cubic-bezier(0.16, 1, 0.3, 1), ease !important;
@@ -954,6 +953,9 @@ html[data-eink='true'][data-moke-reader-transition='exit']::view-transition-old(
 
     html:not([data-eink='true']) .book-card-motion:hover .book-cover-motion,
     html:not([data-eink='true']) .book-card-motion:focus-visible .book-cover-motion {
+      /* will-change 只在真正要动画时生效：列表里每张封面常驻提升图层会显著增加
+         合成与显存开销（墨水屏/低端设备上尤其明显）。 */
+      will-change: transform;
       transform: translate3d(0, -5px, 0) rotateX(1deg) rotateY(-0.6deg) scale(1.01);
       box-shadow: 0 18px 32px -19px rgba(37, 30, 20, 0.62), 0 6px 14px -10px rgba(37, 30, 20, 0.2);
       filter: saturate(1.04) contrast(1.015);

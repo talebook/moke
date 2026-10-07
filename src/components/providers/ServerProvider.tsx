@@ -13,7 +13,15 @@ const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { serverUrl, offlineMode, hasHydrated, capabilities, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  // 字段级订阅：能力探测一轮会连续 setServerTitle / setUser / setServerCapabilities，
+  // 整对象订阅会让每次 set 都重渲染整棵应用树；只订阅用到的字段即可。
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
+  const hasHydrated = useServerStore((state) => state.hasHydrated);
+  const capabilities = useServerStore((state) => state.capabilities);
+  const setServerTitle = useServerStore((state) => state.setServerTitle);
+  const setUser = useServerStore((state) => state.setUser);
+  const setServerCapabilities = useServerStore((state) => state.setServerCapabilities);
   const [discoveryServerUrl, capabilitiesCheckedAt] = getServerDiscoveryInputs(serverUrl, capabilities);
 
   // 拓展管理页面是本地功能，不需要连接服务器
@@ -45,11 +53,16 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const checkAccess = async () => {
-      const userAtSyncStart = useServerStore.getState().user;
+      const { user: userAtSyncStart, sessionRevision } = useServerStore.getState();
+      const isCurrentSession = () => {
+        const current = useServerStore.getState();
+        return !cancelled && current.serverUrl === discoveryServerUrl && current.sessionRevision === sessionRevision;
+      };
 
       try {
         const welcome = await checkWelcomeRequirement(discoveryServerUrl);
-        if (!cancelled && welcome.needsAccessCode) {
+        if (!isCurrentSession()) return;
+        if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
           router.replace('/access');
           return;
@@ -60,7 +73,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           fetchServerInfo(),
           discoverServerCapabilities(discoveryServerUrl),
         ]);
-        if (cancelled) return;
+        if (!isCurrentSession()) return;
 
         const currentState = useServerStore.getState();
         if (currentState.serverUrl !== discoveryServerUrl) return;
@@ -98,6 +111,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           console.warn('[ServerProvider] capabilities sync failed:', capabilitiesResult.reason);
         }
       } catch (e) {
+        if (!isCurrentSession()) return;
         // Welcome/network failures are transient. Preserve the last confirmed
         // user, title, and capability snapshot for the next sync attempt.
         console.error('[ServerProvider] sync error:', e);

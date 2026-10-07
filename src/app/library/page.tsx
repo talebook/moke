@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Search, ArrowLeft, Loader2 } from 'lucide-react';
@@ -82,7 +82,8 @@ const TAG_DROPDOWN_LIMIT = 12;
 const MORE_TAGS_VALUE = '__moke_more_tags__';
 
 export default function LibraryPage() {
-  const { serverUrl, offlineMode } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
   const router = useRouter();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
@@ -1062,6 +1063,13 @@ export default function LibraryPage() {
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
+/** 网络书籍没有稳定 id：优先用「书源 + book_url」合成，缺失时才退回下标。 */
+function networkRowId(book: NetworkBook, idx: number): string {
+  return book.source_id != null && book.book_url
+    ? `network-${book.source_id}:${book.book_url}`
+    : `network-${idx}`;
+}
+
 function networkBookToRow(book: NetworkBook, idx: number): BookRow {
   const title = book.title || book.name || `未命名-${idx}`;
   const authorRaw = book.author || book.authors;
@@ -1070,11 +1078,10 @@ function networkBookToRow(book: NetworkBook, idx: number): BookRow {
     : Array.isArray(authorRaw)
       ? authorRaw.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
       : '';
-  // Network books don't carry a stable id; synthesize one from the index so the table
-  // can key rows. Rows are made clickable via `getRowHref`, which resolves the
-  // network-book detail page from `source_id` + `book_url` (see NetworkBookTable).
+  // 网络书籍没有稳定 id，这里合成一个，供表格行 key 与 getRowHref 使用
+  // （详情页地址由 source_id + book_url 解析，见 NetworkBookTable）。
   return {
-    id: `network-${idx}`,
+    id: networkRowId(book, idx),
     title,
     author,
     img: book.cover_url || book.img || book.thumb,
@@ -1095,9 +1102,21 @@ function NetworkBookTable({
   paged?: boolean;
   onSortChange?: (sort: SortState | null) => void;
 }) {
+  // 行只在 books 变化时重建：否则父级任意状态变化都会生成新数组，
+  // 让 BookTable 内部的排序 useMemo 无谓重跑、行 key 漂移导致重挂载。
+  const { rows, bookById } = useMemo(() => {
+    const byId = new Map<string, NetworkBook>();
+    const mapped = books.map((book, idx) => {
+      const row = networkBookToRow(book, idx);
+      byId.set(String(row.id), book);
+      return row;
+    });
+    return { rows: mapped, bookById: byId };
+  }, [books]);
+
   return (
     <BookTable
-      books={books.map((b, i) => networkBookToRow(b, i))}
+      books={rows}
       getRowHref={(row) =>
         row.source_id != null && row.book_url ? buildNetworkBookHref(row.source_id, row.book_url) : ''
       }
@@ -1106,8 +1125,7 @@ function NetworkBookTable({
       onContextAction={
         onContextAction
           ? (id, x, y) => {
-              const idx = parseInt(String(id).replace(/^network-/, ''), 10);
-              const book = books[idx];
+              const book = bookById.get(String(id));
               if (book) onContextAction(book, x, y);
             }
           : undefined

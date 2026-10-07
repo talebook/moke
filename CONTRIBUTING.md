@@ -75,6 +75,11 @@ pnpm typecheck      # TypeScript 类型检查
 pnpm test           # API、离线存储和平台分支基础测试
 ```
 
+浏览器回归需先在一个终端启动 `pnpm dev-preview`，再在另一终端运行
+`pnpm test:browser`。该命令包含封面取消/旧版 WebView、登录竞态及真实
+IndexedDB 的离线删除回归。使用独立端口时，将 `PLAYWRIGHT_BASE_URL` 和
+`MOKE_E2E_BASE_URL` 都设为该预览服务地址。
+
 ### 构建
 
 ```bash

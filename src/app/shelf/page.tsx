@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
 import { BookOpen, History, Play, Search } from 'lucide-react';
@@ -49,8 +49,11 @@ interface BookItem {
   };
 }
 
-function BookCard({
+// memo：书架整页的状态变化（勾选、搜索框输入、批量模式开关等）不应重渲染所有卡片。
+// 因此卡片只接收原始 props，serverUrl 由父级传入而不是每张卡各自订阅 store。
+const BookCard = memo(function BookCard({
   book,
+  serverUrl,
   viewGrid = true,
   priority = false,
   batchMode = false,
@@ -59,6 +62,7 @@ function BookCard({
   onContextAction,
 }: {
   book: BookItem;
+  serverUrl: string;
   viewGrid?: boolean;
   priority?: boolean;
   batchMode?: boolean;
@@ -67,7 +71,6 @@ function BookCard({
   /** Right-click / long-press: open the context menu at (x, y) for this book. */
   onContextAction?: (id: string, x: number, y: number) => void;
 }) {
-  const { serverUrl } = useServerStore();
   const authorName = book.author || book.authors?.[0]?.name || '';
   const bookId = String(book.id);
   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
@@ -178,10 +181,11 @@ function BookCard({
       </span>
     </Link>
   );
-}
+});
 
 export default function ShelfPage() {
-  const { serverUrl, offlineMode } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
   const router = useRouter();
   const toast = useToast((s) => s.show);
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -276,7 +280,8 @@ export default function ShelfPage() {
     lastSelectedIdRef.current = null;
   };
 
-  const toggleSelect = (id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+  // 稳定引用：配合 BookCard 的 memo，避免父级重渲染时让全部卡片一起重渲染。
+  const toggleSelect = useCallback((id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
     if (!batchMode) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -298,7 +303,7 @@ export default function ShelfPage() {
       }
       return next;
     });
-  };
+  }, [batchMode, books]);
 
   const selectAll = () => {
     setSelectedIds(new Set(books.map((b) => String(b.id))));
@@ -399,9 +404,9 @@ export default function ShelfPage() {
     },
   ];
 
-  const openContextMenu = (bookId: string, clientX: number, clientY: number) => {
+  const openContextMenu = useCallback((bookId: string, clientX: number, clientY: number) => {
     setContextMenu({ x: clientX, y: clientY, bookId });
-  };
+  }, []);
 
   // ── Batch actions ────────────────────────────────────────────────────────
   const runBatch = async (action: BatchAction): Promise<{ ok: number; fail: number }> => {
@@ -604,6 +609,7 @@ export default function ShelfPage() {
                     <BookCard
                       key={String(book.id)}
                       book={book}
+                      serverUrl={serverUrl}
                       priority={index === 0}
                       viewGrid={viewMode === 'grid'}
                       batchMode={batchMode}

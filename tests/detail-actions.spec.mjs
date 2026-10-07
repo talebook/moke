@@ -1,4 +1,5 @@
 import { test, expect as baseExpect } from '@playwright/test';
+import { installLibraryLayoutMock } from './helpers/library-layout.mjs';
 
 // Shared-host dev hydration and native module imports can exceed five seconds.
 const expect = baseExpect.configure({ timeout: 15_000 });
@@ -8,7 +9,11 @@ const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
 async function installTauriHttpMock(page, { offlineMode = false } = {}) {
+  // Keep Preview entitlement/window commands complete while specializing the
+  // book/HTTP fixture below. Unknown licensing commands cannot return null.
+  await installLibraryLayoutMock(page, { continueReading: false });
   await page.addInitScript(({ serverUrl, bookId, offlineMode }) => {
+    const originalInternals = window.__TAURI_INTERNALS__;
     const requests = new Map();
     const responseBodies = new Map();
     const httpRequests = [];
@@ -61,7 +66,7 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
     });
 
     window.__TAURI_INTERNALS__ = {
-      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      ...originalInternals,
       invoke: async (command, args = {}) => {
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;
@@ -101,7 +106,7 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
         if (command === 'plugin:event|unlisten') return null;
         if (command === 'plugin:os|platform') return 'linux';
         if (command === 'moke_list_downloaded_books') return nativeOfflineBooks;
-        return null;
+        return originalInternals.invoke(command, args);
       },
       transformCallback: () => nextCallbackId++,
       unregisterCallback: () => {},

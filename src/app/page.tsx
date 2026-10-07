@@ -16,7 +16,9 @@ import {
 
 export default function HomePage() {
   const router = useRouter();
-  const { serverUrl, offlineMode, hasHydrated } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
+  const hasHydrated = useServerStore((state) => state.hasHydrated);
   const continueReadingOnLaunch = useSettingsStore((state) => state.continueReadingOnLaunch);
   const [message, setMessage] = useState('正在打开墨客…');
 

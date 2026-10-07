@@ -54,9 +54,11 @@ interface ServerState {
   isConnected: boolean;
   token: string;
   user: ReaderInfo | null;
+  sessionRevision: number;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
   enterOfflineMode: () => void;
   leaveOfflineMode: () => void;
+  invalidateSession: () => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string) => void;
@@ -98,31 +100,52 @@ export const useServerStore = create<ServerState>()(
       isConnected: false,
       token: '',
       user: null,
+      sessionRevision: 0,
       setServer: (protocol, host, port) => {
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
-        set({ serverUrl: url, offlineMode: false, protocol, host, port, isConnected: true, token: '', user: null, capabilities: DEFAULT_SERVER_CAPABILITIES });
+        set((state) => ({
+          serverUrl: url, offlineMode: false, protocol, host, port,
+          isConnected: true, token: '', user: null,
+          capabilities: DEFAULT_SERVER_CAPABILITIES,
+          sessionRevision: state.sessionRevision + 1,
+        }));
       },
       enterOfflineMode: () => set({ offlineMode: true, isConnected: false }),
       leaveOfflineMode: () => set({ offlineMode: false }),
+      // The cookie has changed, but its user is not confirmed yet. Isolate
+      // pending probes/covers and invalidate capabilities without logging in.
+      invalidateSession: () => {
+        set((state) => ({
+          token: '',
+          user: null,
+          sessionRevision: state.sessionRevision + 1,
+          capabilities: invalidateCapabilitiesForSession(state.capabilities),
+        }));
+      },
       setConnected: (token, user) => {
         set((state) => ({
           isConnected: true,
           token,
           user,
+          sessionRevision: state.sessionRevision + 1,
           // A completed sign-in can replace the server cookie even when the
           // same account was cached locally. Re-confirm auth-dependent APIs.
           capabilities: invalidateCapabilitiesForSession(state.capabilities),
         }));
       },
       setUser: (user) => {
-        set((state) => ({
-          isConnected: Boolean(state.serverUrl),
-          token: user ? state.token : '',
-          user,
-          capabilities: didServerSessionChange(state.user, user)
-            ? invalidateCapabilitiesForSession(state.capabilities)
-            : state.capabilities,
-        }));
+        set((state) => {
+          const sessionChanged = didServerSessionChange(state.user, user);
+          return {
+            isConnected: Boolean(state.serverUrl),
+            token: user ? state.token : '',
+            user,
+            sessionRevision: state.sessionRevision + (sessionChanged ? 1 : 0),
+            capabilities: sessionChanged
+              ? invalidateCapabilitiesForSession(state.capabilities)
+              : state.capabilities,
+          };
+        });
       },
       setServerTitle: (serverTitle) => {
         set({ serverTitle });
@@ -138,11 +161,18 @@ export const useServerStore = create<ServerState>()(
           isConnected: Boolean(state.serverUrl),
           token: '',
           user: null,
+          sessionRevision: state.sessionRevision + 1,
           capabilities: invalidateCapabilitiesForSession(state.capabilities),
         }));
       },
       disconnect: () => {
-        set({ serverUrl: '', offlineMode: false, serverTitle: '', capabilities: DEFAULT_SERVER_CAPABILITIES, protocol: 'http', host: '', port: '8080', isConnected: false, token: '', user: null });
+        set((state) => ({
+          serverUrl: '', offlineMode: false, serverTitle: '',
+          capabilities: DEFAULT_SERVER_CAPABILITIES,
+          protocol: 'http', host: '', port: '8080',
+          isConnected: false, token: '', user: null,
+          sessionRevision: state.sessionRevision + 1,
+        }));
       },
     }),
     {

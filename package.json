@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "dotenv -e .env.tauri -- next dev --turbo",
     "dev-preview": "dotenv -e .env.preview -- next dev --turbo",
-    "build": "dotenv -e .env.tauri -- next build --turbo",
+    "build": "dotenv -e .env.tauri -- next build --turbo && node scripts/strip-reader-sourcemaps.mjs out",
     "build:preview": "dotenv -e .env.preview -- next build --turbo && node scripts/strip-reader-sourcemaps.mjs out",
     "preview:release-config": "node scripts/prepare-preview-release-config.mjs",
     "start": "dotenv -e .env.tauri -- next start",
@@ -24,6 +24,7 @@
     "tauri:dev:tablet": "tauri dev --config src-tauri/tauri.tablet.conf.json",
     "lint": "eslint src tests",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
+    "test:browser": "playwright test",
     "typecheck": "tsc --noEmit",
     "clean:build": "node scripts/clean-build-artifacts.mjs",
     "clean:build:full": "node scripts/clean-build-artifacts.mjs --rust",

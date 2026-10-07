@@ -60,7 +60,10 @@ function DetailContent() {
   const continueRequested = searchParams.get('continue') === '1';
   const continueSourceServer = searchParams.get('source');
   const router = useRouter();
-  const { serverUrl, offlineMode, capabilities, user } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
+  const capabilities = useServerStore((state) => state.capabilities);
+  const user = useServerStore((state) => state.user);
   const [comicOffline, setComicOffline] = useState(false);
   const [comicOpen, setComicOpen] = useState(false);
   const closeComic = useCallback(() => setComicOpen(false), []);

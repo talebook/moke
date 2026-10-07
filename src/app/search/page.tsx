@@ -49,7 +49,8 @@ function hasFormat(book: BookItem, filter: string) {
 function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { serverUrl, offlineMode } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
   const searchScope = searchParams.get('scope') === 'shelf' ? 'shelf' : 'library';
   const isShelfScope = searchScope === 'shelf';
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
+import dynamic from 'next/dynamic';
 import {
   broadcastDebugPanelVisibility,
   installConsoleCapture,
@@ -40,6 +40,13 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
+
+// 调试面板及其依赖（debug-log 面板 UI、clipboard）只在开发者解锁后才会用到，
+// 动态加载后普通用户的初始 JS 不再包含这部分代码。
+const DebugLogPanel = dynamic(
+  () => import('@/components/ui/DebugLogPanel').then((mod) => mod.DebugLogPanel),
+  { ssr: false },
+);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const eink = useSettingsStore((s) => s.eink);
@@ -308,7 +315,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <PrivacyConsentGate>{children}</PrivacyConsentGate>
         </AppStartupProvider>
       </div>
-      <DebugLogPanel />
+      {showDebugPanel && <DebugLogPanel />}
     </>
   );
 }
