@@ -26,6 +26,31 @@ failed debug cache, packaging was completed using the freshly built release
 library with that hook temporarily disabled in the local generated project. The
 hook was restored afterward; this workaround is not a source change.
 
+## Native build profile forwarding (TB-363, 2026-10-07)
+
+The same generated hook caused Preview 1.1.5.7 to package an unoptimized
+native library. `tauri ohos build` first builds Release, but Hvigor then calls
+`ohos dev-eco-studio-script` without `--release`. That command defaults to
+Debug and copies its output into the HAP. Signing the HAP does not change
+the Rust optimization profile.
+
+`scripts/prepare-ohos-release.mjs` now forwards Hvigor's `buildMode` to that
+second build: Release adds `--release`; Debug and an unspecified mode retain
+the default. Preparation rejects unfamiliar or partially patched hooks.
+Both the stable workflow and the public Preview workflow run this script
+before HAP assembly. Regenerate the project and rerun release preparation
+for an existing local checkout.
+
+The regression tests execute the pinned upstream Hvigor hook and reproduce
+the missing Release argument, then verify the patched Release/Debug calls
+and the preparation CLI. On the MatePad, the previous Preview 1.1.5.7 startup
+sample attributed 95.31% of CPU cycles to native Context creation; it also
+triggered `THREAD_BLOCK_3S`. The developer reported 7–8 seconds to enter,
+compared with about 2 seconds for the prior locally packaged Release HAP.
+An optimized replacement HAP must still be built with the Preview release
+configuration and measured on the same device before claiming that startup
+has returned to 2 seconds.
+
 The following sections record the original migration's validation at the time it
 was performed.
 
