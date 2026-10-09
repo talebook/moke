@@ -254,12 +254,12 @@ test('macOS、Linux 与移动端仅在中文系统显示墨客，其他语言回
   );
 });
 
-test('Android 名称与继续阅读快捷方式资源会接入生成项目', () => {
+test('Android 接入独立阅读图标并清理旧静态快捷方式，重复准备保持幂等', () => {
   const temporaryRoot = mkdtempSync(path.join(os.tmpdir(), 'moke-app-name-'));
   const sourceRoot = path.join(temporaryRoot, 'src-tauri', 'mobile', 'android');
   mkdirSync(path.join(sourceRoot, 'values'), { recursive: true });
   mkdirSync(path.join(sourceRoot, 'values-zh'), { recursive: true });
-  mkdirSync(path.join(sourceRoot, 'xml'), { recursive: true });
+  mkdirSync(path.join(sourceRoot, 'drawable'), { recursive: true });
   writeFileSync(
     path.join(sourceRoot, 'values', 'strings.xml'),
     '<resources><string name="app_name">Moke</string></resources>',
@@ -269,8 +269,8 @@ test('Android 名称与继续阅读快捷方式资源会接入生成项目', () 
     '<resources><string name="app_name">墨客</string></resources>',
   );
   writeFileSync(
-    path.join(sourceRoot, 'xml', 'shortcuts.xml'),
-    '<shortcuts><shortcut android:shortcutId="continue_reading" /></shortcuts>',
+    path.join(sourceRoot, 'drawable', 'ic_continue_reading.xml'),
+    '<vector android:width="48dp" />',
   );
   const generatedMain = path.join(
     temporaryRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main',
@@ -278,8 +278,10 @@ test('Android 名称与继续阅读快捷方式资源会接入生成项目', () 
   mkdirSync(generatedMain, { recursive: true });
   writeFileSync(
     path.join(generatedMain, 'AndroidManifest.xml'),
-    '<manifest><application><activity android:name=".MainActivity"><intent-filter /></activity></application></manifest>',
+    '<manifest><application><activity android:name=".MainActivity"><intent-filter /><meta-data android:resource="@xml/shortcuts" android:name="android.app.shortcuts" /><meta-data android:name="keep.this" android:value="true" /></activity></application></manifest>',
   );
+  mkdirSync(path.join(generatedMain, 'res', 'xml'), { recursive: true });
+  writeFileSync(path.join(generatedMain, 'res', 'xml', 'shortcuts.xml'), 'stale static shortcut');
 
   prepareAndroidAppNames(temporaryRoot);
 
@@ -293,14 +295,14 @@ test('Android 名称与继续阅读快捷方式资源会接入生成项目', () 
   );
   assert.match(generatedDefault, />Moke</);
   assert.match(generatedChinese, />墨客</);
-  assert.match(
-    readFileSync(path.join(generatedMain, 'res', 'xml', 'shortcuts.xml'), 'utf8'),
-    /continue_reading/,
-  );
-  assert.match(
-    readFileSync(path.join(generatedMain, 'AndroidManifest.xml'), 'utf8'),
-    /android:name="android\.app\.shortcuts" android:resource="@xml\/shortcuts"/,
-  );
+  assert.equal(existsSync(path.join(generatedMain, 'res', 'xml', 'shortcuts.xml')), false);
+  assert.equal(readFileSync(path.join(generatedMain, 'res', 'drawable', 'ic_continue_reading.xml'), 'utf8'), '<vector android:width="48dp" />');
+  const manifest = readFileSync(path.join(generatedMain, 'AndroidManifest.xml'), 'utf8');
+  assert.doesNotMatch(manifest, /android\.app\.shortcuts/);
+  assert.match(manifest, /keep\.this/);
+  assert.match(manifest, /\.MainActivity/);
+  prepareAndroidAppNames(temporaryRoot);
+  assert.equal(readFileSync(path.join(generatedMain, 'AndroidManifest.xml'), 'utf8'), manifest);
 });
 
 test('iOS 名称资源会复制并验证 XcodeGen Resources 接线', () => {

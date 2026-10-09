@@ -15,9 +15,13 @@
 package org.houheya.moke
 
 import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyEvent
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -36,6 +40,7 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
     private var keyLearnModeEnabled = false
     private var lastExitBackPressedAt = 0L
     @Volatile private var continueReadingRequested = false
+    private var publishedContinueReadingEnabled: Boolean? = null
 
     private class WindowModeBridge(activity: MainActivity) {
         private val activityRef = WeakReference<MainActivity>(activity)
@@ -52,11 +57,20 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         @JavascriptInterface
         fun consumeContinueReadingLaunch(): Boolean =
             activityRef.get()?.consumeContinueReadingLaunch() ?: false
+
+        @JavascriptInterface
+        fun setContinueReadingShortcutEnabled(enabled: Boolean) {
+            activityRef.get()?.setContinueReadingShortcutEnabled(enabled)
+        }
     }
 
     companion object {
         private const val EXIT_CONFIRM_WINDOW_MS = 2_000L
         private const val CONTINUE_READING_ACTION = "org.houheya.moke.action.CONTINUE_READING"
+        // Pinned shortcuts from the old manifest remain immutable even after
+        // upgrade. A new ID avoids trying to replace one with a dynamic entry.
+        private const val CONTINUE_READING_SHORTCUT_ID = "continue_reading_dynamic"
+        private const val SHORTCUT_PREFERENCES = "moke_launcher_shortcuts"
         private val APP_EXIT_ROUTES = setOf("/", "/welcome", "/shelf", "/library", "/user")
     }
 
@@ -163,6 +177,51 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         val requested = continueReadingRequested
         continueReadingRequested = false
         return requested
+    }
+
+    private fun setContinueReadingShortcutEnabled(enabled: Boolean) {
+        // JavascriptInterface calls arrive on a WebView worker thread. Keep
+        // ShortcutManager updates ordered with Activity lifecycle callbacks.
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            getSharedPreferences(SHORTCUT_PREFERENCES, MODE_PRIVATE)
+                .edit().putBoolean(CONTINUE_READING_SHORTCUT_ID, enabled).apply()
+            updateContinueReadingShortcut(enabled)
+        }
+    }
+
+    private fun updateContinueReadingShortcut(enabled: Boolean) {
+        if (publishedContinueReadingEnabled == enabled) return
+        val manager = getSystemService(ShortcutManager::class.java) ?: return
+        val ids = listOf(CONTINUE_READING_SHORTCUT_ID)
+        try {
+            if (enabled) {
+                // The generated package differs between Moke and Preview.
+                // An explicit component uses this installed application's
+                // package and Activity instead of a hard-coded stable target.
+                val launchIntent = Intent(this, MainActivity::class.java)
+                    .setAction(CONTINUE_READING_ACTION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                val shortcut = ShortcutInfo.Builder(this, CONTINUE_READING_SHORTCUT_ID)
+                    .setShortLabel(getString(R.string.continue_reading_shortcut_short_label))
+                    .setLongLabel(getString(R.string.continue_reading_shortcut_long_label))
+                    .setIcon(Icon.createWithResource(this, R.drawable.ic_continue_reading))
+                    .setIntent(launchIntent)
+                    .build()
+                manager.enableShortcuts(ids)
+                // Preserve any other dynamic shortcuts. A rate-limited update
+                // is retried on the next resume rather than marked published.
+                if (!manager.addDynamicShortcuts(listOf(shortcut))) return
+            } else {
+                manager.removeDynamicShortcuts(ids)
+                // Also prevent a previously pinned shortcut opening stale data.
+                manager.disableShortcuts(ids)
+            }
+            publishedContinueReadingEnabled = enabled
+        } catch (error: RuntimeException) {
+            // A launcher/service failure must not prevent opening the app.
+            Log.w("MokeShortcuts", "Could not update continue-reading shortcut", error)
+        }
     }
 
     private fun notifyContinueReadingRequested() {
@@ -300,6 +359,15 @@ class MainActivity : TauriActivity(), KeyDownInterceptor {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         showMokeStatusBar(darkMode = false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Keep the last confirmed state across process death. Once the shell
+        // mounts, its current server/mode and reading record replace this cache.
+        val enabled = getSharedPreferences(SHORTCUT_PREFERENCES, MODE_PRIVATE)
+            .getBoolean(CONTINUE_READING_SHORTCUT_ID, false)
+        updateContinueReadingShortcut(enabled)
     }
 
     override fun onNewIntent(intent: Intent) {

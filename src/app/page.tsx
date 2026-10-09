@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useServerStore } from '@/lib/store/server';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -9,6 +9,7 @@ import { request } from '@/lib/api';
 import { AppStartupScreen } from '@/components/ui/AppStartupScreen';
 import { APP_BACK_EVENT } from '@/lib/native-back';
 import {
+  CONTINUE_READING_NATIVE_EVENT,
   continueReadingHref,
   getContinueReading,
   resolveContinueReading,
@@ -21,9 +22,10 @@ export default function HomePage() {
   const hasHydrated = useServerStore((state) => state.hasHydrated);
   const continueReadingOnLaunch = useSettingsStore((state) => state.continueReadingOnLaunch);
   const [message, setMessage] = useState('正在打开墨客…');
+  const nativeShortcutHandledRef = useRef(false);
 
   useEffect(() => {
-    if (!hasHydrated) return;
+    if (!hasHydrated || nativeShortcutHandledRef.current) return;
     let cancelled = false;
     const controller = new AbortController();
     // The history request timeout must not invalidate a legitimate navigation.
@@ -37,10 +39,18 @@ export default function HomePage() {
       window.clearTimeout(historyTimeout);
       if (navigationTimer !== undefined) window.clearTimeout(navigationTimer);
     };
+    const handleNativeShortcut = () => {
+      // The launcher owns this explicit request. Cancel the default startup
+      // navigation before it can overwrite the shortcut's detail/reader route.
+      // Retain that decision through React's development effect replay.
+      nativeShortcutHandledRef.current = true;
+      cancelLaunch();
+    };
     // BACK may start a slow route transition while Home is still mounted.
     // Invalidate the launch immediately, before its safety timer can win.
     window.addEventListener(APP_BACK_EVENT, cancelLaunch);
     window.addEventListener('pagehide', cancelLaunch);
+    window.addEventListener(CONTINUE_READING_NATIVE_EVENT, handleNativeShortcut);
 
     const navigate = (target: string) => {
       // Let an effect cleanup cancel a stale launch before issuing native
@@ -78,6 +88,7 @@ export default function HomePage() {
       cancelLaunch();
       window.removeEventListener(APP_BACK_EVENT, cancelLaunch);
       window.removeEventListener('pagehide', cancelLaunch);
+      window.removeEventListener(CONTINUE_READING_NATIVE_EVENT, handleNativeShortcut);
     };
   }, [continueReadingOnLaunch, hasHydrated, offlineMode, serverUrl, router]);
 

@@ -97,16 +97,34 @@ test('首次升级可从服务端阅读历史选出最近一本并规范秒级�
   );
 });
 
-test('Android 静态快捷方式与原生 Intent 桥使用同一个继续阅读动作', () => {
-  const shortcuts = readFileSync(new URL('../src-tauri/mobile/android/xml/shortcuts.xml', import.meta.url), 'utf8');
+test('Android 动态快捷方式使用当前安装包的 Activity 和独立阅读图标', () => {
   const activity = readFileSync(new URL('../src-tauri/android/MainActivity.kt', import.meta.url), 'utf8');
   const action = 'org.houheya.moke.action.CONTINUE_READING';
 
-  assert.match(shortcuts, /android:shortcutId="continue_reading"/);
-  assert.ok(shortcuts.includes(`android:action="${action}"`));
   assert.ok(activity.includes(`CONTINUE_READING_ACTION = "${action}"`));
+  assert.match(activity, /CONTINUE_READING_SHORTCUT_ID = "continue_reading_dynamic"/);
+  assert.match(activity, /Intent\(this, MainActivity::class\.java\)/);
+  assert.match(activity, /Icon\.createWithResource\(this, R\.drawable\.ic_continue_reading\)/);
+  assert.doesNotMatch(activity, /setPackage\("org\.houheya\.moke"\)|ic_launcher/);
+  assert.match(activity, /manager\.addDynamicShortcuts/);
+  assert.match(activity, /manager\.removeDynamicShortcuts/);
+  assert.match(activity, /manager\.disableShortcuts/);
   assert.match(activity, /override fun onNewIntent\(intent: Intent\)/);
   assert.match(activity, /consumeContinueReadingLaunch/);
+});
+
+test('空或损坏记录不启用继续阅读，其他服务器的阅读记录不混用', () => {
+  const storage = memoryStorage();
+  assert.equal(getContinueReading('https://books.example', 'online', storage), null);
+  assert.equal(getContinueReading('', 'offline', storage), null);
+  storage.setItem('moke-continue-reading', '{invalid');
+  assert.equal(getContinueReading('https://books.example', 'online', storage), null);
+  storage.setItem('moke-continue-reading', JSON.stringify({ entries: {
+    bad: { serverUrl: 'https://books.example', bookId: '', updatedAt: 100 },
+  } }));
+  assert.equal(getContinueReading('https://books.example', 'online', storage), null);
+  rememberContinueReading({ serverUrl: 'https://other.example', bookId: '7' }, storage);
+  assert.equal(getContinueReading('https://books.example', 'online', storage), null);
 });
 
 test('三种继续阅读入口都接入统一自动阅读链接', () => {

@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { request } from '@/lib/api';
 import {
+  CONTINUE_READING_CHANGED_EVENT,
   CONTINUE_READING_NATIVE_EVENT,
   continueReadingHref,
   getContinueReading,
@@ -15,6 +16,34 @@ import { useToast } from '@/lib/toast';
 export function ContinueReadingLauncher({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const openingRef = useRef(false);
+  const shortcutEnabledRef = useRef<boolean | undefined>(undefined);
+
+  useEffect(() => {
+    const syncShortcut = () => {
+      const bridge = window.MokeWindowMode;
+      if (!bridge?.setContinueReadingShortcutEnabled) return;
+      const { serverUrl, offlineMode, hasHydrated } = useServerStore.getState();
+      if (!hasHydrated) return;
+      const enabled = getContinueReading(serverUrl, offlineMode ? 'offline' : 'online') !== null;
+      // Progress events can be frequent; only publish a changed availability.
+      if (enabled === shortcutEnabledRef.current) return;
+      try {
+        bridge.setContinueReadingShortcutEnabled(enabled);
+        shortcutEnabledRef.current = enabled;
+      } catch {
+        // Older builds or an unavailable launcher must not block reading.
+      }
+    };
+    const unsubscribe = useServerStore.subscribe(syncShortcut);
+    window.addEventListener(CONTINUE_READING_CHANGED_EVENT, syncShortcut);
+    window.addEventListener('storage', syncShortcut);
+    syncShortcut();
+    return () => {
+      unsubscribe();
+      window.removeEventListener(CONTINUE_READING_CHANGED_EVENT, syncShortcut);
+      window.removeEventListener('storage', syncShortcut);
+    };
+  }, []);
 
   useEffect(() => {
     const openLatest = async () => {
@@ -61,7 +90,9 @@ export function ContinueReadingLauncher({ children }: { children: React.ReactNod
 
     try {
       if (consumeNativeRequest()) {
-        void openLatest();
+        // Notify Home as well: its default startup redirect must yield to the
+        // same explicit request used by warm launches.
+        window.dispatchEvent(new Event(CONTINUE_READING_NATIVE_EVENT));
       }
     } catch {
       // Older Android builds do not expose the shortcut bridge.

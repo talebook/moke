@@ -130,26 +130,26 @@ export function prepareAndroidAppNames(root = projectRoot) {
     );
   }
 
-  const shortcutSource = path.join(sourceRoot, 'xml', 'shortcuts.xml');
-  const shortcutDestination = path.join(generatedResources, 'xml', 'shortcuts.xml');
-  mkdirSync(path.dirname(shortcutDestination), { recursive: true });
-  copyFileSync(shortcutSource, shortcutDestination);
+  const iconDirectory = path.join(generatedResources, 'drawable');
+  mkdirSync(iconDirectory, { recursive: true });
+  copyFileSync(
+    path.join(sourceRoot, 'drawable', 'ic_continue_reading.xml'),
+    path.join(iconDirectory, 'ic_continue_reading.xml'),
+  );
+
+  // Availability now belongs to ShortcutManager. Remove the old immutable
+  // static shortcut as well when preparing an existing generated project.
+  rmSync(path.join(generatedResources, 'xml', 'shortcuts.xml'), { force: true });
 
   const manifestPath = path.join(
     root, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml',
   );
   const manifest = readFileSync(manifestPath, 'utf8');
-  if (!manifest.includes('android.app.shortcuts')) {
-    const activityPattern = /(<activity\b[^>]*android:name="[^"]*MainActivity"[^>]*>)([\s\S]*?)(<\/activity>)/;
-    if (!activityPattern.test(manifest)) {
-      throw new Error(`${manifestPath} does not contain the generated MainActivity`);
-    }
-    const patched = manifest.replace(
-      activityPattern,
-      '$1$2\n            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />\n        $3',
-    );
-    writeFileSync(manifestPath, patched);
-  }
+  const patched = manifest.replace(
+    /<meta-data\b(?=[^>]*android:name="android\.app\.shortcuts")[^>]*\/>\s*/g,
+    '',
+  );
+  if (patched !== manifest) writeFileSync(manifestPath, patched);
 }
 
 export function verifyIosAppNames(root = projectRoot, configPath = 'src-tauri/tauri.conf.json') {

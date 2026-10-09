@@ -28,6 +28,7 @@ declare global {
       isInMultiWindowMode: () => boolean;
       showStatusBar?: (darkMode: boolean) => void;
       consumeContinueReadingLaunch?: () => boolean;
+      setContinueReadingShortcutEnabled?: (enabled: boolean) => void;
     };
   }
 }
