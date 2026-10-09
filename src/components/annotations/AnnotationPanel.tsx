@@ -29,6 +29,8 @@ interface AnnotationPanelProps {
   capabilityCheckedAt: number | null;
   downloaded: boolean;
   openingReader: boolean;
+  readOnly?: boolean;
+  canInteract?: () => boolean;
   locationUnsupportedReason?: string;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
   onAuthRequired: () => void;
@@ -59,6 +61,8 @@ export function AnnotationPanel({
   capabilityCheckedAt,
   downloaded,
   openingReader,
+  readOnly = false,
+  canInteract = () => true,
   locationUnsupportedReason,
   onLocate,
   onAuthRequired,
@@ -80,11 +84,17 @@ export function AnnotationPanel({
   const [saveError, setSaveError] = useState('');
   const draftClientIdRef = useRef('');
   const loadSequenceRef = useRef(0);
+  const mountedRef = useRef(false);
+  const saveSequenceRef = useRef(0);
   const capabilityRef = useRef({ status: capabilityStatus, checkedAt: capabilityCheckedAt });
 
   useEffect(() => {
     capabilityRef.current = { status: capabilityStatus, checkedAt: capabilityCheckedAt };
   }, [capabilityCheckedAt, capabilityStatus]);
+
+  useEffect(() => {
+    if (readOnly) saveSequenceRef.current += 1;
+  }, [readOnly]);
 
   const setCapability = useCallback((status: AnnotationCapabilityStatus) => {
     const checkedAt = Date.now();
@@ -141,8 +151,11 @@ export function AnnotationPanel({
   }, [bookId, onAuthRequired, serverUrl, setCapability]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void load();
     return () => {
+      mountedRef.current = false;
+      saveSequenceRef.current += 1;
       loadSequenceRef.current += 1;
     };
   }, [load]);
@@ -165,19 +178,27 @@ export function AnnotationPanel({
 
   const saveNote = async () => {
     const trimmedContent = content.trim();
-    if (!trimmedContent || saving) return;
+    if (!trimmedContent || saving || readOnly || !canInteract() || loadState !== 'ready') return;
     if (!draftClientIdRef.current) draftClientIdRef.current = newMokeAnnotationClientId();
 
     setSaving(true);
     setSaveError('');
+    const sequence = saveSequenceRef.current;
+    const canFinish = () => mountedRef.current && sequence === saveSequenceRef.current && canInteract();
     try {
-      const result = await upsertBookAnnotation(request, serverUrl, bookId, {
+      const result = await upsertBookAnnotation((url, init) => {
+        // Re-check each async retry as well as the initial submit. The parent
+        // gate closes synchronously on pageshow, before React renders readOnly.
+        if (!canFinish()) throw new Error('书籍信息正在更新，请稍后重试。');
+        return request(url, init);
+      }, serverUrl, bookId, {
         annotation_type: 'note',
         client_id: draftClientIdRef.current,
         chapter: chapter.trim(),
         content: trimmedContent,
         is_private: isPrivate,
       });
+      if (!canFinish()) return;
       // Invalidate a GET that started before this POST. Otherwise its stale
       // snapshot could arrive last and erase the newly saved note from the UI.
       loadSequenceRef.current += 1;
@@ -194,6 +215,7 @@ export function AnnotationPanel({
       setShowComposer(false);
       draftClientIdRef.current = '';
     } catch (error) {
+      if (!canFinish()) return;
       if (error instanceof MokeApiError && error.code === 'user.need_login') {
         setLoadState('auth-required');
         onAuthRequired();
@@ -201,7 +223,7 @@ export function AnnotationPanel({
       }
       setSaveError(getErrorMessage(error, '笔记保存失败；草稿已保留，可直接重试。'));
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   };
 
@@ -218,7 +240,8 @@ export function AnnotationPanel({
         {loadState === 'ready' && (
           <button
             type="button"
-            onClick={() => setShowComposer((value) => !value)}
+            disabled={readOnly}
+            onClick={() => { if (!readOnly && canInteract()) setShowComposer((value) => !value); }}
             className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-primary/25 bg-primary/10 px-3 text-xs font-semibold text-primary transition hover:bg-primary/15"
           >
             {showComposer ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
@@ -232,6 +255,7 @@ export function AnnotationPanel({
           <label className="block text-xs font-medium text-foreground">
             章节（可选）
             <input
+              disabled={readOnly}
               value={chapter}
               onChange={(event) => setChapter(event.target.value)}
               maxLength={500}
@@ -242,6 +266,7 @@ export function AnnotationPanel({
           <label className="mt-3 block text-xs font-medium text-foreground">
             笔记
             <textarea
+              disabled={readOnly}
               value={content}
               onChange={(event) => setContent(event.target.value)}
               rows={3}
@@ -252,6 +277,7 @@ export function AnnotationPanel({
           <label className="mt-3 flex items-center gap-2 text-xs text-foreground">
             <input
               type="checkbox"
+              disabled={readOnly}
               checked={isPrivate}
               onChange={(event) => setIsPrivate(event.target.checked)}
               className="h-4 w-4 rounded border-border"
@@ -262,7 +288,7 @@ export function AnnotationPanel({
           <button
             type="button"
             onClick={saveNote}
-            disabled={!content.trim() || saving}
+            disabled={readOnly || !content.trim() || saving}
             className="mt-4 inline-flex h-9 items-center gap-2 rounded-xl bg-primary px-4 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
           >
             {saving && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
@@ -326,8 +352,9 @@ export function AnnotationPanel({
                 annotation={annotation}
                 downloaded={downloaded}
                 openingReader={openingReader}
+                readOnly={readOnly}
                 locationUnsupportedReason={locationUnsupportedReason}
-                onLocate={onLocate}
+                onLocate={async (annotation) => { if (!readOnly && canInteract()) await onLocate(annotation); }}
               />
             ))}
           </div>
@@ -341,12 +368,14 @@ function AnnotationCard({
   annotation,
   downloaded,
   openingReader,
+  readOnly,
   locationUnsupportedReason,
   onLocate,
 }: {
   annotation: BookAnnotation;
   downloaded: boolean;
   openingReader: boolean;
+  readOnly: boolean;
   locationUnsupportedReason?: string;
   onLocate: (annotation: BookAnnotation) => Promise<void>;
 }) {
@@ -357,7 +386,7 @@ function AnnotationCard({
     annotation.sources.map((source) => source.source_position).filter((value): value is string => Boolean(value)),
   ));
   const canLocate = hasReadestAnnotationLocation(annotation);
-  const locateDisabled = Boolean(locationUnsupportedReason) || !downloaded || openingReader;
+  const locateDisabled = readOnly || Boolean(locationUnsupportedReason) || !downloaded || openingReader;
 
   return (
     <article className="rounded-2xl border border-border/60 bg-background/65 p-4">

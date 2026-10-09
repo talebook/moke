@@ -83,10 +83,18 @@ export async function installReaderCancellationMock(page, {
       }
       if (delay === 'platform' && (command === 'moke_runtime_platform' || command === 'plugin:os|platform')
         && location.pathname === (entry === 'startup' ? '/' : '/detail')) {
-        // Providers also probe the runtime; wait for the actual opener before
-        // dispatching a lifecycle event, instead of cancelling during hydration.
-        const stack = new Error().stack || '';
-        if (stack.includes('navigateFullDocument') || stack.includes('openOfflineBook')) race.openerPending = key;
+        // Qualification/providers must settle before the opener gate. Observe
+        // real UI stages rather than function names erased by production builds.
+        // React may not have painted the stage set immediately before IPC yet.
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const stage = document.querySelector('[data-testid="app-startup-screen"]')?.getAttribute('data-progress-message');
+        const preparing = entry === 'startup'
+          ? ['正在读取阅读记录…', '正在打开上次阅读的书籍…'].includes(stage)
+          : !location.search.includes('continue=1') && [
+            '正在恢复阅读进度…', '正在读取书籍并恢复阅读进度…',
+          ].includes(stage);
+        if (!preparing) return invoke(command, args);
+        race.openerPending = key;
         return hold(key);
       }
       return invoke(command, args);

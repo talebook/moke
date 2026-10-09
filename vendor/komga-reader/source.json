@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/hehetoshang/komga-reader",
+  "commit": "d49a2e808601c7fc9b892a6c019a92eed017fd16",
+  "archiveUrl": "https://codeload.github.com/hehetoshang/komga-reader/tar.gz/d49a2e808601c7fc9b892a6c019a92eed017fd16",
+  "archiveSha256": "362715fddcd5c86e9ad9990de58ed883622309a4de87badf7ee046e6ef64334d",
+  "lockSha256": "36281cce621bf675ed467b3bf523182bf52f659c3999b351c5396dc37ce8c568",
+  "componentSha256": "cc56f4749a6869cf2681b3971601fd5e0864d0ad8a6af7230b6b5f60b20a8b9c",
+  "patchSha256": "e2089112320202a8d134181b2a3499f809e5351bd2c767bed9864d58d0176c67",
+  "versionSha256": "c4099a3997306ebf2617d0c51e988f8681c25ee393351210348d33fbc19c48a1",
+  "baseline": {
+    "komga-reader.umd.js": "d5a63c3cd75fcea2b668850d77ac4439699db4db0b74d6e9936066608627322f",
+    "style.css": "fb393c970bcc3c1aabd9c5ec3b89c24ae5782264390a5d08eeae39d8bcc77939"
+  },
+  "patched": {
+    "komga-reader.umd.js": "972390824f297dbd2ed91dc72ffe41a17032b6b32df84b42b07e4afca64a1631",
+    "style.css": "0d230a3d2f590ee4a09041a9efe3d51504003bef67cdefd23141db52eafdf76d"
+  },
+  "notices": {
+    "LICENSE": "fda1a99286c0313b12852947dc3181895f6885ce4f5c3f1da46e2e75a6af8497",
+    "NOTICE": "e3b4ce9b51f0cc1720d2581a649fb3552956ff4590399eb94b0a92d6cf39b63c",
+    "THIRD_PARTY_NOTICES": "81bc2d14d6fd87c245ea3d472b78c1a10ac0b47c933763e0dbb7e7a060b87003"
+  }
+}

@@ -1,15 +1,18 @@
 import { test, expect } from '@playwright/test';
+import { waitForComicScroll } from './helpers/comic-scroll.mjs';
 
 const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
-async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'comic', format = 'cbz', failPage = false, denied = false, preference = 'system', pageCount = 4, mixedSizes = false, imageBytes = 0, nativeDelay = 0, annotations = false, searchDownload = false } = {}) {
-  await page.addInitScript(({ serverUrl, bookId, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload }) => {
+async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'comic', format = 'cbz', failPage = false, denied = false, preference = 'system', pageCount = 4, mixedSizes = false, imageBytes = 0, nativeDelay = 0, annotations = false, searchDownload = false, shortPages = false, eink = false } = {}) {
+  await page.addInitScript(({ serverUrl, bookId, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink }) => {
     const requests = new Map();
     const responseBodies = new Map();
     const httpRequests = [];
     const commands = [];
+    const events = [];
+    const posts = [];
     let progress = { kind: 'comic', version: 1, pageId: 'p1', pageIndex: 1, percent: 50, completed: false };
     const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 1100;
     const ctx = canvas.getContext('2d');
@@ -22,12 +25,15 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
       ctx.fillStyle = '#193c4b'; ctx.font = '28px sans-serif'; ctx.fillText('Panel ' + (i + 1), 90, 240 + i * 280);
     }
     const png = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
-    const pageDimensions = index => mixedSizes && index % 2 ? { width: 900, height: 600 } : { width: 800, height: 1100 };
+    const pageDimensions = index => shortPages ? { width: 900, height: 160 } : mixedSizes && index % 2 ? { width: 900, height: 600 } : { width: 800, height: 1100 };
     const landscape = document.createElement('canvas'); landscape.width = 900; landscape.height = 600;
     landscape.getContext('2d').fillRect(0, 0, 900, 600);
     const landscapePng = Uint8Array.from(atob(landscape.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
+    const short = document.createElement('canvas'); short.width = 900; short.height = 160;
+    short.getContext('2d').fillRect(0, 0, 900, 160);
+    const shortPng = Uint8Array.from(atob(short.toDataURL('image/png').split(',')[1]), c => c.charCodeAt(0));
     const imageFor = index => {
-      const bytes = mixedSizes && index % 2 ? landscapePng : png;
+      const bytes = shortPages ? shortPng : mixedSizes && index % 2 ? landscapePng : png;
       if (!imageBytes) return bytes;
       const padded = new Uint8Array(imageBytes); padded.set(bytes); return padded;
     };
@@ -90,6 +96,7 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
       },
       invoke: async (command, args = {}) => {
         commands.push(command);
+        events.push({ time: performance.now(), command, rid: args.rid, url: args.clientConfig?.url, method: args.clientConfig?.method });
         if (command === 'moke_build_info') return { channel: 'preview', previewCompiled: true };
         if (command === 'moke_preview_entitlement_status') {
           const expiresAt = Math.floor(Date.now() / 1000) + 600;
@@ -107,7 +114,9 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
           const request = requests.get(args.rid);
           const response = jsonResponse(request?.url || `${serverUrl}/api/book/${bookId}`);
           if (request.url.includes('/comic/progress') && request.method === 'POST') {
-            progress = JSON.parse(new TextDecoder().decode(new Uint8Array(request.data))).progress;
+            const body = JSON.parse(new TextDecoder().decode(new Uint8Array(request.data)));
+            posts.push({ time: performance.now(), url: request.url, method: request.method, body });
+            progress = body.progress;
             window.__COMIC_PROGRESS__ = progress;
           }
           if (/comic\/pages\/\d+/.test(request.url)) {
@@ -119,6 +128,7 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
             response.body = epubBytes;
           }
           const responseRid = nextRid++;
+          events.push({ time: performance.now(), responseRid, url: request.url, status: response.status });
           responseBodies.set(responseRid, { body: response.body, sent: false });
           return {
             status: response.status,
@@ -171,7 +181,9 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__MOKE_TEST_HTTP_REQUESTS__ = httpRequests;
     window.__MOKE_COMMANDS__ = commands;
-    if (!localStorage.getItem('moke-settings')) localStorage.setItem('moke-settings', JSON.stringify({ state: { readerPreference: preference }, version: 0 }));
+    window.__COMIC_HTTP_EVENTS__ = events;
+    window.__COMIC_POSTS__ = posts;
+    if (!localStorage.getItem('moke-settings')) localStorage.setItem('moke-settings', JSON.stringify({ state: { readerPreference: preference, eink }, version: 0 }));
 
     localStorage.setItem('moke-privacy-consent', '2026-08-14');
     if (!localStorage.getItem('moke-server-storage')) localStorage.setItem('moke-server-storage', JSON.stringify({
@@ -198,9 +210,32 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
       },
       version: 0,
     }));
-  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload });
+  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink });
 }
 
+test.beforeEach(async ({ page }) => {
+  page.comicDiagnostics = { errors: [], console: [], failed: [] };
+  page.on('pageerror', error => page.comicDiagnostics.errors.push(error.message));
+  page.on('console', message => {
+    if (['error', 'warning'].includes(message.type())) page.comicDiagnostics.console.push({ type: message.type(), text: message.text() });
+  });
+  page.on('requestfailed', request => page.comicDiagnostics.failed.push({ url: request.url(), error: request.failure() }));
+});
+
+test.afterEach(async ({ page }, testInfo) => {
+  // Page creation can fail before beforeEach runs. Preserve that first error
+  // instead of masking it with another exception from the diagnostic hook.
+  if (!page || page.isClosed()) {
+    await testInfo.attach('comic-transport', { body: JSON.stringify({ diagnosticError: 'Page unavailable after fixture failure or closure' }), contentType: 'application/json' });
+    return;
+  }
+  const state = await page.evaluate(() => ({ url: location.href, text: document.body.innerText,
+    count: document.querySelector('.kr-page-count')?.textContent,
+    events: window.__COMIC_HTTP_EVENTS__, posts: window.__COMIC_POSTS__, progress: window.__COMIC_PROGRESS__,
+  })).catch(error => ({ diagnosticError: error.message }));
+  await testInfo.attach('comic-transport', { body: JSON.stringify({ ...state, ...page.comicDiagnostics }), contentType: 'application/json' });
+  if (testInfo.status !== testInfo.expectedStatus) await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true }).catch(() => {});
+});
 
 for (const width of [390, 1280]) {
   test(`comic renders, turns, restores, saves and exits at ${width}px`, async ({ page }, testInfo) => {
@@ -378,22 +413,293 @@ for (const width of [390, 1280]) {
     }
     await page.locator('.kr-reader').focus();
     await page.keyboard.press('Home');
+    const start = await waitForComicScroll(page, 'start');
+    expect(start.top).toBe(0);
     await expect(page.locator('.kr-page-count')).toHaveText('1 / 30');
     await page.keyboard.press('End');
+    const end = await waitForComicScroll(page, 'end');
+    expect(Math.abs(end.top - end.max)).toBeLessThanOrEqual(1);
+    await testInfo.attach('settled-scroll', { body: JSON.stringify({ start, end }), contentType: 'application/json' });
     await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
-    await expect.poll(() => page.evaluate(() => window.__COMIC_PROGRESS__?.pageIndex)).toBe(29);
+    await expect.poll(() => page.evaluate(() => window.__COMIC_PROGRESS__)).toMatchObject({ pageIndex: 29, percent: 100, completed: true });
+    expect(await page.evaluate(() => window.__COMIC_POSTS__.at(-1))).toMatchObject({
+      method: 'POST', url: `${SERVER_URL}/api/book/42/comic/progress`,
+      body: { progress: { pageIndex: 29, percent: 100, completed: true } },
+    });
     const after = await geometry();
     expect(after.some(r => r.src.startsWith('data:image/svg+xml'))).toBe(true);
     expect(after.every((r, i) => Math.abs(r.height / r.width - (i % 2 ? 600 / 900 : 1100 / 800)) < 0.005)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`comic-webtoon-${width}.png`) });
     await page.getByRole('button', { name: 'Exit reader' }).click();
+    expect(await page.evaluate(() => window.__COMIC_PROGRESS__)).toMatchObject({ pageIndex: 29, percent: 100, completed: true });
     await page.getByTestId('online-read-action').click();
     await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
     await page.getByRole('button', { name: 'Open reader settings', exact: true }).click();
     await page.locator('.kr-settings select').first().selectOption('webtoon');
     await page.getByRole('button', { name: 'Close reader settings' }).click();
-    await expect.poll(() => page.evaluate(() => window.__COMIC_PROGRESS__?.pageIndex)).toBe(29);
+    await waitForComicScroll(page, 'end');
+    await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+    await expect.poll(() => page.evaluate(() => window.__COMIC_PROGRESS__)).toMatchObject({ pageIndex: 29, percent: 100, completed: true });
     await page.getByRole('button', { name: 'Exit reader' }).click();
+  });
+}
+
+async function enableWebtoon(page, animations = true) {
+  await page.getByRole('button', { name: 'Open reader settings', exact: true }).click();
+  await page.locator('.kr-settings select').first().selectOption('webtoon');
+  await page.getByRole('checkbox', { name: 'Animate transitions' }).setChecked(animations);
+  await page.getByRole('button', { name: 'Close reader settings' }).click();
+}
+
+async function pageScrollTop(page, index) {
+  return page.locator('.kr-continuous').evaluate((scroller, index) => {
+    const image = scroller.querySelectorAll('img')[index];
+    return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight,
+      image.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop));
+  }, index);
+}
+
+for (const change of ['expand', 'shrink', 'rotate-wide', 'rotate-tall', 'image-grow', 'image-shrink']) {
+  test(`webtoon follows its logical End target through ${change}`, async ({ page }, testInfo) => {
+    const width = change === 'expand' || change === 'rotate-tall' ? 390 : 1280;
+    const height = change === 'rotate-tall' ? 1280 : 900;
+    await page.setViewportSize({ width, height });
+    await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
+    await page.goto(`${BASE_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click();
+    await enableWebtoon(page);
+    await page.locator('.kr-reader').focus();
+    await page.keyboard.press('Home');
+    await waitForComicScroll(page, 'start');
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.kr-continuous');
+      return el.scrollTop > 100 && el.scrollTop < el.scrollHeight - el.clientHeight - 100;
+    });
+    const inFlight = await page.locator('.kr-continuous').evaluate(el => ({ top: el.scrollTop, max: el.scrollHeight - el.clientHeight }));
+    if (change.startsWith('image-')) {
+      // Late image geometry affects every preceding page, including recycled
+      // placeholders, while the final page stays a short landscape image.
+      await page.locator('.kr-continuous img').evaluateAll((images, grow) => {
+        for (const image of images.slice(0, -1)) image.style.height = `${image.height * (grow ? 1.5 : 0.5)}px`;
+      }, change === 'image-grow');
+    } else {
+      await page.setViewportSize(change === 'expand' ? { width: 1280, height: 900 }
+        : change === 'shrink' ? { width: 390, height: 900 }
+          : change === 'rotate-wide' ? { width: 900, height: 1280 } : { width: 1280, height: 390 });
+    }
+    // Inspect the actual stopped position first so the old resource yields a
+    // useful assertion failure instead of hanging forever waiting for End.
+    const end = await waitForComicScroll(page, 'current');
+    // In a short landscape viewport the final image can be taller than the
+    // viewport: its reachable page-start (not the image bottom) is the target.
+    const expectedTarget = await pageScrollTop(page, 29);
+    await testInfo.attach('dynamic-target-geometry', { body: JSON.stringify({ change, inFlight, end, expectedTarget }), contentType: 'application/json' });
+    expect(Math.abs(end.top - expectedTarget)).toBeLessThanOrEqual(1);
+    await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageId: 'p29', pageIndex: 29, percent: 100, completed: true });
+    // Both a programmatic scroll and real wheel movement must update the page
+    // and produce a NEW final POST after the 350ms write debounce.
+    const beforeTop = await page.evaluate(() => window.__COMIC_POSTS__.length);
+    await page.locator('.kr-continuous').evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+    await waitForComicScroll(page, 'start');
+    await expect(page.locator('.kr-page-count')).toHaveText('1 / 30');
+    await expect.poll(() => page.evaluate(() => ({ count: window.__COMIC_POSTS__.length, progress: window.__COMIC_POSTS__.at(-1)?.body.progress }))).toMatchObject({ count: beforeTop + 1, progress: { pageIndex: 0, completed: false } });
+    await page.locator('.kr-reader').focus(); await page.keyboard.press('End');
+    await waitForComicScroll(page, await pageScrollTop(page, 29));
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress.completed)).toBe(true);
+    const beforeWheel = await page.evaluate(() => window.__COMIC_POSTS__.length);
+    await page.mouse.move(100, 200); await page.mouse.wheel(0, -2400);
+    const away = await waitForComicScroll(page, 'current');
+    expect(away.max - away.top).toBeGreaterThan(1000);
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.length)).toBeGreaterThan(beforeWheel);
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress.completed)).toBe(false);
+    const saved = await page.evaluate(() => window.__COMIC_POSTS__.at(-1).body.progress);
+    await page.getByRole('button', { name: 'Exit reader' }).click();
+    await expect(page.locator('.kr-reader')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__COMIC_POSTS__.at(-1).body.progress)).toEqual(saved);
+    await page.getByTestId('online-read-action').click();
+    await expect(page.locator('.kr-page-count')).toHaveText(`${saved.pageIndex + 1} / 30`);
+  });
+}
+
+for (const width of [390, 1280]) {
+  test(`webtoon follows a programmatic interior page through resize from ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
+    await page.goto(`${BASE_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click(); await enableWebtoon(page);
+    await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
+    await waitForComicScroll(page, 'start');
+    await page.locator('.kr-toolbar--bottom input[type=range]').evaluate(input => {
+      input.value = '20'; input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForFunction(() => document.querySelector('.kr-continuous').scrollTop > 100);
+    await page.setViewportSize({ width: width === 390 ? 1280 : 390, height: 900 });
+    const stopped = await waitForComicScroll(page, 'current');
+    expect(Math.abs(stopped.top - await pageScrollTop(page, 19))).toBeLessThanOrEqual(1);
+    await expect(page.locator('.kr-page-count')).toHaveText('20 / 30');
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageIndex: 19, completed: false });
+    await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
+    await waitForComicScroll(page, 'start');
+    await expect(page.locator('.kr-page-count')).toHaveText('1 / 30');
+  });
+
+  for (const mode of ['normal', 'reduced-motion', 'eink', 'no-animation']) {
+    test(`webtoon manual boundaries and rapid explicit jumps at ${width}px (${mode})`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 });
+      if (mode === 'reduced-motion') await page.emulateMedia({ reducedMotion: 'reduce' });
+      await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true, eink: mode === 'eink' });
+      await page.goto(`${BASE_URL}/detail?id=42`);
+      await page.getByTestId('online-read-action').click();
+      await enableWebtoon(page, mode !== 'eink' && mode !== 'no-animation');
+      await page.locator('.kr-continuous img').nth(29).waitFor();
+      await page.locator('.kr-reader').focus();
+      await page.keyboard.press('Home');
+      await waitForComicScroll(page, 'start');
+      await expect(page.locator('.kr-page-count')).toHaveText('1 / 30');
+      // Real wheel input cancels programmatic selection and reaches the boundary.
+      await page.mouse.move(width / 2, 450);
+      await page.mouse.wheel(0, 100000);
+      const bottom = await waitForComicScroll(page, 'end');
+      await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+      await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageIndex: 29, percent: 100, completed: true });
+      // Move beyond the last page's center at both viewport sizes.
+      await page.mouse.wheel(0, -1200);
+      const away = await waitForComicScroll(page, 'current');
+      expect(away.top).toBeLessThan(away.max - 1);
+      await expect(page.locator('.kr-page-count')).not.toHaveText('30 / 30');
+      await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress.completed)).toBe(false);
+      await page.locator('.kr-reader').focus();
+      await page.keyboard.press('End');
+      await page.keyboard.press('Home');
+      await page.keyboard.press('End');
+      // A short interior page must keep its explicit target after scrolling.
+      await page.locator('.kr-toolbar--bottom input[type=range]').evaluate(input => {
+        input.value = '8'; input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const jump = await waitForComicScroll(page, await pageScrollTop(page, 7));
+      await expect(page.locator('.kr-page-count')).toHaveText('8 / 30');
+      await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress.pageIndex)).toBe(7);
+      if (mode === 'normal') {
+        await page.locator('.kr-reader').focus();
+        await page.keyboard.press('Home');
+        await waitForComicScroll(page, 'start');
+        await page.keyboard.press('End');
+        await page.waitForFunction(() => {
+          const el = document.querySelector('.kr-continuous');
+          return el.scrollTop > 100 && el.scrollTop < el.scrollHeight - el.clientHeight - 100;
+        });
+        await page.mouse.wheel(0, -100);
+        await waitForComicScroll(page, 'current');
+        await expect(page.locator('.kr-page-count')).not.toHaveText('30 / 30');
+      }
+      await testInfo.attach('manual-and-jump-geometry', { body: JSON.stringify({ mode, width, bottom, away, jump }), contentType: 'application/json' });
+      // Exit while a jump is pending: the logical target is saved, old frames
+      // cannot mutate it after destruction, and the next instance restores it.
+      await page.locator('.kr-reader').focus();
+      await page.keyboard.press('End');
+      await page.getByRole('button', { name: 'Exit reader' }).click();
+      await expect(page.locator('.kr-reader')).toHaveCount(0);
+      await expect(page.getByTestId('online-read-action')).toBeFocused();
+      expect(await page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageIndex: 29, completed: true });
+      await page.getByTestId('online-read-action').click();
+      await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+      await enableWebtoon(page, mode !== 'eink' && mode !== 'no-animation');
+      await waitForComicScroll(page, 'end');
+      await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+      await page.evaluate(() => window.dispatchEvent(new Event('moke:native-back')));
+      await expect(page.locator('.kr-reader')).toHaveCount(0);
+      expect(await page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageIndex: 29, completed: true });
+    });
+  }
+}
+
+for (const input of ['pointer', 'touch', 'mode-switch']) {
+  test(`webtoon releases an in-flight jump on ${input}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
+    await page.goto(`${BASE_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click(); await enableWebtoon(page);
+    await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
+    await waitForComicScroll(page, 'start');
+    // Prepare the transport before starting the animation. A prior scroll
+    // sample alone cannot prove the browser received the tap during the jump.
+    const touchSession = input === 'touch' ? await page.context().newCDPSession(page) : null;
+    if (touchSession) await page.evaluate(() => {
+      document.addEventListener('touchstart', event => {
+        const scroller = document.querySelector('.kr-continuous');
+        window.__COMIC_TOUCH_RECEIPT__ = {
+          time: performance.now(), trusted: event.isTrusted,
+          inside: !!event.target.closest('.kr-continuous'),
+          top: scroller.scrollTop, max: scroller.scrollHeight - scroller.clientHeight,
+        };
+      }, { capture: true, once: true });
+    });
+    await page.keyboard.press('End');
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.kr-continuous');
+      return el.scrollTop > 100 && el.scrollTop < el.scrollHeight - el.clientHeight - 100;
+    });
+    if (input === 'pointer') {
+      await page.mouse.move(100, 200); await page.mouse.down(); await page.mouse.up();
+    } else if (input === 'touch') {
+      try {
+        await touchSession.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 100, y: 200 }] });
+        await touchSession.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      } finally { await touchSession.detach(); }
+      const receipt = await page.evaluate(() => window.__COMIC_TOUCH_RECEIPT__);
+      await testInfo.attach('touch-receipt', { body: JSON.stringify(receipt ?? null), contentType: 'application/json' });
+      expect(receipt, 'a trusted touchstart must reach the moving scroller').toMatchObject({ trusted: true, inside: true });
+      expect(receipt.top, 'touchstart must arrive after the jump begins').toBeGreaterThan(100);
+      expect(receipt.top, 'touchstart must arrive before the jump reaches End').toBeLessThan(receipt.max - 100);
+    } else {
+      await page.getByRole('button', { name: 'Open reader settings', exact: true }).click();
+      await page.locator('.kr-settings select').first().selectOption('ltr');
+      await expect(page.locator('.kr-continuous')).toHaveCount(0);
+      await page.locator('.kr-settings select').first().selectOption('webtoon');
+      await page.getByRole('button', { name: 'Close reader settings' }).click();
+      await waitForComicScroll(page, 'end');
+      await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
+    }
+    await waitForComicScroll(page, 'current');
+    // A real tap also hides the toolbar. Check the persistent live page status
+    // and POST BEFORE another click can cancel a still-pending navigation.
+    await expect(page.locator('.kr-reader > p')).not.toHaveText('Page 30 of 30');
+    await expect.poll(() => page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress.completed)).toBe(false);
+    if (!await page.locator('.kr-page-count').isVisible()) await page.getByRole('button', { name: 'Toggle reader controls', exact: true }).click();
+    await expect(page.locator('.kr-page-count')).not.toHaveText('30 / 30');
+    // Subsequent input must remain usable after cancellation.
+    await page.locator('.kr-reader').focus(); await page.keyboard.press('End');
+    await waitForComicScroll(page, 'end');
+    await expect(page.locator('.kr-page-count')).toHaveText('30 / 30');
+    await page.getByRole('button', { name: 'Exit reader' }).click();
+    await expect(page.locator('.kr-reader')).toHaveCount(0);
+  });
+}
+
+for (const pageCount of [1, 2]) {
+  test(`webtoon preserves explicit selection in a short ${pageCount}-page document`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 });
+    await installTauriHttpMock(page, { pageCount, shortPages: true });
+    await page.goto(`${BASE_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click();
+    await enableWebtoon(page);
+    await page.locator('.kr-reader').focus();
+    await page.keyboard.press('Home');
+    const start = await waitForComicScroll(page, 'start');
+    expect(start.max).toBe(0);
+    await expect(page.locator('.kr-page-count')).toHaveText(`1 / ${pageCount}`);
+    await page.keyboard.press('End');
+    await waitForComicScroll(page, 'end');
+    await expect(page.locator('.kr-page-count')).toHaveText(`${pageCount} / ${pageCount}`);
+    await page.getByRole('button', { name: 'Exit reader' }).click();
+    // Clicking starts the asynchronous exit flush. Destruction confirms that
+    // the save finished before inspecting its real transport response.
+    await expect(page.locator('.kr-reader')).toHaveCount(0);
+    expect(await page.evaluate(() => window.__COMIC_POSTS__.at(-1)?.body.progress)).toMatchObject({ pageIndex: pageCount - 1, percent: 100, completed: true });
+    await page.getByTestId('online-read-action').click();
+    await expect(page.locator('.kr-page-count')).toHaveText(`${pageCount} / ${pageCount}`);
   });
 }
 

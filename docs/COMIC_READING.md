@@ -8,7 +8,21 @@ Moke 将 Talebook 同款 komga-reader 的独立浏览器产物随应用打包，
 - Talebook 参考基线 `ce9c33a4494d54e0d9777462f2f060a0d7825870`；`webserver/handlers/comic.py`、`webserver/services/comic_archive.py` 是接口依据。
 - Talebook PR #1012（TB-129 / TB-131）已合并。komga-reader PR #1、#2 均已合并，静态产物固定在 Talebook 的 `komga-reader-version.txt` 所指 `d49a2e808601c7fc9b892a6c019a92eed017fd16`，并非追随上游最新版本。
 - TB-200 的 Moke PR #127、#128 和 TB-205 的 #129 均已合并；平台 PR 缓存曾将 #128 标为 open，已通过 GitHub 实时状态及基线代码纠正。
-- `public/vendor/komga-reader/` 的 UMD、CSS、LICENSE、NOTICE、THIRD_PARTY_NOTICES 原样取自该 Talebook 基线；UMD SHA-256：`d5a63c3cd75fcea2b668850d77ac4439699db4db0b74d6e9936066608627322f`。MIT，保留 Komga、独立提取项目及 Vue 等署名。本次不修改阅读器上游或 Readest 子模块。
+- `public/vendor/komga-reader/` 原始 UMD、CSS、LICENSE、NOTICE、THIRD_PARTY_NOTICES 取自该 Talebook 基线；原 UMD SHA-256：`d5a63c3cd75fcea2b668850d77ac4439699db4db0b74d6e9936066608627322f`。MIT，保留 Komga、独立提取项目及 Vue 等署名。TB-323 在同一固定源码上应用 Moke 本地补丁后重新生成 UMD/CSS；上游版本、许可及 Readest 子模块不变。
+
+### Moke 连续滚动补丁（TB-323 / M-004）
+
+`vendor/komga-reader/continuous-scroll.patch` 只修改固定版本的 `src/components/ComicReader.vue`：自然滚动首尾优先选择首/末页；程序化跳页期间保留逻辑页目标，每帧按当前图片位置与可达范围重算坐标（TB-333 / M-005）。视口旋转、宽度变化或图片几何变化时取消旧平滑目的地并即时对齐新位置，到达实际夹取位置且连续两帧稳定后解除保护；最终排队滚动事件不覆盖目标，离开该位置即恢复手动选页。滚轮、触摸或指针介入会取消平滑跳页并立即重算可见页码；快速跳页、模式切换与销毁使旧任务失效。完全放得下的短文档保留显式选页，减少动态效果及墨水屏使用即时滚动。宿主进度计算和退出前保存协议不变。
+
+源码归属仍为 Moke 内的本地补丁；没有修改独立上游仓库，也没有手工编辑压缩产物。`vendor/komga-reader/source.json` 固定源码归档、原组件、上游 npm lockfile、补丁、原始/新资源及许可的 SHA-256。构建脚本先用上游冻结依赖重建并验证原资源逐字节一致，再校验/应用可读源码补丁、重建并验证新产物后复制。CSS 变化仅为 Vue 组件源码变化生成的新作用域标识。
+
+```bash
+# 下载 source.json 中 archiveUrl 指定的固定归档到自己的构建空间。
+node scripts/build-komga-reader.mjs --archive ./komga-d49a2.tar.gz --workdir ./own-komga-build
+node scripts/build-komga-reader.mjs --check
+```
+
+脚本需要 Node、npm、tar、git；冻结安装使用上游 `npm ci --ignore-scripts`，不执行上游 prepare。普通 Moke 构建使用已提交资源，不下载第三方源码；`pnpm test` 同时检查资源、补丁与许可校验。任何校验不符均停止，升级来源必须显式更新记录并重新评审。
 
 ## 类型与格式
 

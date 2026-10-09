@@ -1,0 +1,123 @@
+--- a/src/components/ComicReader.vue
++++ b/src/components/ComicReader.vue
+@@ -114,6 +114,9 @@
+           :class="`kr-continuous--${settings.continuousScale}`"
+           :style="continuousStyle"
+           @scroll.passive="onContinuousScroll"
++          @wheel.passive="interruptContinuousNavigation"
++          @pointerdown.passive="interruptContinuousNavigation"
++          @touchstart.passive="interruptContinuousNavigation"
+         >
+           <img
+             v-for="(page, index) in pages"
+@@ -314,6 +317,11 @@
+ const reportedImageErrors = new Set<ReaderPageId>()
+ let lastValidationError = ''
+ let scrollFrame = 0
++let navigationFrame = 0
++let navigationRevision = 0
++let navigationPending = false
++let settledTop: number | undefined
++let unmounted = false
+ 
+ const continuous = computed(() => settings.direction === 'webtoon')
+ const spreads = computed(() => buildSpreads(pages.value, settings.layout))
+@@ -376,6 +384,8 @@
+ })
+ 
+ onBeforeUnmount(() => {
++  unmounted = true
++  cancelContinuousNavigation()
+   if (scrollFrame) cancelAnimationFrame(scrollFrame)
+ })
+ 
+@@ -523,7 +533,17 @@
+   if (scrollFrame) cancelAnimationFrame(scrollFrame)
+   scrollFrame = requestAnimationFrame(() => {
+     const scroller = continuousScroller.value
+-    if (!scroller) return
++    if (!scroller || navigationPending || unmounted) return
++    // A final queued scroll event must not replace an explicit jump target.
++    // Moving away from that position restores normal manual page selection.
++    if (settledTop !== undefined && Math.abs(scroller.scrollTop - settledTop) <= 1) return
++    settledTop = undefined
++    const maxScroll = scroller.scrollHeight - scroller.clientHeight
++    // A document that fits entirely has no distinct start/end scroll boundary.
++    // Preserve its explicit page selection (including Home/End and single pages).
++    if (maxScroll <= 1) return
++    if (scroller.scrollTop <= 1) { goTo(1, false); return }
++    if (maxScroll - scroller.scrollTop <= 1) { goTo(pages.value.length, false); return }
+     const center = scroller.getBoundingClientRect().top + scroller.clientHeight / 2
+     const images = Array.from(scroller.querySelectorAll<HTMLImageElement>('img[data-page-index]'))
+     let nearestIndex = currentPage.value - 1
+@@ -541,10 +561,67 @@
+ }
+ 
+ async function scrollToCurrentPage(): Promise<void> {
+-  if (!continuous.value) return
++  cancelContinuousNavigation()
++  if (!continuous.value || unmounted) return
++  const revision = navigationRevision
++  const page = currentPage.value
++  navigationPending = true
+   await nextTick()
+-  const target = continuousScroller.value?.querySelector<HTMLElement>(`#${pageElementId(currentPage.value - 1)}`)
+-  target?.scrollIntoView?.({ block: 'start', behavior: settings.animations ? 'smooth' : 'auto' })
++  if (revision !== navigationRevision || unmounted) return
++  const scroller = continuousScroller.value
++  if (!scroller) { cancelContinuousNavigation(); return }
++  function destination(): number | undefined {
++    if (!scroller?.isConnected || continuousScroller.value !== scroller || !continuous.value) return
++    const target = scroller.querySelector<HTMLElement>(`#${pageElementId(page - 1)}`)
++    if (!target) return
++    // Keep the logical page, not a pixel snapshot: viewport rotation, image
++    // loading and placeholders can all change its position or the scroll limit.
++    return Math.max(0, Math.min(Math.max(0, scroller.scrollHeight - scroller.clientHeight),
++      target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop))
++  }
++  const initialTop = destination()
++  if (initialTop === undefined) { interruptContinuousNavigation(); return }
++  let top = initialTop
++  const animate = settings.animations && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
++  scroller.scrollTo({ top, behavior: animate ? 'smooth' : 'instant' })
++  let settledFrames = 0
++  function checkDestination(): void {
++    if (revision !== navigationRevision || unmounted) return
++    const nextTop = destination()
++    if (nextTop === undefined) { interruptContinuousNavigation(); return }
++    if (Math.abs(nextTop - top) > 1) {
++      top = nextTop
++      settledFrames = 0
++      // Cancel the browser's old smooth destination, then align to the newly
++      // reachable one. Repeated reflow cannot leave an obsolete target locked.
++      scroller!.scrollTo({ top, behavior: 'instant' })
++    }
++    settledFrames = Math.abs(scroller!.scrollTop - top) <= 1 ? settledFrames + 1 : 0
++    if (settledFrames >= 2) {
++      settledTop = scroller!.scrollTop
++      navigationPending = false
++      navigationFrame = 0
++    } else navigationFrame = requestAnimationFrame(checkDestination)
++  }
++  navigationFrame = requestAnimationFrame(checkDestination)
++}
++
++function cancelContinuousNavigation(): void {
++  navigationRevision++
++  if (navigationFrame) cancelAnimationFrame(navigationFrame)
++  navigationFrame = 0
++  navigationPending = false
++  settledTop = undefined
++}
++
++function interruptContinuousNavigation(): void {
++  const scroller = continuousScroller.value
++  const wasPending = navigationPending
++  cancelContinuousNavigation()
++  if (wasPending && scroller) scroller.scrollTo({ top: scroller.scrollTop, behavior: 'instant' })
++  // Aborting smooth scrolling need not emit another scroll event. Reconcile
++  // the visible page immediately even when the input itself cannot move it.
++  onContinuousScroll()
+ }
+ 
+ function pageElementId(index: number): string {

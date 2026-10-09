@@ -159,8 +159,16 @@ for (const change of ['account', 'fresh-link']) {
     await page.getByTestId('offline-read-primary-action').click();
     await expect(page.getByRole('heading', { name: '模拟阅读器', exact: true })).toBeVisible();
     if (change === 'account') {
-      await page.evaluate(() => sessionStorage.setItem('changed-account', 'true'));
+      await page.evaluate(() => {
+        sessionStorage.setItem('changed-account', 'true');
+        // bfcache restores the document without running addInitScript again.
+        // Change the actual persisted account while Reader is open as well.
+        const stored = JSON.parse(localStorage.getItem('moke-server-storage'));
+        stored.state.user.id = 2;
+        localStorage.setItem('moke-server-storage', JSON.stringify(stored));
+      });
       await page.goBack({ waitUntil: 'commit' });
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.user.id)).toBe(2);
     } else {
       await page.goto(APP_URL + detail, { waitUntil: 'commit' });
     }

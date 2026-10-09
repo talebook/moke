@@ -72,6 +72,7 @@ function DetailContent() {
   const [offlineRecord, setOfflineRecord] = useState<OfflineBookRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshingDetail, setRefreshingDetail] = useState(false);
+  const [returnRevision, setReturnRevision] = useState(0);
   const [readerStage, setReaderStage] = useState('正在打开上次阅读的书籍…');
   const returnSnapshotRef = useRef<{ key: string; snapshot: DetailReturnSnapshot | null } | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -128,6 +129,7 @@ function DetailContent() {
         : '下载后阅读';
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
   const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
+  const canUseDetailActions = useCallback(() => !loadBookPendingRef.current, []);
 
   useEffect(() => {
     if (!id) return;
@@ -143,9 +145,13 @@ function DetailContent() {
     // openers there as well as on route/book/session changes. Consuming continue
     // is deliberately absent from these lifecycle dependencies.
     const cancelReaderOpen = () => {
+      const wasOpening = Boolean(readerOpenControllerRef.current);
       readerOpenControllerRef.current?.abort();
       readerOpenControllerRef.current = null;
       openingReaderRef.current = false;
+      if (wasOpening) setContinuePending(false);
+      setOpeningReader(false);
+      setOpeningOnline(false);
     };
     const cancelForBack = () => {
       cancelReaderOpen();
@@ -164,7 +170,7 @@ function DetailContent() {
       window.removeEventListener('pagehide', cancelReaderOpen);
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
-  }, [continueSourceServer, id, offlineMode, serverUrl, user?.id]);
+  }, [continueSourceServer, id, offlineMode, serverUrl, user?.id, returnRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,7 +213,23 @@ function DetailContent() {
   useEffect(() => {
     // A WebView may restore the old document from its back/forward cache.
     // Its consumed launch URL now represents an ordinary book detail.
-    const restoreDetail = () => {
+    const restoreDetail = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        // React stays mounted in bfcache. Block handlers immediately, then
+        // rehydrate the current identity and run the normal cancellable load.
+        loadBookPendingRef.current = true;
+        readerOpenControllerRef.current?.abort();
+        readerOpenControllerRef.current = null;
+        openingReaderRef.current = false;
+        setOpeningReader(false);
+        setOpeningOnline(false);
+        setContinuePending(false);
+        void useServerStore.persist.rehydrate();
+        // Even the same identity has a new one-shot Reader return snapshot.
+        returnSnapshotRef.current = null;
+        setRefreshingDetail(true);
+        setReturnRevision((revision) => revision + 1);
+      }
       if (new URLSearchParams(window.location.search).get('continue') !== '1') {
         setContinuePending(false);
         if (!readerOpenControllerRef.current) {
@@ -1137,13 +1159,15 @@ function DetailContent() {
 
         {!offlineMode && shouldRequestBookAnnotations(Boolean(user)) && (
           <AnnotationPanel
-            key={String(book.id)}
+            key={detailIdentityKey}
             bookId={String(book.id)}
             serverUrl={serverUrl}
             capabilityStatus={capabilities.annotationApiStatus}
             capabilityCheckedAt={capabilities.annotationApiCheckedAt}
             downloaded={downloaded}
             openingReader={openingReader}
+            readOnly={refreshingDetail}
+            canInteract={canUseDetailActions}
             locationUnsupportedReason={readerKind === 'comic' ? '漫画不支持笔记精确定位，请使用在线阅读' : undefined}
             onLocate={async (annotation) => { await handleOfflineRead(annotation); }}
             onAuthRequired={handleAnnotationAuthRequired}
