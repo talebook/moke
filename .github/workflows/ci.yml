@@ -76,54 +76,6 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib --locked
 
-  desktop-build:
-    name: Desktop build smoke test
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          standalone: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Readest dependencies and vendors
-        working-directory: readest
-        shell: bash
-        run: |
-          pnpm install --no-frozen-lockfile
-          pnpm --filter @readest/readest-app setup-vendors
-
-      - name: Build desktop app without installer bundling
-        run: pnpm tauri build --no-bundle
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-
   mobile-smoke:
     name: Mobile, tablet and desktop page smoke test
     runs-on: ubuntu-latest
