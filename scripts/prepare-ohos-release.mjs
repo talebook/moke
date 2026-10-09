@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 export const OHOS_RELEASE_BUNDLE = 'org.houheya.moke_openharmony';
 
-const PROFILE_ARGS = 'const rustProfileArgs = properties.buildMode === "release" ? ["--release"] : [];';
+const PROFILE_ARGS = 'const rustProfileArgs = hvigor.getParameter().getExtParam("buildMode") === "release" ? ["--release"] : [];';
+const LEGACY_PROFILE_ARGS = 'const rustProfileArgs = properties.buildMode === "release" ? ["--release"] : [];';
 const TARGET_ARGS = '"--target", target.toString()';
 
 // The pinned Tauri Hvigor hook calls dev-eco-studio-script, whose default is
@@ -12,19 +13,34 @@ const TARGET_ARGS = '"--target", target.toString()';
 // second build copies its library into the HAP. Forward Hvigor's buildMode so
 // release HAPs actually contain optimized Rust code, and debug builds stay debug.
 export function patchHvigorRustProfile(source) {
-  const hasDeclaration = source.includes(PROFILE_ARGS);
-  const hasArguments = source.includes(`${TARGET_ARGS}, ...rustProfileArgs`);
-  if (hasDeclaration && hasArguments) return source;
-  if (hasDeclaration || hasArguments) {
-    throw new Error('Partially patched OHOS Rust profile; regenerate the Hvigor file');
-  }
   const target = 'const target = properties.target || "aarch64";';
-  const args = `${TARGET_ARGS}]`;
   if (
     !source.includes('hvigor.getParameter().getProperties()')
     || source.split(target).length !== 2
-    || source.split(args).length !== 2
   ) {
+    throw new Error('Unsupported OHOS Hvigor Rust hook; review build profile forwarding');
+  }
+  const hasDeclaration = source.includes(PROFILE_ARGS);
+  const hasLegacyDeclaration = source.includes(LEGACY_PROFILE_ARGS);
+  const patchedArgs = `${TARGET_ARGS}, ...rustProfileArgs]`;
+  const hasArguments = source.includes(patchedArgs);
+  if (hasDeclaration && hasLegacyDeclaration) {
+    throw new Error('Partially patched OHOS Rust profile; regenerate the Hvigor file');
+  }
+  if ((hasDeclaration || hasLegacyDeclaration) && hasArguments) {
+    const declaration = hasDeclaration ? PROFILE_ARGS : LEGACY_PROFILE_ARGS;
+    if (source.split(declaration).length !== 2 || source.split(patchedArgs).length !== 2) {
+      throw new Error('Unsupported OHOS Hvigor Rust hook; review build profile forwarding');
+    }
+    // Upgrade the exact old patch; it read a different parameter channel and
+    // must not be treated as an already prepared Release hook.
+    return hasLegacyDeclaration ? source.replace(LEGACY_PROFILE_ARGS, PROFILE_ARGS) : source;
+  }
+  if (hasDeclaration || hasLegacyDeclaration || hasArguments) {
+    throw new Error('Partially patched OHOS Rust profile; regenerate the Hvigor file');
+  }
+  const args = `${TARGET_ARGS}]`;
+  if (source.split(args).length !== 2) {
     throw new Error('Unsupported OHOS Hvigor Rust hook; review build profile forwarding');
   }
   return source

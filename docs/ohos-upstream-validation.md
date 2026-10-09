@@ -28,23 +28,46 @@ hook was restored afterward; this workaround is not a source change.
 
 ## Native build profile forwarding (TB-363, 2026-10-07)
 
-The same generated hook caused Preview 1.1.5.7 to package an unoptimized
-native library. `tauri ohos build` first builds Release, but Hvigor then calls
+The generated hook can overwrite the initial Release native library with a
+Debug build. `tauri ohos build` first builds Release, but Hvigor then calls
 `ohos dev-eco-studio-script` without `--release`. That command defaults to
 Debug and copies its output into the HAP. Signing the HAP does not change
 the Rust optimization profile.
 
-`scripts/prepare-ohos-release.mjs` now forwards Hvigor's `buildMode` to that
-second build: Release adds `--release`; Debug and an unspecified mode retain
-the default. Preparation rejects unfamiliar or partially patched hooks.
+The first TB-363 patch incorrectly read `getProperties().buildMode`; that
+does not establish forwarding of the actual `-p buildMode=release` parameter.
+The GROK-001 correction reads `getExtParam("buildMode")` inside `buildRustCode`,
+while properties still supplies the target. Only external Release adds
+`--release`; external Debug and an unspecified mode retain the default,
+even if properties contains `buildMode: "release"`.
+Preparation upgrades the exact complete legacy patch and is idempotent for
+the corrected hook. It rejects unfamiliar or partially patched hooks without
+writing the file.
 Both the stable workflow and the public Preview workflow run this script
-before HAP assembly. Regenerate the project and rerun release preparation
-for an existing local checkout.
+before HAP assembly. Rerun `node scripts/prepare-ohos-release.mjs` for an
+existing generated project to upgrade the complete legacy patch. A rejected
+hook requires regeneration with the pinned Tauri CLI and a new preparation
+run; do not discard local signing configuration or app data.
 
 The regression tests execute the pinned upstream Hvigor hook and reproduce
-the missing Release argument, then verify the patched Release/Debug calls
-and the preparation CLI. On the MatePad, the previous Preview 1.1.5.7 startup
-sample attributed 95.31% of CPU cycles to native Context creation; it also
+the missing Release argument, then verify separate properties/external
+parameter channels, Release/Debug/default and conflicting properties,
+legacy upgrade, CLI idempotence and rejection without file changes.
+These are mocked hook/script results, not actual Hvigor SDK, Windows/native,
+HAP packaging or device evidence. Native acceptance requires the final source
+SHA, Preview configuration/features, toolchain and second Rust Release log,
+plus a HAP hash and comparison of its library with the corresponding Release
+output (accounting for stripping).
+
+A separate isolated task on local Hvigor 6.24.2 confirmed that `-p
+buildMode=release/debug` reaches `getExtParam`, while `getProperties().buildMode`
+is absent; an omitted parameter returns undefined. This probe uses a minimal
+custom system plugin, not the HAP plugin, and does not invoke Rust compilation.
+It does not establish HAP library identity, Windows execution or startup speed.
+
+On the MatePad, the previous Preview 1.1.5.7 startup
+sample attributed 95.31% of CPU cycles to `libmoke_lib.so` on the
+`generated tauri` thread; it also
 triggered `THREAD_BLOCK_3S`. The developer reported 7–8 seconds to enter,
 compared with about 2 seconds for the prior locally packaged Release HAP.
 An optimized replacement HAP must still be built with the Preview release
