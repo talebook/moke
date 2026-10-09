@@ -19,6 +19,13 @@ for (const appearance of ['light', 'dark', 'eink']) {
       theme: appearance === 'dark' ? 'dark' : 'light', eink: appearance === 'eink',
     });
     await page.addInitScript((bookTitle) => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        if (command === 'moke_preview_enter_app') {
+          sessionStorage.setItem('startup-handoff-appearance', args.appearance);
+        }
+        return invoke(command, args);
+      };
       const sample = () => {
         const startup = document.querySelector('[data-testid="app-startup-screen"]');
         if (startup) {
@@ -53,8 +60,10 @@ for (const appearance of ['light', 'dark', 'eink']) {
       entered: sessionStorage.getItem('layout-preview-entered'),
       opens: sessionStorage.getItem('layout-reader-opens'),
       detailOpens: sessionStorage.getItem('layout-detail-opens'),
+      appearance: sessionStorage.getItem('startup-handoff-appearance'),
     }));
     expect(trace.entered).toBe('true');
+    expect(trace.appearance).toBe(appearance);
     expect(trace.opens).toBe('1');
     expect(trace.detailOpens).toBe('1');
     expect(trace.flashed).toBeNull();

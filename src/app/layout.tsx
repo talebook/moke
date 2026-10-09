@@ -108,6 +108,17 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* Paint the document canvas without waiting for the stylesheet. The
+            native window uses the same light fallback before HTML arrives. */}
+        <style>{`
+          html { background-color: #fbfaf3; }
+          @media (prefers-color-scheme: dark) {
+            html:not([data-moke-appearance='light']):not([data-eink='true']) { background-color: #1a1814; }
+          }
+          html[data-moke-appearance='dark'] { background-color: #1a1814; }
+          html[data-eink='true'], html[data-moke-appearance='eink'] { background-color: #fff; }
+          @media (update: slow), (max-color: 1) { html { background-color: #fff !important; } }
+        `}</style>
         {mobileDevHmrScript && <script dangerouslySetInnerHTML={{ __html: mobileDevHmrScript }} />}
         <script dangerouslySetInnerHTML={{ __html: mokeDocumentTransitionGuardScript }} />
         {/* Apply the persisted theme before hydration so the first paint is
@@ -125,7 +136,7 @@ export default function RootLayout({
             that this script mutates the class attribute before hydration. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');var st=s&&s.state||{};var t=st.theme||'system';var eink=!!st.eink;var el=document.documentElement;if(eink){el.setAttribute('data-eink','true')}var darkMq=window.matchMedia('(prefers-color-scheme: dark)');var autoEink=window.matchMedia('(update: slow), (max-color: 1)').matches;var dark=!eink&&!autoEink&&(t==='dark'||(t==='system'&&darkMq.matches));if(dark){el.classList.add('dark');el.style.colorScheme='dark'}else{el.style.colorScheme='light'}}catch(e){}})();/*MOKE-THEME-INIT*/`,
+            __html: `(function(){try{var st={};try{var s=JSON.parse(localStorage.getItem('moke-settings')||'{}');st=s&&s.state||{}}catch(e){}var t=st.theme||'system';var eink=!!st.eink;var el=document.documentElement;if(eink){el.setAttribute('data-eink','true')}var darkMq=window.matchMedia('(prefers-color-scheme: dark)');var autoEink=window.matchMedia('(update: slow), (max-color: 1)').matches;var dark=!eink&&!autoEink&&(t==='dark'||(t==='system'&&darkMq.matches));el.setAttribute('data-moke-appearance',dark?'dark':(eink||autoEink?'eink':'light'));if(dark){el.classList.add('dark');el.style.colorScheme='dark'}else{el.style.colorScheme='light'}}catch(e){}})();/*MOKE-THEME-INIT*/`,
           }}
         />
         {/* Keep the first render independent from third-party font servers. The

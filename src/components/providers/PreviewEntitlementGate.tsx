@@ -121,7 +121,9 @@ function PreviewEntitlementGateInner({ children }: { children: React.ReactNode }
     ) return;
     handoffRequestedRef.current = true;
     void import('@tauri-apps/api/core')
-      .then(({ invoke }) => invoke<void>('moke_preview_enter_app'))
+      .then(({ invoke }) => invoke<void>('moke_preview_enter_app', {
+        appearance: document.documentElement.dataset.mokeAppearance || 'light',
+      }))
       .catch((nextError) => {
         handoffRequestedRef.current = false;
         if (mountedRef.current) setError(formatError(nextError));

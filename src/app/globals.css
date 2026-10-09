@@ -103,7 +103,7 @@
     --moke-top-safe-area: env(safe-area-inset-top, 0px);
   }
 
-  [data-moke-top-safe-area] .moke-app-root > :first-child {
+  [data-moke-top-safe-area] .moke-app-root > :first-child:not(.moke-startup-screen) {
     padding-top: var(--moke-top-safe-area);
   }
 

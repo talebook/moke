@@ -131,6 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const dark = !eink && !autoEinkMq.matches && resolved === 'dark';
       const el = document.documentElement;
       el.classList.toggle('dark', dark);
+      el.dataset.mokeAppearance = dark ? 'dark' : (eink || autoEinkMq.matches ? 'eink' : 'light');
       el.style.colorScheme = dark ? 'dark' : 'light';
       restoreStatusBar(dark);
     };

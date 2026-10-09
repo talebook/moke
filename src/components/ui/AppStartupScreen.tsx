@@ -18,7 +18,7 @@ function ProgressScreen({ message }: { message: string }) {
       aria-atomic="true"
       data-testid="app-startup-screen"
       data-progress-message={message}
-      className="fixed inset-0 z-[180] flex flex-col items-center justify-center gap-3 app-warm-bg px-4 text-center"
+      className="moke-startup-screen fixed inset-0 z-[180] flex flex-col items-center justify-center gap-3 app-warm-bg px-4 text-center"
     >
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" aria-hidden="true" />
       <span className="sr-only">{message}</span>

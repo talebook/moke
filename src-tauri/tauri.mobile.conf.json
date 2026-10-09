@@ -8,7 +8,8 @@
         "minWidth": 320,
         "minHeight": 560,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "backgroundColor": "#fbfaf3"
       }
     ]
   }
