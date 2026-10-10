@@ -8,7 +8,8 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GPLv3 许可证" /></a>
   </p>
   <p>
-    <a href="https://github.com/talebook/moke/releases">下载安装</a> ·
+    <a href="https://github.com/talebook/moke/releases">稳定版下载</a> ·
+    <a href="#moke-preview-赞助内测">Moke Preview</a> ·
     <a href="#快速开始">快速开始</a> ·
     <a href="https://github.com/talebook/moke/issues">问题反馈</a> ·
     <a href="CONTRIBUTING.md">参与贡献</a>
@@ -19,7 +20,7 @@
 
 > 使用前请准备一个可访问的 Talebook 服务器。Moke 是客户端，书库管理与账号服务由 Talebook 提供。
 
-[应用预览](#应用预览) · [主要功能](#主要功能) · [安装](#安装) · [快速开始](#快速开始) · [本地开发](#本地开发) · [贡献与反馈](#贡献与反馈) · [许可证](#许可证)
+[应用预览](#应用预览) · [主要功能](#主要功能) · [安装](#安装) · [Moke Preview](#moke-preview-赞助内测) · [快速开始](#快速开始) · [本地开发](#本地开发) · [贡献与反馈](#贡献与反馈) · [许可证](#许可证)
 
 ## 应用预览
 
@@ -58,7 +59,7 @@
 
 ## 安装
 
-前往 [GitHub Releases](https://github.com/talebook/moke/releases) 下载适合设备的安装包，具体可用平台以对应版本的发布资产为准。
+公开稳定版免费提供，前往 [GitHub Releases](https://github.com/talebook/moke/releases) 下载适合设备的安装包，具体可用平台以对应版本的发布资产为准。
 
 | 平台 | 安装包格式 |
 |---|---|
@@ -72,6 +73,20 @@
 > **系统要求**：Windows 10 1809+ / macOS 11+ / Linux（glibc 2.31+）/ Android 8+ / iOS/iPadOS 17+ / HarmonyOS NEXT 5.0+（API 12）
 
 OpenHarmony 安装包目前处于 alpha 阶段，建议在测试设备上体验；iOS/iPadOS 和 OpenHarmony 的签名、安装要求见对应版本的发布说明。
+
+### Moke Preview 赞助内测
+
+[Moke Preview](https://github.com/hehetoshang/moke-preview-builds) 是面向希望提前体验新功能并参与反馈的赞助者的预览通道。安装包与发布说明在独立仓库提供，具体可用平台及安装要求以对应版本的发布说明为准。
+
+1. 前往 [爱发电](https://ifdian.net/a/hehetoshang) 选择包含 Moke Preview 资格的内测方案，从私信获取一次性访问码及安装说明。
+2. 从 [Preview Releases](https://github.com/hehetoshang/moke-preview-builds/releases) 下载适合设备的安装包。
+3. 首次启动时输入访问码，完成当前设备的激活；后续启动需要联网检查授权。更换或重装设备时，请按应用提示迁移资格。
+
+普通赞助不代表自动获得 Preview 资格，具体权益以爱发电方案说明为准。目前 Preview 安装包未启用自动更新，更新时请前往 Preview Releases 下载新版本并按发布说明安装。
+
+Preview 可能包含未完成的功能或兼容性问题，请提前备份重要数据。参与方式、设备迁移与安装详情见 [Preview 仓库说明](https://github.com/hehetoshang/moke-preview-builds#readme)。
+
+遇到问题或有体验建议时，可使用 [Moke Preview 专用反馈表单](https://github.com/talebook/moke/issues/new?template=moke-preview.yml&labels=moke-preview)。访问码或订单问题请通过爱发电私信联系开发者，请勿在公开 Issue 中提交访问码、订单凭证、账号密码或服务器密钥。
 
 ## 快速开始
 
@@ -127,6 +142,7 @@ cd ..
 ## 贡献与反馈
 
 - [报告 Bug 或提出建议](https://github.com/talebook/moke/issues)：请附上应用版本、系统环境与复现步骤。
+- [反馈 Moke Preview 问题](https://github.com/talebook/moke/issues/new?template=moke-preview.yml&labels=moke-preview)：请使用专用表单，并附上 Preview 版本、运行平台与复现步骤。
 - [参与贡献](CONTRIBUTING.md)：了解开发流程与提交规范。
 - [安全政策](SECURITY.md)：安全漏洞请通过私密渠道报告。
 - [隐私政策](PRIVACY.md)：了解应用的数据处理方式。
