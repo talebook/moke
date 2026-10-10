@@ -18,6 +18,7 @@ export async function installLibraryLayoutMock(page, {
   readerFailure = false, returnBookPayload = null,
   windowLabel = 'main', bootstrapHandoff = false,
   theme = 'system', eink = false,
+  navs = [],
 } = {}) {
   const books = empty ? [] : Array.from({ length: bookCount }, (_, index) => bookCount === 1
     ? LAYOUT_BOOK : { ...LAYOUT_BOOK, id: String(index + 1), title: `测试书籍 ${index + 1}` });
@@ -26,7 +27,7 @@ export async function installLibraryLayoutMock(page, {
     '/api/shelf': { err: 'ok', books },
     '/api/library': { err: 'ok', books, total: books.length },
     '/api/search': { err: 'ok', books },
-    '/api/book/nav': { err: 'ok', navs: [] },
+    '/api/book/nav': { err: 'ok', navs },
     '/api/network/sources': { err: 'ok', items: [] },
     '/api/user/info': { err: 'ok', user: { id: 1, is_login: true, username: 'layout-test', extra: {} }, sys: { title: '布局测试书库' } },
     '/api/welcome': { err: 'not_invited' },

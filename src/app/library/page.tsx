@@ -1373,7 +1373,7 @@ function TagPickerDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="all-tags-title"
-        className="flex max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
+        className="flex max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-amber-950/10 px-5 py-4 sm:px-6">
           <div>
