@@ -60,9 +60,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 480 
   });
 
   test(`all tags stay scrollable without dvh at ${viewport.width}px`, async ({ page }) => {
-    // Open the selector at normal height, then shrink the dialog. The existing
-    // Select cannot fit its 60vh panel above/below the trigger at 480px; that
-    // separate baseline behavior is not a regression of the dialog fallback.
+    // Retain coverage for an already-open dialog when the viewport shrinks.
     const openingViewport = { ...viewport, height: Math.max(viewport.height, 844) };
     await page.setViewportSize(openingViewport);
     await installLibraryLayoutMock(page, { continueReading: false,
@@ -93,3 +91,70 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 480 
     await expect(dialog).toBeHidden();
   });
 }
+
+for (const viewport of [
+  { width: 1280, height: 900 }, { width: 390, height: 844 }, { width: 390, height: 480 },
+]) {
+  test(`all tags are reachable from the initial ${viewport.width}x${viewport.height} viewport`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await installLibraryLayoutMock(page, { continueReading: false,
+      navs: [{ tags: Array.from({ length: 80 }, (_, index) => ({ name: `标签${index + 1}` })) }],
+    });
+    await page.goto(`${APP_URL}/library`);
+    const trigger = page.getByText('标签', { exact: true }).locator('..').getByRole('button');
+    await trigger.click();
+    const panel = page.getByRole('listbox');
+    const bounds = await panel.boundingBox();
+    expect(bounds.y).toBeGreaterThanOrEqual(8);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 8);
+    await panel.hover();
+    await page.mouse.wheel(0, 1000);
+    await page.getByRole('option', { name: '更多标签…' }).click();
+    const dialog = page.getByRole('dialog', { name: '全部标签' });
+    await expect(dialog).toBeVisible();
+    const close = dialog.getByRole('button', { name: '关闭全部标签' });
+    await expect(close).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: '标签80', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(close).toBeFocused();
+    await dialog.getByRole('button', { name: '标签80', exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toHaveText('标签80');
+    await expect(trigger).toBeFocused();
+    // Native keyboard activation must also reach the same entry at this size.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const more = page.getByRole('option', { name: '更多标签…' });
+    await more.focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+  });
+}
+
+test('an open tag selector stays inside the viewport and flips to the roomier side on resize', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installLibraryLayoutMock(page, { continueReading: false,
+    navs: [{ tags: Array.from({ length: 80 }, (_, index) => ({ name: `标签${index + 1}` })) }],
+  });
+  await page.goto(`${APP_URL}/library`);
+  const trigger = page.getByText('标签', { exact: true }).locator('..').getByRole('button');
+  await trigger.click();
+  for (const height of [480, 400, 844]) {
+    await page.setViewportSize({ width: 390, height });
+    await expect.poll(async () => {
+      const bounds = await page.getByRole('listbox').boundingBox();
+      return bounds.y >= 8 && bounds.y + bounds.height <= height - 8;
+    }).toBe(true);
+    if (height === 400) {
+      const panel = await page.getByRole('listbox').boundingBox();
+      const button = await trigger.boundingBox();
+      expect(panel.y + panel.height).toBeLessThan(button.y);
+    }
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('listbox')).toBeHidden();
+});
