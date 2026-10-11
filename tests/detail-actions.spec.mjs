@@ -5,6 +5,16 @@ const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
+async function settleCoverLayout(page) {
+  // Clicking a book card can leave the mouse over the detail cover. Measure
+  // the resting layout after its real hover transform finishes reversing.
+  await page.mouse.move(0, 0);
+  await expect.poll(() => page.locator('.book-cover-shadow').evaluate(cover => {
+    const transform = getComputedStyle(cover).transform;
+    return transform === 'none' || new DOMMatrixReadOnly(transform).isIdentity;
+  })).toBe(true);
+}
+
 async function installTauriHttpMock(page, { downloaded = false } = {}) {
   await installSavedServerFixture(page, SERVER_URL);
   await page.addInitScript(({ serverUrl, bookId, downloaded }) => {
@@ -131,6 +141,7 @@ for (const viewport of [
     await expect(download).toBeEnabled();
     await download.focus();
     await expect(download).toBeFocused();
+    await settleCoverLayout(page);
 
     const layout = await page.evaluate(() => {
       const rect = (testId) => document.querySelector(`[data-testid="${testId}"]`).getBoundingClientRect();
@@ -184,6 +195,7 @@ for (const viewport of [
     await expect(page.getByTestId('offline-download-action')).toHaveCount(0);
     await offlineRead.focus();
     await expect(offlineRead).toBeFocused();
+    await settleCoverLayout(page);
 
     const layout = await page.evaluate(() => {
       const action = document.querySelector('[data-testid="offline-read-primary-action"]');

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bindComicImages, comicPlaceholder } from '../src/lib/comic-images.ts';
+import { bindComicImages, comicPlaceholder, ComicImageLayoutError } from '../src/lib/comic-images.ts';
 
-function installImageHost(context, dimensions, { originalSize = false } = {}) {
+function installImageHost(context, dimensions, { originalSize = false, pageDimensions = dimensions } = {}) {
   const observers = {};
   const requests = [];
   const revoked = [];
@@ -51,14 +51,16 @@ function installImageHost(context, dimensions, { originalSize = false } = {}) {
     addEventListener() {},
     removeEventListener() {},
   };
-  const dispose = bindComicImages(host, async index => {
+  const bindAdapter = () => bindComicImages(host, async index => {
     requests.push(index);
     return new Blob([new Uint8Array(16)], { type: 'image/png' });
-  }, error => { errors.push(error); }, () => {}, dimensions);
+  }, error => { errors.push(error); }, () => {}, pageDimensions);
+  const dispose = bindAdapter();
   context.after(dispose);
   return {
     images, requests, revoked, errors, observers,
     intersect(entries) { observers.intersections.callback(entries.map(([index, isIntersecting]) => ({ target: images[index], isIntersecting }))); },
+    restart() { dispose(); context.after(bindAdapter()); },
   };
 }
 
@@ -107,17 +109,46 @@ test('cache eviction restores the placeholder with its ratio intact and reloads 
   assert.deepEqual(errors, []);
 });
 
-test('invalid dimensions and unknown placeholder indices cannot install layout styles or dispatch loads', async context => {
+test('invalid dimensions report one safe actionable error per page without styles or requests', async context => {
   const dimensions = [
     { width: 0, height: 1100 }, { width: 800, height: -1 }, { width: 1.5, height: 600 },
     { width: Infinity, height: 600 }, { width: 40001, height: 1 }, { width: 8000, height: 8000 },
   ];
-  const { images, requests, observers, intersect } = installImageHost(context, dimensions);
-  images[0].src = comicPlaceholder(999, 800, 1100);
-  observers.mutations.callback();
+  const { images, requests, errors, observers, intersect } = installImageHost(context, dimensions);
+  for (let scan = 0; scan < 4; scan++) observers.mutations.callback();
   assert.deepEqual(images.map(image => image.style.aspectRatio), dimensions.map(() => ''));
   assert.equal(observers.intersections.observed.size, 0);
   intersect(dimensions.map((_, index) => [index, true]));
   await drainImageRequests();
+  assert.deepEqual(requests, []);
+  assert.equal(errors.length, dimensions.length);
+  for (const [index, error] of errors.entries()) {
+    assert.ok(error instanceof ComicImageLayoutError);
+    assert.equal(error.message, '漫画页面尺寸信息无效，请重新加载。');
+    assert.deepEqual(error.diagnostics, {
+      pageIndex: index, width: Number.isFinite(dimensions[index].width) ? dimensions[index].width : null,
+      height: dimensions[index].height,
+    });
+  }
+});
+
+test('missing page dimensions report once across duplicate views and again after adapter reload', async context => {
+  const { images, requests, errors, observers, intersect, restart } = installImageHost(context,
+    [{ width: 800, height: 1100 }], { pageDimensions: [] });
+  const duplicate = { ...images[0],
+    getAttribute(name) { return name === 'src' ? this.src : null; }, closest() { return null; } };
+  images.push(duplicate);
+  for (let scan = 0; scan < 4; scan++) observers.mutations.callback();
+  assert.equal(errors.length, 1);
+  assert.deepEqual(errors[0].diagnostics, { pageIndex: 0, width: null, height: null });
+  assert.equal(errors[0].message, '漫画页面尺寸信息无效，请重新加载。');
+  assert.equal(observers.intersections.observed.size, 0);
+  intersect([[0, true], [1, true]]);
+  await drainImageRequests();
+  assert.deepEqual(requests, []);
+  restart();
+  for (let scan = 0; scan < 4; scan++) observers.mutations.callback();
+  assert.equal(errors.length, 2);
+  assert.deepEqual(errors[1].diagnostics, errors[0].diagnostics);
   assert.deepEqual(requests, []);
 });

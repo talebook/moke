@@ -7,6 +7,19 @@ export function comicPlaceholder(index: number, width: number, height: number) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}#comic-${index}`;
 }
 
+export class ComicImageLayoutError extends Error {
+  readonly diagnostics: { pageIndex: number | null; width: number | null; height: number | null };
+  constructor(index: number, dimensions?: { width: number; height: number }) {
+    super('漫画页面尺寸信息无效，请重新加载。');
+    this.name = 'ComicImageLayoutError';
+    this.diagnostics = {
+      pageIndex: Number.isSafeInteger(index) && index >= 0 ? index : null,
+      width: typeof dimensions?.width === 'number' && Number.isFinite(dimensions.width) ? dimensions.width : null,
+      height: typeof dimensions?.height === 'number' && Number.isFinite(dimensions.height) ? dimensions.height : null,
+    };
+  }
+}
+
 export function bindComicImages(
   host: HTMLElement,
   load: (index: number) => Promise<Blob>,
@@ -22,6 +35,7 @@ export function bindComicImages(
   const loading = new Set<number>();
   const cache = new Map<number, { url: string; size: number }>();
   const failed = new Set<number>();
+  const invalidDimensions = new Set<number>();
   const visible = new Set<HTMLImageElement>();
   const observers = new IntersectionObserver(entries => {
     for (const entry of entries) {
@@ -83,7 +97,15 @@ export function bindComicImages(
         const dimensions = pageDimensions[index];
         if (!dimensions || !Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height)
           || dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width > 40000 || dimensions.height > 40000
-          || dimensions.width * dimensions.height > 40000000) return;
+          || dimensions.width * dimensions.height > 40000000) {
+          // Reader views can contain several images for the same page, and
+          // mutations rescan them. Report once per page for this adapter run.
+          if (!invalidDimensions.has(index)) {
+            invalidDimensions.add(index);
+            onError(new ComicImageLayoutError(index, dimensions));
+          }
+          return;
+        }
         // Lazy SVG placeholders have no intrinsic dimensions until decoded.
         // Reserve their manifest ratio before that happens, including after
         // eviction. This does not override the reader's original-size attrs.

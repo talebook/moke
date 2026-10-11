@@ -11,8 +11,15 @@ export interface RegistryStorage {
   setItem(key: string, value: string): void | Promise<void>;
   prepareRecovery?: () => () => void;
 }
-export type StorageResult<T> = { ok: true; value: T; notice?: string } | { ok: false; error: string };
+export type StorageResult<T> = { ok: true; value: T; notice?: string }
+  | { ok: false; error: string; reason?: 'configuration-changed' };
 export const emptyRegistry = (): ServerRegistry => ({ savedServers: [] });
+
+class ServerRegistryConflictError extends Error {
+  constructor() {
+    super('服务器配置已在其他窗口更改，请在服务器列表点击“重试加载”读取最新列表后重试');
+  }
+}
 
 export function parseServerRegistry(raw: string | null, legacy: string | null = null, onSkipped?: (count: number) => void): ServerRegistry {
   const parsed = raw !== null ? JSON.parse(raw) : null;
@@ -104,7 +111,8 @@ export class ServerRegistryRepository {
       } : {}) };
     } catch (error) {
       this.loaded = false;
-      return { ok: false, error: `无法加载服务器列表：${error instanceof Error ? error.message : '存储不可用'}。原数据已保留，可重试或恢复。` };
+      return { ok: false, error: `无法加载服务器列表：${error instanceof Error ? error.message : '存储不可用'}。原数据已保留，可重试或恢复。`,
+        ...(error instanceof ServerRegistryConflictError ? { reason: 'configuration-changed' as const } : {}) };
     }
   }
 
@@ -115,7 +123,8 @@ export class ServerRegistryRepository {
         await this.writeVerified(serializeServerRegistry(registry));
         return { ok: true, value: registry };
       } catch (error) {
-        return { ok: false, error: `未保存：${error instanceof Error ? error.message : '存储不可用'}，请重试。` };
+        return { ok: false, error: `未保存：${error instanceof Error ? error.message : '存储不可用'}，请重试。`,
+          ...(error instanceof ServerRegistryConflictError ? { reason: 'configuration-changed' as const } : {}) };
       }
     });
   }
@@ -143,7 +152,8 @@ export class ServerRegistryRepository {
         this.loaded = true;
         return { ok: true, value: emptyRegistry() };
       } catch (error) {
-        return { ok: false, error: `恢复失败：${error instanceof Error ? error.message : '存储不可用'}。请在浏览器站点设置或系统设置中允许本应用使用存储，检查设备可用空间，然后完全退出并重新启动应用后重试。原数据已保留。` };
+        return { ok: false, error: `恢复失败：${error instanceof Error ? error.message : '存储不可用'}。请在浏览器站点设置或系统设置中允许本应用使用存储，检查设备可用空间，然后完全退出并重新启动应用后重试。原数据已保留。`,
+          ...(error instanceof ServerRegistryConflictError ? { reason: 'configuration-changed' as const } : {}) };
       } finally { finishRecovery?.(); }
     });
   }
@@ -154,14 +164,19 @@ export class ServerRegistryRepository {
     return next;
   }
 
+  private async assertUnchanged(expectedRaw: string | null): Promise<void> {
+    if (await this.storage.getItem(SERVER_STORAGE_KEY) !== expectedRaw) throw new ServerRegistryConflictError();
+  }
+
   private async writeVerified(encoded: string): Promise<void> {
-    if (await this.storage.getItem(SERVER_STORAGE_KEY) !== this.raw) throw new Error('配置已在另一窗口更改，请重新加载');
+    const expectedRaw = this.raw;
+    await this.assertUnchanged(expectedRaw);
     // Tolerant reads never rewrite the original. Before a later explicit save
     // or title update omits invalid entries, preserve the exact original bytes.
-    if (this.raw !== null && this.preserveRawOnWrite) {
+    if (expectedRaw !== null && this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-damaged-backup-${createLocalId()}`;
-      await this.storage.setItem(key, this.raw);
-      if (await this.storage.getItem(key) !== this.raw) throw new Error('原数据备份校验失败');
+      await this.storage.setItem(key, expectedRaw);
+      if (await this.storage.getItem(key) !== expectedRaw) throw new Error('原数据备份校验失败');
     }
     // Preserve a damaged compatibility-only value before creating the list;
     // a later connection may replace that key with its active-server mirror.
@@ -172,12 +187,15 @@ export class ServerRegistryRepository {
     }
     // Keep a backup of migrations before overwriting the legacy payload.
     let version: unknown;
-    try { version = this.raw && JSON.parse(this.raw)?.version; } catch { version = 1; }
-    if (this.raw && version !== 1 && !this.preserveRawOnWrite) {
+    try { version = expectedRaw && JSON.parse(expectedRaw)?.version; } catch { version = 1; }
+    if (expectedRaw && version !== 1 && !this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-legacy-backup`;
-      await this.storage.setItem(key, this.raw);
-      if (await this.storage.getItem(key) !== this.raw) throw new Error('迁移备份校验失败');
+      await this.storage.setItem(key, expectedRaw);
+      if (await this.storage.getItem(key) !== expectedRaw) throw new Error('迁移备份校验失败');
     }
+    // Recheck after every awaited backup. This catches changes during backup,
+    // but getItem/setItem are separate operations, not an atomic compare-and-set.
+    await this.assertUnchanged(expectedRaw);
     await this.storage.setItem(SERVER_STORAGE_KEY, encoded);
     if (await this.storage.getItem(SERVER_STORAGE_KEY) !== encoded) throw new Error('写入读回校验失败');
     this.raw = encoded;

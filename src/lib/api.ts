@@ -280,70 +280,56 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
 }
 
 export async function validateServerConnection(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {
-  const maxRetries = 0;
+  // Each explicit connection attempt probes once; retry is a user action.
+  let response: Response;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      console.log('[validateServerConnection] retry attempt', attempt);
-      await new Promise(r => setTimeout(r, 1500));
-    }
-
-    let response: Response;
-
-    try {
-      response = await request(`${serverUrl}/api/user/info`, {
-        credentials: 'include', signal,
-      });
-    } catch (e) {
-      signal?.throwIfAborted();
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      console.error('[validateServerConnection] network error:', errorMsg);
-      debugLog('error', 'validate', `连接失败 (尝试 ${attempt + 1}/${maxRetries + 1})`, errorMsg);
-      if (attempt < maxRetries) continue;
-      return {
-        err: 'network.error',
-        msg: `无法连接到服务器，请检查地址和网络 (${errorMsg})`,
-      };
-    }
-
-    console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
-
-    let data: UserInfoResponse;
-    try {
-      data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
-    } catch (e) {
-      signal?.throwIfAborted();
-      logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
-      if (attempt < maxRetries) continue;
-      return {
-        err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
-        msg: getErrorMessage(e, '服务器返回内容无效，不像是可用的 Talebook 服务。'),
-      };
-    }
-
-    if (!response.ok && data.err !== 'user.need_login' && data.err !== 'not_invited') {
-      logHttpErrorMetadata('validateServerConnection', response.status, data);
-      if (attempt < maxRetries) continue;
-      return {
-        err: data.err || `http.${response.status}`,
-        msg: data.msg || '服务器响应异常，请确认服务已正常启动',
-      };
-    }
-
-    if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
-      console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
-      if (attempt < maxRetries) continue;
-      return {
-        err: data.err || 'server.invalid',
-        msg: data.msg || '服务器校验失败，请确认这是 Talebook 服务',
-      };
-    }
-
-    console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
-    return { err: 'ok' };
+  try {
+    response = await request(`${serverUrl}/api/user/info`, {
+      credentials: 'include', signal,
+    });
+  } catch (e) {
+    signal?.throwIfAborted();
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    console.error('[validateServerConnection] network error:', errorMsg);
+    debugLog('error', 'validate', '连接失败', errorMsg);
+    return {
+      err: 'network.error',
+      msg: `无法连接到服务器，请检查地址和网络 (${errorMsg})`,
+    };
   }
 
-  return { err: 'server.invalid_response', msg: '服务器校验失败' };
+  console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
+
+  let data: UserInfoResponse;
+  try {
+    data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
+  } catch (e) {
+    signal?.throwIfAborted();
+    logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
+    return {
+      err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
+      msg: getErrorMessage(e, '服务器返回内容无效，不像是可用的 Talebook 服务。'),
+    };
+  }
+
+  if (!response.ok && data.err !== 'user.need_login' && data.err !== 'not_invited') {
+    logHttpErrorMetadata('validateServerConnection', response.status, data);
+    return {
+      err: data.err || `http.${response.status}`,
+      msg: data.msg || '服务器响应异常，请确认服务已正常启动',
+    };
+  }
+
+  if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
+    console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
+    return {
+      err: data.err || 'server.invalid',
+      msg: data.msg || '服务器校验失败，请确认这是 Talebook 服务',
+    };
+  }
+
+  console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
+  return { err: 'ok' };
 }
 
 export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {

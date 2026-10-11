@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.15.0"
   },
   "scripts": {
     "dev": "dotenv -e .env.tauri -- next dev --turbo",

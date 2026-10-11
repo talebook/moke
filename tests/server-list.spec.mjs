@@ -152,3 +152,44 @@ test('failed recovery explains how to repair unavailable storage',async({page})=
   await start(page);await page.getByRole('button',{name:'保留原数据并重建列表',exact:true}).click();
   await expect(page.getByText(/恢复失败.*站点设置或系统设置.*可用空间.*完全退出并重新启动/)).toBeVisible();
 });
+
+test('a changed configuration exposes in-app reload without losing the current connection', async ({ page }) => {
+  const fixture = await installServerListFixture(page);
+  await start(page);
+  await save(page, fixture.origins[0]);
+  await page.locator('li button').first().click();
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await list(page);
+  await expect(page.locator('li button').first()).toContainText('A 测试书库');
+
+  const other = await page.context().newPage();
+  let changed;
+  try {
+    await other.goto(base + '/welcome');
+    changed = await other.evaluate(url => {
+      const registry = JSON.parse(localStorage.getItem('moke-server-storage'));
+      registry.state.savedServers.push({ id: 'external-b', url, title: '外部加入的 B', addedAt: '' });
+      const raw = JSON.stringify(registry);
+      localStorage.setItem('moke-server-storage', raw);
+      return raw;
+    }, fixture.origins[1]);
+  } finally { await other.close(); }
+
+  const requestsBeforeSave = fixture.requests.length;
+  await page.getByRole('button', { name: '加入服务器', exact: true }).click();
+  await page.getByLabel('服务器地址', { exact: true }).fill('https://c.example.test');
+  await page.getByRole('button', { name: '保存到列表', exact: true }).click();
+  await expect(page.getByRole('button', { name: '重试加载', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('moke-server-storage'))).toBe(changed);
+  await expect(page.getByRole('button', { name: '返回当前书架', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: '重试加载', exact: true }).click();
+  await expect(page.locator('li')).toHaveCount(2);
+  await expect(page.locator('li button').nth(1)).toContainText('外部加入的 B');
+  await page.getByRole('button', { name: '保存到列表', exact: true }).click();
+  await expect(page.locator('li')).toHaveCount(3);
+  expect(fixture.requests).toHaveLength(requestsBeforeSave);
+  await page.getByRole('button', { name: '返回当前书架', exact: true }).click();
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await expect(page.getByText('A 测试读者', { exact: true })).toBeVisible();
+});

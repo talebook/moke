@@ -1,7 +1,7 @@
 'use client';
 
 import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-policy';
-import { assertReaderContext, openReaderFromSource } from '@/lib/reader-source';
+import { assertReaderSessionUnchanged, openReaderFromSource } from '@/lib/reader-source';
 import { useServerStore } from '@/lib/store/server';
 import type { OfflineBookRecord } from '@/lib/offline-books';
 import { isSampleBook } from '@/lib/sample-book-info';
@@ -48,14 +48,14 @@ export async function openOfflineBook(
     mokeBookId: record.bookId,
     restoreProgress,
   };
-  assertReaderContext(source, useServerStore.getState());
+  assertReaderSessionUnchanged({ sessionId: source.sessionId }, useServerStore.getState());
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(
       buildEmbeddedReaderUrl({ ...common, serverUrl: sampleBook ? '' : record.serverUrl }),
       navigate,
       platform,
-      source,
+      { sessionId: source.sessionId },
     );
     return;
   }

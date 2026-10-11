@@ -149,7 +149,12 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         const server = { id: createLocalId(), url, title: '', addedAt: new Date().toISOString() };
         const { savedServers } = get();
         const result = await repository.save({ savedServers: [...savedServers, server] });
-        if (!result.ok) return result;
+        if (!result.ok) {
+          // The list page exposes its non-destructive reload action for this
+          // conflict; retrying the same stale snapshot cannot succeed.
+          if (result.reason === 'configuration-changed') set({ storageError: result.error });
+          return result;
+        }
         set({ savedServers: result.value.savedServers });
         return { ok: true, value: server, created: true };
       } catch (error) {
@@ -249,7 +254,10 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         const savedServers = get().savedServers.map((entry) => entry.id === active.id ? { ...entry, title: serverTitle } : entry);
         const result = await repository.save({ savedServers });
         if (result.ok) set({ savedServers: result.value.savedServers });
-        else if (isSameConnection()) set({ serverListNotice: `服务器名称${result.error} 当前连接已保留。` });
+        else {
+          if (result.reason === 'configuration-changed') set({ storageError: result.error });
+          if (isSameConnection()) set({ serverListNotice: `服务器名称${result.error} 当前连接已保留。` });
+        }
       } catch {
         if (isSameConnection()) set({ serverListNotice: '服务器名称未保存，请稍后重新连接以重试。当前连接已保留。' });
       } finally { set({ saving: false }); }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { request } from '@/lib/api';
 import { COMIC_FORMAT_MESSAGE, COMIC_OFFLINE_MESSAGE, supportsComicPages, type ReaderBook } from '@/lib/book-reader-policy';
 import { comicErrorMessage, comicProgress, ComicProgressWriter, createComicApi, restoreComicPage, type ComicProgress } from '@/lib/comic-api';
-import { bindComicImages, comicPlaceholder } from '@/lib/comic-images';
+import { bindComicImages, comicPlaceholder, ComicImageLayoutError } from '@/lib/comic-images';
 import { APP_BACK_EVENT } from '@/lib/native-back';
 import { useSettingsStore } from '@/lib/store/settings';
 
@@ -118,7 +118,13 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
           onError: () => { setLoading(false); setNotice('漫画页面无法显示，请重试加载。'); },
         });
         disposeImages = bindComicImages(host.current, index => api.page(manifest, index),
-          e => { setLoading(false); setNotice(comicErrorMessage(e)); },
+          e => {
+            setLoading(false);
+            if (e instanceof ComicImageLayoutError) {
+              console.warn('[ComicReader] invalid page dimensions:', e.diagnostics);
+              setNotice(e.message);
+            } else setNotice(comicErrorMessage(e));
+          },
           () => setLoading(false), manifest.pages);
       } catch (e) { if (active()) { setError(comicErrorMessage(e)); setLoading(false); } }
     };

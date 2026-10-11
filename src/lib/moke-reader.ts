@@ -1,5 +1,5 @@
 import type { ReadingProgressPayload } from './reading-progress';
-import { assertReaderContext, withClosedReaderSession, type ReaderSource } from './reader-source.ts';
+import { assertReaderSessionUnchanged, withClosedReaderSession } from './reader-source.ts';
 import { clearReaderReturn, prepareReaderReturn } from './reader-return.ts';
 
 export const isSingleWebviewRuntime = (platform: string): boolean =>
@@ -451,12 +451,12 @@ export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
   platformOverride?: string,
-  source?: ReaderSource,
+  preparedSession?: { sessionId: number },
 ): Promise<void> {
   await withClosedReaderSession(async () => {
     const { useServerStore } = await import('./store/server.ts');
     const context = useServerStore.getState();
-    if (source) assertReaderContext(source, context);
+    if (preparedSession) assertReaderSessionUnchanged(preparedSession, context);
     if (context.candidate) throw new Error('正在变更连接，请稍候再试');
     // Keep Readest's existing literal /library return contract. The one-use
     // receipt stays in the live browsing context, never in a URL or list file.

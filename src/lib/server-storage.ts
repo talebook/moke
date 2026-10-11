@@ -42,12 +42,13 @@ export function createNativeServerStorage(): RegistryStorage {
       } finally { await file.close(); }
     },
     async setItem(key, value) {
-      const { BaseDirectory, mkdir, open, rename } = await import('@tauri-apps/plugin-fs');
+      const { BaseDirectory, mkdir, open, remove, rename } = await import('@tauri-apps/plugin-fs');
       const options = { baseDir: BaseDirectory.AppData };
       await mkdir('books/.servers', { ...options, recursive: true });
       const path = `books/.servers/${key}.json`;
       const temporary = `${path}.${createLocalId()}.tmp`;
       const file = await open(temporary, { ...options, write: true, createNew: true });
+      let closed = false;
       try {
         const bytes = new TextEncoder().encode(value);
         let position = 0;
@@ -56,8 +57,17 @@ export function createNativeServerStorage(): RegistryStorage {
           if (!count) throw new Error('服务器配置文件写入不完整');
           position += count;
         }
-      } finally { await file.close(); }
-      await rename(temporary, path, { oldPathBaseDir: BaseDirectory.AppData, newPathBaseDir: BaseDirectory.AppData });
+        await file.close();
+        closed = true;
+        await rename(temporary, path, { oldPathBaseDir: BaseDirectory.AppData, newPathBaseDir: BaseDirectory.AppData });
+      } catch (error) {
+        // Clean up only the temporary file we successfully created. A failed
+        // createNew may mean that path belongs to another writer. Cleanup must
+        // preserve the write/close/rename error and never remove the target.
+        if (!closed) { try { await file.close(); } catch { /* Best effort. */ } }
+        try { await remove(temporary, options); } catch { /* Best effort. */ }
+        throw error;
+      }
     },
   };
 }
@@ -69,17 +79,24 @@ export function createServerRepository(): ServerRegistryRepository {
     native ? { getItem: safeGetLocalStorageItem, setItem: browserServerStorage.setItem } : browserServerStorage);
 }
 
-export function writeActiveServerMirror(url: string): void {
+export function writeActiveServerMirror(url: string): boolean {
   try {
-    const previous = window.localStorage.getItem('moke_server_url');
+    const storage = window.localStorage;
+    const previous = storage.getItem('moke_server_url');
     if (previous !== null) {
-      // A tolerant legacy load may still need to back up this exact value.
-      // The optional runtime mirror must not erase it on disconnect/restart.
-      try { normalizeServerAddress(previous); } catch { return; }
+      try { normalizeServerAddress(previous); }
+      catch {
+        // A tolerant legacy load may still need these exact bytes. Preserve
+        // and verify them before a connection/disconnect updates the mirror.
+        const backupKey = `${SERVER_STORAGE_KEY}-damaged-legacy-url-backup-${createLocalId()}`;
+        storage.setItem(backupKey, previous);
+        if (storage.getItem(backupKey) !== previous || storage.getItem('moke_server_url') !== previous) return false;
+      }
     }
-    if (url) window.localStorage.setItem('moke_server_url', url);
-    else window.localStorage.removeItem('moke_server_url');
-  } catch { /* This compatibility mirror never determines the saved list. */ }
+    if (url) storage.setItem('moke_server_url', url);
+    else storage.removeItem('moke_server_url');
+    return storage.getItem('moke_server_url') === (url || null);
+  } catch { return false; /* This compatibility mirror never determines the saved list. */ }
 }
 
 export { SERVER_STORAGE_KEY };

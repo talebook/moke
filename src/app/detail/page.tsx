@@ -17,7 +17,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
-import { assertReaderContext, openReaderFromSource, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
+import { assertReaderSessionUnchanged, openReaderFromSource, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
@@ -482,7 +482,7 @@ function DetailContent() {
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;
-      assertReaderContext({ serverUrl, bookId: String(book.id), sessionId }, useServerStore.getState());
+      assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
       // The preflight may have validated a same-host HTTP → HTTPS upgrade.
       // Keep progress identity on the saved server URL, but authorize the resolved source.
       const sourceServerUrl = new URL(source.url).origin;
@@ -498,7 +498,7 @@ function DetailContent() {
           sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
-        await openEmbeddedReaderBook(href, router.push, currentPlatform, { serverUrl, bookId: String(book.id), sessionId });
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { sessionId });
         return;
       }
 
@@ -610,7 +610,7 @@ function DetailContent() {
         },
       });
       const { record, platform: currentPlatform } = prepared;
-      assertReaderContext({ serverUrl, bookId: String(book.id), sessionId }, useServerStore.getState());
+      assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
       if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
         return;
@@ -640,7 +640,7 @@ function DetailContent() {
           serverUrl,
           runtimePlatform: currentPlatform,
         });
-        await openEmbeddedReaderBook(href, router.push, currentPlatform, { serverUrl, bookId: String(book.id), sessionId });
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { sessionId });
         return;
       }
 

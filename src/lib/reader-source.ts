@@ -2,8 +2,13 @@ import { MokeApiError } from './api-core.ts';
 
 export interface ReaderSource { serverUrl: string; bookId: string; sessionId: number }
 
-export function assertReaderContext(source: ReaderSource, current: { sessionId: number; candidate: unknown }): void {
-  if (source.sessionId !== current.sessionId || current.candidate) {
+/** Fence asynchronous preparation against connection, identity and mode changes.
+ * Those transitions increment sessionId; a candidate also blocks dispatch.
+ * Book/server ownership is carried separately by the immutable ReaderSource,
+ * including downloaded books from a server other than the active connection.
+ */
+export function assertReaderSessionUnchanged(preparedSession: { sessionId: number }, current: { sessionId: number; candidate: unknown }): void {
+  if (preparedSession.sessionId !== current.sessionId || current.candidate) {
     throw new MokeApiError('连接或登录状态已改变，请返回书籍页面重试', 'reader.context_changed');
   }
 }
@@ -132,7 +137,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
       // Callers no longer run the connection guard first. Retain its progress
       // flush under this opening reservation, then check the latest session.
       await Promise.all([...progressFlushes].map((flush) => flush()));
-      assertReaderContext(source, await host.getContext());
+      assertReaderSessionUnchanged({ sessionId: source.sessionId }, await host.getContext());
       const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null, ambiguous: false };
       pending = request;
       try {

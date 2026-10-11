@@ -5,7 +5,7 @@ import { ServerRegistryRepository, SERVER_STORAGE_KEY, parseServerRegistry, seri
 import { createServerStore } from '../src/lib/store/server.ts';
 import { checkSavedServer, readConnectionWelcome } from '../src/lib/server-connection.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
-import { assertReaderContext, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders, registerReaderProgressFlush } from '../src/lib/reader-source.ts';
+import { assertReaderSessionUnchanged, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders, registerReaderProgressFlush } from '../src/lib/reader-source.ts';
 import { mockCrypto } from './helpers/crypto-context.mjs';
 
 function storage(initial = {}) {
@@ -417,9 +417,9 @@ test('delayed title persistence cannot overwrite the runtime title after disconn
 
 test('delayed reader preparation cannot open after a session change or during a candidate switch', () => {
   const source = { serverUrl: 'http://a.test', bookId: '42', sessionId: 1 };
-  assert.doesNotThrow(() => assertReaderContext(source, { sessionId: 1, candidate: null }));
-  assert.throws(() => assertReaderContext(source, { sessionId: 2, candidate: null }), /状态已改变/);
-  assert.throws(() => assertReaderContext(source, { sessionId: 1, candidate: { url: 'http://b.test' } }), /状态已改变/);
+  assert.doesNotThrow(() => assertReaderSessionUnchanged(source, { sessionId: 1, candidate: null }));
+  assert.throws(() => assertReaderSessionUnchanged(source, { sessionId: 2, candidate: null }), /状态已改变/);
+  assert.throws(() => assertReaderSessionUnchanged(source, { sessionId: 1, candidate: { url: 'http://b.test' } }), /状态已改变/);
 });
 
 test('authentication reserves the Reader boundary and releases it on success and failure', async () => {
