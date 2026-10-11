@@ -84,6 +84,7 @@ test('welcome requirements keep unknown codes, failed HTTP responses and malform
   for (const [response, expectedCode] of [
     [() => Response.json({ err: 'server.busy', msg: '服务繁忙' }), 'server.busy'],
     [() => Response.json({ err: 'not_installed' }), 'not_installed'],
+    [() => Response.json({ err: 'not_invited' }, { status: 403 }), 'not_invited'],
     [() => Response.json({ err: 'not_invited' }, { status: 503 }), 'not_invited'],
     [() => Response.json({ err: 'free' }, { status: 403 }), 'http.403'],
     [() => Response.json({ err: 'ok' }, { status: 500 }), 'http.500'],
@@ -102,12 +103,12 @@ test('welcome requirements keep unknown codes, failed HTTP responses and malform
 });
 
 test('saved-server confirmation rejects failed welcome HTTP requests even with an ok or invite-state body', async context => {
-  for (const err of ['ok', 'free', 'not_invited']) {
+  for (const [err, status] of [['ok', 503], ['free', 503], ['not_invited', 503], ['not_invited', 403]]) {
     const requests = [];
     context.mock.method(globalThis, 'fetch', async url => {
       requests.push(String(url));
       return String(url).endsWith('/api/user/info') ? Response.json({ err: 'ok' })
-        : Response.json({ err, msg: 'failed welcome HTTP request' }, { status: 503 });
+        : Response.json({ err, msg: 'failed welcome HTTP request' }, { status });
     });
     await assert.rejects(checkSavedServer('https://books.test', {
       validate: validateServerConnection, welcome: checkWelcomeRequirement,
@@ -129,6 +130,10 @@ test('an uninstalled server is recognized by HTTP 200 but cannot pass saved-serv
 });
 
 test('saved-server confirmation uses actual requests to route not_invited to access and reject unknown welcome failures', async context => {
+  // The ok welcome case models the official invite-required flow: HTTP 200
+  // not_invited from user/info, then HTTP 200 ok from Welcome, which bypasses
+  // that gate (talebook/talebook d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2,
+  // webserver/handlers/base.py:206-214 and user.py:467-477).
   for (const err of ['ok', 'free', 'not_invited', 'server.busy']) {
     const calls = [];
     const controller = new AbortController();

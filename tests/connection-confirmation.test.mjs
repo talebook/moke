@@ -85,8 +85,8 @@ function harness(kind, initialState = {}) {
         if (requestId === undefined || h.state.candidate?.requestId === requestId) h.state.candidate=null;
       },
       requireAccess:requestId => h.accessRequests.push(requestId),
-      activateCandidate:async requestId => {
-        const activation={requestId,...deferred()}; h.activations.push(activation);
+      activateCandidate:async (requestId, accessConfirmed) => {
+        const activation={requestId,accessConfirmed,...deferred()}; h.activations.push(activation);
         const confirmed=await activation.promise;
         if (confirmed) {
           const candidate=h.state.candidate;
@@ -212,7 +212,9 @@ test('welcome reports a current failed confirmation, retains the list/account an
   const h=harness('welcome');
   try {
     const before={list:h.state.savedServers,url:h.state.serverUrl,user:h.state.user};
-    const activation=await reachActivation(h);activation.resolve(false);await nextTurn();
+    const activation=await reachActivation(h);
+    assert.equal(activation.accessConfirmed,undefined,'the ordinary connection path cannot confirm an access code');
+    activation.resolve(false);await nextTurn();
     assert.equal(h.status.error,'连接未被确认，请重试');assert.equal(h.status.loading,null);
     assert.deepEqual(h.routes,[]);assert.equal(h.state.savedServers,before.list);
     assert.equal(h.state.serverUrl,before.url);assert.equal(h.state.user,before.user);
@@ -248,10 +250,13 @@ test('welcome old false confirmation cannot clear or add errors to a newer pendi
 test('access reports failed activation and a retry completes even when its own session change unmounts it', async () => {
   const h=harness('access');
   try {
-    const first=await reachActivation(h);first.resolve(false);await nextTurn();
+    const first=await reachActivation(h);
+    assert.equal(first.accessConfirmed,true,'a successful current access response confirms activation');
+    first.resolve(false);await nextTurn();
     assert.deepEqual(h.status,{loading:false,error:'连接未被确认，请重试',captcha:false});
     assert.deepEqual(h.routes,[]);assert.equal(h.state.serverUrl,'https://current.test');
     h.submit();h.verifications.at(-1).resolve({err:'ok'});await nextTurn();
+    assert.equal(h.activations.at(-1).accessConfirmed,true);
     h.remountOnActivation=true;h.activations.at(-1).resolve(true);await nextTurn();
     assert.equal(h.verifications.at(-1).signal.aborted,true);
     assert.deepEqual(h.routes,['/shelf'],'the activation-created cleanup must not prevent success navigation');
@@ -306,7 +311,20 @@ test('cold access read failure remains retryable after the error is cleared', as
   } finally {await h.close();}
 });
 
-for (const outcome of ['false activation','error response','captcha response']) {
+for (const err of ['invite.invalid','captcha.required']) {
+  test(`access ${err} response never authorizes candidate activation`, async () => {
+    const h=harness('access');
+    try {
+      h.submit();h.verifications.at(-1).resolve({err,msg:'fixture access failure'});await nextTurn();
+      assert.deepEqual(h.activations,[]);assert.deepEqual(h.routes,[]);
+      assert.equal(h.status.error,'fixture access failure');
+      assert.equal(h.status.loading,false);assert.equal(h.status.captcha,err === 'captcha.required');
+      assert.equal(h.state.serverUrl,'https://current.test');
+    } finally {await h.close();}
+  });
+}
+
+for (const outcome of ['false activation','success response','error response','captcha response']) {
   test(`access context change fences old ${outcome} and its finally against the new form`, async () => {
     const h=harness('access');
     try {
@@ -317,14 +335,18 @@ for (const outcome of ['false activation','error response','captcha response']) 
       h.state.candidate={id:'b',url:'https://b.test',requestId:2};h.params='serverId=b&requestId=2';h.render();
       assert.equal(oldRequest.signal.aborted,true);
       assert.deepEqual(h.status,{loading:false,error:'',captcha:false});
-      h.submit();const current=h.verifications.at(-1), before=h.updates.length;
+      h.submit();const current=h.verifications.at(-1), before=h.updates.length, activationsBefore=h.activations.length;
       if (outcome === 'false activation') old.resolve(false);
+      else if (outcome === 'success response') old.resolve({err:'ok'});
       else if (outcome === 'error response') old.reject(new Error('old response failed'));
       else old.resolve({err:'captcha.required',msg:'old captcha'});
       await nextTurn();
       assert.equal(h.updates.length,before);assert.deepEqual(h.status,{loading:true,error:'',captcha:false});
+      assert.equal(h.activations.length,activationsBefore,'a stale response cannot authorize the newer candidate');
       assert.equal(current.signal.aborted,false);assert.equal(current.url,'https://b.test');
-      current.resolve({err:'ok'});await nextTurn();h.activations.at(-1).resolve(false);await nextTurn();
+      current.resolve({err:'ok'});await nextTurn();
+      assert.equal(h.activations.at(-1).requestId,2);assert.equal(h.activations.at(-1).accessConfirmed,true);
+      h.activations.at(-1).resolve(false);await nextTurn();
       assert.deepEqual(h.status,{loading:false,error:'连接未被确认，请重试',captcha:false});
     } finally {await h.close();}
   });

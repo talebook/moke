@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2, MonitorCog } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { fetchServerInfo, getErrorMessage, request } from '@/lib/api';
+import { fetchServerInfo, getErrorMessage, MokeApiError, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
@@ -18,6 +18,13 @@ import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 import { Select } from '@/components/ui/Select';
+
+function getSettingsReaderError(error: unknown, action: string, fallback: string): string {
+  if (error instanceof MokeApiError && error.code === 'reader.windows_open') {
+    return `请先关闭当前阅读器及阅读器书库窗口，再${action}。当前连接已保留。`;
+  }
+  return getErrorMessage(error, fallback);
+}
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -74,7 +81,7 @@ export default function SettingsPage() {
   }, [offlineMode, serverUrl]);
 
   const handleDisconnect = async () => {
-    try { await requireClosedReaders(); } catch (error) { showToast(getErrorMessage(error, '无法断开连接，请重试。'), 'error'); return; }
+    try { await requireClosedReaders(); } catch (error) { showToast(getSettingsReaderError(error, '断开连接', '无法断开连接，请重试。'), 'error'); return; }
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/welcome');
@@ -100,7 +107,7 @@ export default function SettingsPage() {
         safeRemoveLocalStorageItem('moke-auth-token');
         router.push('/login');
       });
-    } catch (error) { showToast(getErrorMessage(error, '退出登录失败，请重试。'), 'error'); }
+    } catch (error) { showToast(getSettingsReaderError(error, '退出登录', '退出登录失败，请重试。'), 'error'); }
   };
 
   const handleSelectDownloadDirectory = async () => {
@@ -130,7 +137,7 @@ export default function SettingsPage() {
     try {
       await enterOfflineMode();
       router.push('/shelf');
-    } catch (error) { showToast(getErrorMessage(error, '无法进入离线模式，请重试。'), 'error'); }
+    } catch (error) { showToast(getSettingsReaderError(error, '进入离线模式', '无法进入离线模式，请重试。'), 'error'); }
   };
 
   return (

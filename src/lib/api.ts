@@ -276,9 +276,10 @@ export async function discoverServerCapabilities(serverUrl: string, signal?: Abo
 }
 
 // Keep compatible HTTP auth challenges separate from successful JSON states.
-// Talebook returns not_installed with HTTP 200 (base.py:216-220 at
-// d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2); it identifies the server, but
-// checkSavedServer's subsequent welcome check must still reject that state.
+// Talebook returns not_invited and not_installed with HTTP 200 (base.py:206-220 at
+// d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2). Both identify the server; an
+// incomplete installation must still fail checkSavedServer's welcome check.
+// The 401/403 pairs below are compatibility for the user/info probe only.
 const SERVER_CONNECTION_AUTH_HTTP_STATUS = new Map([
   ['user.need_login', 401],
   ['not_invited', 403],
@@ -373,8 +374,9 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
   if (!response.ok) {
     logHttpErrorMetadata('checkWelcomeRequirement', response.status, data);
     return {
-      // A success-shaped body cannot turn a failed HTTP request into an open
-      // connection. Invite-state compatibility applies only after HTTP success.
+      // Talebook's Welcome bypasses the invite gate and returns HTTP 200 ok/free
+      // (user.py:467-477 at d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2).
+      // Even not_invited cannot make a failed welcome request require a code.
       err: typeof data.err === 'string' && data.err !== 'ok' && data.err !== 'free' ? data.err : `http.${response.status}`,
       msg: data.msg || '访问码状态检查失败',
       needsAccessCode: false,

@@ -61,7 +61,7 @@ function AccessPageInner() {
       if (res.err === 'ok') {
         await requireClosedReaders();
         if (!isCurrent()) return;
-        if (!await useServerStore.getState().activateCandidate(requestId)) {
+        if (!await useServerStore.getState().activateCandidate(requestId, true)) {
           if (isCurrent()) setError('连接未被确认，请重试');
           return;
         }

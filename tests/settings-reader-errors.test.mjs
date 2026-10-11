@@ -20,7 +20,7 @@ const mocks = new Map([
     useServerStore.getState = useServerStore;`],
   ['@/lib/reader-source', `export const requireClosedReaders = () => globalThis.__settingsReaderErrors.boundary.requireClosedReaders();
     export const withClosedReaderSession = change => globalThis.__settingsReaderErrors.boundary.withClosedReaderSession(change);`],
-  ['@/lib/api', `export {getErrorMessage} from '${new URL('../src/lib/api-core.ts', import.meta.url).href}';
+  ['@/lib/api', `export {getErrorMessage, MokeApiError} from '${new URL('../src/lib/api-core.ts', import.meta.url).href}';
     export const fetchServerInfo = async () => ({});
     export const request = async (...args) => {globalThis.__settingsReaderErrors.requests.push(args);return new Response();};`],
   ['@/lib/store/developer', 'export const useDeveloperStore = selector => selector({unlocked:false,enabled:false});'],
@@ -85,7 +85,7 @@ for (const [label, change, route, fallback] of actions) {
   test(`${label} reports the typed Reader guard through the existing error toast without changing context`, async context => {
     const h = harness(context, 'reader');
     await h.click(label);
-    assert.deepEqual(h.toasts, [['请先关闭当前阅读器及阅读器书库窗口，再重试连接。当前连接已保留。','error']]);
+    assert.deepEqual(h.toasts, [[`请先关闭当前阅读器及阅读器书库窗口，再${label}。当前连接已保留。`,'error']]);
     assert.deepEqual(h.changes, []); assert.deepEqual(h.routes, []);
     assert.deepEqual(h.requests, []); assert.deepEqual(h.removals, []);
   });

@@ -63,7 +63,7 @@ interface ServerState {
   beginActiveAccessConfirmation: () => Candidate | null;
   cancelConnection: (requestId?: number) => void;
   requireAccess: (requestId: number) => void;
-  activateCandidate: (requestId: number) => Promise<boolean>;
+  activateCandidate: (requestId: number, accessConfirmed?: boolean) => Promise<boolean>;
   enterOfflineMode: (prepareDocumentReturn?: () => void) => Promise<void>;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
@@ -215,13 +215,18 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       const candidate = get().candidate;
       if (candidate?.requestId === requestId) set({ candidate: { ...candidate, needsAccessCode: true } });
     },
-    activateCandidate: async (requestId) => {
+    activateCandidate: async (requestId, accessConfirmed = false) => {
       const candidate = get().candidate;
-      if (candidate?.requestId !== requestId || get().saving || get().storageBusy || get().storageError) return false;
+      // Access may confirm this candidate only after a successful server
+      // response. This fences internal activation; the server owns auth.
+      if (candidate?.requestId !== requestId || (candidate.needsAccessCode && !accessConfirmed)
+        || get().saving || get().storageBusy || get().storageError) return false;
       set({ saving: true });
       try {
         return await withClosedReaderSession(async () => {
-          if (get().candidate?.requestId !== requestId || get().storageBusy || get().storageError) return false;
+          const currentCandidate = get().candidate;
+          if (currentCandidate?.requestId !== requestId || (currentCandidate.needsAccessCode && !accessConfirmed)
+            || get().storageBusy || get().storageError) return false;
           const url = new URL(candidate.url);
           clearReaderReturn(returnChannel);
           clearReadStateCache();

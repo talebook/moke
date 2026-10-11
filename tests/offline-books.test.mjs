@@ -507,6 +507,76 @@ test('重复保存会更新原记录，多个服务器之间互不覆盖', async
   assert.equal((await getOfflineBook('https://b.example', '7'))?.title, '另一服务器');
 });
 
+for (const platform of ['web', 'tauri']) {
+  for (const operation of ['read', 'delete']) {
+    test(`${platform} ${operation} with an empty source cannot select another server's matching download`, async (t) => {
+      const native = platform === 'tauri' ? installTauriOfflineStore(undefined, true) : null;
+      const indexedDB = native?.indexedDB ?? installWebOfflineStore();
+      t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+      for (const serverUrl of ['https://a.example', 'https://b.example']) {
+        await saveOfflineBook({
+          serverUrl, bookId: '7', title: serverUrl, format: 'pdf',
+          fileName: '7.pdf', mimeType: 'application/pdf', blob: new Blob([serverUrl]),
+        });
+      }
+
+      if (operation === 'read') {
+        assert.equal(await getOfflineBook('', '7', 'pdf'), null);
+        assert.equal(await getOfflineBook('', '7'), null);
+      } else {
+        await deleteOfflineBook('', '7', 'pdf');
+        await deleteOfflineBook('', '7');
+        assert.equal(native?.calls.filter(({ command }) => command === 'moke_delete_downloaded_book_file').length ?? 0, 0);
+      }
+      assert.equal(indexedDB.records.size, 2);
+      for (const serverUrl of ['https://a.example', 'https://b.example']) {
+        const record = await getOfflineBook(serverUrl, '7', 'pdf');
+        assert.equal(record?.serverUrl, serverUrl);
+        assert.equal(record?.title, serverUrl);
+      }
+    });
+  }
+}
+
+test('format fallback preserves the requested server when a sample with the same book ID is visible', async () => {
+  const indexedDB = installWebOfflineStore();
+  await saveOfflineBook({ ...SAMPLE_BOOK, blob: new Blob(['sample']) });
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://a.example', blob: new Blob(['server book']) });
+
+  assert.equal((await listOfflineBooks('https://b.example')).length, 1, 'the sample remains globally visible');
+  assert.equal(await getOfflineBook('https://b.example', SAMPLE_BOOK.bookId, 'epub'), null);
+  assert.equal(await getOfflineBook('', SAMPLE_BOOK.bookId, 'epub'), null);
+  await deleteOfflineBook('https://b.example', SAMPLE_BOOK.bookId, 'epub');
+  await deleteOfflineBook('', SAMPLE_BOOK.bookId, 'epub');
+
+  assert.equal(indexedDB.records.size, 2);
+  assert.equal(await (await getSampleBook()).blob.text(), 'sample');
+  assert.equal(await (await getOfflineBook('https://a.example', SAMPLE_BOOK.bookId, 'epub')).blob.text(), 'server book');
+});
+
+for (const platform of ['web', 'tauri']) {
+  test(`${platform} format fallback still resolves normalized server origins and explicit local downloads`, async () => {
+    const native = platform === 'tauri' ? installTauriOfflineStore(undefined, true) : null;
+    if (!native) installWebOfflineStore();
+    const common = { bookId: '7', format: 'pdf', fileName: '7.pdf', mimeType: 'application/pdf' };
+    await saveOfflineBook({ ...common, serverUrl: 'https://a.example:443', title: 'Server', blob: new Blob(['server']) });
+    await saveOfflineBook({ ...common, serverUrl: '', title: 'Local', blob: new Blob(['local']) });
+
+    assert.equal((await getOfflineBook('https://a.example', '7', '.PDF')).title, 'Server');
+    const local = await getOfflineBook('', '7', 'pdf');
+    assert.equal(local.title, 'Local');
+    if (native) assert.match(local.filePath, /^\/data\/user\/0\/org\.houheya\.moke\/books\//);
+    else assert.equal(await local.blob.text(), 'local');
+    await deleteOfflineBook('', '7', 'pdf');
+    assert.equal(await getOfflineBook('', '7', 'pdf'), null);
+    assert.equal((await getOfflineBook('https://a.example', '7', 'pdf')).title, 'Server');
+    if (native) {
+      assert.deepEqual(native.calls.filter(({ command }) => command === 'moke_delete_downloaded_book_file')
+        .map(({ args }) => args.id), ['::7::pdf']);
+    }
+  });
+}
+
 test('删除只移除目标离线书籍，删除不存在的记录也不会失败', async () => {
   installWebOfflineStore();
 
