@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import './helpers/import-app-module.mjs';
-import { prepareReaderReturn, takeReaderReturn, READER_RETURN_TTL_MS } from '../src/lib/reader-return.ts';
+import { prepareOfflineLibraryEntry, prepareReaderReturn, takeReaderReturn, READER_RETURN_TTL_MS } from '../src/lib/reader-return.ts';
 import { createServerStore } from '../src/lib/store/server.ts';
 import { ServerRegistryRepository, SERVER_STORAGE_KEY } from '../src/lib/server-registry.ts';
 import { mockCrypto } from './helpers/crypto-context.mjs';
@@ -28,6 +28,53 @@ test('one-use return receipt contains only source identity and preserves the lit
   assert.deepEqual(takeReaderReturn([a,b],tab,1001),online);
   assert.equal(takeReaderReturn([a,b],tab,1002),null);
   assert.equal(tab.state.marker,'');
+});
+
+test('offline library document entry restores only offline intent, stays in library and cannot replay on cold load', async () => {
+  const disk=registry(),tab=channel();
+  disk.values.set(SERVER_STORAGE_KEY,JSON.stringify({version:1,state:{savedServers:[a]}}));
+  prepareOfflineLibraryEntry(tab);
+  const receipt=JSON.parse([...tab.state.values.values()][0]);
+  assert.equal(receipt.activeServerId,null);assert.equal(receipt.serverUrl,'');assert.equal(receipt.intent,'offline-library');
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>assert.fail('offline entry must not probe a saved server');
+  try {
+    const arrived=createServerStore(disk.repository,tab);await arrived.getState().loadServers();
+    assert.equal(arrived.getState().offlineMode,true);assert.equal(arrived.getState().serverUrl,'');
+    assert.equal(arrived.getState().readerReturnTo,null);assert.equal(arrived.getState().user,null);
+    assert.deepEqual(arrived.getState().savedServers,[a]);assert.equal('intent' in arrived.getState(),false);
+    assert.equal(tab.state.marker,'');assert.equal(tab.state.values.size,0);
+    const cold=createServerStore(disk.repository,tab);await cold.getState().loadServers();
+    assert.equal(cold.getState().offlineMode,false);
+  }finally{globalThis.fetch=originalFetch;}
+});
+
+test('offline entry rejects reload/history, foreign paths, missing live markers, expiry and modified intents', () => {
+  for(const scenario of ['reload','history','foreign','cold','expired','modified']) {
+    const tab=channel();prepareOfflineLibraryEntry(tab,1000);
+    if(scenario==='reload')tab.state.arrival.navigationType='reload';
+    if(scenario==='history')tab.state.arrival.navigationType='back_forward';
+    if(scenario==='foreign')tab.state.arrival.pathname='/shelf';
+    if(scenario==='cold')tab.state.marker='';
+    if(scenario==='modified'){
+      const key=[...tab.state.values.keys()][0],data=JSON.parse(tab.state.values.get(key));
+      delete data.intent;tab.state.values.set(key,JSON.stringify(data));
+    }
+    assert.equal(takeReaderReturn([a],tab,scenario==='expired'?1000+READER_RETURN_TTL_MS:1001),null,scenario);
+    assert.equal(tab.state.values.size,0);assert.equal(tab.state.marker,'');
+  }
+  assert.throws(()=>prepareReaderReturn({...online,intent:'offline-library'},channel()),/无法保存/);
+});
+
+test('denied document handoff preparation retains online identity and offline mode before remount', async () => {
+  const disk=registry(),tab=channel(),store=createServerStore(disk.repository,tab);
+  await store.getState().loadServers();const saved=(await store.getState().saveServer(a.url)).value;
+  await store.getState().activateCandidate(store.getState().beginConnection(saved.id).requestId);
+  const before=store.getState();
+  const denied={...tab,storage:{...tab.storage,setItem(){throw new Error('denied');}}};
+  await assert.rejects(store.getState().enterOfflineMode(()=>prepareOfflineLibraryEntry(denied)),/无法保存离线书库跳转信息/);
+  assert.equal(store.getState().offlineMode,false);assert.equal(store.getState().sessionId,before.sessionId);
+  assert.equal(store.getState().serverUrl,a.url);assert.equal(store.getState().activeServerId,saved.id);
 });
 
 test('cold contexts, wrong paths, reload/history, stale/future/deleted/forged-source receipts do not reactivate a server', () => {

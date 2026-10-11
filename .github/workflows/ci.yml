@@ -124,6 +124,43 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+  single-webview-smoke:
+    name: Single WebView document handoff smoke test (synthetic IPC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+      - name: Exercise full-document offline entry
+        run: |
+          node tests/helpers/tauri-preview-server.mjs > "$RUNNER_TEMP/moke-tauri-preview.log" 2>&1 &
+          moke_preview_pid=$!
+          trap 'kill "$moke_preview_pid" || true' EXIT
+          for attempt in {1..30}; do
+            if curl --silent --fail http://127.0.0.1:31391/settings/developer > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs --workers=1
+      - name: Upload document handoff evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: single-webview-smoke-artifacts
+          path: |
+            test-results/**
+            ${{ runner.temp }}/moke-tauri-preview.log
+
   mobile-smoke:
     name: Mobile, tablet and desktop page smoke test
     runs-on: ubuntu-latest

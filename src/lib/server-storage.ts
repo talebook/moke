@@ -8,7 +8,9 @@ export const browserServerStorage: RegistryStorage = {
   setItem: (key, value) => window.localStorage.setItem(key, value),
 };
 
-// Native builds keep the list in AppData using the existing narrow books fs scope.
+// Native builds keep non-secret list metadata in the existing books fs scope.
+// Reader windows can read this directory (including via the asset protocol);
+// it is not a main-window confidentiality boundary. Only main may write it.
 // Reading the old browser keys only when no native file exists allows a one-time
 // migration while retaining the original data. No credentials live in this file.
 export function createNativeServerStorage(): RegistryStorage {

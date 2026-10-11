@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { useServerStore } from '../src/lib/store/server.ts';
 import { registerReaderProgressFlush, withClosedReaderSession } from '../src/lib/reader-source.ts';
+import { clearReaderReturn, prepareOfflineLibraryEntry, takeReaderReturn } from '../src/lib/reader-return.ts';
 
 // Exercise the component's actual callback with captured hook values and the
 // production session boundary. No React/native rendering claim is made here.
@@ -15,14 +16,40 @@ function visit(node) {
 }
 visit(source);
 assert.ok(callback, 'the sample library button must have its guarded callback');
-const createCallback = new Function('busyRef', 'setBusy', 'setError', 'useServerStore', 'navigateFullDocument', 'router', ts.transpile(`return (${callback});`, { target: ts.ScriptTarget.ES2022 }));
+const createCallback = new Function('busyRef', 'setBusy', 'setError', 'useServerStore', 'navigateFullDocument', 'router', 'prepareOfflineLibraryEntry', 'clearReaderReturn', 'getMokeRuntimePlatform', 'isSingleWebviewRuntime', ts.transpile(`return (${callback});`, { target: ts.ScriptTarget.ES2022 }));
 
-function fixture() {
+function fixture(mode = 'router') {
   const state = { busy: false, error: '', navigations: [] };
-  const navigate = async (path) => { state.navigations.push(path); };
-  const handler = createCallback({ current: false }, value => { state.busy = value; }, value => { state.error = value; }, useServerStore, navigate, { push() {} });
-  return { state, handler };
+  const values=new Map();let marker='';
+  const tab={storage:{getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},getMarker:()=>marker,setMarker:value=>{marker=value;},getArrival:()=>({pathname:'/library',navigationType:'navigate'})};
+  const navigate = async (path, fallback, _platform, beforeDocument) => {
+    if(mode==='changed')useServerStore.getState().setServer('http','b.test','');
+    if(mode!=='router')beforeDocument();
+    if(mode==='fallback')fallback(path);
+    else state.navigations.push(path);
+  };
+  const prepare=()=>{if(mode==='denied')throw new Error('无法保存离线书库跳转信息');prepareOfflineLibraryEntry(tab);};
+  const runtime=async()=>{if(mode==='changed-probe')useServerStore.getState().setServer('http','b.test','');return mode==='router'?'web':'ios';};
+  const handler = createCallback({ current: false }, value => { state.busy = value; }, value => { state.error = value; }, useServerStore, navigate, { push: path=>state.navigations.push(path) }, prepare, ()=>clearReaderReturn(tab), runtime, value=>value==='ios');
+  return { state, handler, tab };
 }
+
+test('sample full-document callback prepares a one-use offline library intent and clears failed IPC fallback', async () => {
+  for(const mode of ['document','fallback','changed','changed-probe','denied']) {
+    useServerStore.getState().disconnect();
+    const {state,handler,tab}=fixture(mode);await handler();
+    assert.equal(state.busy,false);
+    if(mode==='document'){
+      assert.deepEqual(takeReaderReturn([],tab),{activeServerId:null,serverUrl:'',offlineMode:true,intent:'offline-library'});
+      assert.deepEqual(state.navigations,['/library']);
+    }else if(mode==='fallback'){
+      assert.equal(takeReaderReturn([],tab),null);assert.deepEqual(state.navigations,['/library']);
+    }else{
+      assert.match(state.error,/状态已改变|无法保存/);assert.deepEqual(state.navigations,[]);assert.equal(takeReaderReturn([],tab),null);
+    }
+    useServerStore.getState().disconnect();
+  }
+});
 
 test('sample library waits for offline entry, blocks duplicate clicks, then navigates once', async () => {
   useServerStore.getState().disconnect();

@@ -175,6 +175,7 @@ export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
   platformOverride?: string,
+  beforeDocumentNavigation?: () => void,
 ): Promise<void> {
   if (!isSafeAppNavigationPath(href)) {
     console.warn('Refusing unsafe full-document navigation:', href);
@@ -202,6 +203,9 @@ export async function navigateFullDocument(
     fallback(href);
     return;
   }
+  // Prepare ephemeral handoff state only when a document will be replaced.
+  // A preparation failure must stop navigation, not silently use the router.
+  beforeDocumentNavigation?.();
   if (!requiresMokeNavigate(currentPlatform)) {
     // Crossing app boundaries intentionally discards the current shell state;
     // the launch URL carries all context the embedded reader needs.

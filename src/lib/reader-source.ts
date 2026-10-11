@@ -1,8 +1,10 @@
+import { MokeApiError } from './api-core.ts';
+
 export interface ReaderSource { serverUrl: string; bookId: string; sessionId: number }
 
 export function assertReaderContext(source: ReaderSource, current: { sessionId: number; candidate: unknown }): void {
   if (source.sessionId !== current.sessionId || current.candidate) {
-    throw new Error('连接或登录状态已改变，请返回书籍页面重试');
+    throw new MokeApiError('连接或登录状态已改变，请返回书籍页面重试', 'reader.context_changed');
   }
 }
 
@@ -15,11 +17,13 @@ interface ReaderHost {
 }
 
 const UNRESOLVED_OPEN = '上次阅读器打开请求尚未确认，当前连接已保留。请等待窗口出现并关闭后重试；若一直未出现，请退出并重启应用。';
+const AMBIGUOUS_OPEN = '检测到多个新阅读器窗口，无法确认本次打开请求的来源。当前连接已保留。请关闭阅读器并完全退出、重新启动应用后重试。';
 
 /** Dispatch may succeed even when its receipt/creation cannot be observed. */
-export class ReaderOpenUnconfirmedError extends Error {
-  constructor(cause?: unknown) {
-    super(UNRESOLVED_OPEN, { cause });
+export class ReaderOpenUnconfirmedError extends MokeApiError {
+  constructor(cause?: unknown, ambiguous = false) {
+    super(ambiguous ? AMBIGUOUS_OPEN : UNRESOLVED_OPEN, 'reader.open_unconfirmed');
+    this.cause = cause;
     this.name = 'ReaderOpenUnconfirmedError';
   }
 }
@@ -33,7 +37,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   const retired = new Set<string>();
   let readerOpening = false;
   let readerSessionChanging = false;
-  let pending: { source: ReaderSource; before: Set<string>; label: string | null } | null = null;
+  let pending: { source: ReaderSource; before: Set<string>; label: string | null; ambiguous: boolean } | null = null;
   const progressFlushes = new Set<() => Promise<void>>();
 
   function bindReaderWindow(windowLabel: string, source: ReaderSource): void {
@@ -42,7 +46,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   }
 
   function observeWindow(label: string): void {
-    if (!pending || pending.before.has(label) || retired.has(label) || !label.startsWith('reader-')) return;
+    if (!pending || pending.ambiguous || pending.before.has(label) || retired.has(label) || !label.startsWith('reader-')) return;
     bindReaderWindow(label, pending.source);
     pending.label = label;
   }
@@ -52,7 +56,16 @@ export function createReaderSourceBoundary(host: ReaderHost) {
       const request = pending;
       const created = labels.filter((label) => label.startsWith('reader-') && !request.before.has(label) && !retired.has(label));
       // Ambiguous observations cannot authorize a new request or a switch.
-      if (created.length === 1 && (!request.label || request.label === created[0])) {
+      // An empty later snapshot cannot prove that the dispatched IPC request
+      // created either window, or that no queued creation is still outstanding.
+      if (created.length > 1) {
+        request.ambiguous = true;
+        request.label = null;
+        // Early events may have provisionally associated one label. Once the
+        // snapshot is ambiguous, neither label may keep that authority.
+        for (const label of created) windows.delete(label);
+      }
+      if (!request.ambiguous && created.length === 1 && (!request.label || request.label === created[0])) {
         observeWindow(created[0]);
         pending = null;
       }
@@ -65,7 +78,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   function retireReaderWindow(label: string): void {
     // book:closed has no Moke book id. Only an already associated label can
     // settle a request; an unknown delayed close cannot release a newer open.
-    if (pending?.label === label) {
+    if (pending?.label === label && !pending.ambiguous) {
       pending = null;
     }
     windows.delete(label);
@@ -75,7 +88,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   function sourceForReaderEvent(windowLabel: string, bookId: string): ReaderSource | null {
     const known = windows.get(windowLabel);
     if (known) return known.bookId === bookId ? known : null;
-    if (retired.has(windowLabel) || pending?.source.bookId !== bookId || pending.before.has(windowLabel)) return null;
+    if (retired.has(windowLabel) || pending?.ambiguous || pending?.source.bookId !== bookId || pending.before.has(windowLabel)) return null;
     observeWindow(windowLabel);
     return windows.get(windowLabel) ?? null;
   }
@@ -83,21 +96,21 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   async function checkClosedReaders(): Promise<void> {
     const labels = await host.getWindowLabels();
     reconcileWindows(labels);
-    if (pending) throw new ReaderOpenUnconfirmedError();
+    if (pending) throw new ReaderOpenUnconfirmedError(undefined, pending.ambiguous);
     if (labels.some(isReaderWindow)) {
-      throw new Error('请先关闭当前阅读器及阅读器书库窗口，再重试连接。当前连接已保留。');
+      throw new MokeApiError('请先关闭当前阅读器及阅读器书库窗口，再重试连接。当前连接已保留。', 'reader.windows_open');
     }
     await Promise.all([...progressFlushes].map((flush) => flush()));
   }
 
   async function requireClosedReaders(): Promise<void> {
-    if (readerOpening) throw new Error('阅读器正在打开，请稍候再试。当前连接已保留。');
-    if (readerSessionChanging) throw new Error('正在变更登录状态，请稍候再试。当前连接已保留。');
+    if (readerOpening) throw new MokeApiError('阅读器正在打开，请稍候再试。当前连接已保留。', 'reader.opening');
+    if (readerSessionChanging) throw new MokeApiError('正在变更登录状态，请稍候再试。当前连接已保留。', 'reader.session_changing');
     await checkClosedReaders();
   }
 
   async function withClosedReaderSession<T>(change: () => Promise<T>): Promise<T> {
-    if (readerOpening || readerSessionChanging) throw new Error('阅读器或登录状态正在变更，请稍候再试');
+    if (readerOpening || readerSessionChanging) throw new MokeApiError('阅读器或登录状态正在变更，请稍候再试', 'reader.busy');
     readerSessionChanging = true;
     try {
       await checkClosedReaders();
@@ -106,20 +119,20 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   }
 
   async function openReaderFromSource(source: ReaderSource, args: Record<string, unknown>): Promise<void> {
-    if (readerOpening || readerSessionChanging) throw new Error('阅读器或登录状态正在变更，请稍候再试');
+    if (readerOpening || readerSessionChanging) throw new MokeApiError('阅读器或登录状态正在变更，请稍候再试', 'reader.busy');
     readerOpening = true;
     try {
       const before = await host.getWindowLabels();
       reconcileWindows(before);
-      if (pending) throw new ReaderOpenUnconfirmedError();
+      if (pending) throw new ReaderOpenUnconfirmedError(undefined, pending.ambiguous);
       // Check under the opening reservation so another launch cannot race the
       // caller's earlier window snapshot.
-      if (before.some(isReaderWindow)) throw new Error('请先关闭当前阅读器及阅读器书库窗口，再打开书籍');
+      if (before.some(isReaderWindow)) throw new MokeApiError('请先关闭当前阅读器及阅读器书库窗口，再打开书籍', 'reader.windows_open');
       // Callers no longer run the connection guard first. Retain its progress
       // flush under this opening reservation, then check the latest session.
       await Promise.all([...progressFlushes].map((flush) => flush()));
       assertReaderContext(source, await host.getContext());
-      const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null };
+      const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null, ambiguous: false };
       pending = request;
       try {
         await host.open(args);
@@ -133,9 +146,9 @@ export function createReaderSourceBoundary(host: ReaderHost) {
           delayMs = Math.min(delayMs * 2, 1000);
         }
       } catch (error) {
-        throw new ReaderOpenUnconfirmedError(error);
+        throw new ReaderOpenUnconfirmedError(error, request.ambiguous);
       }
-      throw new ReaderOpenUnconfirmedError();
+      throw new ReaderOpenUnconfirmedError(undefined, request.ambiguous);
     } finally {
       // Only the foreground reservation ends. A dispatched request remains
       // unconfirmed even on rejection: the transport may have lost its receipt.

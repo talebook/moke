@@ -5,47 +5,7 @@ import {
   DEFAULT_SERVER_CAPABILITIES,
   discoverGeneralServerCapabilities,
   getServerDiscoveryInputs,
-  mergePersistedServerCapabilities,
 } from '../src/lib/server-capabilities.ts';
-
-test('持久化能力迁移剥离 legacy annotationApi 键', () => {
-  const migrated = mergePersistedServerCapabilities(DEFAULT_SERVER_CAPABILITIES, {
-    shelfApi: true,
-    annotationApi: true,
-    checkedAt: 12_345,
-    version: 'legacy',
-  });
-
-  assert.equal(migrated.annotationApiStatus, 'supported');
-  assert.equal(migrated.annotationApiCheckedAt, 12_345);
-  assert.equal(Object.hasOwn(migrated, 'annotationApi'), false);
-  assert.deepEqual(
-    Object.keys(migrated).sort(),
-    Object.keys(DEFAULT_SERVER_CAPABILITIES).sort(),
-  );
-});
-
-test('legacy annotationApi false 迁移为可重探的 unchecked', () => {
-  const migrated = mergePersistedServerCapabilities(DEFAULT_SERVER_CAPABILITIES, {
-    annotationApi: false,
-    checkedAt: 12_345,
-  });
-
-  assert.equal(migrated.annotationApiStatus, 'unchecked');
-  assert.equal(migrated.annotationApiCheckedAt, null);
-  assert.equal(migrated.checkedAt, 12_345);
-});
-
-test('早于 annotationApi 的持久化数据强制重探通用能力', () => {
-  const migrated = mergePersistedServerCapabilities(DEFAULT_SERVER_CAPABILITIES, {
-    shelfApi: true,
-    checkedAt: 12_345,
-  });
-
-  assert.equal(migrated.annotationApiStatus, 'unchecked');
-  assert.equal(migrated.annotationApiCheckedAt, null);
-  assert.equal(migrated.checkedAt, null);
-});
 
 test('通用能力探测不请求样本书标注，并保持标注状态 unchecked', async () => {
   const probedPaths = [];

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "墨客",
         "width": 1280,
         "height": 800,

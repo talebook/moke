@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
-import { fetchCurrentUser, request } from '@/lib/api';
+import { fetchCurrentUser, getErrorMessage, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { ServerConnectionNotice } from '@/components/auth/ServerConnectionNotice';
 import { withClosedReaderSession } from '@/lib/reader-source';
@@ -92,7 +92,10 @@ export default function LoginPage() {
         }
       });
     } catch (loginError) {
-      if (current() && !abort.signal.aborted) setError(loginError instanceof Error ? loginError.message : '无法连接服务器');
+      if (current() && !abort.signal.aborted) {
+        console.warn('[LoginPage] login flow failed:', loginError);
+        setError(getErrorMessage(loginError, '无法连接服务器'));
+      }
     } finally {
       setLoading(false);
     }

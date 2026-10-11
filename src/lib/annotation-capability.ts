@@ -24,13 +24,6 @@ export function createUncheckedAnnotationCapability(): AnnotationCapabilitySnaps
   return { status: 'unchecked', checkedAt: null };
 }
 
-export function isAnnotationCapabilityStatus(value: unknown): value is AnnotationCapabilityStatus {
-  return value === 'unchecked'
-    || value === 'supported'
-    || value === 'unsupported'
-    || value === 'transient-error';
-}
-
 /**
  * Supported endpoints are loaded to display their data. Unchecked endpoints
  * are checked once. On a later panel mount, transient failures may be retried

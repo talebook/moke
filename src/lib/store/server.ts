@@ -52,7 +52,7 @@ interface ServerState {
   requireAccess: (requestId: number) => void;
   activateCandidate: (requestId: number) => Promise<boolean>;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
-  enterOfflineMode: () => Promise<void>;
+  enterOfflineMode: (prepareDocumentReturn?: () => void) => Promise<void>;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string, source: TitleSource) => Promise<void>;
@@ -103,10 +103,11 @@ export function createServerStore(repository: ServerRegistryRepository = createS
             if (requestNumber === requestAtStart && get().connectionId === previous.connectionId
               && get().sessionId === previous.sessionId && !get().candidate) {
               const url = context.serverUrl ? new URL(context.serverUrl) : null;
-              set({ ...disconnected, ...context, isConnected: Boolean(context.serverUrl),
+              set({ ...disconnected, activeServerId: context.activeServerId, serverUrl: context.serverUrl,
+                offlineMode: context.offlineMode, isConnected: Boolean(context.serverUrl),
                 protocol: url?.protocol === 'https:' ? 'https' : 'http', host: url?.hostname ?? '', port: url?.port ?? '',
                 connectionId: previous.connectionId + 1, sessionId: previous.sessionId + 1,
-                readerReturnTo: context.offlineMode ? '/shelf' : null });
+                readerReturnTo: context.offlineMode && context.intent !== 'offline-library' ? '/shelf' : null });
               writeActiveServerMirror(context.serverUrl);
             }
           } catch {
@@ -199,8 +200,11 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         protocol, host, port, offlineMode: false, isConnected: true,
         connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
     },
-    enterOfflineMode: () => withClosedReaderSession(async () => {
+    enterOfflineMode: (prepareDocumentReturn) => withClosedReaderSession(async () => {
       clearReaderReturn(returnChannel);
+      // Prepare a document handoff under the same reservation, before changing
+      // identity/remounting pages. Failure leaves the original page and mode intact.
+      prepareDocumentReturn?.();
       clearReadStateCache();
       set({ offlineMode: true, candidate: null, readerReturnTo: null, readerReturnError: '', serverListNotice: '', sessionId: get().sessionId + 1 });
     }),

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createReaderSourceBoundary, ReaderOpenUnconfirmedError } from '../src/lib/reader-source.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
 import { onlineReadingErrorMessage } from '../src/lib/online-reading.ts';
+import { getErrorMessage } from '../src/lib/api-core.ts';
 
 const a = { serverUrl:'http://a.test', bookId:'42', sessionId:1 };
 const b = { serverUrl:'http://b.test', bookId:'42', sessionId:2 };
@@ -123,8 +124,42 @@ test('ambiguous window snapshots preserve the boundary instead of assigning the 
   const {state,boundary}=fixture();
   await assert.rejects(boundary.openReaderFromSource(a,{}),/尚未确认/);
   state.labels=['reader-0','reader-1'];
-  await assert.rejects(boundary.requireClosedReaders(),/尚未确认/);
-  assert.equal(boundary.sourceForReaderEvent('reader-0','99'),null);
+  const check = error => {
+    assert.ok(error instanceof ReaderOpenUnconfirmedError);
+    assert.match(getErrorMessage(error, '无法连接服务器'), /多个新阅读器窗口.*完全退出.*重新启动/);
+    return true;
+  };
+  await assert.rejects(boundary.requireClosedReaders(),check);
+  assert.equal(boundary.sourceForReaderEvent('reader-0','42'),null);
+  state.labels=['reader-1'];
+  await assert.rejects(boundary.requireClosedReaders(),check);
+  state.labels=[];
+  await assert.rejects(boundary.withClosedReaderSession(async()=>assert.fail('ambiguous dispatch is unresolved')),check);
+  await assert.rejects(boundary.openReaderFromSource(b,{}),check);
+  // An empty snapshot cannot prove cancellation; a later event cannot acquire B.
+  assert.equal(boundary.sourceForReaderEvent('reader-late','42'),null);
+  assert.equal(state.opens,1);
+});
+
+test('account error formatting preserves actionable reader guards and hides internal errors', async () => {
+  const {state,boundary}=fixture();state.labels=['reader-open'];
+  await assert.rejects(boundary.withClosedReaderSession(async()=>{}),error=>{
+    assert.match(getErrorMessage(error,'无法连接服务器'),/请先关闭当前阅读器/);
+    return true;
+  });
+  assert.equal(getErrorMessage(new SyntaxError('Unexpected token < internal response'),'无法连接服务器'),'无法连接服务器');
+});
+
+test('ambiguity revokes provisional early-event ownership and a close cannot release the unresolved dispatch', async () => {
+  const {state,boundary}=fixture();
+  state.onOpen=async()=>{
+    assert.deepEqual(boundary.sourceForReaderEvent('reader-0','42'),a);
+    state.labels=['reader-0','reader-1'];
+  };
+  await assert.rejects(boundary.openReaderFromSource(a,{}),/多个新阅读器窗口/);
+  assert.equal(boundary.sourceForReaderEvent('reader-0','42'),null);
+  boundary.retireReaderWindow('reader-0');state.labels=[];
+  await assert.rejects(boundary.withClosedReaderSession(async()=>assert.fail('must remain unresolved')),/完全退出.*重新启动/);
 });
 
 test('flush failure prevents the reserved session/offline change and allows retry', async () => {

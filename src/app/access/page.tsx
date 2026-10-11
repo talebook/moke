@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
-import { submitWelcomeCode } from '@/lib/api';
+import { getErrorMessage, submitWelcomeCode } from '@/lib/api';
 import { requireClosedReaders } from '@/lib/reader-source';
 import { useServerStore } from '@/lib/store/server';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
@@ -65,7 +65,10 @@ function AccessPageInner() {
         setShowCaptcha(false);
       }
     } catch (e) {
-      if (!abort.signal.aborted && validContext()) setError(e instanceof Error ? e.message : '无法连接服务器');
+      if (!abort.signal.aborted && validContext()) {
+        console.warn('[AccessPage] access verification failed:', e);
+        setError(getErrorMessage(e, '无法连接服务器'));
+      }
     }
     finally { setLoading(false); }
   };

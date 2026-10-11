@@ -10,12 +10,13 @@ export interface ReaderReturnContext {
   activeServerId: string | null;
   serverUrl: string;
   offlineMode: boolean;
+  intent?: 'offline-library';
 }
 
 function returnMarker(nonce: string, context: ReaderReturnContext, createdAt: number): string {
   // The live context also binds the source tuple. Editing a stored receipt to
   // another valid list entry cannot reuse the original browsing authority.
-  return `${MARKER_PREFIX}${JSON.stringify([nonce, createdAt, context.activeServerId, context.serverUrl, context.offlineMode])}`;
+  return `${MARKER_PREFIX}${JSON.stringify([nonce, createdAt, context.activeServerId, context.serverUrl, context.offlineMode, context.intent ?? null])}`;
 }
 
 /** Both values belong to one live browsing context, not the saved server list.
@@ -59,13 +60,16 @@ export function prepareReaderReturn(
   try {
     if ((!context.offlineMode && (!context.activeServerId || !context.serverUrl))
       || (context.activeServerId === null && context.serverUrl !== '')
+      || (context.intent !== undefined && (context.intent !== 'offline-library'
+        || !context.offlineMode || context.activeServerId !== null || context.serverUrl !== ''))
       || (context.serverUrl && normalizeServerAddress(context.serverUrl) !== context.serverUrl)) {
       throw new Error('reader.return.context');
     }
     const current = channel ?? browserReaderReturnChannel();
     const nonce = secureRandomUUID();
     const value = JSON.stringify({ version: 1, nonce, createdAt: now,
-      activeServerId: context.activeServerId, serverUrl: context.serverUrl, offlineMode: context.offlineMode });
+      activeServerId: context.activeServerId, serverUrl: context.serverUrl, offlineMode: context.offlineMode,
+      ...(context.intent ? { intent: context.intent } : {}) });
     current.storage.setItem(STORAGE_KEY, value);
     if (current.storage.getItem(STORAGE_KEY) !== value) throw new Error('reader.return.storage');
     current.setMarker(returnMarker(nonce, context, now));
@@ -73,6 +77,15 @@ export function prepareReaderReturn(
   } catch {
     clearReaderReturn(channel);
     throw new Error('无法保存阅读器返回信息，当前连接已保留。请重新确认连接，并检查本次会话的存储权限与安全随机数支持后重试。');
+  }
+}
+
+/** A one-use offline intent survives document replacement without restoring an account. */
+export function prepareOfflineLibraryEntry(channel?: ReaderReturnChannel, now = Date.now()): void {
+  try {
+    prepareReaderReturn({ activeServerId: null, serverUrl: '', offlineMode: true, intent: 'offline-library' }, channel, now);
+  } catch {
+    throw new Error('无法保存离线书库跳转信息，请检查本次会话的存储权限与安全随机数支持后重试。');
   }
 }
 
@@ -96,8 +109,13 @@ export function takeReaderReturn(
       || !/^[0-9a-f-]{36}$/.test(data.nonce) || marker !== returnMarker(data.nonce, data, data.createdAt)
       || !Number.isFinite(data.createdAt) || data.createdAt > now || now - data.createdAt >= READER_RETURN_TTL_MS
       || typeof data.offlineMode !== 'boolean' || typeof data.serverUrl !== 'string') return null;
+    if (data.intent !== undefined && (data.intent !== 'offline-library'
+      || !data.offlineMode || data.activeServerId !== null || data.serverUrl !== '')) return null;
     if (data.activeServerId === null) {
-      return data.offlineMode && data.serverUrl === '' ? { activeServerId: null, serverUrl: '', offlineMode: true } : null;
+      return data.offlineMode && data.serverUrl === '' ? {
+        activeServerId: null, serverUrl: '', offlineMode: true,
+        ...(data.intent ? { intent: data.intent } : {}),
+      } : null;
     }
     if (typeof data.activeServerId !== 'string' || normalizeServerAddress(data.serverUrl) !== data.serverUrl) return null;
     const server = savedServers.find((entry) => entry.id === data.activeServerId && entry.url === data.serverUrl);

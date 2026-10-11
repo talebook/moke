@@ -28,3 +28,27 @@ for(const viewport of [{width:1280,height:900},{width:390,height:844}]) {
     await expect(page.getByRole('alert').filter({hasText:'连接信息已失效'})).toBeVisible();
   });
 }
+
+for(const form of ['login','access']) {
+  test(`${form} displays safe errors for invalid server responses and logs the failed operation`,async({page})=>{
+    const fixture=await installServerListFixture(page), warnings=[];
+    page.on('console',message=>{if(message.type()==='warning')warnings.push(message.text());});
+    const server=fixture.servers.get(fixture.origins[0]);server.loggedIn=false;
+    server.invited=form==='login';
+    await page.goto(base+'/welcome',{waitUntil:'domcontentloaded'});
+    await page.locator('li button').first().click();
+    if(form==='login') {
+      await page.getByRole('link',{name:'登录',exact:true}).click();
+      await page.getByPlaceholder('请输入用户名',{exact:true}).fill('fixture-reader');
+      await page.getByPlaceholder('请输入密码',{exact:true}).fill('fixture-password');
+      await page.route('**/api/user/sign_in',route=>route.fulfill({contentType:'text/html',body:'<html><body>internal gateway page</body></html>'}));
+    }else{
+      await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+      await page.route('**/api/welcome',route=>route.fulfill({contentType:'text/html',body:'<html><body>internal gateway page</body></html>'}));
+    }
+    await page.locator('button[type="submit"]').click();
+    await expect(page.getByText('服务器返回内容无效。',{exact:true})).toBeVisible();
+    await expect(page.getByText(/Unexpected token|internal gateway|DOCTYPE/)).toHaveCount(0);
+    expect(warnings.some(message=>message.includes(form==='login'?'[LoginPage] login flow failed':'[AccessPage] access verification failed'))).toBe(true);
+  });
+}
