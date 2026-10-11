@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Check, Copy } from 'lucide-react';
+import { BookOpen, Check, Copy, Server } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
-import { logErrorMetadata } from '@/lib/api-log';
+import { prepareServerJoin, type JoinedServer } from '@/lib/join-server';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
@@ -14,19 +14,38 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
+const JOIN_TIMEOUT_MS = 20_000;
 
 export default function WelcomePage() {
   const router = useRouter();
-  const { setServer, enterOfflineMode } = useServerStore();
-  const [serverUrl, setServerUrl] = useState('');
+  const { serverUrl: savedServerUrl, offlineMode, setServer, enterOfflineMode } = useServerStore();
+  const [serverUrl, setServerUrl] = useState(savedServerUrl);
+  const [step, setStep] = useState<'intro' | 'form' | 'success'>('intro');
+  const [joined, setJoined] = useState<JoinedServer | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const requestRef = useRef<AbortController | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const startRef = useRef<HTMLButtonElement | null>(null);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const successRef = useRef<HTMLHeadingElement | null>(null);
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
+    requestRef.current?.abort();
     if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+    if (versionClickTimerRef.current) clearTimeout(versionClickTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (step === 'form') {
+      if (loading) cancelRef.current?.focus();
+      else inputRef.current?.focus();
+    } else if (step === 'success') successRef.current?.focus();
+    else startRef.current?.focus();
+  }, [step, loading]);
 
   // 主页版本号连点 8 次：解锁并直接进入开发者选项（无任何提示）
   const versionClicksRef = useRef(0);
@@ -45,44 +64,26 @@ export default function WelcomePage() {
     }, 2000);
   };
 
-  const normalizeServerUrl = (value: string) => {
-    const input = value.trim();
-    if (!input) {
-      throw new Error('empty');
-    }
-
-    const url = new URL(input.startsWith('http') ? input : `http://${input}`);
-    return {
-      protocol: url.protocol.replace(':', '') as 'http' | 'https',
-      host: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? '443' : '80'),
-      origin: url.origin,
-    };
-  };
-
-  const handleConnect = async (value: string) => {
+  const handleJoin = async () => {
+    // The ref also guards repeated Enter presses before React renders disabled controls.
+    if (requestRef.current || joined) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setError('');
+    setNotice('');
     setLoading(true);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, JOIN_TIMEOUT_MS);
 
     try {
-      const parsed = normalizeServerUrl(value);
-      const result = await validateServerConnection(parsed.origin);
-
-      if (result.err !== 'ok') {
-        logErrorMetadata('WelcomePage validateServerConnection failed', result);
-        setError(result.msg || '服务器校验失败');
-        return;
-      }
-
-      const welcome = await checkWelcomeRequirement(parsed.origin);
-
-      if (welcome.err !== 'ok') {
-        logErrorMetadata('WelcomePage checkWelcomeRequirement failed', welcome);
-        setError(welcome.msg || '访问码状态检查失败');
-        return;
-      }
-
-      console.log('[WelcomePage] connect OK, needsAccessCode:', welcome.needsAccessCode);
+      const parsed = await prepareServerJoin(serverUrl, {
+        validate: validateServerConnection,
+        welcome: checkWelcomeRequirement,
+      }, controller.signal);
+      if (requestRef.current !== controller || controller.signal.aborted) return;
       setServer(parsed.protocol, parsed.host, parsed.port);
 
       // release WebView 下 zustand persist 与 URL query 跨页都不可靠，
@@ -98,17 +99,28 @@ export default function WelcomePage() {
         debugLog('info', 'welcome', `localStorage 不可用，跳过持久化: ${String(e)}`);
       }
 
-      if (welcome.needsAccessCode) {
-        router.push(`/access?server=${encodeURIComponent(parsed.origin)}`);
-      } else {
-        router.push('/shelf');
-      }
+      setJoined(parsed);
+      setStep('success');
     } catch (e) {
-      console.error('[WelcomePage] connect exception:', e);
-      setError('请输入正确的服务器地址');
+      if (requestRef.current !== controller) return;
+      if (timedOut) setError('加入超时，请检查服务器地址和网络后重试');
+      else if (!controller.signal.aborted) setError(e instanceof Error ? e.message : '加入失败，请稍后重试');
     } finally {
-      setLoading(false);
+      clearTimeout(timeout);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
+  };
+
+  const handleCancel = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setLoading(false);
+    setError('');
+    setNotice('已取消加入，现有配置保持不变');
+    setStep('intro');
   };
 
   const handleEnterOfflineMode = () => {
@@ -148,42 +160,65 @@ export default function WelcomePage() {
           </div>
         </div>
 
-        <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 md:p-16">
-          <div className="w-full max-w-sm p-8 rounded-[32px] app-glass">
-            <h2 className="text-xl font-semibold mb-6 text-card-foreground">连接书库</h2>
+        <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 md:p-16">
+          <div className="w-full max-w-sm p-6 sm:p-8 rounded-[32px] app-glass">
+            <h2 id="join-title" className="text-xl font-semibold text-card-foreground">加入服务器</h2>
 
             {error && (
-              <div className="mb-4 rounded-[10px] border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <div id="join-error" role="alert" className="mt-4 rounded-[10px] border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
 
-            <div className="mb-4">
-              <label className="block text-xs font-medium mb-1.5 text-muted-foreground">
-                服务器地址
-              </label>
-              <input
-                type="text"
-                placeholder="http://192.168.1.100:8080"
-                value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleConnect(serverUrl);
-                  }
-                }}
-                className="w-full h-11 px-4 rounded-2xl border border-amber-950/10 bg-white/65 shadow-sm text-foreground text-sm outline-none transition-colors duration-150 focus:ring-2 focus:ring-ring focus:border-ring"
-              />
-            </div>
-
-            <button
-              data-dom-id="btn-connect"
-              onClick={() => handleConnect(serverUrl)}
-              disabled={loading || !serverUrl.trim()}
-              className="inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium bg-primary shadow-lg shadow-primary/15 text-primary-foreground cursor-pointer transition hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? '连接中...' : '连接'}
+            {step === 'form' ? (
+              <form aria-labelledby="join-title" onSubmit={(e) => { e.preventDefault(); void handleJoin(); }} className="mt-4">
+                <p id="join-help" className="mb-5 text-sm leading-relaxed text-muted-foreground">填写书库管理员提供的 Talebook 根地址，我们会验证服务器并检查是否需要访问码。</p>
+                <label htmlFor="join-server-address" className="block text-xs font-medium mb-1.5 text-muted-foreground">服务器地址</label>
+                <input
+                  ref={inputRef}
+                  id="join-server-address"
+                  type="text"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  aria-describedby={error ? 'join-help join-error' : 'join-help'}
+                  aria-invalid={Boolean(error)}
+                  placeholder="http://192.168.1.100:8080"
+                  value={serverUrl}
+                  onChange={(e) => { setServerUrl(e.target.value); setError(''); }}
+                  disabled={loading}
+                  className="w-full h-11 px-4 rounded-2xl border border-amber-950/10 bg-white/65 shadow-sm text-foreground text-sm outline-none transition-colors duration-150 focus:ring-2 focus:ring-ring focus:border-ring disabled:opacity-60"
+                />
+                <p role="status" className="mt-3 text-xs leading-relaxed text-muted-foreground">{loading ? '正在验证服务器与访问权限…' : '支持 HTTP、HTTPS 和局域网地址，省略协议时使用 HTTP。'}</p>
+                <button type="submit" data-dom-id="btn-connect" disabled={loading || !serverUrl.trim()}
+                  className="mt-5 inline-flex items-center justify-center w-full h-11 rounded-2xl text-sm font-medium bg-primary text-primary-foreground transition hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+                  {loading ? '正在加入…' : error ? '重试加入' : '加入服务器'}
+                </button>
+                <button ref={cancelRef} type="button" onClick={handleCancel}
+                  className="mt-3 w-full h-11 rounded-2xl border border-amber-950/10 text-sm text-foreground hover:bg-white/55 focus-visible:ring-2 focus-visible:ring-ring">取消加入</button>
+              </form>
+            ) : step === 'success' && joined ? (
+              <div className="mt-5">
+                <Check aria-hidden="true" className="h-8 w-8 text-primary" />
+                <h3 ref={successRef} tabIndex={-1} className="mt-3 text-lg font-semibold text-foreground outline-none">已加入服务器</h3>
+                <p className="mt-2 break-all text-sm text-muted-foreground">{joined.origin}</p>
+                <p role="status" className="mt-3 text-sm leading-relaxed text-muted-foreground">{joined.needsAccessCode ? '服务器验证成功，请继续输入管理员提供的访问码。' : '服务器验证成功，可以进入书架，或登录后同步个人书架。'}</p>
+                <button type="button" onClick={() => router.push(joined.needsAccessCode ? `/access?server=${encodeURIComponent(joined.origin)}` : '/shelf')}
+                  className="mt-5 w-full h-11 rounded-2xl bg-primary text-primary-foreground text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">{joined.needsAccessCode ? '继续验证访问码' : '进入书架'}</button>
+                {!joined.needsAccessCode && <button type="button" onClick={() => router.push('/login')}
+                  className="mt-3 w-full h-11 rounded-2xl border border-amber-950/10 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring">登录账号</button>}
+              </div>
+            ) : (
+              <>
+            <p className="mt-3 mb-5 text-sm leading-relaxed text-muted-foreground">加入你的 Talebook 服务器，浏览藏书并在设备上阅读。请先向书库管理员获取服务器地址。</p>
+            {notice && <p role="status" className="mb-4 text-sm text-muted-foreground">{notice}</p>}
+            <button ref={startRef} type="button" data-dom-id="btn-start-join" onClick={() => { setNotice(''); setError(''); setStep('form'); }}
+              className="inline-flex gap-2 items-center justify-center w-full h-11 rounded-2xl text-sm font-medium bg-primary text-primary-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <Server aria-hidden="true" className="h-4 w-4" />开始加入
             </button>
+            {(savedServerUrl || offlineMode) && <button type="button" onClick={() => router.push('/shelf')}
+              className="mt-3 w-full h-11 rounded-2xl border border-amber-950/10 text-sm text-foreground focus-visible:ring-2 focus-visible:ring-ring">返回书架</button>}
 
             <div className="flex items-center my-5">
               <div className="flex-1 border-t border-border"></div>
@@ -214,8 +249,10 @@ export default function WelcomePage() {
             </button>
 
             <p className="mt-5 text-xs text-center text-muted-foreground leading-relaxed">
-              可连接 Talebook 同步书库，也可使用已下载内容离线阅读
+              加入服务器后可登录同步书库，也可使用已下载内容离线阅读
             </p>
+              </>
+            )}
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">

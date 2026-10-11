@@ -25,6 +25,7 @@ import {
   type UserInfoResponse,
 } from '@/lib/server-session';
 import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
+import { readJoinWelcomeResult } from '@/lib/join-server';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
@@ -278,13 +279,15 @@ export async function discoverServerCapabilities(serverUrl: string): Promise<Ser
   });
 }
 
-export async function validateServerConnection(serverUrl: string): Promise<{ err: string; msg?: string }> {
+export async function validateServerConnection(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {
   const maxRetries = 1;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    signal?.throwIfAborted();
     if (attempt > 0) {
       console.log('[validateServerConnection] retry attempt', attempt);
       await new Promise(r => setTimeout(r, 1500));
+      signal?.throwIfAborted();
     }
 
     let response: Response;
@@ -292,8 +295,10 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     try {
       response = await request(`${serverUrl}/api/user/info`, {
         credentials: 'include',
+        signal,
       });
     } catch (e) {
+      signal?.throwIfAborted();
       const errorMsg = e instanceof Error ? e.message : String(e);
       console.error('[validateServerConnection] network error:', errorMsg);
       debugLog('error', 'validate', `连接失败 (尝试 ${attempt + 1}/${maxRetries + 1})`, errorMsg);
@@ -310,6 +315,7 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
     try {
       data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
     } catch (e) {
+      signal?.throwIfAborted();
       logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
       if (attempt < maxRetries) continue;
       return {
@@ -343,14 +349,16 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
   return { err: 'server.invalid_response', msg: '服务器校验失败' };
 }
 
-export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {
+export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {
   let response: Response;
 
   try {
     response = await request(`${serverUrl}/api/welcome`, {
       credentials: 'include',
+      signal,
     });
   } catch (e) {
+    signal?.throwIfAborted();
     console.error('[checkWelcomeRequirement] network error:', e);
     return {
       err: 'network.error',
@@ -364,6 +372,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   try {
     data = await readJsonResponse(response, '服务器返回内容无效，无法确认访问码状态。');
   } catch (e) {
+    signal?.throwIfAborted();
     logHttpErrorMetadata('checkWelcomeRequirement invalid response', response.status, e);
     return {
       err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
@@ -383,19 +392,7 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
 
   console.log('[checkWelcomeRequirement] err=%s', getSafeErrorCode(data));
 
-  if (data.err === 'ok') {
-    return {
-      err: 'ok',
-      msg: data.welcome || data.msg,
-      needsAccessCode: true,
-    };
-  }
-
-  return {
-    err: 'ok',
-    msg: data.msg,
-    needsAccessCode: false,
-  };
+  return readJoinWelcomeResult(data);
 }
 
 export async function submitWelcomeCode(code: string, captchaData?: any): Promise<{ err: string; msg?: string }> {
