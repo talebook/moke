@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-prepare-import"
+description = "Enables the ext_prepare_import command without any pre-configured scope."
+commands.allow = ["ext_prepare_import"]
+
+[[permission]]
+identifier = "deny-ext-prepare-import"
+description = "Denies the ext_prepare_import command without any pre-configured scope."
+commands.deny = ["ext_prepare_import"]

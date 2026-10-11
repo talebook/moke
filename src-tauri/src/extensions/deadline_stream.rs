@@ -8,6 +8,7 @@ use std::time::Instant;
 pub(super) struct DeadlineStream {
     stream: TcpStream,
     deadline: Option<Instant>,
+    remaining: Option<usize>,
 }
 
 impl DeadlineStream {
@@ -15,6 +16,15 @@ impl DeadlineStream {
         Self {
             stream,
             deadline: Some(deadline),
+            remaining: None,
+        }
+    }
+
+    pub(super) fn with_read_limit(stream: TcpStream, deadline: Instant, remaining: usize) -> Self {
+        Self {
+            stream,
+            deadline: Some(deadline),
+            remaining: Some(remaining),
         }
     }
 
@@ -22,6 +32,7 @@ impl DeadlineStream {
         self.stream.set_read_timeout(None)?;
         self.stream.set_write_timeout(None)?;
         self.deadline = None;
+        self.remaining = None;
         Ok(())
     }
 
@@ -62,7 +73,22 @@ impl Deref for DeadlineStream {
 impl Read for DeadlineStream {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.prepare(false)?;
-        self.stream.read(buffer)
+        let length = match self.remaining {
+            Some(0) if !buffer.is_empty() => {
+                let _ = self.stream.shutdown(Shutdown::Both);
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "handshake exceeds byte limit",
+                ));
+            }
+            Some(remaining) => buffer.len().min(remaining),
+            None => buffer.len(),
+        };
+        let read = self.stream.read(&mut buffer[..length])?;
+        if let Some(remaining) = &mut self.remaining {
+            *remaining -= read;
+        }
+        Ok(read)
     }
 }
 

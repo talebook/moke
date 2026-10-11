@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 struct EnabledExtension {
     token: String,
+    permissions: Vec<String>,
     port: u16,
     backend: std::sync::Mutex<Option<std::process::Child>>,
 }
@@ -10,3 +11,6 @@ mod deadline_stream;
 mod events;
 #[path = "../../../src-tauri/src/extensions/http_transport.rs"]
 mod http_transport;
+
+#[path = "../../../src-tauri/src/extensions/security.rs"]
+mod security;

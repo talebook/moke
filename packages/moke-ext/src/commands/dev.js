@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { lookup } from 'node:dns/promises';
 
 export default function dev(args) {
   const cwd = process.cwd();
@@ -40,22 +39,21 @@ export default function dev(args) {
   };
 
   const server = createServer(async (req, res) => {
+    if (req.headers.host !== `127.0.0.1:${port}`) {
+      res.writeHead(403, { 'Content-Type': 'text/plain', 'X-Content-Type-Options': 'nosniff' });
+      res.end('Invalid Host');
+      return;
+    }
+
     let url = req.url === '/' ? '/index.html' : req.url;
     // Prevent path traversal
     if (url.includes('..')) { res.writeHead(403); res.end(); return; }
 
     const filePath = join(uiDir, url);
 
-    // /api/token — return simulated token for dev
-    if (req.url === '/api/token') {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ token: 'dev-token-use-real-token-in-production' }));
-      return;
-    }
-
     try {
       const data = await readFile(filePath);
-      res.writeHead(200, { 'Content-Type': mime(url), 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(200, { 'Content-Type': mime(url), 'X-Content-Type-Options': 'nosniff' });
       res.end(data);
     } catch {
       res.writeHead(404);
@@ -72,7 +70,6 @@ export default function dev(args) {
     console.log(`Moke extension dev server`);
     console.log(`  Extension: ${name}`);
     console.log(`  URL:       http://127.0.0.1:${port}`);
-    console.log(`  Token:     dev-token-use-real-token-in-production`);
     console.log();
     console.log('To test in Moke:');
     console.log(`  1. Copy this folder to %APPDATA%\\com.moke.client\\extensions\\${name}\\`);

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-commit-import"
+description = "Enables the ext_commit_import command without any pre-configured scope."
+commands.allow = ["ext_commit_import"]
+
+[[permission]]
+identifier = "deny-ext-commit-import"
+description = "Denies the ext_commit_import command without any pre-configured scope."
+commands.deny = ["ext_commit_import"]

@@ -185,3 +185,39 @@ jobs:
 
       - name: Verify web build configuration
         run: pnpm build-web
+
+  desktop-browser-smoke:
+    name: Extension import and mocked desktop browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run extension import, comic reader and detail actions
+        run: pnpm test:e2e:extensions
+
+      - name: Upload browser test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-browser-artifacts
+          path: test-results/
+          if-no-files-found: warn
