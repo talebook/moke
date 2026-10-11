@@ -4,16 +4,14 @@ export const SERVER_STORAGE_KEY = 'moke-server-storage';
 export interface SavedServer { id: string; url: string; title: string; addedAt: string }
 export interface ServerRegistry {
   savedServers: SavedServer[];
-  lastUsedServerId: string | null;
-  offlineMode: boolean;
 }
 export interface RegistryStorage {
   getItem(key: string): string | null | Promise<string | null>;
   setItem(key: string, value: string): void | Promise<void>;
-  prepareRecovery?: () => void;
+  prepareRecovery?: () => () => void;
 }
 export type StorageResult<T> = { ok: true; value: T } | { ok: false; error: string };
-export const emptyRegistry = (): ServerRegistry => ({ savedServers: [], lastUsedServerId: null, offlineMode: false });
+export const emptyRegistry = (): ServerRegistry => ({ savedServers: [] });
 
 export function parseServerRegistry(raw: string | null, legacy: string | null = null): ServerRegistry {
   const parsed = raw !== null ? JSON.parse(raw) : null;
@@ -27,18 +25,17 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
     const savedServers: SavedServer[] = [];
     const ids = new Set<string>();
     for (const item of state.savedServers) {
-      if (!item || typeof item.id !== 'string' || !item.id || typeof item.url !== 'string'
-        || typeof item.title !== 'string' || typeof item.addedAt !== 'string' || ids.has(item.id)) {
+      if (!item || typeof item.id !== 'string' || !item.id || typeof item.url !== 'string' || ids.has(item.id)) {
         throw new Error('服务器条目损坏，原数据已保留');
       }
       ids.add(item.id);
       const url = normalizeServerAddress(item.url);
-      if (!savedServers.some((s) => s.url === url)) savedServers.push({ id: item.id, url, title: item.title, addedAt: item.addedAt });
+      if (!savedServers.some((s) => s.url === url)) savedServers.push({ id: item.id, url,
+        title: typeof item.title === 'string' ? item.title : '',
+        addedAt: typeof item.addedAt === 'string' ? item.addedAt : '' });
     }
     return {
       savedServers,
-      lastUsedServerId: savedServers.some((s) => s.id === state.lastUsedServerId) ? state.lastUsedServerId : null,
-      offlineMode: state.offlineMode === true,
     };
   }
   if (parsed && parsed.version !== undefined && parsed.version !== 0) throw new Error('不支持的服务器配置版本，原数据已保留');
@@ -46,7 +43,6 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
   const oldUrl = state?.serverUrl?.trim() || legacy?.trim();
   return {
     ...emptyRegistry(),
-    offlineMode: state?.offlineMode === true,
     savedServers: oldUrl ? [{ id: crypto.randomUUID(), url: normalizeServerAddress(oldUrl),
       title: typeof state?.serverTitle === 'string' ? state.serverTitle : '', addedAt: new Date().toISOString() }] : [],
   };
@@ -55,7 +51,6 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
 export function serializeServerRegistry(registry: ServerRegistry): string {
   return JSON.stringify({ version: 1, state: {
     savedServers: registry.savedServers.map(({ id, url, title, addedAt }) => ({ id, url, title, addedAt })),
-    lastUsedServerId: registry.lastUsedServerId, offlineMode: registry.offlineMode,
   } });
 }
 
@@ -80,7 +75,9 @@ export class ServerRegistryRepository {
       const registry = parseServerRegistry(this.raw, legacy);
       this.loaded = true;
       const encoded = serializeServerRegistry(registry);
-      if (encoded !== this.raw) await this.writeVerified(encoded);
+      // Existing v1 lists remain usable when storage becomes read-only. Only
+      // initial creation/migration must commit before claiming persistence.
+      if (!isV1 && encoded !== this.raw) await this.writeVerified(encoded);
       return { ok: true, value: registry };
     } catch (error) {
       this.loaded = false;
@@ -103,8 +100,9 @@ export class ServerRegistryRepository {
   /** Recovery is a visible UI action. Preserve both original keys before replacing anything. */
   recover(): Promise<StorageResult<ServerRegistry>> {
     return this.serial(async () => {
+      let finishRecovery: (() => void) | undefined;
       try {
-        this.storage.prepareRecovery?.();
+        finishRecovery = this.storage.prepareRecovery?.();
         this.raw = await this.storage.getItem(SERVER_STORAGE_KEY);
         let legacy: string | null = null;
         let legacyUnavailable = false;
@@ -122,7 +120,7 @@ export class ServerRegistryRepository {
         return { ok: true, value: emptyRegistry() };
       } catch (error) {
         return { ok: false, error: `恢复失败：${error instanceof Error ? error.message : '存储不可用'}。` };
-      }
+      } finally { finishRecovery?.(); }
     });
   }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useShallow } from 'zustand/react/shallow';
 import { BookOpen } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { checkSavedServer } from '@/lib/server-connection';
@@ -21,7 +22,15 @@ const primaryButtonStyle = `${buttonLayout} bg-primary text-primary-foreground h
 
 export default function WelcomePage() {
   const router = useRouter();
-  const store = useServerStore();
+  const store = useServerStore(useShallow((state) => ({
+    savedServers: state.savedServers, saving: state.saving, hasHydrated: state.hasHydrated,
+    storageError: state.storageError, storageBusy: state.storageBusy, readerReturnError: state.readerReturnError,
+    serverListNotice: state.serverListNotice, serverUrl: state.serverUrl, activeServerId: state.activeServerId,
+    offlineMode: state.offlineMode, saveServer: state.saveServer, beginConnection: state.beginConnection,
+    cancelConnection: state.cancelConnection, requireAccess: state.requireAccess, activateCandidate: state.activateCandidate,
+    disconnect: state.disconnect, loadServers: state.loadServers, recoverServers: state.recoverServers,
+    enterOfflineMode: state.enterOfflineMode,
+  })));
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [adding, setAdding] = useState(false);
@@ -60,9 +69,8 @@ export default function WelcomePage() {
     setError(''); setNotice('');
     const result = await store.saveServer(address);
     if (!result.ok) { setError(result.error); input.current?.focus(); return; }
-    const duplicate = store.savedServers.some((s) => s.id === result.value.id);
     setAdding(false); setAddress('');
-    setNotice(duplicate ? '已在列表中，点击条目即可连接' : '已保存到服务器列表，点击条目即可连接');
+    setNotice(result.created ? '已保存到服务器列表，点击条目即可连接' : '已在列表中，点击条目即可连接');
     requestAnimationFrame(() => items.current.get(result.value.id)?.focus());
   };
 
@@ -109,7 +117,7 @@ export default function WelcomePage() {
   };
 
   const disconnect = async () => {
-    try { await requireClosedReaders(); store.disconnect(); setNotice('已断开，服务器列表已保留'); }
+    try { await requireClosedReaders(); store.disconnect(); }
     catch (failure) { setError((failure as Error).message); }
   };
   let preview = '';
@@ -128,7 +136,7 @@ export default function WelcomePage() {
         <div className="w-full max-w-md p-6 rounded-[32px] app-glass">
           <h2 className="text-xl font-semibold mb-4 text-card-foreground">服务器</h2>
           <p className="text-sm text-muted-foreground mb-5">加入只保存地址；点击已保存条目连接。</p>
-          <div role="status" aria-live="polite" className="text-sm mb-3 text-foreground">{notice}</div>
+          <div role="status" aria-live="polite" className="text-sm mb-3 text-foreground">{notice || store.serverListNotice}</div>
           {(error || store.readerReturnError) && <p id="server-error" role="alert" className="text-sm text-destructive mb-4 break-words">{error || store.readerReturnError}</p>}
           {!store.hasHydrated ? <p role="status">正在加载服务器列表…</p> : store.storageError ? (
             <div role="alert" className="text-sm space-y-3">

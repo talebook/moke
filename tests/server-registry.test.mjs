@@ -5,7 +5,7 @@ import { ServerRegistryRepository, SERVER_STORAGE_KEY, parseServerRegistry, seri
 import { createServerStore } from '../src/lib/store/server.ts';
 import { checkSavedServer, readConnectionWelcome } from '../src/lib/server-connection.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
-import { assertReaderContext, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders } from '../src/lib/reader-source.ts';
+import { assertReaderContext, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders, registerReaderProgressFlush } from '../src/lib/reader-source.ts';
 
 function storage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -32,14 +32,17 @@ test('save A/B persists both, never changes active/offline state, and preserves 
   assert.equal(store.getState().offlineMode, true);
   assert.equal(store.getState().savedServers.length, 2);
   const duplicate = await store.getState().saveServer('https://A.example.test:443/');
+  assert.equal(a.created, true);
+  assert.equal(duplicate.created, false);
   assert.equal(duplicate.value.id, a.value.id);
   const restarted = createServerStore(new ServerRegistryRepository(disk));
   await restarted.getState().loadServers();
   assert.deepEqual(restarted.getState().savedServers, store.getState().savedServers);
   assert.equal(restarted.getState().serverUrl, '');
+  assert.equal(restarted.getState().offlineMode, false);
   const state = JSON.parse(disk.values.get(SERVER_STORAGE_KEY));
   assert.equal(state.version, 1);
-  for (const field of ['user', 'token', 'serverUrl', 'isConnected', 'candidate']) assert.equal(field in state.state, false);
+  for (const field of ['user', 'token', 'serverUrl', 'isConnected', 'candidate', 'offlineMode', 'lastUsedServerId']) assert.equal(field in state.state, false);
 });
 
 test('migration backs up old single config, prefers main key, and is idempotent', async () => {
@@ -167,30 +170,28 @@ test('same bookId progress queues retain immutable source and window ownership a
   assert.equal(sourceForReaderEvent('reader-10','99'), null);
 });
 
-test('cancel during persistence restores last-used metadata and keeps active A', async () => {
+test('cancel during the reserved progress flush keeps active A and the saved list intact', async () => {
   const disk = storage();
   const store = createServerStore(new ServerRegistryRepository(disk));
   await store.getState().loadServers();
   const a = (await store.getState().saveServer('http://a.test')).value;
   const b = (await store.getState().saveServer('http://b.test')).value;
   await store.getState().activateCandidate(store.getState().beginConnection(a.id).requestId);
-  const oldSet = disk.setItem;
-  let entered;
-  const started = new Promise(resolve => { entered=resolve; });
-  let release;
-  const wait = new Promise(resolve => { release=resolve; });
-  disk.setItem = async (key,value) => {
-    if(JSON.parse(value).state?.lastUsedServerId===b.id){entered();await wait;}
-    oldSet(key,value);
-  };
-  const attempt=store.getState().beginConnection(b.id);
-  const activation=store.getState().activateCandidate(attempt.requestId);
-  await started;
-  store.getState().cancelConnection(attempt.requestId);
-  release();
-  assert.equal(await activation,false);
-  assert.equal(store.getState().serverUrl,a.url);
-  assert.equal(JSON.parse(disk.values.get(SERVER_STORAGE_KEY)).state.lastUsedServerId,a.id);
+  const before = disk.values.get(SERVER_STORAGE_KEY);
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const wait = new Promise(resolve => { release = resolve; });
+  const remove = registerReaderProgressFlush(async () => { entered(); await wait; });
+  try {
+    const attempt = store.getState().beginConnection(b.id);
+    const activation = store.getState().activateCandidate(attempt.requestId);
+    await started;
+    store.getState().cancelConnection(attempt.requestId);
+    release();
+    assert.equal(await activation, false);
+    assert.equal(store.getState().serverUrl, a.url);
+    assert.equal(disk.values.get(SERVER_STORAGE_KEY), before);
+  } finally { remove(); release(); }
 });
 
 test('stalled native/storage hydration shows a bounded error and blocks racing recovery', async (context) => {
@@ -235,4 +236,67 @@ test('authentication reserves the Reader boundary and releases it on success and
   await assert.doesNotReject(requireClosedReaders());
   await assert.rejects(withClosedReaderSession(async () => { throw new Error('login failed'); }), /login failed/);
   await assert.doesNotReject(requireClosedReaders());
+});
+
+test('read-only existing lists still connect without writing connection metadata', async () => {
+  const raw = JSON.stringify({version:1,state:{savedServers:[{id:'a',url:'http://a.test',title:'A',addedAt:''}],offlineMode:true,lastUsedServerId:'a'}});
+  const disk = storage({[SERVER_STORAGE_KEY]:raw});
+  let writes = 0;
+  disk.setItem = () => { writes++; throw new Error('quota'); };
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  assert.equal(store.getState().storageError, '');
+  assert.equal(store.getState().offlineMode, false);
+  assert.equal(await store.getState().activateCandidate(store.getState().beginConnection('a').requestId), true);
+  assert.equal(store.getState().serverUrl, 'http://a.test');
+  assert.equal(writes, 0);
+  assert.equal((await store.getState().saveServer('http://b.test')).ok, false);
+  assert.equal(store.getState().serverUrl, 'http://a.test');
+});
+
+test('invalid display metadata degrades without dropping server identities', () => {
+  const registry = parseServerRegistry(JSON.stringify({version:1,state:{savedServers:[
+    {id:'a',url:'http://a.test',title:null,addedAt:42},
+    {id:'b',url:'http://b.test',title:'B',addedAt:'2026-10-11'},
+  ]}}));
+  assert.deepEqual(registry.savedServers, [
+    {id:'a',url:'http://a.test',title:'',addedAt:''},
+    {id:'b',url:'http://b.test',title:'B',addedAt:'2026-10-11'},
+  ]);
+  for (const bad of [{id:42,url:'http://a.test'},{id:'a',url:'http://a.test/path'}]) {
+    assert.throws(() => parseServerRegistry(JSON.stringify({version:1,state:{savedServers:[bad]}})));
+  }
+});
+
+test('successful recovery disconnects the runtime and cancels a stale candidate', async () => {
+  const disk = storage();
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  const a = (await store.getState().saveServer('http://a.test')).value;
+  await store.getState().activateCandidate(store.getState().beginConnection(a.id).requestId);
+  store.getState().setConnected('test-token', {id:1,name:'A'});
+  const stale = store.getState().beginConnection(a.id);
+  const before = store.getState().sessionId;
+  await store.getState().recoverServers();
+  for (const field of ['serverUrl','token']) assert.equal(store.getState()[field], '');
+  for (const field of ['activeServerId','user','candidate']) assert.equal(store.getState()[field], null);
+  assert.equal(store.getState().isConnected, false);
+  assert.equal(store.getState().offlineMode, false);
+  assert.equal(store.getState().sessionId, before + 1);
+  assert.deepEqual(store.getState().savedServers, []);
+  assert.equal(await store.getState().activateCandidate(stale.requestId), false);
+  assert.equal(JSON.parse([...disk.values].find(([key]) => key.startsWith(`${SERVER_STORAGE_KEY}-backup-`))[1]).raw.includes(a.id), true);
+});
+
+test('failed recovery preserves the active connection and original list', async () => {
+  const disk = storage();
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  const a = (await store.getState().saveServer('http://a.test')).value;
+  await store.getState().activateCandidate(store.getState().beginConnection(a.id).requestId);
+  disk.setItem = () => { throw new Error('backup failed'); };
+  await store.getState().recoverServers();
+  assert.equal(store.getState().serverUrl, a.url);
+  assert.deepEqual(store.getState().savedServers, [a]);
+  assert.match(store.getState().storageError, /backup failed/);
 });

@@ -13,6 +13,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -32,6 +38,12 @@
         },
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -40,6 +52,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -50,6 +68,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -58,6 +82,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -67,6 +97,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },
@@ -75,6 +111,12 @@
       "allow": [
         {
           "path": "$APPDATA/books/**"
+        },
+        {
+          "path": "$APPDATA/books/.servers"
+        },
+        {
+          "path": "$APPDATA/books/.servers/**"
         }
       ]
     },

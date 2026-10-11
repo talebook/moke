@@ -10,3 +10,6 @@ mod deadline_stream;
 mod events;
 #[path = "../../../src-tauri/src/extensions/http_transport.rs"]
 mod http_transport;
+#[cfg(test)]
+#[path = "../../../src-tauri/src/server_storage_scope_tests.rs"]
+mod server_storage_scope_tests;

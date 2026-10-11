@@ -1036,6 +1036,9 @@ mod moke_document_acl_tests {
 }
 
 #[cfg(test)]
+mod server_storage_scope_tests;
+
+#[cfg(test)]
 mod fs_scope_tests {
     use glob::{MatchOptions, Pattern};
     use serde_json::Value;

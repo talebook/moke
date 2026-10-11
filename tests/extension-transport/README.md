@@ -14,3 +14,7 @@ the production 5-second deadline and the real event server.
 The same tests are included in the normal `src-tauri` library test suite. This
 crate is a portable companion, not evidence of a complete native build, Reader
 flow or mobile device compatibility.
+
+The crate also runs the production server-registry capability test with the
+same glob version as Tauri, checking Unix and Windows dotfile matching for the
+hidden `.servers` directory, temporary/backup files and the AppData boundary.

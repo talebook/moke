@@ -11,11 +11,13 @@ import { CaptchaModal } from '@/components/auth/CaptchaModal';
 function AccessPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { candidate } = useServerStore();
+  const candidate = useServerStore((state) => state.candidate);
+  const hasHydrated = useServerStore((state) => state.hasHydrated);
   const serverUrl = candidate?.url || '';
   const requestId = Number(searchParams.get('requestId'));
   const serverId = searchParams.get('serverId');
   const controller = useRef<AbortController | null>(null);
+  const restoredContext = useRef(false);
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -25,6 +27,18 @@ function AccessPageInner() {
     const state = useServerStore.getState();
     return state.candidate?.requestId === requestId && state.candidate.id === serverId;
   };
+  useEffect(() => {
+    if (!hasHydrated || restoredContext.current) return;
+    restoredContext.current = true;
+    const state = useServerStore.getState();
+    // A new document can reconstruct the saved identity, never an arbitrary
+    // URL or a stale request. Do not replace a live candidate/connection.
+    if (state.candidate || state.serverUrl || state.offlineMode || !serverId) return;
+    const attempt = state.beginConnection(serverId);
+    if (!attempt) return;
+    state.requireAccess(attempt.requestId);
+    router.replace(`/access?serverId=${encodeURIComponent(serverId)}&requestId=${attempt.requestId}`);
+  }, [hasHydrated, router, serverId]);
   useEffect(() => () => { controller.current?.abort(); }, [requestId, serverId]);
 
   const handleVerify = async (captchaData?: any) => {

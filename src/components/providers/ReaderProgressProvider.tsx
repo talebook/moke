@@ -6,6 +6,7 @@ import { clearAnnotationLocateProgressSuppressionFromPayload, shouldSuppressAnno
 import { startAsyncSubscription } from '@/lib/async-subscription';
 import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush } from '@/lib/reader-source';
 import { createReaderProgressQueue } from '@/lib/reader-progress-queue';
+import { debugLog } from '@/lib/debug-log';
 
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -29,7 +30,12 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
         if (!progress) return;
         const source = sourceForReaderEvent(payload.window, progress.moke_book_id);
         // Unknown windows have no authenticated origin. Never guess from the active server.
-        if (!source || shouldSuppressAnnotationReaderProgress(source.serverUrl, progress)) return;
+        if (!source) {
+          debugLog('warn', 'reader-progress', '无法确认阅读器来源，未同步进度',
+            { window: payload.window, bookId: progress.moke_book_id });
+          return;
+        }
+        if (shouldSuppressAnnotationReaderProgress(source.serverUrl, progress)) return;
         queue.schedule(source, progress);
       });
     }, (error) => console.warn('[ReaderProgressProvider] could not listen:', error));

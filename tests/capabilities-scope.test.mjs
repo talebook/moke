@@ -293,7 +293,7 @@ test('main download lifecycle grants scoped stat and atomic rename operations', 
   const main = readCapability('src-tauri/capabilities/default.json');
   for (const identifier of ['fs:allow-stat', 'fs:allow-rename']) {
     const paths = permissionPaths(findPermission(main, identifier));
-    assert.deepEqual(paths, ['$APPDATA/books/**']);
+    assert.deepEqual(paths, ['$APPDATA/books/**', '$APPDATA/books/.servers', '$APPDATA/books/.servers/**']);
   }
   const identifiers = new Set(main.permissions.map(permissionIdentifier));
   for (const identifier of ['fs:allow-read', 'fs:allow-seek', 'fs:allow-ftruncate']) {

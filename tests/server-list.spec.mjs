@@ -1,6 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect as baseExpect } from '@playwright/test';
 import { installServerListFixture } from './helpers/server-list-fixture.mjs';
 const base=process.env.MOKE_TEST_BASE_URL || 'http://127.0.0.1:3000';
+// Server-list flows include a real 20s timeout and cold route compilation.
+test.setTimeout(180000);
+const expect = baseExpect.configure({ timeout: 45000 });
 
 async function start(page) {
   await page.goto(`${base}/`);
@@ -37,9 +40,17 @@ for(const viewport of [{width:1280,height:900},{width:390,height:844}]) {
     await page.locator('li button').nth(1).click();await expect(page).toHaveURL(/\/access\?/);
     await page.getByRole('button',{name:'返回',exact:true}).click();
     await expect(page).toHaveURL(/\/welcome/);await expect(page.getByText('当前服务器',{exact:true})).toBeVisible();
-    await page.locator('li button').nth(1).click();await page.getByPlaceholder('请输入访问码').fill('fixture-code');await page.getByRole('button',{name:'确认',exact:true}).click();
+    await page.locator('li button').nth(1).click();await expect(page).toHaveURL(/\/access\?/);
+    // Simulate a WebView full-document reload: only the saved identity survives.
+    await page.reload();await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+    await expect(page.getByRole('button',{name:'确认',exact:true})).toBeEnabled();
+    await page.getByRole('button',{name:'确认',exact:true}).click();
     await expect(page).toHaveURL(/\/shelf/);await expect(page.getByText('B 同编号藏书').first()).toBeVisible();
     await expect(page.getByText('A 同编号藏书',{exact:true})).toHaveCount(0);
+    if(viewport.width<1024){await page.getByRole('link',{name:'我的',exact:true}).click();await page.getByRole('link',{name:'前往设置',exact:true}).click();}
+    await list(page);await page.getByRole('button',{name:'断开',exact:true}).click();
+    await expect(page.getByText('已断开，服务器列表已保留',{exact:true})).toBeVisible();
+    await expect(page.locator('li')).toHaveCount(2);
   });
 }
 
@@ -78,4 +89,38 @@ test('legacy migration, timeout, retry and B login retain source identity',async
   await expect(page.getByText('B 测试读者',{exact:true})).toBeVisible();
   await list(page);await page.locator('li button').first().click();await expect(page.getByText('A 测试读者',{exact:true})).toBeVisible();
   expect(fixture.requests.filter(r=>r.path==='/api/user/sign_in').map(r=>r.origin)).toEqual([fixture.origins[1]]);
+});
+
+test('read-only saved list still connects after reload and offline settings have one entry',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  await save(page,fixture.origins[0]);
+  await page.addInitScript(()=>{
+    const write=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){
+      if(key==='moke-server-storage')throw new DOMException('quota','QuotaExceededError');
+      return write.call(this,key,value);
+    };
+  });
+  await page.reload();await expect(page.locator('li')).toHaveCount(1);
+  await page.locator('li button').first().click();await expect(page).toHaveURL(/\/shelf/);
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await list(page);await page.getByRole('button',{name:'断开',exact:true}).click();
+  await expect(page.getByText('已断开，服务器列表已保留',{exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'进入离线模式',exact:true}).click();
+  await page.getByRole('link',{name:'设置',exact:true}).click();
+  await expect(page.getByRole('button',{name:'服务器列表',exact:true})).toHaveCount(1);
+  await expect(page.getByRole('link',{name:'服务器列表',exact:true}).filter({visible:true})).toHaveCount(0);
+});
+
+test('access reload rejects an unknown saved identity without contacting a supplied URL',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  await save(page,fixture.origins[0]);
+  await page.goto(`${base}/access?serverId=missing&requestId=999&serverUrl=${encodeURIComponent(fixture.origins[1])}`);
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+  await expect(page.getByRole('button',{name:'确认',exact:true})).toBeDisabled();
+  await expect(page.getByText(/连接上下文已失效/)).toBeVisible();
+  expect(fixture.requests).toHaveLength(0);
+  await page.getByRole('button',{name:'返回',exact:true}).click();
+  await expect(page.locator('li')).toHaveCount(1);
 });

@@ -34,7 +34,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   }
 
   function observeWindow(label: string): void {
-    if (!pending || pending.before.has(label) || retired.has(label) || !/^reader-\d+$/.test(label)) return;
+    if (!pending || pending.before.has(label) || retired.has(label) || !label.startsWith('reader-')) return;
     bindReaderWindow(label, pending.source);
     pending.label = label;
   }
@@ -42,7 +42,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   function reconcileWindows(labels: string[]): void {
     if (pending) {
       const request = pending;
-      const created = labels.filter((label) => /^reader-\d+$/.test(label) && !request.before.has(label) && !retired.has(label));
+      const created = labels.filter((label) => label.startsWith('reader-') && !request.before.has(label) && !retired.has(label));
       // Ambiguous observations cannot authorize a new request or a switch.
       if (created.length === 1 && (!request.label || request.label === created[0])) {
         observeWindow(created[0]);
@@ -61,7 +61,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
       pending = null;
     }
     windows.delete(label);
-    if (/^reader-\d+$/.test(label)) retired.add(label);
+    if (label.startsWith('reader-')) retired.add(label);
   }
 
   function sourceForReaderEvent(windowLabel: string, bookId: string): ReaderSource | null {

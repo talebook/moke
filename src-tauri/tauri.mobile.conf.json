@@ -2,6 +2,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "墨客 - Mobile Preview",
         "width": 390,
         "height": 844,

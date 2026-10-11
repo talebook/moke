@@ -104,7 +104,9 @@ test('640x480 shelf context menu can remove the sample book', async ({ page }) =
   const panel = samplePanel(page);
   await panel.getByRole('button', { name: '导入示例书籍' }).click();
   await panel.getByRole('button', { name: '在离线书库查看' }).click();
-  await page.goto(`${BASE_URL}/shelf`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/library$/);
+  await page.getByRole('link', { name: '书架', exact: true }).click();
+  await expect(page).toHaveURL(/\/shelf$/);
   const book = page.getByRole('link').filter({ has: page.getByText('墨客示例书', { exact: true }) });
   await expect(book).toBeVisible();
   await book.scrollIntoViewIfNeeded();
@@ -118,5 +120,8 @@ test('640x480 shelf context menu can remove the sample book', async ({ page }) =
   await page.getByRole('menuitem', { name: '移出书架' }).click();
   await expect(page.getByText('墨客示例书', { exact: true })).toHaveCount(0);
   await page.reload({ waitUntil: 'domcontentloaded' });
+  // Cold documents load the list, then require explicit offline entry.
+  await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
+  await expect(page).toHaveURL(/\/shelf$/);
   await expect(page.getByText('墨客示例书', { exact: true })).toHaveCount(0);
 });

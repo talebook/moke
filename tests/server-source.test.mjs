@@ -6,6 +6,7 @@ const { useDebugLogStore } = await import('../src/lib/debug-log.ts');
 import { useServerStore } from '../src/lib/store/server.ts';
 const { fetchReadingProgress, saveReadingProgress } = await import('../src/lib/reading-progress.ts');
 import { clearReadStateCache, filterReadingStateBooks } from '../src/lib/reading-state.ts';
+import { SAMPLE_BOOK } from '../src/lib/sample-book-info.ts';
 
 const progress = { schema:'moke.readest.progress.v1',reader:'readest',moke_book_id:'42',location:'A-location',updated_at:'2026-10-04T00:00:00Z' };
 
@@ -73,4 +74,15 @@ test('clearing auth cache prevents older in-flight read-state results from re-po
   const current=await filterReadingStateBooks(async()=>{calls++;return new Response(JSON.stringify({err:'ok',read_state:2}));},'http://a.test',[{id:'42'}]);
   assert.equal(calls,1);
   assert.equal(current.finished.length,1);
+});
+
+test('bundled sample progress stays local even with an explicit server source', async () => {
+  const original = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; throw new Error('sample must not contact Talebook'); };
+  try {
+    assert.equal(await fetchReadingProgress(SAMPLE_BOOK.bookId, undefined, 'http://a.test'), null);
+    await saveReadingProgress(SAMPLE_BOOK.bookId, { ...progress, moke_book_id: SAMPLE_BOOK.bookId }, 'http://a.test');
+    assert.equal(requests, 0);
+  } finally { globalThis.fetch = original; }
 });

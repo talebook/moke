@@ -123,3 +123,17 @@ test('flush failure prevents the reserved session/offline change and allows retr
   await boundary.withClosedReaderSession(async()=>{changed=true;});
   assert.equal(changed,true);
 });
+
+test('Reader prefix labels support UUID and named windows, exclude home and retire ownership', async () => {
+  for (const label of ['reader-one', 'reader-5f8568e3-a37c-4fc1']) {
+    const {state,boundary}=fixture();
+    state.onOpen=async()=>{
+      assert.equal(boundary.sourceForReaderEvent('moke-home-1','42'),null);
+      state.labels=[label];
+    };
+    await boundary.openReaderFromSource(a,{});
+    assert.deepEqual(boundary.sourceForReaderEvent(label,'42'),a);
+    boundary.retireReaderWindow(label);
+    assert.equal(boundary.sourceForReaderEvent(label,'42'),null);
+  }
+});

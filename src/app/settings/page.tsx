@@ -162,7 +162,7 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
-          <SettingsLinkRow icon={PlugZap} label="服务器列表" description="加入并保存多个服务器，点击条目连接" href="/welcome" />
+          {!offlineMode && <SettingsLinkRow icon={PlugZap} label="服务器列表" description="加入并保存多个服务器，点击条目连接" href="/welcome" />}
           <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
             {offlineMode ? (
               <ActionRow

@@ -312,7 +312,7 @@ export async function validateServerConnection(serverUrl: string, signal?: Abort
     try {
       data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
     } catch (e) {
-    signal?.throwIfAborted();
+      signal?.throwIfAborted();
       logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
       if (attempt < maxRetries) continue;
       return {
