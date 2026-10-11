@@ -1,4 +1,5 @@
 import { normalizeServerAddress } from './server-url.ts';
+import { createLocalId } from './random-id.ts';
 
 export const SERVER_STORAGE_KEY = 'moke-server-storage';
 export interface SavedServer { id: string; url: string; title: string; addedAt: string }
@@ -43,7 +44,7 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
   const oldUrl = state?.serverUrl?.trim() || legacy?.trim();
   return {
     ...emptyRegistry(),
-    savedServers: oldUrl ? [{ id: crypto.randomUUID(), url: normalizeServerAddress(oldUrl),
+    savedServers: oldUrl ? [{ id: createLocalId(), url: normalizeServerAddress(oldUrl),
       title: typeof state?.serverTitle === 'string' ? state.serverTitle : '', addedAt: new Date().toISOString() }] : [],
   };
 }
@@ -111,7 +112,7 @@ export class ServerRegistryRepository {
           if (!this.storage.prepareRecovery) throw error;
           legacyUnavailable = true;
         }
-        const backupKey = `${SERVER_STORAGE_KEY}-backup-${crypto.randomUUID()}`;
+        const backupKey = `${SERVER_STORAGE_KEY}-backup-${createLocalId()}`;
         const backup = JSON.stringify({ raw: this.raw, legacy, legacyUnavailable });
         await this.storage.setItem(backupKey, backup);
         if (await this.storage.getItem(backupKey) !== backup) throw new Error('原数据备份校验失败');

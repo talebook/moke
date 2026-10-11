@@ -1,5 +1,6 @@
 import { SERVER_STORAGE_KEY, ServerRegistryRepository, type RegistryStorage } from './server-registry.ts';
 import { safeGetLocalStorageItem } from './browser-storage.ts';
+import { createLocalId } from './random-id.ts';
 
 /** Unlike the compatibility helpers, unavailable storage is an explicit failure. */
 export const browserServerStorage: RegistryStorage = {
@@ -42,7 +43,7 @@ export function createNativeServerStorage(): RegistryStorage {
       const options = { baseDir: BaseDirectory.AppData };
       await mkdir('books/.servers', { ...options, recursive: true });
       const path = `books/.servers/${key}.json`;
-      const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+      const temporary = `${path}.${createLocalId()}.tmp`;
       const file = await open(temporary, { ...options, write: true, createNew: true });
       try {
         const bytes = new TextEncoder().encode(value);

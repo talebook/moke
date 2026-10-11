@@ -1,16 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createReaderSourceBoundary } from '../src/lib/reader-source.ts';
+import { createReaderSourceBoundary, ReaderOpenUnconfirmedError } from '../src/lib/reader-source.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
+import { onlineReadingErrorMessage } from '../src/lib/online-reading.ts';
 
 const a = { serverUrl:'http://a.test', bookId:'42', sessionId:1 };
 const b = { serverUrl:'http://b.test', bookId:'42', sessionId:2 };
 function fixture() {
-  const state = { labels:[], context:{sessionId:1,candidate:null}, opens:0, time:0, onOpen:async()=>{} };
+  const state = { labels:[], context:{sessionId:1,candidate:null}, opens:0, reads:0, time:0, onOpen:async()=>{}, onWait:()=>{} };
   const boundary = createReaderSourceBoundary({
-    getWindowLabels:async()=>[...state.labels], getContext:async()=>state.context,
+    getWindowLabels:async()=>{state.reads++;return [...state.labels];}, getContext:async()=>state.context,
     open:async()=>{state.opens++; await state.onOpen();},
-    now:()=>state.time, wait:async()=>{state.time+=1000;},
+    now:()=>state.time, wait:async(delayMs)=>{state.time+=delayMs;state.onWait();},
   });
   return {state,boundary};
 }
@@ -20,7 +21,15 @@ test('A timeout retains ownership, rejects switching/B retries, then closes/flus
   const writes=[];
   const queue=createReaderProgressQueue(async(source,progress)=>writes.push([source.serverUrl,progress.location]),10000);
   boundary.registerReaderProgressFlush(()=>queue.flush());
-  await assert.rejects(boundary.openReaderFromSource(a,{}),/尚未确认/);
+  await assert.rejects(boundary.openReaderFromSource(a,{}),(error)=>{
+    assert.ok(error instanceof ReaderOpenUnconfirmedError);
+    assert.match(onlineReadingErrorMessage(error),/尚未确认/);
+    assert.match(onlineReadingErrorMessage(error),/重启应用/);
+    assert.doesNotMatch(onlineReadingErrorMessage(error),/检查网络/);
+    return true;
+  });
+  assert.equal(state.time,5000);
+  assert.ok(state.reads<=10, 'adaptive observation must avoid about 100 IPC calls');
   let switched=false;
   await assert.rejects(boundary.withClosedReaderSession(async()=>{switched=true;state.context.sessionId=2;}),/尚未确认/);
   assert.equal(switched,false);
@@ -79,7 +88,12 @@ test('pre-dispatch stale/cancelled preparation releases reservation without a ph
 test('an IPC rejection after dispatch cannot free ownership of a possibly queued window', async () => {
   const {state,boundary}=fixture();
   state.onOpen=async()=>{throw new Error('lost receipt');};
-  await assert.rejects(boundary.openReaderFromSource(a,{}),/lost receipt/);
+  await assert.rejects(boundary.openReaderFromSource(a,{}),(error)=>{
+    assert.ok(error instanceof ReaderOpenUnconfirmedError);
+    assert.match(error.cause.message,/lost receipt/);
+    assert.match(onlineReadingErrorMessage(error),/尚未确认/);
+    return true;
+  });
   await assert.rejects(boundary.withClosedReaderSession(async()=>{}),/尚未确认/);
   state.labels=['reader-0'];
   await assert.rejects(boundary.requireClosedReaders(),/请先关闭/);
@@ -136,4 +150,26 @@ test('Reader prefix labels support UUID and named windows, exclude home and reti
     boundary.retireReaderWindow(label);
     assert.equal(boundary.sourceForReaderEvent(label,'42'),null);
   }
+});
+
+test('a delayed window is confirmed during adaptive observation and retains its original source', async () => {
+  const {state,boundary}=fixture();
+  state.onWait=()=>{if(state.time>=1500)state.labels=['reader-delayed'];};
+  await boundary.openReaderFromSource(a,{});
+  assert.equal(state.time,1500);
+  assert.deepEqual(boundary.sourceForReaderEvent('reader-delayed','42'),a);
+});
+
+test('a Reader library home blocks session changes and new opens without granting progress authority', async () => {
+  const {state,boundary}=fixture();
+  state.labels=['moke-home-1'];
+  let changed=false;
+  await assert.rejects(boundary.withClosedReaderSession(async()=>{changed=true;}),/书库窗口/);
+  await assert.rejects(boundary.openReaderFromSource(a,{}),/书库窗口/);
+  assert.equal(changed,false);
+  assert.equal(state.opens,0);
+  assert.equal(boundary.sourceForReaderEvent('moke-home-1','42'),null);
+  state.labels=[];
+  await boundary.withClosedReaderSession(async()=>{changed=true;});
+  assert.equal(changed,true);
 });

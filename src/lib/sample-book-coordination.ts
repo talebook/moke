@@ -1,3 +1,5 @@
+import { createLocalId } from './random-id.ts';
+
 const OPERATION_LOCK = 'moke-sample-book-operation';
 const DELETION_GENERATION = 'moke-sample-book-deletion';
 
@@ -15,5 +17,5 @@ export function sampleBookDeletionGeneration(): string {
 }
 
 export function invalidateSampleBookImports(): void {
-  localStorage.setItem(DELETION_GENERATION, crypto.randomUUID());
+  localStorage.setItem(DELETION_GENERATION, createLocalId());
 }

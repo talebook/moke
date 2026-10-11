@@ -8,6 +8,7 @@ import { createServerRepository, writeActiveServerMirror } from '../server-stora
 import { withClosedReaderSession } from '../reader-source.ts';
 import { clearReaderReturn, takeReaderReturn, type ReaderReturnChannel } from '../reader-return.ts';
 import { checkSavedServer } from '../server-connection.ts';
+import { createLocalId } from '../random-id.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
 export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
@@ -18,6 +19,7 @@ function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): Ser
 }
 
 interface Candidate { id: string; url: string; requestId: number; needsAccessCode: boolean }
+interface TitleSource { serverUrl: string; connectionId: number; sessionId: number }
 type SaveServerResult = { ok: true; value: SavedServer; created: boolean } | { ok: false; error: string };
 interface ServerState {
   savedServers: SavedServer[];
@@ -54,7 +56,7 @@ interface ServerState {
   leaveOfflineMode: () => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
-  setServerTitle: (title: string) => void;
+  setServerTitle: (title: string, source: TitleSource) => Promise<void>;
   setServerCapabilities: (capabilities: ServerCapabilities) => void;
   setHasHydrated: (hydrated: boolean) => void;
   logout: () => void;
@@ -78,7 +80,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       // Keep recovery locked until this operation settles so a late file write
       // cannot race a new recovery or save.
       const timer = setTimeout(() => set({ hasHydrated: true,
-        storageError: '服务器存储操作超时，原数据保留。请等待操作结束后重试，或重启应用。' }), 8000);
+        storageError: '服务器列表读取超时，原数据已保留。请完全退出并重新启动应用后重试；若读取自行完成，列表会自动恢复。' }), 8000);
       loading = (async () => {
         const result = await repository.load();
         if (!result.ok) { clearReaderReturn(returnChannel); set({ storageError: result.error, hasHydrated: true }); return; }
@@ -142,14 +144,16 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       catch (error) { return { ok: false, error: (error as Error).message }; }
       const existing = get().savedServers.find((s) => s.url === url);
       if (existing) return { ok: true, value: existing, created: false };
-      const server = { id: crypto.randomUUID(), url, title: '', addedAt: new Date().toISOString() };
       set({ saving: true });
       try {
+        const server = { id: createLocalId(), url, title: '', addedAt: new Date().toISOString() };
         const { savedServers } = get();
         const result = await repository.save({ savedServers: [...savedServers, server] });
         if (!result.ok) return result;
         set({ savedServers: result.value.savedServers });
         return { ok: true, value: server, created: true };
+      } catch (error) {
+        return { ok: false, error: `未保存：${error instanceof Error ? error.message : '存储不可用'}，请重试。` };
       } finally { set({ saving: false }); }
     },
     beginConnection: (id) => {
@@ -215,7 +219,29 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         sessionId: get().sessionId + (changed ? 1 : 0),
         capabilities: changed ? invalidateCapabilitiesForSession(get().capabilities) : get().capabilities });
     },
-    setServerTitle: (serverTitle) => set({ serverTitle }),
+    setServerTitle: async (serverTitle, source) => {
+      const isSameConnection = () => get().serverUrl === source.serverUrl && get().connectionId === source.connectionId;
+      const isCurrent = () => isSameConnection() && get().sessionId === source.sessionId;
+      if (!isCurrent()) return;
+      set({ serverTitle });
+      const active = get().savedServers.find((entry) => entry.id === get().activeServerId && entry.url === source.serverUrl);
+      if (!active || active.title === serverTitle) return;
+      // Display metadata is optional: read-only storage must not invalidate a
+      // confirmed connection. Share the write reservation with save/recovery.
+      if (get().saving || loading || get().storageError) {
+        set({ serverListNotice: '服务器名称未保存，请稍后重新连接以重试。当前连接已保留。' });
+        return;
+      }
+      set({ saving: true });
+      try {
+        const savedServers = get().savedServers.map((entry) => entry.id === active.id ? { ...entry, title: serverTitle } : entry);
+        const result = await repository.save({ savedServers });
+        if (result.ok) set({ savedServers: result.value.savedServers });
+        else if (isSameConnection()) set({ serverListNotice: `服务器名称${result.error} 当前连接已保留。` });
+      } catch {
+        if (isSameConnection()) set({ serverListNotice: '服务器名称未保存，请稍后重新连接以重试。当前连接已保留。' });
+      } finally { set({ saving: false }); }
+    },
     setServerCapabilities: (capabilities) => set({ capabilities }),
     setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     logout: () => {

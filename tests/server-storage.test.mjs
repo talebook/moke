@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { mockCrypto } from './helpers/crypto-context.mjs';
 
 // Exercise the native adapter and repository with synthetic IPC files. This
 // verifies fallback/recovery semantics, not a real device's filesystem ACL.
@@ -78,4 +79,17 @@ test('native recovery scope ends on success and failure and never leaks to anoth
     finish();
     assert.equal(await adapter.getItem(SERVER_STORAGE_KEY), raw);
   }
+}));
+
+test('native temporary files and recovery backups work without randomUUID or Web Crypto', (context) => inNative(async () => {
+  mockCrypto(context, undefined);
+  globalThis.window = { localStorage: { getItem: () => null } };
+  const repository = createServerRepository();
+  assert.equal((await repository.load()).ok, true);
+  const savedServers = [{ id: 'a', url: 'http://a.test', title: 'A', addedAt: '' }];
+  assert.equal((await repository.save({ savedServers })).ok, true);
+  assert.deepEqual((await createServerRepository().load()).value.savedServers, savedServers);
+  assert.equal((await repository.recover()).ok, true);
+  assert.equal([...files.keys()].some(path => path.endsWith('.tmp')), false);
+  assert.equal([...files.keys()].filter(path => path.includes('-backup-')).length, 1);
 }));

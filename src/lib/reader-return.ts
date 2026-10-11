@@ -1,5 +1,6 @@
 import { normalizeServerAddress } from './server-url.ts';
 import type { SavedServer } from './server-registry.ts';
+import { secureRandomUUID } from './random-id.ts';
 
 const STORAGE_KEY = 'moke-reader-return-v1';
 const MARKER_PREFIX = 'moke-reader-return:';
@@ -55,14 +56,14 @@ export function prepareReaderReturn(
   now = Date.now(),
 ): void {
   clearReaderReturn(channel);
-  if ((!context.offlineMode && (!context.activeServerId || !context.serverUrl))
-    || (context.activeServerId === null && context.serverUrl !== '')
-    || (context.serverUrl && normalizeServerAddress(context.serverUrl) !== context.serverUrl)) {
-    throw new Error('连接信息已改变，请重新连接服务器后打开阅读器');
-  }
   try {
+    if ((!context.offlineMode && (!context.activeServerId || !context.serverUrl))
+      || (context.activeServerId === null && context.serverUrl !== '')
+      || (context.serverUrl && normalizeServerAddress(context.serverUrl) !== context.serverUrl)) {
+      throw new Error('reader.return.context');
+    }
     const current = channel ?? browserReaderReturnChannel();
-    const nonce = crypto.randomUUID();
+    const nonce = secureRandomUUID();
     const value = JSON.stringify({ version: 1, nonce, createdAt: now,
       activeServerId: context.activeServerId, serverUrl: context.serverUrl, offlineMode: context.offlineMode });
     current.storage.setItem(STORAGE_KEY, value);
@@ -71,7 +72,7 @@ export function prepareReaderReturn(
     if (current.getMarker() !== returnMarker(nonce, context, now)) throw new Error('reader.return.marker');
   } catch {
     clearReaderReturn(channel);
-    throw new Error('无法保存阅读器返回信息，当前连接已保留。请检查本次会话的存储权限后重试。');
+    throw new Error('无法保存阅读器返回信息，当前连接已保留。请重新确认连接，并检查本次会话的存储权限与安全随机数支持后重试。');
   }
 }
 

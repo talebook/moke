@@ -98,7 +98,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         const syncedUser = resolveUserAfterSync(userAtSyncStart, currentUser, userResult);
 
         if (serverResult.status === 'fulfilled') {
-          setServerTitle(serverResult.value.title || '');
+          void setServerTitle(serverResult.value.title || '', { serverUrl: discoveryServerUrl, connectionId, sessionId });
         } else {
           console.warn('[ServerProvider] server info sync failed:', serverResult.reason);
         }

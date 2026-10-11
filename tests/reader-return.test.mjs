@@ -4,6 +4,7 @@ import './helpers/import-app-module.mjs';
 import { prepareReaderReturn, takeReaderReturn, READER_RETURN_TTL_MS } from '../src/lib/reader-return.ts';
 import { createServerStore } from '../src/lib/store/server.ts';
 import { ServerRegistryRepository, SERVER_STORAGE_KEY } from '../src/lib/server-registry.ts';
+import { mockCrypto } from './helpers/crypto-context.mjs';
 
 const a={id:'a-id',url:'http://a.test',title:'A',addedAt:'2026-10-05T00:00:00Z'};
 const b={...a,id:'b-id',url:'http://b.test',title:'B'};
@@ -59,6 +60,29 @@ test('denied return storage prevents reader launch and removes the browsing-cont
   tab.storage.setItem=()=>{throw new Error('denied');};
   assert.throws(()=>prepareReaderReturn(online,tab),/无法保存/);
   assert.equal(tab.state.marker,'');
+});
+
+test('return nonce survives missing randomUUID but never uses a weak fallback', (context) => {
+  const secure = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  mockCrypto(context, { getRandomValues: secure });
+  const tab = channel();
+  prepareReaderReturn(online, tab, 1000);
+  assert.deepEqual(takeReaderReturn([a], tab, 1001), online);
+  prepareReaderReturn(online, tab, 1000);
+  Object.defineProperty(globalThis, 'crypto', { value: undefined, configurable: true });
+  assert.throws(() => prepareReaderReturn(online, tab, 1001), /无法保存.*当前连接已保留.*安全随机数/);
+  assert.equal(tab.state.marker, '');
+  assert.equal(tab.state.values.size, 0);
+});
+
+test('invalid return source clears prior authority and uses the unified retained-connection error', () => {
+  for (const serverUrl of ['ftp://a.test', 'http://user:secret@a.test', 'http://a.test/path', 'http://A.test:80', '']) {
+    const tab = channel();
+    prepareReaderReturn(online, tab, 1000);
+    assert.throws(() => prepareReaderReturn({ ...online, serverUrl }, tab, 1001), /无法保存阅读器返回信息，当前连接已保留/);
+    assert.equal(tab.state.marker, '');
+    assert.equal(tab.state.values.size, 0);
+  }
 });
 
 test('a denied sessionStorage getter clears an old marker and reports a recoverable launch error', () => {

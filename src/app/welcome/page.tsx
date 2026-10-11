@@ -141,9 +141,11 @@ export default function WelcomePage() {
           {!store.hasHydrated ? <p role="status">正在加载服务器列表…</p> : store.storageError ? (
             <div role="alert" className="text-sm space-y-3">
               <p className="break-words">{store.storageError}</p>
-              <button className={buttonStyle} disabled={store.saving || store.storageBusy} onClick={() => void store.loadServers()}>重试加载</button>
-              <p>恢复会先备份可读取的原配置，再重建空列表；无法读取的旧浏览器配置和已有离线文件保留。备份失败时不覆盖原数据。</p>
-              <button className={buttonStyle} disabled={store.saving || store.storageBusy} onClick={() => void store.recoverServers()}>保留原数据并重建列表</button>
+              {!store.storageBusy && <>
+                <button className={buttonStyle} disabled={store.saving} onClick={() => void store.loadServers()}>重试加载</button>
+                <p>恢复会先备份可读取的原配置，再重建空列表；无法读取的旧浏览器配置和已有离线文件保留。备份失败时不覆盖原数据。</p>
+                <button className={buttonStyle} disabled={store.saving} onClick={() => void store.recoverServers()}>保留原数据并重建列表</button>
+              </>}
             </div>
           ) : <>
             {!store.savedServers.length && <p className="text-sm text-muted-foreground mb-4">尚未加入服务器</p>}

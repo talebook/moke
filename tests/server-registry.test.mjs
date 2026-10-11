@@ -6,6 +6,7 @@ import { createServerStore } from '../src/lib/store/server.ts';
 import { checkSavedServer, readConnectionWelcome } from '../src/lib/server-connection.ts';
 import { createReaderProgressQueue } from '../src/lib/reader-progress-queue.ts';
 import { assertReaderContext, bindReaderWindow, sourceForReaderEvent, withClosedReaderSession, openReaderFromSource, requireClosedReaders, registerReaderProgressFlush } from '../src/lib/reader-source.ts';
+import { mockCrypto } from './helpers/crypto-context.mjs';
 
 function storage(initial = {}) {
   const values = new Map(Object.entries(initial));
@@ -207,12 +208,121 @@ test('stalled native/storage hydration shows a bounded error and blocks racing r
   context.mock.timers.tick(8001);
   assert.equal(store.getState().hasHydrated,true);
   assert.match(store.getState().storageError,/超时/);
+  assert.match(store.getState().storageError,/完全退出并重新启动应用/);
   assert.equal(store.getState().storageBusy,true);
   await store.getState().recoverServers();
   assert.equal(disk.values.has(SERVER_STORAGE_KEY),false);
   release();await load;
   assert.equal(store.getState().storageBusy,false);
   assert.equal(store.getState().storageError,'');
+});
+
+test('missing Web Crypto still migrates, saves distinct servers, restarts and backs up recovery', async (context) => {
+  mockCrypto(context, undefined);
+  const old = JSON.stringify({ version: 0, state: { serverUrl: 'http://a.test', serverTitle: 'A' } });
+  const disk = storage({ [SERVER_STORAGE_KEY]: old });
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  assert.equal(store.getState().storageError, '');
+  const a = store.getState().savedServers[0];
+  const b = await store.getState().saveServer('http://b.test');
+  assert.equal(b.ok, true);
+  assert.notEqual(a.id, b.value.id);
+  const restarted = createServerStore(new ServerRegistryRepository(disk));
+  await restarted.getState().loadServers();
+  assert.deepEqual(restarted.getState().savedServers, [a, b.value]);
+  await restarted.getState().recoverServers();
+  assert.equal(restarted.getState().storageError, '');
+  assert.deepEqual(restarted.getState().savedServers, []);
+  assert.equal([...disk.values.keys()].filter(key => key.startsWith(`${SERVER_STORAGE_KEY}-backup-`)).length, 1);
+});
+
+test('identity construction or unexpected storage errors return a visible save failure and release the reservation', async (context) => {
+  mockCrypto(context, undefined);
+  const store = createServerStore(new ServerRegistryRepository(storage()));
+  await store.getState().loadServers();
+  const random = context.mock.method(Math, 'random', () => { throw new Error('identity failed'); });
+  const result = await store.getState().saveServer('http://a.test');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /未保存.*identity failed/);
+  assert.equal(store.getState().saving, false);
+  assert.deepEqual(store.getState().savedServers, []);
+  random.mock.restore();
+  assert.equal((await store.getState().saveServer('http://a.test')).ok, true);
+});
+
+test('discovered titles persist only to their confirmed source and unchanged titles do not rewrite', async () => {
+  const disk = storage();
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  const a = (await store.getState().saveServer('http://a.test')).value;
+  const b = (await store.getState().saveServer('http://b.test')).value;
+  await store.getState().activateCandidate(store.getState().beginConnection(a.id).requestId);
+  const sourceA = { ...store.getState() };
+  await store.getState().setServerTitle('A 最新书库', sourceA);
+  assert.equal(store.getState().savedServers[0].title, 'A 最新书库');
+  const before = disk.values.get(SERVER_STORAGE_KEY);
+  const write = disk.setItem;
+  let writes = 0;
+  disk.setItem = (key, value) => { writes++; write(key, value); };
+  await store.getState().setServerTitle('A 最新书库', sourceA);
+  assert.equal(writes, 0);
+  await store.getState().activateCandidate(store.getState().beginConnection(b.id).requestId);
+  await store.getState().setServerTitle('A 迟到名称', sourceA);
+  assert.equal(store.getState().serverTitle, '');
+  assert.equal(disk.values.get(SERVER_STORAGE_KEY), before);
+  const sourceB = { ...store.getState() };
+  store.getState().logout();
+  await store.getState().setServerTitle('B 旧会话名称', sourceB);
+  assert.equal(store.getState().serverTitle, '');
+  const restarted = createServerStore(new ServerRegistryRepository(disk));
+  await restarted.getState().loadServers();
+  assert.deepEqual(restarted.getState().savedServers.map(s => s.title), ['A 最新书库', '']);
+});
+
+test('title write failure or verification mismatch preserves the saved title and connection with a visible retry notice', async () => {
+  for (const mode of ['reject', 'discard']) {
+    const disk = storage({ [SERVER_STORAGE_KEY]: serializeServerRegistry({ savedServers: [{ id: 'a', url: 'http://a.test', title: '旧名称', addedAt: '' }] }) });
+    const store = createServerStore(new ServerRegistryRepository(disk));
+    await store.getState().loadServers();
+    await store.getState().activateCandidate(store.getState().beginConnection('a').requestId);
+    const source = { ...store.getState() };
+    const before = disk.values.get(SERVER_STORAGE_KEY);
+    disk.setItem = () => { if (mode === 'reject') throw new Error('quota'); };
+    await store.getState().setServerTitle('新名称', source);
+    assert.equal(store.getState().serverTitle, '新名称');
+    assert.equal(store.getState().savedServers[0].title, '旧名称');
+    assert.equal(disk.values.get(SERVER_STORAGE_KEY), before);
+    assert.match(store.getState().serverListNotice, /名称未保存.*请重试.*当前连接已保留/);
+    assert.equal(store.getState().storageError, '');
+    assert.equal(store.getState().serverUrl, 'http://a.test');
+    assert.equal(store.getState().sessionId, source.sessionId);
+    assert.equal(store.getState().saving, false);
+    assert.ok(store.getState().beginConnection('a'));
+  }
+});
+
+test('delayed title persistence cannot overwrite the runtime title after disconnect and reconnect', async () => {
+  const disk = storage();
+  const store = createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();
+  const a = (await store.getState().saveServer('http://a.test')).value;
+  const b = (await store.getState().saveServer('http://b.test')).value;
+  await store.getState().activateCandidate(store.getState().beginConnection(a.id).requestId);
+  let entered, release;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const write = disk.setItem;
+  disk.setItem = async (key, value) => { entered(); await gate; write(key, value); };
+  const updating = store.getState().setServerTitle('A 新名称', { ...store.getState() });
+  await started;
+  assert.equal((await store.getState().saveServer('http://c.test')).ok, false);
+  store.getState().disconnect();
+  assert.equal(store.getState().serverTitle, '');
+  release(); await updating;
+  await store.getState().activateCandidate(store.getState().beginConnection(b.id).requestId);
+  assert.equal(store.getState().serverTitle, '');
+  assert.deepEqual(store.getState().savedServers.map(s => s.title), ['A 新名称', '']);
 });
 
 test('delayed reader preparation cannot open after a session change or during a candidate switch', () => {

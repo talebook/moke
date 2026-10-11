@@ -185,6 +185,22 @@ function SampleBookPanel() {
     }
   };
 
+  const viewOfflineLibrary = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      await useServerStore.getState().enterOfflineMode();
+      await navigateFullDocument('/library', router.push);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '无法进入离线书库，请重试。');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <ActionRow
@@ -200,10 +216,7 @@ function SampleBookPanel() {
         <button
           type="button"
           disabled={busy}
-          onClick={() => {
-            useServerStore.getState().enterOfflineMode();
-            void navigateFullDocument('/library', router.push);
-          }}
+          onClick={() => void viewOfflineLibrary()}
           className="mx-4 my-3 text-sm text-primary hover:underline disabled:opacity-50"
         >
           在离线书库查看

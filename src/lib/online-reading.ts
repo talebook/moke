@@ -1,5 +1,6 @@
 import { retryOnlineRead } from './online-retry.ts';
 import { MokeApiError, readJsonResponse } from './api-core.ts';
+import { ReaderOpenUnconfirmedError } from './reader-source.ts';
 
 const EPUB_MIME = 'application/epub+zip';
 const LEGACY_EPUB_MIME = 'application/octet-stream';
@@ -548,6 +549,7 @@ export async function resolveTalebookOnlineSource(
 }
 
 export function onlineReadingErrorMessage(error: unknown): string {
+  if (error instanceof ReaderOpenUnconfirmedError) return error.message;
   if (error instanceof OnlineReadingError && error.status && error.status >= 300 && error.status < 400) {
     return '在线阅读请求被服务器重定向，请检查书库地址是否应使用 HTTPS；无法验证的跳转已停止。';
   }

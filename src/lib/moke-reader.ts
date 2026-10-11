@@ -226,6 +226,8 @@ export async function navigateFullDocument(
  * 桌面 reader-home（书库首页）窗口的 label。
  * 不能落入扩展的 `reader-*` 枚举（H20-L4）：该书库窗口不代表阅读器，
  * 扩展不应把它当作阅读器寻址/列出来。
+ * 但它仍持有阅读来源，并能自行创建 Reader：会话切换和 Moke 打开书籍
+ * 的保护边界会要求关闭该窗口；这与扩展寻址的 `reader-*` 枚举用途不同。
  */
 export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): string {
   return `moke-home-${timestamp}`;

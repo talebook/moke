@@ -17,7 +17,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
-import { assertReaderContext, openReaderFromSource, requireClosedReaders } from '@/lib/reader-source';
+import { assertReaderContext, openReaderFromSource, requireClosedReaders, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
@@ -669,7 +669,8 @@ function DetailContent() {
     } catch (e) {
       if (annotationNavigationId) clearAnnotationLocateProgressSuppression(annotationNavigationId);
       console.error('Failed to open book:', e);
-      setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
+      setMessage(e instanceof ReaderOpenUnconfirmedError ? e.message
+        : targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
       finishOpening();
     }

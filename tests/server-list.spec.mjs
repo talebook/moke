@@ -35,6 +35,7 @@ for(const viewport of [{width:1280,height:900},{width:390,height:844}]) {
     try {await reopened.goto(base);await expect(reopened.locator('li')).toHaveCount(2);expect(await reopened.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(before);}finally{await second.close();}
     await page.locator('li button').first().click();
     await expect(page).toHaveURL(/\/shelf/);await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.savedServers[0].title)).toBe('A 测试书库');
     if(viewport.width<1024){await page.getByRole('link',{name:'我的',exact:true}).click();await page.getByRole('link',{name:'前往设置',exact:true}).click();}
     await list(page);
     await page.locator('li button').nth(1).click();await expect(page).toHaveURL(/\/access\?/);
@@ -46,11 +47,15 @@ for(const viewport of [{width:1280,height:900},{width:390,height:844}]) {
     await expect(page.getByRole('button',{name:'确认',exact:true})).toBeEnabled();
     await page.getByRole('button',{name:'确认',exact:true}).click();
     await expect(page).toHaveURL(/\/shelf/);await expect(page.getByText('B 同编号藏书').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.savedServers[1].title)).toBe('B 测试书库');
     await expect(page.getByText('A 同编号藏书',{exact:true})).toHaveCount(0);
     if(viewport.width<1024){await page.getByRole('link',{name:'我的',exact:true}).click();await page.getByRole('link',{name:'前往设置',exact:true}).click();}
     await list(page);await page.getByRole('button',{name:'断开',exact:true}).click();
     await expect(page.getByText('已断开，服务器列表已保留',{exact:true})).toBeVisible();
     await expect(page.locator('li')).toHaveCount(2);
+    await page.reload();
+    await expect(page.locator('li button').first()).toContainText('A 测试书库');
+    await expect(page.locator('li button').nth(1)).toContainText('B 测试书库');
   });
 }
 
@@ -67,6 +72,8 @@ test('duplicate, invalid root, cancellation, storage failure and recovery',async
 });
 
 test('legacy migration, timeout, retry and B login retain source identity',async({page})=>{
+  // Plain HTTP/older WebViews expose getRandomValues but not randomUUID.
+  await page.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }));
   const fixture=await installServerListFixture(page);
   await page.goto(base);
   await page.evaluate(()=>localStorage.setItem('moke-server-storage',JSON.stringify({version:0,state:{serverUrl:'https://A.example.test:443/',serverTitle:'旧 A'}})));

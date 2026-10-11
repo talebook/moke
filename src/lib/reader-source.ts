@@ -10,11 +10,19 @@ interface ReaderHost {
   getWindowLabels: () => Promise<string[]>;
   getContext: () => Promise<{ sessionId: number; candidate: unknown }>;
   open: (args: Record<string, unknown>) => Promise<unknown>;
-  wait: () => Promise<void>;
+  wait: (delayMs: number) => Promise<void>;
   now: () => number;
 }
 
 const UNRESOLVED_OPEN = '上次阅读器打开请求尚未确认，当前连接已保留。请等待窗口出现并关闭后重试；若一直未出现，请退出并重启应用。';
+
+/** Dispatch may succeed even when its receipt/creation cannot be observed. */
+export class ReaderOpenUnconfirmedError extends Error {
+  constructor(cause?: unknown) {
+    super(UNRESOLVED_OPEN, { cause });
+    this.name = 'ReaderOpenUnconfirmedError';
+  }
+}
 
 /** One dispatched request retains ownership until its real window is observed.
  * Readest has no creation/cancellation receipt. A timeout or IPC failure cannot
@@ -75,7 +83,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   async function checkClosedReaders(): Promise<void> {
     const labels = await host.getWindowLabels();
     reconcileWindows(labels);
-    if (pending) throw new Error(UNRESOLVED_OPEN);
+    if (pending) throw new ReaderOpenUnconfirmedError();
     if (labels.some(isReaderWindow)) {
       throw new Error('请先关闭当前阅读器及阅读器书库窗口，再重试连接。当前连接已保留。');
     }
@@ -103,22 +111,28 @@ export function createReaderSourceBoundary(host: ReaderHost) {
     try {
       const before = await host.getWindowLabels();
       reconcileWindows(before);
-      if (pending) throw new Error(UNRESOLVED_OPEN);
+      if (pending) throw new ReaderOpenUnconfirmedError();
       // Check under the opening reservation so another launch cannot race the
       // caller's earlier window snapshot.
-      if (before.some(isReaderWindow)) throw new Error('请先关闭当前阅读器，再打开书籍');
+      if (before.some(isReaderWindow)) throw new Error('请先关闭当前阅读器及阅读器书库窗口，再打开书籍');
       assertReaderContext(source, await host.getContext());
       const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null };
       pending = request;
-      await host.open(args);
-      const deadline = host.now() + 5000;
-      while (host.now() < deadline) {
-        if (request.label && pending !== request) return;
-        reconcileWindows(await host.getWindowLabels());
-        if (request.label && pending !== request) return;
-        await host.wait();
+      try {
+        await host.open(args);
+        const deadline = host.now() + 5000;
+        let delayMs = 100;
+        while (host.now() < deadline) {
+          if (request.label && pending !== request) return;
+          reconcileWindows(await host.getWindowLabels());
+          if (request.label && pending !== request) return;
+          await host.wait(Math.min(delayMs, deadline - host.now()));
+          delayMs = Math.min(delayMs * 2, 1000);
+        }
+      } catch (error) {
+        throw new ReaderOpenUnconfirmedError(error);
       }
-      throw new Error(UNRESOLVED_OPEN);
+      throw new ReaderOpenUnconfirmedError();
     } finally {
       // Only the foreground reservation ends. A dispatched request remains
       // unconfirmed even on rejection: the transport may have lost its receipt.
@@ -136,6 +150,9 @@ export function createReaderSourceBoundary(host: ReaderHost) {
 }
 
 export function isReaderWindow(label: string): boolean {
+  // Session/open guard, not extension addressing: the Reader library home
+  // retains the same source context and can create readers of its own. Keep
+  // both closed before changing sessions or dispatching a new Moke book.
   return label.startsWith('reader-') || label.startsWith('moke-home-');
 }
 
@@ -147,7 +164,7 @@ const boundary = createReaderSourceBoundary({
   },
   getContext: async () => (await import('./store/server.ts')).useServerStore.getState(),
   open: async (args) => (await import('@tauri-apps/api/core')).invoke('open_reader', args),
-  wait: () => new Promise((resolve) => setTimeout(resolve, 50)),
+  wait: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   now: () => Date.now(),
 });
 export const { bindReaderWindow, sourceForReaderEvent, retireReaderWindow, requireClosedReaders, withClosedReaderSession,
