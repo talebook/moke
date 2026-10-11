@@ -29,7 +29,7 @@ export default function WelcomePage() {
     offlineMode: state.offlineMode, saveServer: state.saveServer, beginConnection: state.beginConnection,
     cancelConnection: state.cancelConnection, requireAccess: state.requireAccess, activateCandidate: state.activateCandidate,
     disconnect: state.disconnect, loadServers: state.loadServers, recoverServers: state.recoverServers,
-    enterOfflineMode: state.enterOfflineMode,
+    enterOfflineMode: state.enterOfflineMode, serverBackupKey: state.serverBackupKey, readServerBackup: state.readServerBackup,
   })));
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -38,19 +38,25 @@ export default function WelcomePage() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [serverBackup, setServerBackup] = useState<{ key: string; raw: string } | null>(null);
+  const [readingBackup, setReadingBackup] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const items = useRef(new Map<string, HTMLButtonElement>());
   const controller = useRef<AbortController | null>(null);
   const versionClicks = useRef(0);
   const versionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backupRequest = useRef(0);
+  const backupPending = useRef(false);
 
   useEffect(() => { if (adding) input.current?.focus(); }, [adding]);
   useEffect(() => () => {
     controller.current?.abort();
+    backupRequest.current += 1;
     if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
     if (versionTimer.current) clearTimeout(versionTimer.current);
   }, []);
+  useEffect(() => { setServerBackup(null); }, [store.serverBackupKey]);
 
   const cancelConnection = () => {
     controller.current?.abort();
@@ -75,10 +81,20 @@ export default function WelcomePage() {
   };
 
   const connect = async (id: string) => {
-    if (connectingId === id || store.saving) return;
+    if (connectingId === id) return;
+    const attempt = useServerStore.getState().beginConnection(id);
+    if (!attempt) {
+      const current = useServerStore.getState();
+      setNotice('');
+      setError(current.storageBusy ? '服务器列表仍在加载或确认返回连接，请等待完成后重试。'
+        : current.saving ? '正在保存服务器列表，请稍候再连接。'
+          : current.storageError ? '服务器列表暂不可连接，请先重试加载或恢复。'
+            : '该服务器已不在当前列表中，请选择现有条目或重新加入。');
+      items.current.get(id)?.focus();
+      return;
+    }
+    // A refused click must leave an earlier connection request running.
     controller.current?.abort();
-    const attempt = store.beginConnection(id);
-    if (!attempt) return;
     const abort = new AbortController();
     controller.current = abort;
     setConnectingId(id); setError(''); setNotice('');
@@ -122,6 +138,34 @@ export default function WelcomePage() {
     } else setError(`复制链接失败，请手动复制：${DEMO_LIBRARY_URL}`);
   };
 
+  const viewServerBackup = async () => {
+    if (backupPending.current) return;
+    const current = useServerStore.getState();
+    if (current.saving || current.storageBusy) {
+      setError('服务器列表操作仍在进行，请等待完成后查看备份。');
+      return;
+    }
+    const key = current.serverBackupKey;
+    if (!key) { setError('本次会话尚无可查看的备份。'); return; }
+    const request = ++backupRequest.current;
+    backupPending.current = true;
+    setReadingBackup(true); setServerBackup(null); setError('');
+    try {
+      const result = await current.readServerBackup();
+      if (backupRequest.current !== request) return;
+      if (!result.ok) { setError(result.error); return; }
+      if (useServerStore.getState().serverBackupKey !== key || result.value.key !== key) {
+        setError('备份已更新，请再次查看本次会话最新备份。');
+        return;
+      }
+      setServerBackup(result.value);
+    } catch {
+      if (backupRequest.current === request) setError('无法读取备份，请检查存储权限后重试。');
+    } finally {
+      if (backupRequest.current === request) { backupPending.current = false; setReadingBackup(false); }
+    }
+  };
+
   const disconnect = async () => {
     try { await requireClosedReaders(); store.disconnect(); }
     catch (failure) { setError((failure as Error).message); }
@@ -151,6 +195,7 @@ export default function WelcomePage() {
           <p className="text-sm text-muted-foreground mb-5">加入只保存地址；点击已保存条目连接。</p>
           <div role="status" aria-live="polite" className="text-sm mb-3 text-foreground">{notice || store.serverListNotice}</div>
           {(error || store.readerReturnError) && <p id="server-error" role="alert" className="text-sm text-destructive mb-4 break-words">{error || store.readerReturnError}</p>}
+          {store.hasHydrated && store.storageBusy && !store.storageError && <p id="server-storage-status" role="status" className="text-sm mb-3 text-foreground">服务器列表仍在加载或确认返回连接，请等待完成后连接。</p>}
           {!store.hasHydrated ? <p role="status">正在加载服务器列表…</p> : store.storageError ? (
             <div role="alert" className="text-sm space-y-3">
               <p className="break-words">{store.storageError}</p>
@@ -170,8 +215,8 @@ export default function WelcomePage() {
               {store.savedServers.map((server) => <li key={server.id} className="rounded-2xl border border-amber-950/10 bg-white/50">
                 <button ref={(element) => { if (element) items.current.set(server.id, element); else items.current.delete(server.id); }}
                   className="w-full min-h-11 text-left p-4 rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
-                  disabled={store.saving || connectingId === server.id} onClick={() => void connect(server.id)}
-                  aria-describedby={error ? 'server-error' : undefined}>
+                  disabled={store.saving || store.storageBusy || connectingId === server.id} onClick={() => void connect(server.id)}
+                  aria-describedby={store.storageBusy ? 'server-storage-status' : error ? 'server-error' : undefined}>
                   <span className="block text-sm font-semibold text-foreground">{server.title || new URL(server.url).host}</span>
                   <span className="block text-xs text-muted-foreground break-all mt-1">{server.url}</span>
                   {store.activeServerId === server.id && <span className="block text-xs text-foreground mt-1">{store.offlineMode ? '当前服务器（离线模式）' : '当前服务器'}</span>}
@@ -192,6 +237,15 @@ export default function WelcomePage() {
               }}>取消</button>
             </form> : <button ref={addButton} className={`${primaryButtonStyle} w-full`} disabled={store.saving || Boolean(connectingId)} onClick={() => { setAdding(true); setError(''); setNotice(''); }}>加入服务器</button>}
           </>}
+          {store.serverBackupKey && <section className="mt-4 space-y-2 text-sm" aria-label="服务器列表备份">
+            <button className={`${buttonStyle} w-full`} disabled={store.saving || store.storageBusy || readingBackup} onClick={() => void viewServerBackup()}>{readingBackup ? '正在读取备份…' : '查看本次会话最新备份'}</button>
+            <p>本入口提供本次会话内服务器列表的最新备份，请在重启前查看。</p>
+            {serverBackup && serverBackup.key === store.serverBackupKey && <>
+              <p className="break-words">备份位置：{process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? `AppData/books/.servers/${serverBackup.key}.json` : `当前站点 localStorage 键：${serverBackup.key}`}</p>
+              <label htmlFor="server-backup-data" className="block">原始备份内容（只读，可复制）</label>
+              <textarea id="server-backup-data" readOnly value={serverBackup.raw} rows={8} className="w-full rounded-xl border border-amber-950/10 bg-white/65 p-3 font-mono text-xs" />
+            </>}
+          </section>}
           {store.serverUrl && !(store.storageError && store.storageBusy) && <div className="flex gap-2 mt-4">
             <button className={`${buttonStyle} flex-1`} onClick={returnToCurrentShelf}>返回当前书架</button>
             <button className={buttonStyle} disabled={Boolean(connectingId) || store.saving} onClick={() => void disconnect()}>断开</button>

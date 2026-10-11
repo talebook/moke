@@ -275,6 +275,16 @@ export async function discoverServerCapabilities(serverUrl: string, signal?: Abo
   return capabilities;
 }
 
+// Keep compatible HTTP auth challenges separate from successful JSON states.
+// Talebook returns not_installed with HTTP 200 (base.py:216-220 at
+// d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2); it identifies the server, but
+// checkSavedServer's subsequent welcome check must still reject that state.
+const SERVER_CONNECTION_AUTH_HTTP_STATUS = new Map([
+  ['user.need_login', 401],
+  ['not_invited', 403],
+]);
+const SERVER_CONNECTION_STATES = new Set(['ok', 'not_installed', ...SERVER_CONNECTION_AUTH_HTTP_STATUS.keys()]);
+
 export async function validateServerConnection(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {
   // Each explicit connection attempt probes once; retry is a user action.
   let response: Response;
@@ -308,15 +318,16 @@ export async function validateServerConnection(serverUrl: string, signal?: Abort
     };
   }
 
-  if (!response.ok && data.err !== 'user.need_login' && data.err !== 'not_invited') {
+  if (!response.ok && SERVER_CONNECTION_AUTH_HTTP_STATUS.get(data.err) !== response.status) {
     logHttpErrorMetadata('validateServerConnection', response.status, data);
     return {
-      err: data.err || `http.${response.status}`,
+      // A known JSON state cannot turn a transport failure into success.
+      err: data.err && data.err !== 'ok' ? data.err : `http.${response.status}`,
       msg: data.msg || '服务器响应异常，请确认服务已正常启动',
     };
   }
 
-  if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
+  if (!SERVER_CONNECTION_STATES.has(data.err)) {
     console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
     return {
       err: data.err || 'server.invalid',

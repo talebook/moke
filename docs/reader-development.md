@@ -63,6 +63,10 @@ Reader 窗口按 `reader-` 前缀识别，不要求纯数字后缀。Reader 内�
 
 单 WebView 阅读会替换 Moke 文档。打开前将最小返回信息保存在本标签的 `sessionStorage`，并用 `window.name` 绑定一次性 nonce 和来源，沿用 Reader 的 `/library` 返回契约。返回信息不包含用户、密码、访问码、token 或能力缓存，也不写入服务器列表或 URL。返回时核对已保存服务器的 id/地址；在线连接最多确认 20 秒，离线返回不发网络请求，并进入 `/shelf`。返回记录最多有效 12 小时，消费后立即清除；切服务器、登录、退出登录、断开或切离线都会失效旧记录。
 
+单 WebView 的进度保存由 Reader 文档负责，Moke 的 `ReaderProgressProvider` 已随原文档卸载。在线阅读及下载书籍的启动 URL 携带来源 `mokeServerUrl` 和 `mokeBookId`；Reader 按当前固定版本的 [HTTP 契约](https://github.com/hehetoshang/readest-reader/blob/4b3db91bd1d94e5e9063639964f95a407334e81f/docs/MOKE_CONTRACT.md) 直接 POST 到该来源的 `/api/book/{id}/progress`，合并页码更新并在关闭前 flush。示例书不携带服务器地址。宿主的窗口来源 Map 用于桌面 `reader-*`，无需把移动端 `main` 绑定到已卸载的 Moke Provider。
+
+服务器列表读取超时的“先使用离线书库”出口使用同文档导航进入 `/library`，以便查看本地下载，包括未加入书架的书籍；打开书籍并关闭单 WebView Reader 后，仍按上述离线返回约定转到 `/shelf`。示例书开发者入口的 `offline-library` intent 只授权首次跨文档进入 `/library`，在到达时消费，后续开书会生成新的 Reader 返回凭据，不继承该入口 intent。离线阅读不恢复之前的书库筛选或详情页。
+
 冷启动、新 WebView、刷新/历史重放、过期、缺失或被改动的来源均不会凭此自动连接，仍回服务器列表。若运行时不允许会话存储或设置返回标记，打开操作会保留当前连接并报错。原生平台是否保持同源文档间的 `window.name` 和会话存储，需在对应设备验证；Chromium 返回辅助模块测试不能替代原生 EPUB、实际 Moke 页面或 Cookie 回写验收。
 
 返回 nonce 使用 `crypto.randomUUID`，缺失时使用 `crypto.getRandomValues` 生成 UUID；两者都不可用时清除返回授权并报错。服务器条目 ID、备份/临时文件名等本地标识可以使用非安全回退，但不得用于返回授权。

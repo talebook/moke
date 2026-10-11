@@ -5,7 +5,7 @@ const { validateServerConnection, checkWelcomeRequirement } = await import('../s
 const { readConnectionWelcome, checkSavedServer } = await import('../src/lib/server-connection.ts');
 
 test('one explicit connection probe accepts the supported Talebook states', async context => {
-  for (const [err, status] of [['ok', 200], ['not_installed', 200], ['user.need_login', 401], ['not_invited', 403]]) {
+  for (const [err, status] of [['ok', 200], ['not_installed', 200], ['user.need_login', 200], ['not_invited', 200], ['user.need_login', 401], ['not_invited', 403]]) {
     const calls = [];
     context.mock.method(globalThis, 'fetch', async (url, init) => {
       calls.push([String(url), init.credentials]);
@@ -13,6 +13,26 @@ test('one explicit connection probe accepts the supported Talebook states', asyn
     });
     assert.deepEqual(await validateServerConnection('https://books.test'), { err: 'ok' });
     assert.deepEqual(calls, [['https://books.test/api/user/info', 'include']]);
+  }
+});
+
+test('HTTP failures cannot use a known Talebook state to bypass the connection probe', async context => {
+  for (const [err, status] of [
+    ['ok', 503], ['not_installed', 503], ['user.need_login', 503], ['not_invited', 503],
+    ['not_installed', 401], ['not_invited', 401], ['user.need_login', 403],
+  ]) {
+    const requests = [];
+    context.mock.method(globalThis, 'fetch', async url => {
+      requests.push(String(url));
+      assert.equal(String(url).endsWith('/api/user/info'), true, 'failed validation must not reach welcome');
+      return Response.json({ err, msg: 'connection HTTP failure' }, { status });
+    });
+    const result = await validateServerConnection('https://books.test');
+    assert.equal(result.err, err === 'ok' ? `http.${status}` : err);
+    await assert.rejects(checkSavedServer('https://books.test', {
+      validate: validateServerConnection, welcome: checkWelcomeRequirement,
+    }, new AbortController().signal), /connection HTTP failure/);
+    assert.deepEqual(requests, Array(2).fill('https://books.test/api/user/info'));
   }
 });
 
@@ -94,6 +114,18 @@ test('saved-server confirmation rejects failed welcome HTTP requests even with a
     }, new AbortController().signal), /failed welcome HTTP request/);
     assert.deepEqual(requests, ['https://books.test/api/user/info', 'https://books.test/api/welcome']);
   }
+});
+
+test('an uninstalled server is recognized by HTTP 200 but cannot pass saved-server confirmation', async context => {
+  const requests = [];
+  context.mock.method(globalThis, 'fetch', async url => {
+    requests.push(String(url));
+    return Response.json({ err: 'not_installed', msg: 'server setup is incomplete' });
+  });
+  await assert.rejects(checkSavedServer('https://books.test', {
+    validate: validateServerConnection, welcome: checkWelcomeRequirement,
+  }, new AbortController().signal), /server setup is incomplete/);
+  assert.deepEqual(requests, ['https://books.test/api/user/info', 'https://books.test/api/welcome']);
 });
 
 test('saved-server confirmation uses actual requests to route not_invited to access and reject unknown welcome failures', async context => {

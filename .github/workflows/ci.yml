@@ -145,12 +145,16 @@ jobs:
           node tests/helpers/tauri-preview-server.mjs > "$RUNNER_TEMP/moke-tauri-preview.log" 2>&1 &
           moke_preview_pid=$!
           trap 'kill "$moke_preview_pid" || true' EXIT
-          for attempt in {1..30}; do
-            if curl --silent --fail http://127.0.0.1:31391/settings/developer > /dev/null; then
-              break
-            fi
-            sleep 1
-          done
+          (
+            for attempt in {1..30}; do
+              if curl --silent --fail http://127.0.0.1:31391/settings/developer > /dev/null; then
+                exit 0
+              fi
+              sleep 1
+            done
+            cat "$RUNNER_TEMP/moke-tauri-preview.log"
+            exit 1
+          )
           MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 MOKE_E2E_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs tests/connection-reader-guard.spec.mjs tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs tests/server-storage-timeout.spec.mjs --workers=1
       - name: Upload document handoff evidence
         if: always()

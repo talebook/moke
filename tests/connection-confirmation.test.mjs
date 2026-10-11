@@ -76,8 +76,8 @@ function harness(kind, initialState = {}) {
       storageBusy:false,storageError:'',readerReturnError:'',serverListNotice:'',
       beginConnection:id => {
         h.connections.push(id);
-        if (h.state.storageBusy || h.state.storageError) return null;
         const server=h.state.savedServers.find(server => server.id === id);
+        if (!server || h.state.saving || h.state.storageBusy || h.state.storageError) return null;
         h.state.candidate={...server,requestId:++requestNumber};
         return h.state.candidate;
       },
@@ -124,10 +124,11 @@ function harness(kind, initialState = {}) {
     },
     buttons(label) {return nodes(h.render(), node => node.type === 'button' && text(node) === label);},
     click(label) {const button=h.buttons(label)[0];assert.ok(button, `missing ${label}`);return button.props.onClick();},
-    connect(id) {
+    connectionButton(id) {
       const row=nodes(h.render(), node => node.type === 'li').find(node => text(node).startsWith(id === 'a' ? 'A' : 'B'));
-      return nodes(row, node => node.type === 'button')[0].props.onClick();
+      return nodes(row, node => node.type === 'button')[0];
     },
+    connect(id) {return h.connectionButton(id).props.onClick();},
     submit() {return nodes(h.render(), node => node.type === 'form')[0].props.onSubmit({preventDefault(){}});},
     fill() {
       nodes(h.render(), node => node.props?.placeholder === '请输入访问码')[0].props.onChange({target:{value:'fixture-code'}});
@@ -153,6 +154,59 @@ async function reachActivation(h, id = 'a') {
   await nextTurn();
   return h.activations.at(-1);
 }
+
+for (const [reason, change, message] of [
+  ['removed entry', state => {state.savedServers=state.savedServers.filter(server => server.id !== 'a');}, /不在.*列表|不存在/],
+  ['saving', state => {state.saving=true;}, /正在保存.*稍候|保存.*等待/],
+  ['busy registry', state => {state.storageBusy=true;}, /仍在加载|等待.*完成/],
+  ['registry error', state => {state.storageError='配置已在其他窗口更改';}, /重试加载|恢复/],
+]) {
+  test(`welcome reports ${reason} from the live state when a rendered entry can no longer connect`, async () => {
+    const h=harness('welcome');
+    try {
+      const click=h.connectionButton('a').props.onClick;
+      assert.equal(h.connectionButton('a').props.disabled,false);
+      change(h.state);
+      const before={list:h.state.savedServers,url:h.state.serverUrl,user:h.state.user,sessionId:h.state.sessionId};
+      click();await nextTurn();
+      assert.match(h.status.error,message);assert.equal(h.status.loading,null);
+      assert.deepEqual(h.connections,['a']);assert.deepEqual(h.checks,[]);assert.deepEqual(h.activations,[]);assert.deepEqual(h.routes,[]);
+      assert.equal(h.state.candidate,null);assert.equal(h.state.savedServers,before.list);
+      assert.equal(h.state.serverUrl,before.url);assert.equal(h.state.user,before.user);assert.equal(h.state.sessionId,before.sessionId);
+    } finally {await h.close();}
+  });
+}
+
+test('welcome disables saved entries and explains the remaining registry reservation after its error clears', async () => {
+  const h=harness('welcome',{storageBusy:true,storageError:''});
+  try {
+    assert.equal(h.connectionButton('a').props.disabled,true);assert.equal(h.connectionButton('b').props.disabled,true);
+    const status=nodes(h.render(),node => node.props?.id === 'server-storage-status')[0];
+    assert.ok(status);assert.equal(status.props.role,'status');assert.match(text(status),/等待.*完成|仍在加载/);
+    assert.equal(h.connectionButton('a').props['aria-describedby'],status.props.id);
+    assert.deepEqual(h.connections,[]);assert.deepEqual(h.checks,[]);
+    h.state.storageBusy=false;
+    assert.equal(h.connectionButton('a').props.disabled,false);
+    assert.equal(nodes(h.render(),node => node.props?.id === 'server-storage-status').length,0);
+    h.connect('a');await nextTurn();assert.equal(h.checks.length,1);
+  } finally {await h.close();}
+});
+
+test('a refused entry click preserves the earlier pending connection and permits its later completion', async () => {
+  const h=harness('welcome');
+  try {
+    h.connect('a');await nextTurn();
+    const pending=h.checks[0],candidate=h.state.candidate,click=h.connectionButton('b').props.onClick;
+    h.state.storageBusy=true;click();await nextTurn();
+    assert.match(h.status.error,/仍在加载|等待.*完成/);assert.equal(h.status.loading,'a');
+    assert.equal(pending.signal.aborted,false);assert.equal(h.state.candidate,candidate);
+    assert.equal(h.checks.length,1);assert.deepEqual(h.routes,[]);
+    h.state.storageBusy=false;
+    pending.resolve({needsAccessCode:false});await nextTurn();
+    h.activations.at(-1).resolve(true);await nextTurn();
+    assert.deepEqual(h.routes,['/shelf']);assert.equal(h.state.serverUrl,'https://a.test');
+  } finally {await h.close();}
+});
 
 test('welcome reports a current failed confirmation, retains the list/account and permits retry', async () => {
   const h=harness('welcome');

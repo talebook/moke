@@ -3,7 +3,7 @@ import { didServerSessionChange, invalidateServerCapabilities, type ReaderInfo }
 import { DEFAULT_SERVER_CAPABILITIES, type ServerCapabilities } from '../server-capabilities.ts';
 import { clearReadStateCache } from '../reading-state.ts';
 import { normalizeServerAddress } from '../server-url.ts';
-import { emptyRegistry, type SavedServer, type ServerRegistryRepository } from '../server-registry.ts';
+import { emptyRegistry, type SavedServer, type ServerBackup, type StorageResult, type ServerRegistryRepository } from '../server-registry.ts';
 import { createServerRepository, writeActiveServerMirror } from '../server-storage.ts';
 import { withClosedReaderSession } from '../reader-source.ts';
 import { clearReaderReturn, takeReaderReturn, type ReaderReturnChannel } from '../reader-return.ts';
@@ -34,6 +34,7 @@ type SaveServerResult = { ok: true; value: SavedServer; created: boolean } | { o
 interface ServerState {
   savedServers: SavedServer[];
   serverListNotice: string;
+  serverBackupKey: string | null;
   storageError: string;
   storageBusy: boolean;
   saving: boolean;
@@ -56,6 +57,7 @@ interface ServerState {
   user: ReaderInfo | null;
   loadServers: () => Promise<void>;
   recoverServers: () => Promise<void>;
+  readServerBackup: () => Promise<StorageResult<ServerBackup>>;
   saveServer: (value: string) => Promise<SaveServerResult>;
   beginConnection: (id: string) => Candidate | null;
   beginActiveAccessConfirmation: () => Candidate | null;
@@ -80,6 +82,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
   let requestNumber = 0;
   return create<ServerState>()((set, get) => ({
     ...emptyRegistry(), ...disconnected, offlineMode: false, serverListNotice: '', candidate: null, connectionId: 0, sessionId: 0,
+    serverBackupKey: repository.getLatestBackupKey(),
     hasHydrated: false, readerReturnTo: null, readerReturnError: '', storageError: '', storageBusy: false, saving: false,
     loadServers: async () => {
       if (loading || get().saving) return loading ?? undefined;
@@ -130,7 +133,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         }
         set({ hasHydrated: true });
       })();
-      try { await loading; } finally { clearTimeout(timer); loading = null; set({ storageBusy: false }); }
+      try { await loading; } finally { clearTimeout(timer); loading = null; set({ storageBusy: false, serverBackupKey: repository.getLatestBackupKey() }); }
     },
     recoverServers: async () => {
       if (get().saving || loading) return;
@@ -146,7 +149,13 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         });
       } catch (error) {
         set({ storageError: error instanceof Error ? error.message : '恢复失败，请重试' });
-      } finally { set({ saving: false }); }
+      } finally { set({ saving: false, serverBackupKey: repository.getLatestBackupKey() }); }
+    },
+    readServerBackup: async () => {
+      // The repository serializes this read with migration, save and recovery;
+      // viewing original bytes never restores a connection or changes the list.
+      try { return await repository.readLatestBackup(); }
+      finally { set({ serverBackupKey: repository.getLatestBackupKey() }); }
     },
     saveServer: async (value) => {
       if (get().saving || get().storageBusy || !get().hasHydrated || get().storageError) return { ok: false, error: '请先完成服务器列表加载或恢复' };
@@ -173,7 +182,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         return { ok: true, value: server, created: true };
       } catch (error) {
         return { ok: false, error: `未保存：${error instanceof Error ? error.message : '存储不可用'}，请重试。` };
-      } finally { set({ saving: false }); }
+      } finally { set({ saving: false, serverBackupKey: repository.getLatestBackupKey() }); }
     },
     beginConnection: (id) => {
       const server = get().savedServers.find((s) => s.id === id);
@@ -275,7 +284,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         }
       } catch {
         if (isSameConnection()) set({ serverListNotice: '服务器名称未保存，请稍后重新连接以重试。当前连接已保留。' });
-      } finally { set({ saving: false }); }
+      } finally { set({ saving: false, serverBackupKey: repository.getLatestBackupKey() }); }
     },
     setServerCapabilities: (capabilities) => set({ capabilities }),
     logout: () => {

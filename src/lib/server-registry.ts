@@ -18,6 +18,7 @@ export interface RegistryStorage {
 }
 export type StorageResult<T> = { ok: true; value: T; notice?: string }
   | { ok: false; error: string; reason?: 'configuration-changed' };
+export interface ServerBackup { key: string; raw: string }
 export const emptyRegistry = (): ServerRegistry => ({ savedServers: [] });
 
 class ServerRegistryConflictError extends Error {
@@ -87,6 +88,7 @@ export class ServerRegistryRepository {
   private legacyRaw: string | null = null;
   private loaded = false;
   private preserveRawOnWrite = false;
+  private latestBackup: ServerBackup | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private storage: RegistryStorage;
   private legacyStorage: RegistryStorage;
@@ -95,30 +97,49 @@ export class ServerRegistryRepository {
     this.legacyStorage = legacyStorage;
   }
 
-  async load(): Promise<StorageResult<ServerRegistry>> {
-    try {
-      this.raw = await this.storage.getItem(SERVER_STORAGE_KEY);
-      // A valid v1 list is authoritative; a broken/unavailable compatibility key cannot override it.
-      const isV1 = this.raw && JSON.parse(this.raw)?.version === 1;
-      this.legacyRaw = isV1 ? null : await this.legacyStorage.getItem('moke_server_url');
-      let skipped = 0;
-      const registry = parseServerRegistry(this.raw, this.legacyRaw, (count) => { skipped = count; });
-      this.preserveRawOnWrite = skipped > 0;
-      this.loaded = true;
-      const encoded = serializeServerRegistry(registry);
-      // Existing lists and skipped legacy entries remain usable without a
-      // write. Valid initial creation/migration must commit before success.
-      if (!isV1 && !skipped && encoded !== this.raw) await this.writeVerified(encoded);
-      return { ok: true, value: registry, ...(skipped ? {
-        notice: isV1
-          ? `有 ${skipped} 条服务器配置无效或重复，已跳过；有效条目可继续连接，原数据已保留。`
-          : '旧服务器地址无效，已跳过；可保存并连接新服务器，原数据已保留。',
-      } : {}) };
-    } catch (error) {
-      this.loaded = false;
-      return { ok: false, error: `无法加载服务器列表：${error instanceof Error ? error.message : '存储不可用'}。原数据已保留，可重试或恢复。`,
-        ...(error instanceof ServerRegistryConflictError ? { reason: 'configuration-changed' as const } : {}) };
-    }
+  load(): Promise<StorageResult<ServerRegistry>> {
+    return this.serial(async () => {
+      try {
+        this.raw = await this.storage.getItem(SERVER_STORAGE_KEY);
+        // A valid v1 list is authoritative; a broken/unavailable compatibility key cannot override it.
+        const isV1 = this.raw && JSON.parse(this.raw)?.version === 1;
+        this.legacyRaw = isV1 ? null : await this.legacyStorage.getItem('moke_server_url');
+        let skipped = 0;
+        const registry = parseServerRegistry(this.raw, this.legacyRaw, (count) => { skipped = count; });
+        this.preserveRawOnWrite = skipped > 0;
+        this.loaded = true;
+        const encoded = serializeServerRegistry(registry);
+        // Existing lists and skipped legacy entries remain usable without a
+        // write. Valid initial creation/migration must commit before success.
+        if (!isV1 && !skipped && encoded !== this.raw) await this.writeVerified(encoded);
+        return { ok: true, value: registry, ...(skipped ? {
+          notice: isV1
+            ? `有 ${skipped} 条服务器配置无效或重复，已跳过；有效条目可继续连接，原数据已保留。`
+            : '旧服务器地址无效，已跳过；可保存并连接新服务器，原数据已保留。',
+        } : {}) };
+      } catch (error) {
+        this.loaded = false;
+        return { ok: false, error: `无法加载服务器列表：${error instanceof Error ? error.message : '存储不可用'}。原数据已保留，可重试或恢复。`,
+          ...(error instanceof ServerRegistryConflictError ? { reason: 'configuration-changed' as const } : {}) };
+      }
+    });
+  }
+
+  /** Only backups verified during this repository instance are offered for viewing. */
+  getLatestBackupKey(): string | null { return this.latestBackup?.key ?? null; }
+
+  readLatestBackup(): Promise<StorageResult<ServerBackup>> {
+    return this.serial(async () => {
+      const backup = this.latestBackup;
+      if (!backup) return { ok: false, error: '本次会话尚无已验证的服务器备份。' };
+      try {
+        const raw = await this.storage.getItem(backup.key);
+        if (raw !== backup.raw) throw new Error('备份已被删除或更改，无法确认其内容');
+        return { ok: true, value: { key: backup.key, raw } };
+      } catch (error) {
+        return { ok: false, error: `无法读取本次会话最新备份：${error instanceof Error ? error.message : '存储不可用'}。` };
+      }
+    });
   }
 
   save(registry: ServerRegistry): Promise<StorageResult<ServerRegistry>> {
@@ -153,8 +174,7 @@ export class ServerRegistryRepository {
         }
         const backupKey = `${SERVER_STORAGE_KEY}-backup-${createLocalId()}`;
         const backup = JSON.stringify({ raw: this.raw, legacy, legacyUnavailable, ...(sources ? { sources } : {}) });
-        await this.storage.setItem(backupKey, backup);
-        if (await this.storage.getItem(backupKey) !== backup) throw new Error('原数据备份校验失败');
+        await this.backupVerified(backupKey, backup, '原数据备份校验失败');
         if (sources && JSON.stringify(await this.storage.readRecoverySources?.()) !== JSON.stringify(sources)) {
           throw new ServerRegistryConflictError();
         }
@@ -179,6 +199,12 @@ export class ServerRegistryRepository {
     if (await this.storage.getItem(SERVER_STORAGE_KEY) !== expectedRaw) throw new ServerRegistryConflictError();
   }
 
+  private async backupVerified(key: string, raw: string, error: string): Promise<void> {
+    await this.storage.setItem(key, raw);
+    if (await this.storage.getItem(key) !== raw) throw new Error(error);
+    this.latestBackup = { key, raw };
+  }
+
   private async writeVerified(encoded: string): Promise<void> {
     const expectedRaw = this.raw;
     await this.assertUnchanged(expectedRaw);
@@ -186,23 +212,20 @@ export class ServerRegistryRepository {
     // or title update omits invalid entries, preserve the exact original bytes.
     if (expectedRaw !== null && this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-damaged-backup-${createLocalId()}`;
-      await this.storage.setItem(key, expectedRaw);
-      if (await this.storage.getItem(key) !== expectedRaw) throw new Error('原数据备份校验失败');
+      await this.backupVerified(key, expectedRaw, '原数据备份校验失败');
     }
     // Preserve a damaged compatibility-only value before creating the list;
     // a later connection may replace that key with its active-server mirror.
     if (this.legacyRaw !== null && this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-damaged-legacy-url-backup-${createLocalId()}`;
-      await this.storage.setItem(key, this.legacyRaw);
-      if (await this.storage.getItem(key) !== this.legacyRaw) throw new Error('旧地址备份校验失败');
+      await this.backupVerified(key, this.legacyRaw, '旧地址备份校验失败');
     }
     // Keep a backup of migrations before overwriting the legacy payload.
     let version: unknown;
     try { version = expectedRaw && JSON.parse(expectedRaw)?.version; } catch { version = 1; }
     if (expectedRaw && version !== 1 && !this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-legacy-backup`;
-      await this.storage.setItem(key, expectedRaw);
-      if (await this.storage.getItem(key) !== expectedRaw) throw new Error('迁移备份校验失败');
+      await this.backupVerified(key, expectedRaw, '迁移备份校验失败');
     }
     // Recheck after every awaited backup. This catches changes during backup,
     // but getItem/setItem are separate operations, not an atomic compare-and-set.
