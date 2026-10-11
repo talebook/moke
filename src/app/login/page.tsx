@@ -7,6 +7,7 @@ import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { ServerConnectionNotice } from '@/components/auth/ServerConnectionNotice';
 import { withClosedReaderSession } from '@/lib/reader-source';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
@@ -40,7 +41,7 @@ async function login(serverUrl: string, signal: AbortSignal, username: string, p
 
 export default function LoginPage() {
   const router = useRouter();
-  const { logout, serverTitle, setConnected, serverUrl, connectionId, sessionId } = useServerStore();
+  const { logout, serverTitle, setConnected, serverUrl, connectionId, sessionId, hasHydrated } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -55,7 +56,7 @@ export default function LoginPage() {
   const current = () => useServerStore.getState().connectionId === connectionId && useServerStore.getState().sessionId === sessionId;
 
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim() || loading || !serverUrl) return;
+    if (!username.trim() || !password.trim() || loading || !hasHydrated || !serverUrl) return;
     const abort = new AbortController(); controller.current = abort;
     setLoading(true);
     setError('');
@@ -114,6 +115,8 @@ export default function LoginPage() {
         <h1 className="text-[22px] font-bold text-center text-foreground">登录</h1>
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">欢迎回到 {serverTitle || '书库'}</p>
 
+        <ServerConnectionNotice hasHydrated={hasHydrated} serverUrl={serverUrl} />
+
         {error && (
           <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">
             {error}
@@ -156,7 +159,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || !username.trim() || !password.trim()}
+            disabled={loading || !hasHydrated || !serverUrl || !username.trim() || !password.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
           >
             {loading ? '登录中...' : '登录'}

@@ -1,39 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeServerAddress } from '../src/lib/server-url.ts';
 
-import { isHttpUrl, parseHttpUrl } from '../src/lib/server-url.ts';
-
-test('accepts http and https URLs', () => {
-  assert.equal(isHttpUrl('http://192.168.1.5:8080'), true);
-  assert.equal(isHttpUrl('https://books.example.com'), true);
-  assert.equal(isHttpUrl('https://user:pass@example.com/path?q=1#frag'), true);
+test('accepts HTTP(S) roots and optional schemes', () => {
+  assert.equal(normalizeServerAddress('http://192.168.1.5:8080'), 'http://192.168.1.5:8080');
+  assert.equal(normalizeServerAddress('https://books.example.com/'), 'https://books.example.com');
+  assert.equal(normalizeServerAddress(' books.example.com:8080 '), 'http://books.example.com:8080');
 });
-
-test('rejects non-http protocols', () => {
-  assert.equal(isHttpUrl('javascript:alert(1)'), false);
-  assert.equal(isHttpUrl('data:text/html,<script>alert(1)</script>'), false);
-  assert.equal(isHttpUrl('file:///etc/passwd'), false);
-  assert.equal(isHttpUrl('ftp://example.com'), false);
-  assert.equal(isHttpUrl('about:blank'), false);
+test('rejects non-HTTP protocols and malformed input', () => {
+  for (const value of ['', '   ', 'not a url', '//no-scheme', 'javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', 'file:///etc/passwd', 'ftp://example.com', 'about:blank']) assert.throws(() => normalizeServerAddress(value));
 });
-
-test('rejects malformed input instead of throwing', () => {
-  assert.equal(isHttpUrl(''), false);
-  assert.equal(isHttpUrl('   '), false);
-  assert.equal(isHttpUrl('not a url'), false);
-  assert.equal(isHttpUrl('//no-scheme'), false);
+test('rejects credentials and non-root components without stripping them', () => {
+  for (const value of ['https://user:pass@example.com', 'https://example.com/book', 'https://example.com/book/..', 'https://example.com/?q=1', 'https://example.com/#fragment']) assert.throws(() => normalizeServerAddress(value), /服务器根地址/);
 });
-
-test('parses an HTTP URL once for callers to reuse', () => {
-  const parsed = parseHttpUrl('https://books.example.com:8443/path?q=1');
-
-  assert.equal(parsed?.origin, 'https://books.example.com:8443');
-  assert.equal(parsed?.protocol, 'https:');
-  for (const candidate of ['', '   ', 'not a url', '//host', 'ftp://example.com']) {
-    let invalid;
-    assert.doesNotThrow(() => {
-      invalid = parseHttpUrl(candidate);
-    });
-    assert.equal(invalid, null);
-  }
+test('canonicalizes hostname/default ports and retains non-default ports', () => {
+  assert.equal(normalizeServerAddress('https://BOOKS.example.com:443'), 'https://books.example.com');
+  assert.equal(normalizeServerAddress('http://BOOKS.example.com:80'), 'http://books.example.com');
+  assert.equal(normalizeServerAddress('https://books.example.com:8443'), 'https://books.example.com:8443');
 });

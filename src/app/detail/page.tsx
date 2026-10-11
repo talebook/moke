@@ -17,7 +17,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
-import { assertReaderContext, openReaderFromSource, requireClosedReaders, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
+import { assertReaderContext, openReaderFromSource, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
@@ -504,7 +504,6 @@ function DetailContent() {
 
       await openAndRecordBookRead({
         open: async () => {
-          await requireClosedReaders();
           await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: source.url,
             eink: useSettingsStore.getState().eink,
@@ -647,7 +646,6 @@ function DetailContent() {
 
       await openAndRecordBookRead({
         open: async () => {
-          await requireClosedReaders();
           await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,

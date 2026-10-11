@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeServerAddress, sameServerAddress } from '../src/lib/server-url.ts';
+import { normalizeServerAddress } from '../src/lib/server-url.ts';
 import { ServerRegistryRepository, SERVER_STORAGE_KEY, parseServerRegistry, serializeServerRegistry, emptyRegistry } from '../src/lib/server-registry.ts';
 import { createServerStore } from '../src/lib/store/server.ts';
 import { checkSavedServer, readConnectionWelcome } from '../src/lib/server-connection.ts';
@@ -16,8 +16,8 @@ function storage(initial = {}) {
 test('server origins normalize duplicates and retain protocol/port/IPv6 distinctions', () => {
   assert.equal(normalizeServerAddress(' https://A.example.test:443/ '), 'https://a.example.test');
   assert.equal(normalizeServerAddress('[::1]:8080'), 'http://[::1]:8080');
-  assert.equal(sameServerAddress('http://a.test:80', 'http://a.test'), true);
-  assert.equal(sameServerAddress('http://a.test:81', 'http://a.test'), false);
+  assert.equal(normalizeServerAddress('http://a.test:80'), normalizeServerAddress('http://a.test'));
+  assert.notEqual(normalizeServerAddress('http://a.test:81'), normalizeServerAddress('http://a.test'));
   for (const url of ['', 'ftp://a.test', 'https://user:pass@a.test', 'https://a.test/book', 'https://a.test/book/..', 'https://a.test/.', 'https://a.test?x', 'https://a.test#', 'javascript:alert(1)']) assert.throws(() => normalizeServerAddress(url));
 });
 
@@ -374,7 +374,7 @@ test('invalid display metadata degrades without dropping server identities', () 
     {id:'b',url:'http://b.test',title:'B',addedAt:'2026-10-11'},
   ]);
   for (const bad of [{id:42,url:'http://a.test'},{id:'a',url:'http://a.test/path'}]) {
-    assert.throws(() => parseServerRegistry(JSON.stringify({version:1,state:{savedServers:[bad]}})));
+    assert.deepEqual(parseServerRegistry(JSON.stringify({version:1,state:{savedServers:[bad]}})), emptyRegistry());
   }
 });
 
@@ -409,4 +409,54 @@ test('failed recovery preserves the active connection and original list', async 
   assert.equal(store.getState().serverUrl, a.url);
   assert.deepEqual(store.getState().savedServers, [a]);
   assert.match(store.getState().storageError, /backup failed/);
+});
+
+test('partially corrupt read-only lists retain valid entries, skip duplicates and do not write', async () => {
+  const a={id:'a',url:'http://a.test',title:'A',addedAt:''}, b={id:'b',url:'http://b.test',title:'B',addedAt:''};
+  const raw=JSON.stringify({version:1,state:{savedServers:[null,{id:'a',url:'ftp://bad.test'},a,{id:'a',url:'http://other.test'},{url:'http://missing.test'},{id:'path',url:'http://bad.test/path'},{id:'dup-url',url:'http://A.test:80'},b]}});
+  const disk=storage({[SERVER_STORAGE_KEY]:raw});let writes=0;
+  disk.setItem=()=>{writes++;throw new Error('read only');};
+  const store=createServerStore(new ServerRegistryRepository(disk));await store.getState().loadServers();
+  assert.deepEqual(store.getState().savedServers,[a,b]);assert.equal(store.getState().storageError,'');
+  assert.match(store.getState().serverListNotice,/有 6 条.*已跳过.*原数据已保留/);
+  await store.getState().activateCandidate(store.getState().beginConnection(b.id).requestId);
+  assert.equal(store.getState().serverUrl,b.url);assert.equal(writes,0);assert.equal(disk.values.get(SERVER_STORAGE_KEY),raw);
+});
+
+test('later saves preserve the exact partially corrupt list in one verified backup', async () => {
+  const raw=JSON.stringify({version:1,state:{savedServers:[{id:'a',url:'http://a.test'},{id:'bad',url:'ftp://bad.test'}]}});
+  const disk=storage({[SERVER_STORAGE_KEY]:raw}), store=createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();assert.equal(disk.values.get(SERVER_STORAGE_KEY),raw);
+  assert.equal((await store.getState().saveServer('http://b.test')).ok,true);
+  const backups=()=>[...disk.values].filter(([key])=>key.startsWith(`${SERVER_STORAGE_KEY}-damaged-backup-`));
+  assert.equal(backups().length,1);assert.equal(backups()[0][1],raw);
+  assert.equal((await store.getState().saveServer('http://c.test')).ok,true);assert.equal(backups().length,1);
+  const restarted=createServerStore(new ServerRegistryRepository(disk));await restarted.getState().loadServers();
+  assert.equal(restarted.getState().serverListNotice,'');assert.equal(restarted.getState().savedServers.length,3);
+});
+
+test('failed or discarded damaged-list backups block writes and preserve original data', async () => {
+  for(const mode of ['reject','discard']) {
+    const raw=JSON.stringify({version:1,state:{savedServers:[{id:'a',url:'http://a.test'},false]}});
+    const disk=storage({[SERVER_STORAGE_KEY]:raw}),store=createServerStore(new ServerRegistryRepository(disk));
+    await store.getState().loadServers();const write=disk.setItem;
+    disk.setItem=(key,value)=>{if(key.includes('-damaged-backup-')){if(mode==='reject')throw new Error('backup denied');return;}write(key,value);};
+    const saved=await store.getState().saveServer('http://b.test');assert.equal(saved.ok,false);assert.match(saved.error,/备份|backup/);
+    assert.equal(disk.values.get(SERVER_STORAGE_KEY),raw);assert.equal(store.getState().savedServers.length,1);assert.equal(store.getState().storageError,'');
+  }
+});
+
+test('all invalid entries load an empty list with notice while outer schema errors remain fatal', async () => {
+  const raw=JSON.stringify({version:1,state:{savedServers:[false,{id:'x',url:'ftp://x.test'}]}});
+  const disk=storage({[SERVER_STORAGE_KEY]:raw}),store=createServerStore(new ServerRegistryRepository(disk));
+  await store.getState().loadServers();assert.deepEqual(store.getState().savedServers,[]);
+  assert.match(store.getState().serverListNotice,/有 2 条/);assert.equal(disk.values.get(SERVER_STORAGE_KEY),raw);
+  for(const state of [[],null,{savedServers:{}},{savedServers:null}])assert.throws(()=>parseServerRegistry(JSON.stringify({version:1,state})));
+});
+
+test('unreadable/unwritable recovery provides repair steps without claiming memory-only saves', async () => {
+  const disk={getItem(){throw new Error('denied');},setItem(){throw new Error('denied');}};
+  const store=createServerStore(new ServerRegistryRepository(disk));await store.getState().loadServers();await store.getState().recoverServers();
+  assert.match(store.getState().storageError,/站点设置或系统设置.*允许.*存储.*可用空间.*完全退出并重新启动/);
+  assert.equal((await store.getState().saveServer('http://a.test')).ok,false);assert.deepEqual(store.getState().savedServers,[]);
 });

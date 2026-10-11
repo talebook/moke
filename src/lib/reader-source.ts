@@ -115,6 +115,9 @@ export function createReaderSourceBoundary(host: ReaderHost) {
       // Check under the opening reservation so another launch cannot race the
       // caller's earlier window snapshot.
       if (before.some(isReaderWindow)) throw new Error('请先关闭当前阅读器及阅读器书库窗口，再打开书籍');
+      // Callers no longer run the connection guard first. Retain its progress
+      // flush under this opening reservation, then check the latest session.
+      await Promise.all([...progressFlushes].map((flush) => flush()));
       assertReaderContext(source, await host.getContext());
       const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null };
       pending = request;

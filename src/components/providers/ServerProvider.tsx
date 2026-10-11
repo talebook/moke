@@ -8,7 +8,8 @@ import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
 
-const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', '/settings/developer'];
+// Auth pages explain an absent connection themselves, including cold reloads.
+const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/reset-password', '/access', '/privacy', '/settings/developer'];
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -147,5 +148,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     && (!hasHydrated || (readerReturnTo && pathname !== readerReturnTo) || (!serverUrl && !offlineMode))) {
     return <div role="status" className="flex min-h-screen items-center justify-center">正在加载连接信息…</div>;
   }
+  // Same-server identity changes must also discard authenticated page data and
+  // abort component requests. Do not increment sessionId for ordinary UI refreshes.
   return <Fragment key={`${connectionId}:${sessionId}:${offlineMode}`}>{children}</Fragment>;
 }

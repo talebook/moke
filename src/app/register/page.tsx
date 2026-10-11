@@ -7,11 +7,12 @@ import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { ServerConnectionNotice } from '@/components/auth/ServerConnectionNotice';
 import { requestAnimatedBack } from '@/lib/native-back';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, connectionId, sessionId } = useServerStore();
+  const { serverTitle, serverUrl, connectionId, sessionId, hasHydrated } = useServerStore();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,7 +25,7 @@ export default function RegisterPage() {
   const current = () => useServerStore.getState().connectionId === connectionId && useServerStore.getState().sessionId === sessionId;
 
   const handleRegister = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim() || loading || !serverUrl) return;
+    if (!username.trim() || !password.trim() || loading || !hasHydrated || !serverUrl) return;
     const abort = new AbortController(); controller.current = abort;
     setLoading(true);
     setError('');
@@ -84,6 +85,8 @@ export default function RegisterPage() {
         <h1 className="text-[22px] font-bold text-center text-foreground">创建账号</h1>
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">加入 {serverTitle || '书库'}</p>
 
+        <ServerConnectionNotice hasHydrated={hasHydrated} serverUrl={serverUrl} />
+
         {error && (
           <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">{error}</div>
         )}
@@ -104,7 +107,7 @@ export default function RegisterPage() {
             <input type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
               className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
-          <button type="submit" disabled={loading || !username.trim() || !password.trim()}
+          <button type="submit" disabled={loading || !hasHydrated || !serverUrl || !username.trim() || !password.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50">
             {loading ? '注册中...' : '注册'}
           </button>

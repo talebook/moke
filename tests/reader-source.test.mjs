@@ -173,3 +173,23 @@ test('a Reader library home blocks session changes and new opens without grantin
   await boundary.withClosedReaderSession(async()=>{changed=true;});
   assert.equal(changed,true);
 });
+
+test('opening owns progress flush, rejects racing session changes and rechecks a changed session', async () => {
+  const {state,boundary}=fixture();let started,release;
+  const entered=new Promise(resolve=>{started=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  const remove=boundary.registerReaderProgressFlush(async()=>{started();await gate;});
+  try {
+    const opening=boundary.openReaderFromSource(a,{});await entered;
+    assert.equal(state.opens,0);
+    await assert.rejects(boundary.withClosedReaderSession(async()=>{}),/状态正在变更/);
+    state.context.sessionId=2;release();await assert.rejects(opening,/状态已改变/);
+    assert.equal(state.opens,0);
+  }finally{remove();release();}
+  await boundary.requireClosedReaders();
+});
+
+test('opening does not dispatch when the reserved progress flush fails', async () => {
+  const {state,boundary}=fixture();const remove=boundary.registerReaderProgressFlush(async()=>{throw new Error('flush failed');});
+  await assert.rejects(boundary.openReaderFromSource(a,{}),/flush failed/);assert.equal(state.opens,0);
+  remove();await boundary.requireClosedReaders();
+});

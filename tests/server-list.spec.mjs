@@ -131,3 +131,24 @@ test('access reload rejects an unknown saved identity without contacting a suppl
   await page.getByRole('button',{name:'返回',exact:true}).click();
   await expect(page.locator('li')).toHaveCount(1);
 });
+
+test('partially damaged list retains valid entries and backs up before later saves',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  const raw=JSON.stringify({version:1,state:{savedServers:[{id:'a',url:fixture.origins[0],title:'A',addedAt:''},{id:'bad',url:'ftp://bad.test'}]}});
+  await page.evaluate(value=>localStorage.setItem('moke-server-storage',value),raw);await page.reload();
+  await expect(page.getByText(/有 1 条服务器配置无效或重复，已跳过/)).toBeVisible();await expect(page.locator('li')).toHaveCount(1);
+  expect(await page.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(raw);
+  await save(page,fixture.origins[1]);
+  expect(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('moke-server-storage-damaged-backup-')).map(k=>localStorage.getItem(k)))).toEqual([raw]);
+  await page.locator('li button').first().click();await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+});
+
+test('failed recovery explains how to repair unavailable storage',async({page})=>{
+  await page.addInitScript(()=>{
+    const read=Storage.prototype.getItem,write=Storage.prototype.setItem;
+    Storage.prototype.getItem=function(key){if(key==='moke-server-storage')throw new DOMException('denied','SecurityError');return read.call(this,key);};
+    Storage.prototype.setItem=function(key,value){if(key.startsWith('moke-server-storage'))throw new DOMException('denied','SecurityError');return write.call(this,key,value);};
+  });
+  await start(page);await page.getByRole('button',{name:'保留原数据并重建列表',exact:true}).click();
+  await expect(page.getByText(/恢复失败.*站点设置或系统设置.*可用空间.*完全退出并重新启动/)).toBeVisible();
+});

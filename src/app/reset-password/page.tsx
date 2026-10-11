@@ -6,6 +6,7 @@ import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
+import { ServerConnectionNotice } from '@/components/auth/ServerConnectionNotice';
 import { requestAnimatedBack } from '@/lib/native-back';
 
 interface TalebookResetResponse {
@@ -13,8 +14,7 @@ interface TalebookResetResponse {
   msg?: string;
 }
 
-async function resetPassword(email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
-  const { serverUrl } = useServerStore.getState();
+async function resetPassword(serverUrl: string, email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
   const body = new URLSearchParams();
   body.append('email', email);
   body.append('username', username);
@@ -39,7 +39,7 @@ async function resetPassword(email: string, username: string, captchaData?: any)
 
 export default function ResetPasswordPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl } = useServerStore();
+  const { serverTitle, serverUrl, hasHydrated } = useServerStore();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
@@ -50,13 +50,13 @@ export default function ResetPasswordPage() {
   const [showCaptcha, setShowCaptcha] = useState(false);
 
   const handleReset = async (captchaData?: any) => {
-    if (!email.trim() || !username.trim()) return;
+    if (!email.trim() || !username.trim() || loading || !hasHydrated || !serverUrl) return;
     setLoading(true);
     setError('');
     setSuccess(false);
 
     try {
-      const res = await resetPassword(email, username, captchaData);
+      const res = await resetPassword(serverUrl, email, username, captchaData);
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
@@ -93,6 +93,8 @@ export default function ResetPasswordPage() {
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">
           {serverTitle || '书库'} 将发送新密码到你的邮箱
         </p>
+
+        <ServerConnectionNotice hasHydrated={hasHydrated} serverUrl={serverUrl} />
 
         {error && (
           <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">
@@ -133,7 +135,7 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading || !email.trim() || !username.trim()}
+            disabled={loading || !hasHydrated || !serverUrl || !email.trim() || !username.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
           >
             {loading ? '提交中...' : '重置密码'}

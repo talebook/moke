@@ -11,10 +11,10 @@ export interface RegistryStorage {
   setItem(key: string, value: string): void | Promise<void>;
   prepareRecovery?: () => () => void;
 }
-export type StorageResult<T> = { ok: true; value: T } | { ok: false; error: string };
+export type StorageResult<T> = { ok: true; value: T; notice?: string } | { ok: false; error: string };
 export const emptyRegistry = (): ServerRegistry => ({ savedServers: [] });
 
-export function parseServerRegistry(raw: string | null, legacy: string | null = null): ServerRegistry {
+export function parseServerRegistry(raw: string | null, legacy: string | null = null, onSkipped?: (count: number) => void): ServerRegistry {
   const parsed = raw !== null ? JSON.parse(raw) : null;
   if (raw !== null && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
     || !parsed.state || typeof parsed.state !== 'object' || Array.isArray(parsed.state))) {
@@ -25,16 +25,21 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
     if (!Array.isArray(state.savedServers)) throw new Error('服务器列表损坏，原数据已保留');
     const savedServers: SavedServer[] = [];
     const ids = new Set<string>();
+    let skipped = 0;
     for (const item of state.savedServers) {
       if (!item || typeof item.id !== 'string' || !item.id || typeof item.url !== 'string' || ids.has(item.id)) {
-        throw new Error('服务器条目损坏，原数据已保留');
+        skipped++; continue;
       }
+      let url: string;
+      try { url = normalizeServerAddress(item.url); }
+      catch { skipped++; continue; }
+      if (savedServers.some((s) => s.url === url)) { skipped++; continue; }
       ids.add(item.id);
-      const url = normalizeServerAddress(item.url);
-      if (!savedServers.some((s) => s.url === url)) savedServers.push({ id: item.id, url,
+      savedServers.push({ id: item.id, url,
         title: typeof item.title === 'string' ? item.title : '',
         addedAt: typeof item.addedAt === 'string' ? item.addedAt : '' });
     }
+    onSkipped?.(skipped);
     return {
       savedServers,
     };
@@ -59,6 +64,7 @@ export function serializeServerRegistry(registry: ServerRegistry): string {
 export class ServerRegistryRepository {
   private raw: string | null = null;
   private loaded = false;
+  private preserveRawOnWrite = false;
   private queue: Promise<unknown> = Promise.resolve();
   private storage: RegistryStorage;
   private legacyStorage: RegistryStorage;
@@ -73,13 +79,17 @@ export class ServerRegistryRepository {
       // A valid v1 list is authoritative; a broken/unavailable compatibility key cannot override it.
       const isV1 = this.raw && JSON.parse(this.raw)?.version === 1;
       const legacy = isV1 ? null : await this.legacyStorage.getItem('moke_server_url');
-      const registry = parseServerRegistry(this.raw, legacy);
+      let skipped = 0;
+      const registry = parseServerRegistry(this.raw, legacy, (count) => { skipped = count; });
+      this.preserveRawOnWrite = skipped > 0;
       this.loaded = true;
       const encoded = serializeServerRegistry(registry);
       // Existing v1 lists remain usable when storage becomes read-only. Only
       // initial creation/migration must commit before claiming persistence.
       if (!isV1 && encoded !== this.raw) await this.writeVerified(encoded);
-      return { ok: true, value: registry };
+      return { ok: true, value: registry, ...(skipped ? {
+        notice: `有 ${skipped} 条服务器配置无效或重复，已跳过；有效条目可继续连接，原数据已保留。`,
+      } : {}) };
     } catch (error) {
       this.loaded = false;
       return { ok: false, error: `无法加载服务器列表：${error instanceof Error ? error.message : '存储不可用'}。原数据已保留，可重试或恢复。` };
@@ -116,11 +126,12 @@ export class ServerRegistryRepository {
         const backup = JSON.stringify({ raw: this.raw, legacy, legacyUnavailable });
         await this.storage.setItem(backupKey, backup);
         if (await this.storage.getItem(backupKey) !== backup) throw new Error('原数据备份校验失败');
+        this.preserveRawOnWrite = false; // Recovery's verified backup already preserves it.
         await this.writeVerified(serializeServerRegistry(emptyRegistry()));
         this.loaded = true;
         return { ok: true, value: emptyRegistry() };
       } catch (error) {
-        return { ok: false, error: `恢复失败：${error instanceof Error ? error.message : '存储不可用'}。` };
+        return { ok: false, error: `恢复失败：${error instanceof Error ? error.message : '存储不可用'}。请在浏览器站点设置或系统设置中允许本应用使用存储，检查设备可用空间，然后完全退出并重新启动应用后重试。原数据已保留。` };
       } finally { finishRecovery?.(); }
     });
   }
@@ -133,6 +144,13 @@ export class ServerRegistryRepository {
 
   private async writeVerified(encoded: string): Promise<void> {
     if (await this.storage.getItem(SERVER_STORAGE_KEY) !== this.raw) throw new Error('配置已在另一窗口更改，请重新加载');
+    // Tolerant reads never rewrite the original. Before a later explicit save
+    // or title update omits invalid entries, preserve the exact original bytes.
+    if (this.raw !== null && this.preserveRawOnWrite) {
+      const key = `${SERVER_STORAGE_KEY}-damaged-backup-${createLocalId()}`;
+      await this.storage.setItem(key, this.raw);
+      if (await this.storage.getItem(key) !== this.raw) throw new Error('原数据备份校验失败');
+    }
     // Keep a backup of migrations before overwriting the legacy payload.
     let version: unknown;
     try { version = this.raw && JSON.parse(this.raw)?.version; } catch { version = 1; }
@@ -144,5 +162,6 @@ export class ServerRegistryRepository {
     await this.storage.setItem(SERVER_STORAGE_KEY, encoded);
     if (await this.storage.getItem(SERVER_STORAGE_KEY) !== encoded) throw new Error('写入读回校验失败');
     this.raw = encoded;
+    this.preserveRawOnWrite = false;
   }
 }

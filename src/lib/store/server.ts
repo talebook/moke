@@ -53,12 +53,10 @@ interface ServerState {
   activateCandidate: (requestId: number) => Promise<boolean>;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
   enterOfflineMode: () => Promise<void>;
-  leaveOfflineMode: () => void;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
   setServerTitle: (title: string, source: TitleSource) => Promise<void>;
   setServerCapabilities: (capabilities: ServerCapabilities) => void;
-  setHasHydrated: (hydrated: boolean) => void;
   logout: () => void;
   disconnect: () => void;
 }
@@ -85,7 +83,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         const result = await repository.load();
         if (!result.ok) { clearReaderReturn(returnChannel); set({ storageError: result.error, hasHydrated: true }); return; }
         clearTimeout(timer);
-        set({ ...result.value, hasHydrated: false, storageError: '' });
+        set({ ...result.value, serverListNotice: result.notice ?? '', hasHydrated: false, storageError: '' });
         // A cold launch only loads the list. A live Reader return consumes its
         // one-use browsing-context receipt before confirming the connection.
         let context = null;
@@ -206,7 +204,6 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       clearReadStateCache();
       set({ offlineMode: true, candidate: null, readerReturnTo: null, readerReturnError: '', serverListNotice: '', sessionId: get().sessionId + 1 });
     }),
-    leaveOfflineMode: () => { clearReaderReturn(returnChannel); set({ offlineMode: false, sessionId: get().sessionId + 1 }); },
     setConnected: (token, user) => {
       clearReaderReturn(returnChannel);
       clearReadStateCache();
@@ -243,7 +240,6 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       } finally { set({ saving: false }); }
     },
     setServerCapabilities: (capabilities) => set({ capabilities }),
-    setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     logout: () => {
       clearReaderReturn(returnChannel);
       clearReadStateCache();

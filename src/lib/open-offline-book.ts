@@ -1,7 +1,7 @@
 'use client';
 
 import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-policy';
-import { assertReaderContext, openReaderFromSource, requireClosedReaders } from '@/lib/reader-source';
+import { assertReaderContext, openReaderFromSource } from '@/lib/reader-source';
 import { useServerStore } from '@/lib/store/server';
 import type { OfflineBookRecord } from '@/lib/offline-books';
 import { isSampleBook } from '@/lib/sample-book-info';
@@ -60,7 +60,6 @@ export async function openOfflineBook(
     return;
   }
 
-  await requireClosedReaders();
   await openReaderFromSource(source, common);
 }
 
