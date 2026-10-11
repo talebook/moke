@@ -16,7 +16,8 @@ import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookCon
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
-import { listOfflineBooks } from '@/lib/offline-books';
+import { listOfflineBooks, setOfflineBookShelfState } from '@/lib/offline-books';
+import { SAMPLE_BOOK } from '@/lib/sample-book-info';
 import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
@@ -281,17 +282,25 @@ export default function ShelfPage() {
   }, [selectedIds, batchMode]);
 
   // ── Single-item actions (from right-click / long-press menu) ────────────
+  const updateShelf = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) {
+      await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, id, false);
+      return { err: 'ok' };
+    }
+    const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ shelf: false }),
+    });
+    return res.json();
+  };
+
   const removeFromShelf = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     try {
-      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ shelf: false }),
-      });
-      const data = await res.json();
+      const data = await updateShelf(id);
       if (data.err === 'ok') {
         toast(`已移出《${book.title}》`);
         await loadBooks();
@@ -304,6 +313,7 @@ export default function ShelfPage() {
   };
 
   const downloadOne = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) return;
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -338,7 +348,7 @@ export default function ShelfPage() {
       icon: <Check className="w-3.5 h-3.5" />,
       onClick: () => removeFromShelf(String(book.id)),
     },
-    ...(isTauriApp
+    ...(isTauriApp && book.id !== SAMPLE_BOOK.bookId
       ? [{
           key: 'download',
           label: '下载',
@@ -368,12 +378,7 @@ export default function ShelfPage() {
 
     if (action === 'remove-shelf') {
       const results = await Promise.allSettled(
-        ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ shelf: false }),
-        }).then((r) => r.json())),
+        ids.map(updateShelf),
       );
       for (const r of results) {
         if (r.status === 'fulfilled' && r.value?.err === 'ok') ok++;
@@ -387,6 +392,7 @@ export default function ShelfPage() {
     } else if (action === 'download') {
       let skipped = 0;
       for (const id of ids) {
+        if (id === SAMPLE_BOOK.bookId) continue;
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -524,7 +530,7 @@ export default function ShelfPage() {
         totalCount={books.length}
         canAddShelf={false}
         canRemoveShelf
-        canDownload={isTauriApp}
+        canDownload={isTauriApp && Array.from(selectedIds).some((id) => id !== SAMPLE_BOOK.bookId)}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}

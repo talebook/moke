@@ -20,7 +20,8 @@ import { Select } from '@/components/ui/Select';
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
-import { listOfflineBooks } from '@/lib/offline-books';
+import { listOfflineBooks, setOfflineBookShelfState } from '@/lib/offline-books';
+import { SAMPLE_BOOK } from '@/lib/sample-book-info';
 import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useLongPressRegistry } from '@/lib/long-press';
 import { useToast } from '@/lib/toast';
@@ -413,17 +414,26 @@ export default function LibraryPage() {
   };
 
   // ── Single-item actions (from right-click / long-press menu) ────────────
+  const updateShelf = async (id: string, inShelf: boolean) => {
+    if (id === SAMPLE_BOOK.bookId) {
+      await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, id, inShelf);
+      await loadBooks(currentPage);
+      return { err: 'ok' };
+    }
+    const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ shelf: inShelf }),
+    });
+    return res.json();
+  };
+
   const addToShelf = async (id: string) => {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     try {
-      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ shelf: true }),
-      });
-      const data = await res.json();
+      const data = await updateShelf(id, true);
       if (data.err === 'ok') toast(`《${book.title}》已加入书架`);
       else toast(data.msg || '加入失败');
     } catch {
@@ -435,13 +445,7 @@ export default function LibraryPage() {
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     try {
-      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ shelf: false }),
-      });
-      const data = await res.json();
+      const data = await updateShelf(id, false);
       if (data.err === 'ok') toast(`《${book.title}》已移出书架`);
       else toast(data.msg || '移出失败');
     } catch {
@@ -450,6 +454,7 @@ export default function LibraryPage() {
   };
 
   const downloadOne = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) return;
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -485,7 +490,7 @@ export default function LibraryPage() {
         icon: <Check className="w-3.5 h-3.5" />,
         onClick: () => (inShelf ? removeFromShelf(String(book.id)) : addToShelf(String(book.id))),
       },
-      ...(isTauriApp
+      ...(isTauriApp && book.id !== SAMPLE_BOOK.bookId
         ? [{
             key: 'download',
             label: '下载',
@@ -611,12 +616,7 @@ export default function LibraryPage() {
 
     if (action === 'add-shelf') {
       const results = await Promise.allSettled(
-        ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ shelf: true }),
-        }).then((r) => r.json())),
+        ids.map((id) => updateShelf(id, true)),
       );
       for (const r of results) {
         if (r.status === 'fulfilled' && r.value?.err === 'ok') ok++;
@@ -628,6 +628,7 @@ export default function LibraryPage() {
     } else if (action === 'download') {
       let skipped = 0;
       for (const id of ids) {
+        if (id === SAMPLE_BOOK.bookId) continue;
         const book = books.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -1027,7 +1028,7 @@ export default function LibraryPage() {
         totalCount={books.length}
         canAddShelf
         canRemoveShelf={false}
-        canDownload={isTauriApp}
+        canDownload={isTauriApp && Array.from(selectedIds).some((id) => id !== SAMPLE_BOOK.bookId)}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}

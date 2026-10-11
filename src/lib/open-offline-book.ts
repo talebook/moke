@@ -4,6 +4,7 @@ import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-poli
 import { assertReaderContext, openReaderFromSource, requireClosedReaders } from '@/lib/reader-source';
 import { useServerStore } from '@/lib/store/server';
 import type { OfflineBookRecord } from '@/lib/offline-books';
+import { isSampleBook } from '@/lib/sample-book-info';
 import { getDebugPanelLaunchState } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
@@ -35,6 +36,7 @@ export async function openOfflineBook(
   // library opens intentionally do not write Talebook read history: there may
   // be no active authenticated server session, and the saved record can belong
   // to a server other than the currently connected one.
+  const sampleBook = isSampleBook(record);
   const [restoreProgress, platform] = await Promise.all([
     fetchReadingProgress(record.bookId, undefined, record.serverUrl),
     getMokeRuntimePlatform(),
@@ -50,7 +52,7 @@ export async function openOfflineBook(
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(
-      buildEmbeddedReaderUrl({ ...common, serverUrl: record.serverUrl }),
+      buildEmbeddedReaderUrl({ ...common, serverUrl: sampleBook ? '' : record.serverUrl }),
       navigate,
       platform,
       source,

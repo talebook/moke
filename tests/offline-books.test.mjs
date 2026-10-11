@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { SAMPLE_BOOK } from '../src/lib/sample-book-info.ts';
+import { deleteSampleBook, getSampleBook, importSampleBook } from '../src/lib/sample-book.ts';
 
 import {
   cacheOfflineMediaType,
@@ -8,6 +11,7 @@ import {
   listOfflineBooks,
   saveOfflineBook,
   saveOfflineBookStream,
+  setOfflineBookShelfState,
   shouldPreserveOfflinePartial,
 } from '../src/lib/offline-books.ts';
 import {
@@ -133,14 +137,32 @@ function createFakeIndexedDb() {
   };
 }
 
+function installSampleCoordination() {
+  const values = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  let queue = Promise.resolve();
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
+    locks: { request: (_name, operation) => {
+      const result = queue.then(operation);
+      queue = result.catch(() => undefined);
+      return result;
+    } },
+  } });
+}
+
 function installWebOfflineStore() {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   globalThis.window = { indexedDB };
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'web';
   return indexedDB;
 }
 
-function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') {
+function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke', trackNativeBooks = false) {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   const calls = [];
   const recordedBooks = [];
@@ -160,9 +182,17 @@ function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') 
     __TAURI_INTERNALS__: {
       invoke: async (command, args = {}) => {
         calls.push({ command, args });
-        if (command === 'moke_list_downloaded_books') return [];
+        if (command === 'moke_list_downloaded_books') return trackNativeBooks
+          ? recordedBooks.map((book) => ({ ...book, filePath: `${appDataDir}/${book.relativePath}` }))
+          : [];
         if (command === 'moke_record_downloaded_book') {
           recordedBooks.push(args.book);
+          return null;
+        }
+        if (trackNativeBooks && command === 'moke_delete_downloaded_book_file') return null;
+        if (trackNativeBooks && command === 'moke_remove_downloaded_book') {
+          const index = recordedBooks.findIndex((book) => book.id === args.id);
+          if (index >= 0) recordedBooks.splice(index, 1);
           return null;
         }
         if (command === 'plugin:path|resolve_directory') return appDataDir;
@@ -200,6 +230,148 @@ function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke') 
   };
   return { calls, indexedDB, recordedBooks };
 }
+
+const sampleEpub = readFileSync(new URL('../public/samples/moke-sample.epub', import.meta.url));
+
+test('示例书默认不导入，读取状态不加载内置文件', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 0);
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.ok(sampleEpub.length < 4096);
+  assert.equal(await hasEpubCentralDirectory(new Blob([sampleEpub])), true);
+});
+
+test('示例书显式导入、并发导入和重新读取始终只有一本', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.equal(url, SAMPLE_BOOK.assetPath);
+    return new Response(sampleEpub);
+  });
+  const [first, second] = await Promise.all([importSampleBook(), importSampleBook()]);
+  assert.equal(first.id, second.id);
+  assert.equal(first.inShelf, true);
+  assert.equal(first.blob.size, sampleEpub.length);
+  assert.equal(store.records.size, 1);
+  assert.equal(fetch.mock.callCount(), 1);
+  // Reopen the same persisted database through another factory owner.
+  globalThis.window = { indexedDB: { open: (...args) => store.open(...args) } };
+  assert.equal((await getSampleBook()).id, first.id);
+  assert.equal((await importSampleBook()).id, first.id);
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('示例书跨服务器可见，删除不碰其他书籍、不发网络请求，并可重新导入', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  await importSampleBook();
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://books.test', blob: new Blob(['ordinary book']) });
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://other.test', bookId: 'other', blob: new Blob(['other book']) });
+  assert.equal((await listOfflineBooks('https://books.test')).length, 2);
+  assert.equal((await listOfflineBooks('https://unrelated.test')).length, 1);
+  await deleteSampleBook();
+  await deleteSampleBook();
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 2);
+  assert.equal(fetch.mock.callCount(), 1);
+  await importSampleBook();
+  assert.equal(store.records.size, 3);
+  assert.equal(fetch.mock.callCount(), 2);
+});
+
+test('示例文件读取失败或损坏不留下记录，失败后可以重试', async (t) => {
+  const store = installWebOfflineStore();
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 500 }));
+  await assert.rejects(importSampleBook(), /无法读取/);
+  assert.equal(store.records.size, 0);
+  fetch.mock.mockImplementation(async () => new Response('not an EPUB'));
+  await assert.rejects(importSampleBook(), /文件无效/);
+  assert.equal(store.records.size, 0);
+  fetch.mock.mockImplementation(async () => new Response(sampleEpub));
+  await importSampleBook();
+  assert.equal(store.records.size, 1);
+});
+
+test('删除不等待迟到导入，旧导入失败而不会重新出现', async (t) => {
+  const store = installWebOfflineStore();
+  let finishFetch;
+  const started = Promise.withResolvers();
+  t.mock.method(globalThis, 'fetch', () => new Promise((resolve) => {
+    finishFetch = resolve;
+    started.resolve();
+  }));
+  const importing = importSampleBook();
+  await started.promise;
+  const deleting = deleteSampleBook();
+  await deleting;
+  const rejected = assert.rejects(importing, /已在另一窗口删除/);
+  finishFetch(new Response(sampleEpub));
+  await rejected;
+  assert.equal(await getSampleBook(), null);
+  assert.equal(store.records.size, 0);
+});
+
+test('跨服务器列出示例不会扩大单本读取、书架修改和删除的范围', async (t) => {
+  installWebOfflineStore();
+  t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  await importSampleBook();
+  assert.equal(await getOfflineBook('https://books.test', SAMPLE_BOOK.bookId), null);
+  await setOfflineBookShelfState('https://books.test', SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://books.test', blob: new Blob(['other']) });
+  await setOfflineBookShelfState('https://books.test', SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await deleteOfflineBook('https://books.test', SAMPLE_BOOK.bookId);
+  assert.equal((await getSampleBook()).inShelf, true);
+  await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, SAMPLE_BOOK.bookId, false);
+  assert.equal((await getSampleBook()).inShelf, false);
+});
+
+test('删除后新显式导入可立即开始，旧 fetch 完成不会覆盖新结果', async (t) => {
+  installWebOfflineStore();
+  const started = Promise.withResolvers();
+  const delayed = Promise.withResolvers();
+  const fetch = t.mock.method(globalThis, 'fetch', () => {
+    started.resolve();
+    return delayed.promise;
+  });
+  const oldImport = importSampleBook();
+  const rejected = assert.rejects(oldImport, /已在另一窗口删除/);
+  await started.promise;
+  // Also exercise deletion via the offline library's public API.
+  await deleteOfflineBook(SAMPLE_BOOK.serverUrl, SAMPLE_BOOK.bookId, SAMPLE_BOOK.format);
+  fetch.mock.mockImplementation(async () => new Response(sampleEpub));
+  const newBook = await importSampleBook();
+  delayed.resolve(new Response(sampleEpub));
+  await rejected;
+  assert.equal((await getSampleBook()).updatedAt, newBook.updatedAt);
+});
+
+test('不支持跨窗口锁时明确失败，不留下未经协调的文件或记录', async (t) => {
+  const store = installWebOfflineStore();
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
+  const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+  await assert.rejects(importSampleBook(), /不支持安全的多窗口/);
+  await assert.rejects(deleteSampleBook(), /不支持安全的多窗口/);
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.equal(store.records.size, 0);
+});
+
+test('Tauri 示例书登记原生索引，删除同时移除原生文件和两个索引', async (t) => {
+  const { calls, indexedDB, recordedBooks } = installTauriOfflineStore('/app/data', true);
+  t.mock.method(globalThis, 'fetch', async () => new Response(sampleEpub));
+  const book = await importSampleBook();
+  assert.equal(book.blob, undefined);
+  assert.ok(book.filePath.startsWith('/app/data/books/'));
+  assert.equal(recordedBooks.length, 1);
+  await deleteSampleBook();
+  assert.equal(recordedBooks.length, 0);
+  assert.equal(indexedDB.records.size, 0);
+  assert.equal(await getSampleBook(), null);
+  assert.ok(calls.some((call) => call.command === 'moke_delete_downloaded_book_file' && call.args.id === book.id));
+  assert.ok(calls.some((call) => call.command === 'moke_remove_downloaded_book' && call.args.id === book.id));
+});
 
 test('离线书籍键会隔离服务器、书籍和格式', () => {
   assert.equal(makeOfflineBookKey('https://a.example', '12'), 'https://a.example::12');
@@ -357,6 +529,7 @@ test('删除只移除目标离线书籍，删除不存在的记录也不会失�
 });
 
 test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载状态', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
   globalThis.window = {
@@ -494,6 +667,7 @@ test('Tauri 自定义下载目录继续使用已授权的绝对路径', async ()
 });
 
 test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别格式化 key', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   const open = indexedDB.open.bind(indexedDB);
   const requestedVersions = [];
@@ -525,6 +699,7 @@ test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别
 });
 
 test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显示阅读按钮', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   indexedDB.records.set('https://a.example::42', {
     id: 'https://a.example::42',
@@ -565,7 +740,8 @@ for (const path of ['get', 'list']) {
   for (const existing of [false, true]) {
     for (const classificationFirst of [false, true]) {
       test(`native ${path} merges classification (${existing ? 'old row' : 'no row'}, ${classificationFirst ? 'classification first' : 'recovery first'})`, async () => {
-        const indexedDB = createFakeIndexedDb();
+        installSampleCoordination();
+  const indexedDB = createFakeIndexedDb();
         const native = {
           id: 'https://a.example::42::pdf', serverUrl: 'https://a.example:443', bookId: '42',
           title: 'Comic PDF', fileName: 'comic.pdf', filePath: '/app-data/books/comic.pdf', updatedAt: 123,

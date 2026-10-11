@@ -1,10 +1,12 @@
 //! 拓展 REST API Server。
 //!
-//! 基于 `tiny_http` 提供 REST 接口，供拓展（外部进程）调用。
+//! 有界 TCP 传输层提供 REST 接口，tiny_http 仅用于格式化响应。
 //! 监听 `127.0.0.1`（仅本地可达），通过 token 认证拓展身份。
 
-use super::EnabledExtension;
+use super::{http_transport, EnabledExtension};
 use std::collections::HashMap;
+use std::io::Read;
+use std::net::TcpListener;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -15,6 +17,8 @@ use tauri::Manager;
 pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
 /// 同时阻塞等待阅读器命令回执的请求上限，避免耗尽 API 请求线程。
 pub(crate) const MAX_CONCURRENT_COMMAND_WAITS: usize = 32;
+/// REST JSON 请求体上限；认证前先检查 Content-Length，读取时再次限流。
+pub(crate) const MAX_API_REQUEST_BODY_BYTES: usize = http_transport::MAX_BODY_BYTES;
 const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
 const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
 
@@ -56,6 +60,22 @@ impl ApiError {
         Self {
             status: 429,
             code,
+            message: message.into(),
+        }
+    }
+
+    fn length_required(message: impl Into<String>) -> Self {
+        Self {
+            status: 411,
+            code: "LENGTH_REQUIRED",
+            message: message.into(),
+        }
+    }
+
+    fn payload_too_large(message: impl Into<String>) -> Self {
+        Self {
+            status: 413,
+            code: "PAYLOAD_TOO_LARGE",
             message: message.into(),
         }
     }
@@ -278,7 +298,7 @@ pub struct ServerContext {
 pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
     let mut port = start_port;
     let server = loop {
-        match tiny_http::Server::http(format!("127.0.0.1:{port}")) {
+        match TcpListener::bind(format!("127.0.0.1:{port}")) {
             Ok(s) => break s,
             Err(_e) if port < start_port + 10 => {
                 log::warn!(
@@ -291,14 +311,11 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
         }
     };
 
-    let actual_port = server.server_addr().to_ip().unwrap().port();
+    let actual_port = server.local_addr().unwrap().port();
     log::info!("拓展 API Server 已启动: http://127.0.0.1:{actual_port}");
 
     std::thread::spawn(move || {
-        for request in server.incoming_requests() {
-            let ctx = ctx.clone();
-            std::thread::spawn(move || handle_request(request, ctx));
-        }
+        http_transport::serve(server, move |request| handle_request(request, ctx.clone()));
     });
 
     actual_port
@@ -308,7 +325,7 @@ pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
 // 路由分发
 // ---------------------------------------------------------------------------
 
-fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
+fn handle_request(mut request: http_transport::Request, ctx: Arc<ServerContext>) {
     // 先提取所有需要的数据（immutable borrows），然后读取 body（mutable borrow）
     let url = request.url().to_string();
     let method = request.method().clone();
@@ -322,13 +339,6 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
         .iter()
         .find(|h| h.field.equiv("X-Extension-Token"))
         .map(|h| h.value.to_string());
-
-    // 读取请求体（需要 mutable borrow，必须在所有 immutable borrow 结束之后）
-    let body = {
-        let mut s = String::new();
-        let _ = request.as_reader().read_to_string(&mut s);
-        s
-    };
 
     // 添加 CORS header（仅对本地拓展，实际不限来源）
     let cors_header =
@@ -373,6 +383,16 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
 
     let ext_name = ext_name.unwrap();
 
+    // 只有认证后的写请求才读取正文。拒绝没有 Content-Length 的流式正文，
+    // 并在声明长度和实际读取两层限制大小，避免 loopback 请求耗尽内存。
+    let body = match read_request_body(&mut request, &method) {
+        Ok(body) => body,
+        Err(error) => {
+            respond_api_error(request, error, cors_header);
+            return;
+        }
+    };
+
     // 路由
     let result = match (&method, url.as_str()) {
         // ---- 宿主信息 ----
@@ -413,22 +433,66 @@ fn handle_request(mut request: tiny_http::Request, ctx: Arc<ServerContext>) {
                 );
             let _ = request.respond(response);
         }
-        Err(error) => {
-            let body = serde_json::json!({
-                "code": error.code,
-                "error": error.message,
-            })
-            .to_string();
-            let response = tiny_http::Response::from_string(body)
-                .with_status_code(error.status)
-                .with_header(cors_header)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
-                        .unwrap(),
-                );
-            let _ = request.respond(response);
-        }
+        Err(error) => respond_api_error(request, error, cors_header),
     }
+}
+
+fn read_request_body(
+    request: &mut http_transport::Request,
+    method: &tiny_http::Method,
+) -> Result<String, ApiError> {
+    let Some(declared) = validate_declared_body_length(method, request.body_length())? else {
+        return Ok(String::new());
+    };
+    let mut bytes = Vec::with_capacity(declared.min(MAX_API_REQUEST_BODY_BYTES));
+    request
+        .as_reader()
+        .map_err(|_| ApiError::bad_request("INVALID_BODY", "无法读取请求体"))?
+        .take((MAX_API_REQUEST_BODY_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ApiError::bad_request("INVALID_BODY", "无法读取请求体"))?;
+    if bytes.len() > MAX_API_REQUEST_BODY_BYTES {
+        return Err(ApiError::payload_too_large("请求体超过 1 MiB 上限"));
+    }
+    if bytes.len() != declared {
+        return Err(ApiError::bad_request("INVALID_BODY", "请求体未完整发送"));
+    }
+    String::from_utf8(bytes)
+        .map_err(|_| ApiError::bad_request("INVALID_BODY", "请求体必须是 UTF-8"))
+}
+
+fn validate_declared_body_length(
+    method: &tiny_http::Method,
+    declared: Option<usize>,
+) -> Result<Option<usize>, ApiError> {
+    if !matches!(method, tiny_http::Method::Post | tiny_http::Method::Put) {
+        return Ok(None);
+    }
+    let declared = declared
+        .ok_or_else(|| ApiError::length_required("POST/PUT 请求必须提供 Content-Length"))?;
+    if declared > MAX_API_REQUEST_BODY_BYTES {
+        return Err(ApiError::payload_too_large("请求体超过 1 MiB 上限"));
+    }
+    Ok(Some(declared))
+}
+
+fn respond_api_error(
+    request: http_transport::Request,
+    error: ApiError,
+    cors_header: tiny_http::Header,
+) {
+    let body = serde_json::json!({
+        "code": error.code,
+        "error": error.message,
+    })
+    .to_string();
+    let response = tiny_http::Response::from_string(body)
+        .with_status_code(error.status)
+        .with_header(cors_header)
+        .with_header(
+            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+        );
+    let _ = request.respond(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,6 +1154,26 @@ mod tests {
         );
         assert_eq!(error.status, 429);
         assert_eq!(error.code, "TOO_MANY_PENDING_COMMANDS");
+    }
+
+    #[test]
+    fn request_body_length_is_required_and_bounded_before_reading() {
+        assert_eq!(
+            validate_declared_body_length(&tiny_http::Method::Get, None).unwrap(),
+            None
+        );
+        assert_eq!(
+            validate_declared_body_length(&tiny_http::Method::Post, Some(42)).unwrap(),
+            Some(42)
+        );
+        let missing = validate_declared_body_length(&tiny_http::Method::Post, None).unwrap_err();
+        assert_eq!(missing.status, 411);
+        let oversized = validate_declared_body_length(
+            &tiny_http::Method::Put,
+            Some(MAX_API_REQUEST_BODY_BYTES + 1),
+        )
+        .unwrap_err();
+        assert_eq!(oversized.status, 413);
     }
 
     #[test]

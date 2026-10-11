@@ -4221,6 +4221,7 @@ version = "0.1.0"
 dependencies = [
  "Readest",
  "glob",
+ "httparse",
  "log",
  "napi-derive-ohos",
  "napi-ohos",
