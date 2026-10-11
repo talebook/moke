@@ -1294,6 +1294,11 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
 
 function TagFilterSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
   const [showAllTags, setShowAllTags] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const closeAllTags = useCallback(() => {
+    setShowAllTags(false);
+    filterRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, []);
   const hasMoreTags = options.length > TAG_DROPDOWN_LIMIT;
   const compactTags = hasMoreTags
     ? Array.from(new Set([
@@ -1308,7 +1313,7 @@ function TagFilterSelect({ value, options, onChange }: { value: string; options:
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div ref={filterRef} className="flex shrink-0 items-center gap-1.5">
         <span className="text-xs shrink-0 text-muted-foreground">标签</span>
         <Select
           value={value}
@@ -1328,7 +1333,7 @@ function TagFilterSelect({ value, options, onChange }: { value: string; options:
           value={value}
           options={options}
           onSelect={onChange}
-          onClose={() => setShowAllTags(false)}
+          onClose={closeAllTags}
         />
       )}
     </>
@@ -1346,10 +1351,26 @@ function TagPickerDialog({
   onSelect: (value: string) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    dialogRef.current?.querySelector('button')?.focus({ preventScroll: true });
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key !== 'Tab') return;
+      const buttons = dialogRef.current?.querySelectorAll('button');
+      if (!buttons?.length) return;
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      const active = document.activeElement;
+      if (!dialogRef.current?.contains(active) ||
+          (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
     };
 
     document.body.style.overflow = 'hidden';
@@ -1370,10 +1391,11 @@ function TagPickerDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="all-tags-title"
-        className="flex max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
+        className="flex max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-amber-950/10 px-5 py-4 sm:px-6">
           <div>

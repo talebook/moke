@@ -90,6 +90,9 @@ OpenHarmony 安装包目前处于 alpha 阶段，建议在测试设备上体验�
 
 ### Web 界面开发
 
+浏览器兼容目标为 Chrome 96+；实际旧浏览器验收范围和回归步骤见
+[浏览器兼容性](docs/browser-compatibility.md)。
+
 只开发 Moke 的书库与设置界面时，可以先启动 Web 预览：
 
 ```bash

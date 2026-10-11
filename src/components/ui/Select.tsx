@@ -53,7 +53,9 @@ export function Select({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number; minWidth: number } | null>(null);
+  const [pos, setPos] = useState<{
+    left: number; top: number; minWidth: number; maxHeight: number;
+  } | null>(null);
 
   // Esc to close
   useEffect(() => {
@@ -104,36 +106,38 @@ export function Select({
     if (left + minWidth > window.innerWidth - pad) {
       left = Math.max(pad, window.innerWidth - pad - minWidth);
     }
-    setPos({ left, top: rect.bottom + 6, minWidth });
+    setPos({ left, top: rect.bottom + 6, minWidth, maxHeight: window.innerHeight * 0.6 });
   }, [open, minPanelWidth]);
 
-  // Keep the content-sized panel within the viewport, and flip it up if there
-  // is no room below. Long options can expand the panel beyond the trigger.
+  // Prefer below when the content fits; otherwise use the roomier side and
+  // constrain the height. Internal scrolling must reach every option even
+  // when neither side can fit the usual 60vh panel.
   useLayoutEffect(() => {
-    if (!open || !pos || !panelRef.current) return;
-    const rect = panelRef.current.getBoundingClientRect();
-    const pad = 8;
-    let left = pos.left;
-    let top = pos.top;
-
-    if (rect.right > window.innerWidth - pad) {
-      left = Math.max(pad, window.innerWidth - pad - rect.width);
-    }
-
-    if (rect.bottom > window.innerHeight - pad) {
+    if (!open || !pos) return;
+    const position = () => {
+      const panel = panelRef.current;
       const trigger = triggerRef.current;
-      if (trigger) {
-        const tr = trigger.getBoundingClientRect();
-        const flipped = tr.top - rect.height - 6;
-        if (flipped >= pad) {
-          top = flipped;
-        }
-      }
-    }
+      if (!panel || !trigger) return;
+      const rect = panel.getBoundingClientRect();
+      const tr = trigger.getBoundingClientRect();
+      const pad = 8;
+      const gap = 6;
+      const above = Math.max(0, tr.top - gap - pad);
+      const below = Math.max(0, window.innerHeight - pad - tr.bottom - gap);
+      const contentHeight = panel.scrollHeight + rect.height - panel.clientHeight;
+      const preferredHeight = Math.min(contentHeight, window.innerHeight * 0.6);
+      const upwards = preferredHeight > below && above > below;
+      const maxHeight = Math.min(preferredHeight, upwards ? above : below);
+      const top = upwards ? tr.top - gap - maxHeight : tr.bottom + gap;
+      const left = Math.max(pad, Math.min(tr.left, window.innerWidth - pad - rect.width));
 
-    if (left !== pos.left || top !== pos.top) {
-      setPos({ ...pos, left, top });
-    }
+      if (left !== pos.left || top !== pos.top || maxHeight !== pos.maxHeight) {
+        setPos({ ...pos, left, top, maxHeight });
+      }
+    };
+    position();
+    window.addEventListener('resize', position);
+    return () => window.removeEventListener('resize', position);
   }, [open, pos]);
 
   const selected = options.find((o) => o.value === value);
@@ -182,7 +186,7 @@ export function Select({
         <div
           ref={panelRef}
           role="listbox"
-          style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth }}
+          style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight }}
           className="fixed z-50 w-max max-w-[calc(100vw-1rem)] max-h-[60vh] overflow-y-auto overscroll-contain rounded-xl border border-amber-950/10 bg-white/95 backdrop-blur shadow-[0_18px_45px_-20px_rgba(74,57,35,0.55)] no-scrollbar"
           onMouseDown={(e) => e.stopPropagation()}
         >
