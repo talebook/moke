@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2, MonitorCog } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { fetchServerInfo, request } from '@/lib/api';
+import { useOfflineReconnect } from '@/lib/use-offline-reconnect';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
@@ -20,7 +21,7 @@ import { Select } from '@/components/ui/Select';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, leaveOfflineMode, user, disconnect, logout } = useServerStore();
+  const { serverTitle, serverUrl, offlineMode, enterOfflineMode, user, disconnect, logout } = useServerStore();
   const unlocked = useDeveloperStore((s) => s.unlocked);
   const developerEnabled = useDeveloperStore((s) => s.enabled);
   const downloadDirectory = useSettingsStore((s) => s.downloadDirectory);
@@ -32,6 +33,7 @@ export default function SettingsPage() {
   const [directorySupported, setDirectorySupported] = useState<boolean | null>(null);
   const showToast = useToast((s) => s.show);
   const [serverVersion, setServerVersion] = useState('获取中...');
+  const { reconnecting, reconnectStatus, reconnectError, connectServer, cancelConnection, chooseServer } = useOfflineReconnect();
 
   useEffect(() => {
     let cancelled = false;
@@ -77,11 +79,6 @@ export default function SettingsPage() {
   const handleDisconnect = () => {
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
-    router.push('/welcome');
-  };
-
-  const handleConnectServer = () => {
-    leaveOfflineMode();
     router.push('/welcome');
   };
 
@@ -157,11 +154,23 @@ export default function SettingsPage() {
 
           <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
             {offlineMode ? (
+              <>
               <ActionRow
                 icon={PlugZap}
                 label="连接服务器"
-                onClick={handleConnectServer}
+                disabled={reconnecting}
+                onClick={connectServer}
               />
+              {reconnectStatus && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">正在恢复服务器连接…</p>}
+              {reconnecting && <ActionRow icon={PlugZap} label="取消连接" onClick={cancelConnection} />}
+              {reconnectError && (
+                <div className="space-y-2 px-4 py-2">
+                  <p role="alert" className="text-sm text-destructive">{reconnectError}</p>
+                  <button type="button" onClick={connectServer} className="rounded-xl border border-border px-3 py-2 text-sm text-foreground">重试连接</button>
+                </div>
+              )}
+              {serverUrl && <ActionRow icon={PlugZap} label="选择服务器" onClick={chooseServer} />}
+              </>
             ) : (
               <>
               <SettingsRow label="连接服务器" value={serverUrl} />
@@ -339,10 +348,11 @@ function SettingsLinkRow({ icon: Icon, label, description, href, disabled }: { i
   return <Link href={href} className="block rounded-3xl">{content}</Link>;
 }
 
-function ActionRow({ icon: Icon, label, tone = 'default', onClick }: { icon: typeof User; label: string; tone?: 'default' | 'danger'; onClick: () => void }) {
+function ActionRow({ icon: Icon, label, tone = 'default', onClick, disabled = false }: { icon: typeof User; label: string; tone?: 'default' | 'danger'; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`w-full flex items-center justify-between px-4 py-3 rounded-3xl text-left transition-all duration-200 active:scale-[0.99] group ${tone === 'danger' ? 'hover:bg-destructive/5' : 'hover:bg-muted/80'}`}
     >
       <div className="flex items-center gap-3.5 min-w-0">

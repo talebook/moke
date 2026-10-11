@@ -64,7 +64,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         if (!isCurrentSession()) return;
         if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
-          router.replace('/access');
+          router.replace(`/access?server=${encodeURIComponent(discoveryServerUrl)}`);
           return;
         }
 

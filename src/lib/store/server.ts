@@ -12,6 +12,7 @@ import {
   invalidateServerCapabilities,
   type ReaderInfo,
 } from '../server-session.ts';
+import { parseHttpUrl } from '../server-url.ts';
 import {
   DEFAULT_SERVER_CAPABILITIES,
   mergePersistedServerCapabilities,
@@ -110,8 +111,31 @@ export const useServerStore = create<ServerState>()(
           sessionRevision: state.sessionRevision + 1,
         }));
       },
-      enterOfflineMode: () => set({ offlineMode: true, isConnected: false }),
-      leaveOfflineMode: () => set({ offlineMode: false }),
+      enterOfflineMode: () => set((state) => {
+        // Match the access page's fallback on WebViews whose primary store
+        // persistence is unavailable. The active server always takes priority.
+        const fallback = !state.serverUrl
+          ? parseHttpUrl(safeGetLocalStorageItem('moke_server_url') || '')
+          : null;
+        return {
+          ...(fallback ? {
+            serverUrl: fallback.origin,
+            protocol: fallback.protocol === 'https:' ? 'https' as const : 'http' as const,
+            host: fallback.hostname,
+            port: fallback.port || (fallback.protocol === 'https:' ? '443' : '80'),
+          } : {}),
+          offlineMode: true,
+          isConnected: false,
+          sessionRevision: state.sessionRevision + 1,
+        };
+      }),
+      leaveOfflineMode: () => set((state) => ({
+        offlineMode: false,
+        isConnected: Boolean(state.serverUrl),
+        sessionRevision: state.sessionRevision + 1,
+        // Going back online must recheck access/capabilities even within TTL.
+        capabilities: invalidateCapabilitiesForSession(state.capabilities),
+      })),
       // The cookie has changed, but its user is not confirmed yet. Isolate
       // pending probes/covers and invalidate capabilities without logging in.
       invalidateSession: () => {
@@ -166,6 +190,7 @@ export const useServerStore = create<ServerState>()(
         }));
       },
       disconnect: () => {
+        safeRemoveLocalStorageItem('moke_server_url');
         set((state) => ({
           serverUrl: '', offlineMode: false, serverTitle: '',
           capabilities: DEFAULT_SERVER_CAPABILITIES,

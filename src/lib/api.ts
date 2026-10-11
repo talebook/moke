@@ -420,9 +420,9 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
   return readJsonResponse(response);
 }
 
-export async function fetchCurrentUser(): Promise<CurrentUserResult> {
+export async function fetchCurrentUser(serverUrlOverride?: string): Promise<CurrentUserResult> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
-  const payload = await fetchUserInfoPayload(serverUrl);
+  const payload = await fetchUserInfoPayload(serverUrlOverride ?? serverUrl);
   if (payload.parseError) throw payload.parseError;
   return resolveCurrentUserResult(payload.data, payload.ok, payload.status);
 }
@@ -570,12 +570,13 @@ export async function validateServerConnection(serverUrl: string): Promise<{ err
   return { err: 'server.invalid_response', msg: '服务器校验失败' };
 }
 
-export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {
+export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {
   let response: Response;
 
   try {
     response = await request(`${serverUrl}/api/welcome`, {
       credentials: 'include',
+      signal,
     });
   } catch (e) {
     console.error('[checkWelcomeRequirement] network error:', e);

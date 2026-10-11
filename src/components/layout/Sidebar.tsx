@@ -7,6 +7,7 @@ import { BookOpen, Bookmark, Library, LogIn, Package, Settings } from 'lucide-re
 import { cn } from '@/lib/utils';
 import { useServerStore } from '@/lib/store/server';
 import { useExtensionStore } from '@/lib/store/extensions';
+import { useOfflineReconnect } from '@/lib/use-offline-reconnect';
 
 let previousSidebarTabIndex: number | null = null;
 
@@ -15,6 +16,8 @@ export function Sidebar() {
   const serverTitle = useServerStore((state) => state.serverTitle);
   const user = useServerStore((state) => state.user);
   const offlineMode = useServerStore((state) => state.offlineMode);
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const { reconnecting, reconnectStatus, reconnectError, connectServer, cancelConnection, chooseServer } = useOfflineReconnect();
   const extensions = useExtensionStore((state) => state.extensions);
   const loaded = useExtensionStore((state) => state.loaded);
   const loadExtensions = useExtensionStore((state) => state.loadExtensions);
@@ -134,9 +137,20 @@ export function Sidebar() {
 
       <div className="px-4 py-4 border-t border-white/10">
         {offlineMode ? (
-          <Link href="/welcome" className="flex items-center justify-center rounded-lg bg-white/10 px-3 py-2.5 text-sm text-primary-foreground hover:bg-white/15">
-            连接服务器
-          </Link>
+          <div className="space-y-2">
+            {reconnectStatus && <p role="status" className="text-sm text-primary-foreground">正在恢复服务器连接…</p>}
+            {reconnectError && (
+              <>
+                <p role="alert" className="text-sm text-primary-foreground">{reconnectError}</p>
+                <button type="button" onClick={connectServer} className="w-full rounded-lg bg-white/10 px-3 py-2 text-sm text-primary-foreground hover:bg-white/15">重试连接</button>
+              </>
+            )}
+            {reconnecting && <button type="button" onClick={cancelConnection} className="w-full rounded-lg px-3 py-2 text-sm text-primary-foreground hover:bg-white/10">取消连接</button>}
+            <button type="button" disabled={reconnecting} onClick={connectServer} className="flex w-full items-center justify-center rounded-lg bg-white/10 px-3 py-2.5 text-sm text-primary-foreground hover:bg-white/15 disabled:opacity-50">
+              连接服务器
+            </button>
+            {serverUrl && <button type="button" onClick={chooseServer} className="w-full rounded-lg px-3 py-2 text-sm text-primary-foreground hover:bg-white/10">选择服务器</button>}
+          </div>
         ) : user ? (
           <Link
             href="/user"

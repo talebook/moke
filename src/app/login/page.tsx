@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
@@ -38,8 +38,9 @@ async function login(serverUrl: string, username: string, password: string, capt
   return response.json();
 }
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { invalidateSession, logout, serverTitle, setConnected } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -113,6 +114,10 @@ export default function LoginPage() {
 
         <h1 className="text-[22px] font-bold text-center text-foreground">登录</h1>
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">欢迎回到 {serverTitle || '书库'}</p>
+
+        {searchParams.get('reconnect') === '1' && (
+          <p role="status" className="mb-4 rounded-lg bg-muted p-3 text-sm text-foreground">登录状态已失效，请重新登录。</p>
+        )}
 
         {error && (
           <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">
@@ -191,4 +196,8 @@ export default function LoginPage() {
       </div>
     </main>
   );
+}
+
+export default function LoginPage() {
+  return <Suspense fallback={null}><LoginPageInner /></Suspense>;
 }
