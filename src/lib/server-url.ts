@@ -2,6 +2,11 @@
 export function normalizeServerAddress(value: string): string {
   const input = value.trim();
   if (!input) throw new Error('请输入服务器地址');
+  // WHATWG parsing silently removes embedded tabs/newlines. Reject them before
+  // parsing so pasted input cannot become a different host or port.
+  if (/[\s\u0000-\u001f\u007f]/.test(input)) {
+    throw new Error('服务器地址不能包含空格或控制字符');
+  }
   const absolute = /^[a-z][a-z\d+.-]*:\/\//i.test(input) ? input : `http://${input}`;
   let url: URL;
   try {

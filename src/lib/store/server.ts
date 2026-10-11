@@ -9,6 +9,7 @@ import { withClosedReaderSession } from '../reader-source.ts';
 import { clearReaderReturn, takeReaderReturn, type ReaderReturnChannel } from '../reader-return.ts';
 import { checkSavedServer } from '../server-connection.ts';
 import { createLocalId } from '../random-id.ts';
+import { debugLog } from '../debug-log.ts';
 
 export type { ReaderInfo } from '../server-session.ts';
 export { DEFAULT_SERVER_CAPABILITIES } from '../server-capabilities.ts';
@@ -16,6 +17,15 @@ export type { ServerCapabilities } from '../server-capabilities.ts';
 
 function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): ServerCapabilities {
   return { ...invalidateServerCapabilities(capabilities), annotationApiStatus: 'unchecked', annotationApiCheckedAt: null };
+}
+
+function syncActiveServerMirror(url: string, operation: 'reader-return' | 'connection' | 'disconnect'): void {
+  if (writeActiveServerMirror(url)) return;
+  // The mirror is optional. Diagnostics must not turn its failure into a
+  // failed connection or disclose addresses, stored bytes or credentials.
+  try {
+    debugLog('warn', 'server-storage', '兼容服务器地址镜像未同步，当前连接状态与服务器列表不受影响。', { operation });
+  } catch { /* Logging is best-effort too. */ }
 }
 
 interface Candidate { id: string; url: string; requestId: number; needsAccessCode: boolean }
@@ -109,7 +119,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
                 protocol: url?.protocol === 'https:' ? 'https' : 'http', host: url?.hostname ?? '', port: url?.port ?? '',
                 connectionId: previous.connectionId + 1, sessionId: previous.sessionId + 1,
                 readerReturnTo: context.offlineMode && context.intent !== 'offline-library' ? '/shelf' : null });
-              writeActiveServerMirror(context.serverUrl);
+              syncActiveServerMirror(context.serverUrl, 'reader-return');
             }
           } catch {
             if (requestNumber === requestAtStart && get().sessionId === previous.sessionId) {
@@ -152,7 +162,10 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         if (!result.ok) {
           // The list page exposes its non-destructive reload action for this
           // conflict; retrying the same stale snapshot cannot succeed.
-          if (result.reason === 'configuration-changed') set({ storageError: result.error });
+          if (result.reason === 'configuration-changed') {
+            get().cancelConnection();
+            set({ storageError: result.error });
+          }
           return result;
         }
         set({ savedServers: result.value.savedServers });
@@ -163,6 +176,10 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     },
     beginConnection: (id) => {
       const server = get().savedServers.find((s) => s.id === id);
+      // An external configuration conflict may remove an ID or reassign its
+      // origin. Keep the live connection, but reload before trusting this list
+      // for another connection. Ordinary read-only writes leave storageError
+      // empty, so a successfully loaded list remains connectable.
       if (!server || get().saving || get().storageError) return null;
       clearReaderReturn(returnChannel);
       const candidate = { id, url: server.url, requestId: ++requestNumber, needsAccessCode: false };
@@ -190,11 +207,11 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     },
     activateCandidate: async (requestId) => {
       const candidate = get().candidate;
-      if (candidate?.requestId !== requestId || get().saving) return false;
+      if (candidate?.requestId !== requestId || get().saving || get().storageError) return false;
       set({ saving: true });
       try {
         return await withClosedReaderSession(async () => {
-          if (get().candidate?.requestId !== requestId) return false;
+          if (get().candidate?.requestId !== requestId || get().storageError) return false;
           const url = new URL(candidate.url);
           clearReaderReturn(returnChannel);
           clearReadStateCache();
@@ -203,7 +220,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
             protocol: url.protocol === 'https:' ? 'https' : 'http', host: url.hostname, port: url.port,
             isConnected: true, offlineMode: false, candidate: null, serverListNotice: '',
             connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
-          writeActiveServerMirror(candidate.url);
+          syncActiveServerMirror(candidate.url, 'connection');
           return true;
         });
       } finally { set({ saving: false }); }
@@ -255,7 +272,10 @@ export function createServerStore(repository: ServerRegistryRepository = createS
         const result = await repository.save({ savedServers });
         if (result.ok) set({ savedServers: result.value.savedServers });
         else {
-          if (result.reason === 'configuration-changed') set({ storageError: result.error });
+          if (result.reason === 'configuration-changed') {
+            get().cancelConnection();
+            set({ storageError: result.error });
+          }
           if (isSameConnection()) set({ serverListNotice: `服务器名称${result.error} 当前连接已保留。` });
         }
       } catch {
@@ -273,7 +293,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       clearReaderReturn(returnChannel);
       clearReadStateCache();
       ++requestNumber;
-      writeActiveServerMirror('');
+      syncActiveServerMirror('', 'disconnect');
       set({ ...disconnected, offlineMode: false, candidate: null, readerReturnTo: null, readerReturnError: '',
         serverListNotice: '已断开，服务器列表已保留',
         connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });

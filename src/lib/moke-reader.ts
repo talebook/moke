@@ -203,10 +203,10 @@ export async function navigateFullDocument(
     fallback(href);
     return;
   }
-  // Prepare ephemeral handoff state only when a document will be replaced.
-  // A preparation failure must stop navigation, not silently use the router.
-  beforeDocumentNavigation?.();
   if (!requiresMokeNavigate(currentPlatform)) {
+    // Preparation is synchronous and immediately precedes document replacement.
+    // Its failure must propagate without trying the client router.
+    beforeDocumentNavigation?.();
     // Crossing app boundaries intentionally discards the current shell state;
     // the launch URL carries all context the embedded reader needs.
     try {
@@ -217,8 +217,18 @@ export async function navigateFullDocument(
     }
     return;
   }
+  let invoke: typeof import('@tauri-apps/api/core').invoke;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
+    ({ invoke } = await import('@tauri-apps/api/core'));
+  } catch (error) {
+    console.warn('Unable to load native navigation, using client-side navigation:', error);
+    fallback(href);
+    return;
+  }
+  // Module resolution can await. Recheck/prepare only after it finishes, then
+  // dispatch without another await between the guard and the native call.
+  beforeDocumentNavigation?.();
+  try {
     await invoke('moke_navigate', { path: href });
   } catch (error) {
     console.warn('Falling back to client-side navigation:', error);
@@ -460,8 +470,20 @@ export async function openEmbeddedReaderBook(
     if (context.candidate) throw new Error('正在变更连接，请稍候再试');
     // Keep Readest's existing literal /library return contract. The one-use
     // receipt stays in the live browsing context, never in a URL or list file.
-    prepareReaderReturn(context);
-    try { await navigateFullDocument(href, navigate, platformOverride); }
+    clearReaderReturn();
+    try {
+      await navigateFullDocument(href, (target) => {
+        // The native helper may recover from assign/invoke failure using the
+        // client router. A receipt armed just before that failure must retire.
+        clearReaderReturn();
+        assertReaderSessionUnchanged({ sessionId: context.sessionId }, useServerStore.getState());
+        navigate(target);
+      }, platformOverride, () => {
+        // Platform probing can await IPC; recheck before granting the handoff.
+        assertReaderSessionUnchanged({ sessionId: context.sessionId }, useServerStore.getState());
+        prepareReaderReturn(context);
+      });
+    }
     catch (error) { clearReaderReturn(); throw error; }
   });
 }

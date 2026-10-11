@@ -9,7 +9,8 @@ import { createReaderSourceBoundary } from '../src/lib/reader-source.ts';
 // synthetic IPC/React effects. Persistence and annotation filtering have their
 // own tests; this fixture checks event naming, ownership and close delivery.
 const host = globalThis.__readerProgressEventsHost = {
-  effect: null, listener: null, boundary: null, invokes: [], writes: [], warnings: [],
+  effect: null, listener: null, boundary: null, invokes: [], writes: [], warnings: [], save: null,
+  unregisters: 0, unlistens: 0,
 };
 const moduleUrl = (source) => 'data:text/javascript,' + encodeURIComponent(source);
 const mocks = new Map([
@@ -23,15 +24,20 @@ const mocks = new Map([
   ['@tauri-apps/api/event', `export async function listen(event, listener) {
     const host = globalThis.__readerProgressEventsHost;
     host.event = event; host.listener = listener;
-    return () => { host.listener = null; };
+    return () => { host.unlistens++; host.listener = null; };
   }`],
   ['@/lib/reader-source', `const host = globalThis.__readerProgressEventsHost;
     export const sourceForReaderEvent = (...args) => host.boundary.sourceForReaderEvent(...args);
     export const retireReaderWindow = (...args) => host.boundary.retireReaderWindow(...args);
-    export const registerReaderProgressFlush = (...args) => host.boundary.registerReaderProgressFlush(...args);`],
+    export const registerReaderProgressFlush = (...args) => {
+      const unregister = host.boundary.registerReaderProgressFlush(...args);
+      return () => { host.unregisters++; unregister(); };
+    };`],
   ['@/lib/reading-progress', `export const normalizeReaderProgressEvent = data => data;
-    export async function saveReadingProgress(bookId, progress, serverUrl) {
-      globalThis.__readerProgressEventsHost.writes.push({ bookId, progress, serverUrl });
+    export function saveReadingProgress(bookId, progress, serverUrl) {
+      const host = globalThis.__readerProgressEventsHost;
+      host.writes.push({ bookId, progress, serverUrl });
+      return host.save ? host.save() : Promise.resolve();
     }`],
   ['@/lib/annotations', `export const clearAnnotationLocateProgressSuppressionFromPayload = () => {};
     export const shouldSuppressAnnotationReaderProgress = () => false;`],
@@ -71,6 +77,7 @@ test('pinned Reader book:closed reaches the host, flushes A and rejects late A e
     wait: async () => assert.fail('the reader should be immediately observable'), now: () => 0,
   });
   host.invokes = []; host.writes = []; host.warnings = [];
+  host.save = null; host.unregisters = 0; host.unlistens = 0;
   let cleanup;
   try {
     ReaderProgressProvider({ children: null });
@@ -111,6 +118,54 @@ test('pinned Reader book:closed reaches the host, flushes A and rejects late A e
     else process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
   }
 });
+
+for (const failure of ['reject', 'throw']) {
+  test(`host close/unmount catches ${failure}ing progress saves, unregisters and permits session changes`, async context => {
+    const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+    process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+    context.after(() => {
+      if (previousPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+      else process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+      host.save = null;
+    });
+    const unhandled = [];
+    const onUnhandled = error => { unhandled.push(error); };
+    process.on('unhandledRejection', onUnhandled);
+    context.after(() => process.off('unhandledRejection', onUnhandled));
+    const state = { sessionId: 1 };
+    host.boundary = createReaderSourceBoundary({
+      getWindowLabels: async () => [],
+      getContext: async () => ({ sessionId: state.sessionId, candidate: null }),
+      open: async () => assert.fail('no Reader is opened by this effect test'),
+      wait: async () => {}, now: () => 0,
+    });
+    const source = { serverUrl: 'https://a.test', bookId: '42', sessionId: 1 };
+    host.boundary.bindReaderWindow('reader-a', source);
+    host.writes = []; host.warnings = []; host.unregisters = 0; host.unlistens = 0;
+    host.save = () => {
+      const error = new Error('token=fixture-secret; internal response');
+      if (failure === 'throw') throw error;
+      return Promise.reject(error);
+    };
+    ReaderProgressProvider({ children: null });
+    const cleanup = host.effect();
+    await new Promise(resolve => setImmediate(resolve));
+    host.listener({ payload: { window: 'reader-a', event: 'page:changed', data: { moke_book_id: '42', location: 'A-position' } } });
+    host.listener({ payload: { window: 'reader-a', event: 'book:closed', data: {} } });
+    cleanup();
+    await host.boundary.withClosedReaderSession(async () => { state.sessionId = 2; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(state.sessionId, 2);
+    assert.equal(host.listener, null);
+    assert.equal(host.unlistens, 1);
+    assert.equal(host.unregisters, 1);
+    assert.equal(host.writes.length, 1);
+    assert.equal(host.warnings.length, 1);
+    assert.deepEqual(host.warnings[0], ['warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作', source]);
+    assert.doesNotMatch(JSON.stringify(host.warnings), /fixture-secret|internal response/);
+    assert.deepEqual(unhandled, []);
+  });
+}
 
 test('the pinned primary Reader close handler awaits the advertised book:closed contract', () => {
   const contract = JSON.parse(readFileSync(new URL('../readest/contract/moke-reader.v1.json', import.meta.url), 'utf8'));

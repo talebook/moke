@@ -1,7 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { request } from '@/lib/api';
@@ -14,7 +13,7 @@ interface TalebookResetResponse {
   msg?: string;
 }
 
-async function resetPassword(serverUrl: string, email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
+async function resetPassword(serverUrl: string, email: string, username: string, captchaData?: any, signal?: AbortSignal): Promise<TalebookResetResponse> {
   const body = new URLSearchParams();
   body.append('email', email);
   body.append('username', username);
@@ -33,13 +32,13 @@ async function resetPassword(serverUrl: string, email: string, username: string,
     method: 'POST',
     body,
     credentials: 'include',
+    signal,
   });
   return response.json();
 }
 
 export default function ResetPasswordPage() {
-  const router = useRouter();
-  const { serverTitle, serverUrl, hasHydrated } = useServerStore();
+  const { serverTitle, serverUrl, connectionId, sessionId, hasHydrated } = useServerStore();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,15 +47,38 @@ export default function ResetPasswordPage() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setLoading(false);
+    setError('');
+    setSuccess(false);
+    setShowCaptcha(false);
+    return () => {
+      controller.current?.abort();
+      controller.current = null;
+    };
+  }, [connectionId, sessionId, serverUrl]);
 
   const handleReset = async (captchaData?: any) => {
     if (!email.trim() || !username.trim() || loading || !hasHydrated || !serverUrl) return;
+    const context = useServerStore.getState();
+    if (context.connectionId !== connectionId || context.sessionId !== sessionId || context.serverUrl !== serverUrl) return;
+    const abort = new AbortController();
+    controller.current?.abort();
+    controller.current = abort;
+    const isCurrent = () => {
+      const state = useServerStore.getState();
+      return controller.current === abort && !abort.signal.aborted
+        && state.connectionId === connectionId && state.sessionId === sessionId && state.serverUrl === serverUrl;
+    };
     setLoading(true);
     setError('');
     setSuccess(false);
 
     try {
-      const res = await resetPassword(serverUrl, email, username, captchaData);
+      const res = await resetPassword(serverUrl, email, username, captchaData, abort.signal);
+      if (!isCurrent()) return;
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
@@ -69,9 +91,12 @@ export default function ResetPasswordPage() {
         setError(res.msg || '重置失败，请检查邮箱和用户名');
       }
     } catch {
-      setError('无法连接服务器');
+      if (isCurrent()) setError('无法连接服务器');
     } finally {
-      setLoading(false);
+      if (isCurrent()) {
+        controller.current = null;
+        setLoading(false);
+      }
     }
   };
 

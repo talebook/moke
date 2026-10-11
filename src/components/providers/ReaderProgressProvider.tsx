@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { normalizeReaderProgressEvent, saveReadingProgress } from '@/lib/reading-progress';
 import { clearAnnotationLocateProgressSuppressionFromPayload, shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
-import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush } from '@/lib/reader-source';
+import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush, type ReaderSource } from '@/lib/reader-source';
 import { createReaderProgressQueue } from '@/lib/reader-progress-queue';
 import { debugLog } from '@/lib/debug-log';
 
@@ -12,9 +12,16 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
     let disposed = false;
+    const reportProgressFailure = (source?: Readonly<ReaderSource>) => {
+      try {
+        debugLog('warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作',
+          source ? { serverUrl: source.serverUrl, bookId: source.bookId, sessionId: source.sessionId } : undefined);
+      } catch { /* Diagnostics must not prevent cleanup or session changes. */ }
+    };
     const queue = createReaderProgressQueue((source, progress) =>
-      saveReadingProgress(source.bookId, progress, source.serverUrl));
-    const unregisterFlush = registerReaderProgressFlush(() => queue.flush());
+      saveReadingProgress(source.bookId, progress, source.serverUrl), 1200, reportProgressFailure);
+    const flush = () => queue.flush().catch(() => reportProgressFailure());
+    const unregisterFlush = registerReaderProgressFlush(flush);
     const cancel = startAsyncSubscription(async () => {
       const { listen } = await import('@tauri-apps/api/event');
       return listen<{ window: string; event: string; data: Record<string, unknown> }>('moke:reader:event', (event) => {
@@ -24,7 +31,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
           clearAnnotationLocateProgressSuppressionFromPayload(payload.data);
           return;
         }
-        if (payload.event === 'book:closed') { retireReaderWindow(payload.window); void queue.flush(); return; }
+        if (payload.event === 'book:closed') { retireReaderWindow(payload.window); void flush(); return; }
         if (payload.event !== 'page:changed') return;
         const progress = normalizeReaderProgressEvent(payload.data);
         if (!progress) return;
@@ -42,7 +49,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
     return () => {
       disposed = true;
       cancel();
-      void queue.flush().finally(unregisterFlush);
+      void flush().finally(unregisterFlush).catch(() => reportProgressFailure());
     };
   }, []);
   return <>{children}</>;
