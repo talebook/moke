@@ -226,7 +226,8 @@ Tauri APIs.
 - `src/lib/offline-books.ts` — offline downloads. Stored in IndexedDB (`moke-offline-books`), and on
   Tauri additionally written to disk under `AppData/books/` via `@tauri-apps/plugin-fs` so the reader
   can open a real file path.
-- `@/*` → `src/*` and `@pdfjs/*` → `public/vendor/pdfjs/*` path aliases (`tsconfig.json`).
+- `@/*` → `src/*` is the host path alias (`tsconfig.json`). PDF.js assets and the `@pdfjs/*`
+  alias belong to the embedded Reader workspace; do not duplicate them in Moke's `public/`.
 
 ### Tauri backend (`src-tauri/`)
 

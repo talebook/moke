@@ -16,6 +16,8 @@ cd ..
 
 `.env.moke-reader` 已随 Reader 仓库提交，无需本地创建。`pnpm setup:vendors` 会转调 Reader app 的 `setup-vendors` 子脚本，生成 PDF.js、SimpleCC 和 Jieba 资源。只启动开发服务器时也需要完成这一步。
 
+PDF.js 的脚本、Worker、WASM、CMap 和标准字体由 Reader 的 `public/vendor/pdfjs` 统一提供。嵌入 Moke 后路径为 `/readest/vendor/pdfjs/`；Moke 主应用不需要单独的 PDF.js 副本或 `@pdfjs/*` 别名，避免在根目录 `public/` 重复打包。
+
 ## 开发与打包
 
 ```bash
