@@ -679,6 +679,7 @@ mod tests {
         ExtensionRuntime {
             operations: std::sync::Arc::new(std::sync::Mutex::new(())),
             installer: std::sync::Mutex::new(Installer::default()),
+            display_trust: std::sync::Mutex::new(trust::DisplayCache::default()),
             recovery_error: None,
             _directory_lock: Some(lock_directory(root).unwrap()),
             enabled: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),

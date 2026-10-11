@@ -131,3 +131,34 @@ Rust 回归覆盖有效签名/篡改/密钥轮换/降级、Node 签名 golden fi
 MCP 首轮桌面控制台出现一条资源 404，未捕获失败请求；随后单独复查该页面无 >=400 响应或控制台错误。窄屏轮无控制台错误或失败请求。浏览器和本轮 Next 测试服务均已关闭。执行者为 Codex 当前 GPT-6 会话；数据为虚构扩展，Tauri IPC 使用 mock。
 
 完整 `cargo check --manifest-path src-tauri/Cargo.toml --lib --locked --offline` 未完成：缺少 vendor/openharmony-ability 等原生子模块，当前磁盘空间不足以继续完整构建。本轮没有重新运行完整 ZIP 原生安装/回滚验收、原生 OS 文件选择器、跨平台真机或 DeepSec 全仓扫描。历史自测/安全扫描不能代表本轮固定 head 的独立 QA 结论；新 head 与本轮证据交回 TB-127，由 Mika 安排现有 Sol/Grok 独立复核。
+
+
+## #131 review 修复
+
+重新 fetch main 与 PR 分支，main 仍为 `05f5d145096b6fa1c015a87333d71ae89e5e1a44`，已是 #131 的祖先，因此本次 `git merge origin/main` 返回 Already up to date，不创建空合并。#111 / #115 的完整 head 仍是祖先；两个依赖 PR 保持关闭。
+
+- WS 在包装 DeadlineStream / HTTP Upgrade 前显式恢复阻塞模式。新增真实 TCP 回归，主动把 accept socket 设为 nonblocking 并分两段发送 Upgrade，验证认证成功；绝对截止时间、预算及权限校验保持不变。
+- 启用、禁用、卸载、取消导入均改为 async + spawn_blocking，操作锁在阻塞线程中获取，磁盘读取、等待进程、目录删除不占 IPC 主线程。
+- 列表仅在轻量发现和状态快照时持操作锁，验签及完整摘要在释放锁后执行。内存展示缓存按 manifest、包文件/签名/trust.json 的路径、大小、修改时间失效；卸载条目被清除。缓存不是安全授权依据：启用、恢复和提交仍做完整新校验。回归明确演示“同大小且恢复 mtime 的篡改可能保留展示摘要，但启用仍拒绝”。
+- `pnpm test:e2e:extensions` 接入独立 CI job，专用 Tauri-mode Next 服务运行 extension-import、comic-reader、detail-actions 三份 spec。与原 Web job 分开，避免并行使用同一 Next 输出目录。首次运行暴露窄屏末页恢复时的上游中心选页行为：短末页没有足够底部滚动空间，切换长条模式把进度回写为上一页。Moke 的宿主 CSS 增加半屏尾部空间，保留固定的第三方产物；既有 390px/1280px 末页恢复回归验证该修复。
+- reading-stats 静态路径按组件拒绝根路径、父路径、反斜杠、Windows 驱动器和控制字符；增加 `%2F`、编码遍历、UNC/驱动器及正常资源路径用例。注释明确 `/api/stats` 为严格 Host、无 CORS 的回环同源只读服务，同用户进程仍可读取；不向浏览器下发宿主 token。
+- 保留未知签名发布者每次启用确认策略，在 trust.rs 和作者文档说明空内置根、再次启用与重启待恢复行为。回归验证历史 grant 不能授权无确认启动，同一摘要再次显式确认仍可通过。
+
+验证结果在本轮提交前记录；临时无 GUI 核心 harness 通过 path 引用生产 discovery/installer/lifecycle/trust/package_path/events/deadline_stream/security/http_transport/permissions/storage 模块，逐字提取 runtime 数据结构和 activate/start/stop/list helpers，以 url crate 提供 URL 类型、空 PendingCommands 替代 API 注册表。它验证核心 Rust 行为，但不编译 Tauri IPC commands/宏、完整 REST 路由或 Reader。可选实际 CLI ZIP 用例本轮没有 MOKE_TEST_IMPORT_ZIP 输入，提前返回，不能据此声称重做真实 CLI 包启用验收。
+
+
+| 本轮验证 | 结果 |
+|---|---|
+| `pnpm test` | 491 passed |
+| `pnpm typecheck` | 通过 |
+| `pnpm lint` | 0 errors / 23 条既有 warnings |
+| `cargo test --manifest-path tests/extension-transport/Cargo.toml --locked --offline -- --test-threads=1` | 20 passed |
+| 核心 Rust 临时无 GUI harness（上述边界） | 59 passed，含 1 条无外部 ZIP 输入时提前返回的可选用例 |
+| `cargo test --manifest-path packages/moke-ext/examples/reading-stats/backend/Cargo.toml --locked --offline` | 5 passed |
+| `pnpm test:e2e:extensions` | 最终完整重跑 38 passed；真实 Chromium，Tauri/HTTP mock |
+| `node --test --experimental-strip-types tests/comic-reader.test.mjs` | 尾部样式修复后 6 passed |
+| CI YAML 解析、`git diff --check`、main/#111/#115 ancestry 核对 | 通过 |
+
+Rust target 与本轮 Next 输出放在 tmpfs 以避免磁盘耗尽。首次浏览器启动因临时迁移 Next 缓存导致 tailwind 模块解析失败，修复本机模块解析后重跑；首次 WS 夹具过早发送认证帧，被 HTTP Upgrade 正确拒绝，改为先读响应后完整重跑通过。typecheck 首次与缓存迁移冲突，稳定缓存后重跑通过。这些失败未算作通过证据。
+
+完整 `cargo check --manifest-path src-tauri/Cargo.toml --lib --locked --offline` 仍在解析依赖时因缺失 `vendor/openharmony-ability/crates/ability/Cargo.toml` 停止。未执行原生 GUI、OS 文件选择器、macOS/Windows 真机、真实 CLI ZIP 后端启动或本轮全仓安全扫描。所有本轮测试服务已关闭；CI 由推送触发，本轮不等待外部结果。

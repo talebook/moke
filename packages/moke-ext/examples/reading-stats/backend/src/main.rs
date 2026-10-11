@@ -5,6 +5,11 @@
 //!   - 后台线程： WebSocket 客户端，使用进程环境中的会话凭据连接宿主
 //!   - 统计数据结构在 Arc<Mutex<>> 中共享，持久化到 stats.json
 //!
+//! HTTP UI 和 /api/stats 仅在回环地址提供，严格校验 Host 且不开放 CORS。
+//! 同源 iframe 可读取统计；同用户本地进程也可读取，因此这不是进程隔离。
+//! 此只读接口有意不使用宿主 token：浏览器 UI 不能获得宿主会话凭据。
+//! token 仅供后端 WebSocket 客户端连接宿主，不应返回到 HTML/JSON。
+//!
 //! 用法: server --ext-port PORT
 
 use std::collections::HashSet;
@@ -87,8 +92,10 @@ fn now_ms() -> u64 {
 // ---------------------------------------------------------------------------
 
 fn stats_file() -> std::path::PathBuf {
-    std::env::var_os("MOKE_EXT_DATA_DIR").map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(".")).join("stats.json")
+    std::env::var_os("MOKE_EXT_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("stats.json")
 }
 
 fn load_stats() -> Stats {
@@ -444,7 +451,15 @@ fn urlencoding(raw: &str) -> String {
 }
 
 fn is_path_traversal(path: &str) -> bool {
-    path.contains("..") || path.contains('\\')
+    let relative = std::path::Path::new(path);
+    path.is_empty()
+        || path.contains('\\')
+        || path.contains(':') // Reject Windows drive-relative paths on every platform.
+        || path.chars().any(char::is_control)
+        || relative.has_root()
+        || !relative.components().all(|component| {
+            matches!(component, std::path::Component::Normal(_))
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +482,29 @@ mod tests {
         assert!(!is_path_traversal("index.html"));
         assert!(is_path_traversal("../secret.txt"));
         assert!(is_path_traversal(&urlencoding("%2e%2e%2f")));
+    }
+
+    #[test]
+    fn encoded_static_paths_cannot_replace_the_ui_root() {
+        // Input is the URL after removing the literal leading slash, as in main.
+        for raw in [
+            "%2Fetc%2Fpasswd",
+            "%2f%2fserver%2fshare",
+            "%2e%2e%2fsecret",
+            "assets/%2e%2e/secret",
+            "%5Cetc%5Cpasswd",
+            "C%3A/Windows/win.ini",
+            "C%3Arelative.txt",
+            "%00index.html",
+            "./index.html",
+        ] {
+            assert!(is_path_traversal(&urlencoding(raw)), "accepted {raw}");
+        }
+        for raw in ["index.html", "assets/styles.css", "hello%20world.html"] {
+            let decoded = urlencoding(raw);
+            assert!(!is_path_traversal(&decoded), "rejected {raw}");
+            assert!(PathBuf::from("ui").join(decoded).starts_with("ui"));
+        }
     }
 
     #[test]

@@ -73,6 +73,7 @@ pnpm tauri dev      # 完整桌面应用开发（Rust 后端 + Next.js 前端）
 pnpm lint           # ESLint 检查
 pnpm typecheck      # TypeScript 类型检查
 pnpm test           # API、离线存储和平台分支基础测试
+pnpm test:e2e:extensions # ZIP 导入、漫画与详情操作（Chromium + mocked Tauri IPC）
 ```
 
 ### 构建

@@ -4,6 +4,13 @@
 //! proves package integrity; publisher keys not already trusted still require a
 //! high-risk activation confirmation. Grants are bound to the exact digest,
 //! version, source and permission set so an old click cannot authorize changes.
+//!
+//! Unknown signed publishers require a fresh confirmation on EVERY activation,
+//! including re-enable and restart, even for an unchanged digest. Writable grants
+//! record change history, not publisher trust. With no built-in anchors provisioned,
+//! restart keeps these extensions pending; the UI must prompt before resuming.
+//! Unsigned UI-only legacy extensions may reuse a matching content grant because
+//! they never launch a native backend. Unsigned native backends remain blocked.
 
 use super::Manifest;
 use base64::Engine;
@@ -118,6 +125,91 @@ impl Default for ExtensionGrant {
 struct EvaluationResult {
     public: TrustEvaluation,
     verified: Option<VerifiedSignature>,
+}
+
+/// Session-only display cache. Metadata checks avoid rereading up to 1 GiB per
+/// package on every UI refresh. Same-size edits with restored timestamps can be
+/// invisible here: cached badges/digests are display hints, NOT integrity proof.
+/// Activation, startup restore and import commit always call fresh evaluation.
+#[derive(Default)]
+pub(super) struct DisplayCache {
+    entries: HashMap<PathBuf, (DisplayStamp, TrustEvaluation)>,
+}
+
+#[derive(PartialEq)]
+struct DisplayStamp {
+    manifest: Manifest,
+    files: Vec<(PathBuf, Option<(u64, Option<std::time::SystemTime>)>)>,
+}
+
+impl DisplayCache {
+    pub(super) fn retain<'a>(&mut self, installed: impl Iterator<Item = &'a Path>) {
+        let installed: std::collections::HashSet<_> = installed.collect();
+        self.entries
+            .retain(|dir, _| installed.contains(dir.as_path()));
+    }
+
+    pub(super) fn evaluate(
+        &mut self,
+        extensions_dir: &Path,
+        ext_dir: &Path,
+        manifest: &Manifest,
+    ) -> TrustEvaluation {
+        let before = display_stamp(extensions_dir, ext_dir, manifest).ok();
+        if let Some(stamp) = &before {
+            if let Some((cached_stamp, evaluation)) = self.entries.get(ext_dir) {
+                if stamp == cached_stamp {
+                    return evaluation.clone();
+                }
+            }
+        }
+        self.entries.remove(ext_dir);
+        let evaluation = evaluate_installed(extensions_dir, ext_dir, manifest);
+        // A concurrent install or external edit must not pin an inconsistent
+        // evaluation under the new metadata. At most return this one snapshot.
+        if let Some(before) = before {
+            if display_stamp(extensions_dir, ext_dir, manifest)
+                .ok()
+                .as_ref()
+                == Some(&before)
+            {
+                self.entries
+                    .insert(ext_dir.to_owned(), (before, evaluation.clone()));
+            }
+        }
+        evaluation
+    }
+}
+
+fn display_stamp(
+    extensions_dir: &Path,
+    ext_dir: &Path,
+    manifest: &Manifest,
+) -> Result<DisplayStamp, String> {
+    let mut files = Vec::new();
+    collect_package_files(ext_dir, ext_dir, &mut files, 0)?;
+    files.sort();
+    let mut paths: Vec<_> = files.into_iter().map(|path| ext_dir.join(path)).collect();
+    // These change signature/approval presentation but are excluded from digest.
+    paths.push(ext_dir.join(SIGNATURE_FILE));
+    paths.push(extensions_dir.join(TRUST_FILE));
+    let files = paths
+        .into_iter()
+        .map(|path| {
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_file() => {
+                    Some((metadata.len(), metadata.modified().ok()))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                _ => return Err("无法读取展示缓存元数据".to_string()),
+            };
+            Ok((path, metadata))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DisplayStamp {
+        manifest: manifest.clone(),
+        files,
+    })
 }
 
 pub fn evaluate_installed(
@@ -850,7 +942,96 @@ mod tests {
         let second = evaluate_installed(&root, &ext_dir, &manifest);
         assert_eq!(second.signature_status, "unknown_publisher");
         assert!(second.requires_approval);
+        // Re-enable and startup restoration cannot treat writable grants as trust.
+        assert!(authorize_activation(&root, &ext_dir, &manifest, None).is_err());
+        authorize_activation(&root, &ext_dir, &manifest, Some(&second.package_digest)).unwrap();
+        assert!(authorize_activation(&root, &ext_dir, &manifest, None).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn display_cache_invalidates_content_signature_and_grant_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let ext_dir = root.path().join("sample-extension");
+        std::fs::create_dir(&ext_dir).unwrap();
+        let manifest = manifest("1.0.0", &["storage"], false);
+        write_manifest(&ext_dir, &manifest);
+        std::fs::write(ext_dir.join("ui.js"), "safe").unwrap();
+        let key = key_pair();
+        sign(&ext_dir, &manifest, "key-1", &key);
+        let mut cache = DisplayCache::default();
+        let first = cache.evaluate(root.path(), &ext_dir, &manifest);
+        assert_eq!(first.permissions_added, ["storage"]);
+        authorize_activation(
+            root.path(),
+            &ext_dir,
+            &manifest,
+            Some(&first.package_digest),
+        )
+        .unwrap();
+        let granted = cache.evaluate(root.path(), &ext_dir, &manifest);
+        assert!(granted.permissions_added.is_empty());
+        assert_eq!(granted.upgrade_from.as_deref(), Some("1.0.0"));
+
+        std::fs::write(ext_dir.join("ui.js"), "modified content").unwrap();
+        let changed = cache.evaluate(root.path(), &ext_dir, &manifest);
+        assert_ne!(changed.package_digest, first.package_digest);
+        assert_eq!(changed.signature_status, "invalid");
+        std::fs::remove_file(ext_dir.join(SIGNATURE_FILE)).unwrap();
+        assert_eq!(
+            cache
+                .evaluate(root.path(), &ext_dir, &manifest)
+                .signature_status,
+            "unsigned"
+        );
+        std::fs::remove_file(ext_dir.join("ui.js")).unwrap();
+        assert_ne!(
+            cache
+                .evaluate(root.path(), &ext_dir, &manifest)
+                .package_digest,
+            changed.package_digest
+        );
+        cache.retain(std::iter::empty());
+        assert!(cache.entries.is_empty());
+    }
+
+    #[test]
+    fn stale_display_cache_never_authorizes_metadata_preserving_tampering() {
+        let root = tempfile::tempdir().unwrap();
+        let ext_dir = root.path().join("sample-extension");
+        std::fs::create_dir(&ext_dir).unwrap();
+        let manifest = manifest("1.0.0", &["storage"], false);
+        write_manifest(&ext_dir, &manifest);
+        let content = ext_dir.join("ui.js");
+        std::fs::write(&content, "safe").unwrap();
+        sign(&ext_dir, &manifest, "key-1", &key_pair());
+        let mut cache = DisplayCache::default();
+        let displayed = cache.evaluate(root.path(), &ext_dir, &manifest);
+        let modified = std::fs::metadata(&content).unwrap().modified().unwrap();
+        std::fs::write(&content, "evil").unwrap();
+        File::options()
+            .write(true)
+            .open(&content)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        // This deliberately demonstrates the display-only metadata tradeoff.
+        assert_eq!(
+            cache
+                .evaluate(root.path(), &ext_dir, &manifest)
+                .package_digest,
+            displayed.package_digest
+        );
+        let fresh = evaluate_installed(root.path(), &ext_dir, &manifest);
+        assert_ne!(fresh.package_digest, displayed.package_digest);
+        assert_eq!(fresh.signature_status, "invalid");
+        assert!(authorize_activation(
+            root.path(),
+            &ext_dir,
+            &manifest,
+            Some(&displayed.package_digest)
+        )
+        .is_err());
     }
 
     #[test]

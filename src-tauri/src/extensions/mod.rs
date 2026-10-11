@@ -34,6 +34,7 @@ use tauri::Manager;
 pub struct ExtensionRuntime {
     operations: Arc<Mutex<()>>,
     installer: Mutex<installer::Installer>,
+    display_trust: Mutex<trust::DisplayCache>,
     recovery_error: Option<String>,
     _directory_lock: Option<std::fs::File>,
     /// 已启用的拓展：name → EnabledExtension
@@ -111,7 +112,7 @@ pub struct MokeOfflineBookInfo {
 // Manifest 内部表示（反序列化用）
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub name: String,
@@ -135,7 +136,7 @@ pub struct Manifest {
     pub lucide_icons: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublisherConfig {
     pub id: String,
@@ -143,7 +144,7 @@ pub struct PublisherConfig {
     pub source: String,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EntryConfig {
     #[serde(default)]
@@ -152,7 +153,7 @@ pub struct EntryConfig {
     pub backend: Option<BackendConfig>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackendConfig {
     #[serde(default)]
@@ -162,7 +163,7 @@ pub struct BackendConfig {
     pub args: Vec<String>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SidebarConfig {
     pub label: String,
@@ -289,9 +290,14 @@ async fn ext_commit_import(
 }
 
 #[tauri::command]
-fn ext_cancel_import(state: tauri::State<'_, ExtensionRuntime>, ticket: String) {
-    let _operation = state.operations.lock().unwrap();
-    state.installer.lock().unwrap().cancel(&ticket);
+async fn ext_cancel_import(app: AppHandle, ticket: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        state.installer.lock().unwrap().cancel(&ticket);
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// 列出所有已安装的拓展。
@@ -299,15 +305,16 @@ fn ext_cancel_import(state: tauri::State<'_, ExtensionRuntime>, ticket: String) 
 async fn ext_list_extensions(app: AppHandle) -> Result<Vec<ExtensionInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<ExtensionRuntime>();
-        let _operation = state.operations.lock().unwrap();
         list_extensions(&state)
     })
     .await
     .map_err(|e| e.to_string())
 }
 fn list_extensions(state: &ExtensionRuntime) -> Vec<ExtensionInfo> {
-    // Package hashing can be slow for large extensions. Snapshot only the
-    // fields needed by the UI so API token checks are not blocked on disk IO.
+    // Snapshot installation/runtime metadata consistently, then release the
+    // operation lock before hashing. Refreshes never serialize writes behind
+    // package IO; a concurrent mutation may yield a stale display snapshot.
+    let operation = state.operations.lock().unwrap();
     let enabled: HashMap<String, u16> = state
         .enabled
         .lock()
@@ -317,11 +324,14 @@ fn list_extensions(state: &ExtensionRuntime) -> Vec<ExtensionInfo> {
         .collect();
     let desired = lifecycle::desired_names(&state.extensions_dir);
     let discoveries = discovery::discover_extensions(&state.extensions_dir);
+    drop(operation);
+    let mut display_trust = state.display_trust.lock().unwrap();
+    display_trust.retain(discoveries.iter().map(|d| d.dir.as_path()));
 
     discoveries
         .into_iter()
         .map(|d| {
-            let mut trust = trust::evaluate_installed(&state.extensions_dir, &d.dir, &d.manifest);
+            let mut trust = display_trust.evaluate(&state.extensions_dir, &d.dir, &d.manifest);
             if let Some(error) = &state.recovery_error {
                 trust.blocked_reason = Some(format!("安装恢复失败，请重启后重试: {error}"));
             }
@@ -368,17 +378,22 @@ fn list_extensions(state: &ExtensionRuntime) -> Vec<ExtensionInfo> {
 
 /// 启用一个拓展。
 #[tauri::command]
-fn ext_enable_extension(
-    state: tauri::State<'_, ExtensionRuntime>,
+async fn ext_enable_extension(
+    app: AppHandle,
     name: String,
     approval: Option<ExtensionApproval>,
 ) -> Result<(), String> {
-    let _operation = state.operations.lock().unwrap();
-    activate(
-        &state,
-        &name,
-        approval.as_ref().map(|a| a.package_digest.as_str()),
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        activate(
+            &state,
+            &name,
+            approval.as_ref().map(|a| a.package_digest.as_str()),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn activate(
@@ -445,32 +460,34 @@ fn activate(
 
 /// 禁用一个拓展。
 #[tauri::command]
-fn ext_disable_extension(
-    state: tauri::State<'_, ExtensionRuntime>,
-    name: String,
-) -> Result<(), String> {
-    let _operation = state.operations.lock().unwrap();
-    if let Some(error) = &state.recovery_error {
-        return Err(error.clone());
-    }
-    lifecycle::validate_extension_name(&name)?;
-    lifecycle::forget_desired(&state.extensions_dir, &name)?;
+async fn ext_disable_extension(app: AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        if let Some(error) = &state.recovery_error {
+            return Err(error.clone());
+        }
+        lifecycle::validate_extension_name(&name)?;
+        lifecycle::forget_desired(&state.extensions_dir, &name)?;
 
-    // 先取出拓展信息，释放锁，再杀进程和持久化（防死锁）
-    let ext = {
-        let mut enabled = state.enabled.lock().unwrap();
-        enabled.remove(&name)
-    };
+        // 先取出拓展信息，释放锁，再杀进程和持久化（防死锁）
+        let ext = {
+            let mut enabled = state.enabled.lock().unwrap();
+            enabled.remove(&name)
+        };
 
-    if let Some(ext) = ext {
-        stop_extension_backend(ext);
-    }
+        if let Some(ext) = ext {
+            stop_extension_backend(ext);
+        }
 
-    // 持久化（此时重新获取 enabled 锁，不会死锁因为不在锁内）
-    lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
+        // 持久化（此时重新获取 enabled 锁，不会死锁因为不在锁内）
+        lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
 
-    log::info!("拓展「{name}」已禁用");
-    Ok(())
+        log::info!("拓展「{name}」已禁用");
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 卸载一个拓展。
@@ -478,42 +495,44 @@ fn ext_disable_extension(
 /// 流程：先禁用拓展，再由宿主直接删除目录。卸载时绝不执行拓展目录内
 /// 的 `uninstall.exe`，否则未受信任的安装内容可借卸载路径执行任意代码。
 #[tauri::command]
-fn ext_uninstall_extension(
-    state: tauri::State<'_, ExtensionRuntime>,
-    name: String,
-) -> Result<(), String> {
-    let _operation = state.operations.lock().unwrap();
-    if let Some(error) = &state.recovery_error {
-        return Err(error.clone());
-    }
-    lifecycle::validate_extension_name(&name)?;
-    lifecycle::forget_desired(&state.extensions_dir, &name)?;
+async fn ext_uninstall_extension(app: AppHandle, name: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<ExtensionRuntime>();
+        let _operation = state.operations.lock().unwrap();
+        if let Some(error) = &state.recovery_error {
+            return Err(error.clone());
+        }
+        lifecycle::validate_extension_name(&name)?;
+        lifecycle::forget_desired(&state.extensions_dir, &name)?;
 
-    // 1. 先禁用（杀进程 + 持久化）
-    let ext = {
-        let mut enabled = state.enabled.lock().unwrap();
-        enabled.remove(&name)
-    };
+        // 1. 先禁用（杀进程 + 持久化）
+        let ext = {
+            let mut enabled = state.enabled.lock().unwrap();
+            enabled.remove(&name)
+        };
 
-    if let Some(ext) = ext {
-        stop_extension_backend(ext);
-    }
+        if let Some(ext) = ext {
+            stop_extension_backend(ext);
+        }
 
-    lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
-    log::info!("拓展「{name}」已禁用，开始卸载...");
+        lifecycle::save_runtime_state(&state.extensions_dir, &state.enabled)?;
+        log::info!("拓展「{name}」已禁用，开始卸载...");
 
-    let ext_dir = state.extensions_dir.join(&name);
-    if !ext_dir.exists() {
-        return Err(format!("拓展目录不存在: {}", ext_dir.display()));
-    }
+        let ext_dir = state.extensions_dir.join(&name);
+        if !ext_dir.exists() {
+            return Err(format!("拓展目录不存在: {}", ext_dir.display()));
+        }
 
-    if ext_dir.exists() {
-        std::fs::remove_dir_all(&ext_dir)
-            .map_err(|e| format!("无法删除拓展目录「{}」: {e}", ext_dir.display()))?;
-    }
+        if ext_dir.exists() {
+            std::fs::remove_dir_all(&ext_dir)
+                .map_err(|e| format!("无法删除拓展目录「{}」: {e}", ext_dir.display()))?;
+        }
 
-    log::info!("拓展「{name}」已由宿主卸载");
-    Ok(())
+        log::info!("拓展「{name}」已由宿主卸载");
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// 返回 API Server 的 REST 端口。
@@ -789,6 +808,7 @@ pub fn init(app: &AppHandle) {
     let runtime = ExtensionRuntime {
         operations,
         installer: Mutex::new(installer::Installer::default()),
+        display_trust: Mutex::new(trust::DisplayCache::default()),
         recovery_error,
         _directory_lock: directory_lock,
         enabled,

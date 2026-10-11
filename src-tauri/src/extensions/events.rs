@@ -275,6 +275,11 @@ fn accept_and_authenticate_with_deadline(
     actual_port: u16,
     deadline: std::time::Instant,
 ) -> Result<Client, String> {
+    // Accepted sockets inherit O_NONBLOCK on macOS/BSD. The deadline wrapper
+    // needs blocking IO so a fragmented Upgrade waits for the remaining bytes.
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| format!("设置 WS 阻塞模式失败: {error}"))?;
     stream
         .set_read_timeout(Some(WS_HANDSHAKE_TIMEOUT))
         .map_err(|error| format!("设置 WS 握手读取超时失败: {error}"))?;
@@ -514,6 +519,55 @@ fn replay_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonblocking_accepted_socket_waits_for_fragmented_upgrade() {
+        use std::io::{Read, Write};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let enabled = Arc::new(Mutex::new(HashMap::from([(
+            "sample".into(),
+            EnabledExtension {
+                token: "test-token".into(),
+                port: 24000,
+                backend: Mutex::new(None),
+                permissions: vec!["reader.events.subscribe".into()],
+            },
+        )])));
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let server = listener.accept().unwrap().0;
+        // Reproduce macOS/BSD accept semantics on every test platform.
+        server.set_nonblocking(true).unwrap();
+        stream.write_all(b"GET / HTTP/1.1\r\n").unwrap();
+        let worker = thread::spawn(move || {
+            accept_and_authenticate(server, &enabled, port).map(|c| c.extension_name)
+        });
+        thread::sleep(Duration::from_millis(100));
+        stream.write_all(format!(
+            "Host: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+        ).as_bytes()).unwrap();
+        // Wait for the HTTP Upgrade response before sending the hello frame.
+        // Otherwise tungstenite correctly rejects extra bytes in the request.
+        let mut response = Vec::new();
+        while !response.ends_with(b"\r\n\r\n") {
+            let mut byte = [0u8];
+            stream.read_exact(&mut byte).unwrap();
+            response.push(byte[0]);
+        }
+        assert!(response.starts_with(b"HTTP/1.1 101"));
+        let mut client = tungstenite::WebSocket::from_raw_socket(
+            stream,
+            tungstenite::protocol::Role::Client,
+            None,
+        );
+        client.send(tungstenite::Message::Text(serde_json::json!({
+            "type":"hello", "extension":"sample", "token":"test-token", "events":["reader.state"]
+        }).to_string())).unwrap();
+        assert_eq!(worker.join().unwrap().unwrap(), "sample");
+    }
 
     #[test]
     fn real_ws_handshake_has_total_deadline_and_checks_token_permissions() {
