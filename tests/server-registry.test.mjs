@@ -60,8 +60,8 @@ test('migration backs up old single config, prefers main key, and is idempotent'
   assert.equal(parseServerRegistry(null, 'http://b.test').savedServers[0].url, 'http://b.test');
 });
 
-test('bad JSON/invalid legacy data remain intact until explicit verified recovery', async () => {
-  for (const raw of ['', 'null', 'false', '0', '[]', '{broken', JSON.stringify({ version: 0, state: { serverUrl: 'http://a.test/path' } }), JSON.stringify({version: 2,state:{}})]) {
+test('bad JSON and outer schema remain intact until explicit verified recovery', async () => {
+  for (const raw of ['', 'null', 'false', '0', '[]', '{broken', JSON.stringify({version: 2,state:{}})]) {
     const disk = storage({ [SERVER_STORAGE_KEY]: raw });
     const repository = new ServerRegistryRepository(disk);
     assert.equal((await repository.load()).ok, false);
@@ -72,6 +72,96 @@ test('bad JSON/invalid legacy data remain intact until explicit verified recover
     const backups = [...disk.values].filter(([key]) => key.startsWith(`${SERVER_STORAGE_KEY}-backup-`));
     assert.equal(JSON.parse(backups[0][1]).raw, raw);
     assert.deepEqual(parseServerRegistry(disk.values.get(SERVER_STORAGE_KEY)), emptyRegistry());
+  }
+});
+
+test('invalid legacy addresses load without writes, preserve exact bytes before save and allow a new connection', async () => {
+  for (const oldUrl of ['http://a.test/path', 'ftp://a.test', 'null', 'undefined', null, 42, {}]) {
+    const raw = `  ${JSON.stringify({version:0,state:{serverUrl:oldUrl,serverTitle:'Old'}})}\n`;
+    const disk = storage({[SERVER_STORAGE_KEY]:raw,moke_server_url:'http://fallback.test'});
+    const store = createServerStore(new ServerRegistryRepository(disk));
+    const writes = [];
+    const write = disk.setItem;
+    disk.setItem = (key, value) => { writes.push(key); write(key, value); };
+    await store.getState().loadServers();
+    assert.equal(store.getState().storageError, '');
+    assert.deepEqual(store.getState().savedServers, []);
+    assert.match(store.getState().serverListNotice, /旧服务器地址无效.*已跳过.*可保存并连接.*原数据已保留/);
+    assert.deepEqual(writes, []);
+    assert.equal(disk.values.get(SERVER_STORAGE_KEY), raw);
+    await store.getState().loadServers();
+    assert.deepEqual(writes, []);
+    const saved = await store.getState().saveServer('nas:8080');
+    assert.equal(saved.ok, true);
+    const backups = [...disk.values].filter(([key]) => key.startsWith(`${SERVER_STORAGE_KEY}-damaged-backup-`));
+    assert.equal(backups.length, 1);
+    assert.equal(backups[0][1], raw);
+    assert.ok(writes.indexOf(backups[0][0]) < writes.indexOf(SERVER_STORAGE_KEY));
+    assert.equal(await store.getState().activateCandidate(store.getState().beginConnection(saved.value.id).requestId), true);
+    assert.equal(store.getState().serverUrl, 'http://nas:8080');
+    const restarted = createServerStore(new ServerRegistryRepository(disk));
+    await restarted.getState().loadServers();
+    assert.equal(restarted.getState().serverListNotice, '');
+    assert.deepEqual(restarted.getState().savedServers, [saved.value]);
+  }
+});
+
+test('read-only invalid legacy configuration remains usable as an empty list without a migration write', async () => {
+  const raw = JSON.stringify({state:{serverUrl:'http://a.test/path'}});
+  const disk = storage({[SERVER_STORAGE_KEY]:raw});
+  let writes = 0;
+  disk.setItem = () => { writes++; throw new Error('read only'); };
+  const repository = new ServerRegistryRepository(disk);
+  const loaded = await repository.load();
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(loaded.value, emptyRegistry());
+  assert.match(loaded.notice, /旧服务器地址无效.*原数据已保留/);
+  assert.equal(writes, 0);
+  assert.equal((await repository.save(emptyRegistry())).ok, false);
+  assert.equal(disk.values.get(SERVER_STORAGE_KEY), raw);
+});
+
+test('compatibility-only invalid legacy values are backed up verbatim before an empty list can be saved', async () => {
+  for (const original of [' null \n', 'undefined', 'http://a.test/path']) {
+    const disk = storage({moke_server_url:original});
+    const repository = new ServerRegistryRepository(disk);
+    const loaded = await repository.load();
+    assert.equal(loaded.ok, true);
+    assert.deepEqual(loaded.value, emptyRegistry());
+    assert.match(loaded.notice, /旧服务器地址无效.*原数据已保留/);
+    assert.equal(disk.values.has(SERVER_STORAGE_KEY), false);
+    assert.equal(disk.values.get('moke_server_url'), original);
+    assert.equal((await repository.save(emptyRegistry())).ok, true);
+    const backups = [...disk.values].filter(([key]) => key.startsWith(`${SERVER_STORAGE_KEY}-damaged-legacy-url-backup-`));
+    assert.equal(backups.length, 1);
+    assert.equal(backups[0][1], original);
+    disk.setItem('moke_server_url', 'http://new-server');
+    assert.equal(disk.values.get(backups[0][0]), original);
+    const restarted = await new ServerRegistryRepository(disk).load();
+    assert.deepEqual(restarted.value, emptyRegistry());
+    assert.equal(restarted.notice, undefined);
+  }
+});
+
+test('failed or discarded legacy-value backups block a save without replacing either original key', async () => {
+  for (const mode of ['reject', 'discard']) {
+    const original = ' undefined ';
+    const disk = storage({moke_server_url:original});
+    const repository = new ServerRegistryRepository(disk);
+    assert.equal((await repository.load()).ok, true);
+    const write = disk.setItem;
+    disk.setItem = (key, value) => {
+      if (key.startsWith(`${SERVER_STORAGE_KEY}-damaged-legacy-url-backup-`)) {
+        if (mode === 'reject') throw new Error('backup denied');
+        return;
+      }
+      write(key, value);
+    };
+    const result = await repository.save(emptyRegistry());
+    assert.equal(result.ok, false);
+    assert.match(result.error, /备份|backup/);
+    assert.equal(disk.values.has(SERVER_STORAGE_KEY), false);
+    assert.equal(disk.values.get('moke_server_url'), original);
   }
 });
 
@@ -452,6 +542,15 @@ test('all invalid entries load an empty list with notice while outer schema erro
   await store.getState().loadServers();assert.deepEqual(store.getState().savedServers,[]);
   assert.match(store.getState().serverListNotice,/有 2 条/);assert.equal(disk.values.get(SERVER_STORAGE_KEY),raw);
   for(const state of [[],null,{savedServers:{}},{savedServers:null}])assert.throws(()=>parseServerRegistry(JSON.stringify({version:1,state})));
+});
+
+test('v1 lists skip literal missing values without rejecting genuine LAN hosts', () => {
+  let skipped = 0;
+  const registry = parseServerRegistry(JSON.stringify({version:1,state:{savedServers:[
+    {id:'null',url:'null'}, {id:'undefined',url:'http://undefined'}, {id:'nas',url:'nas:8080',title:'LAN',addedAt:''},
+  ]}}), null, count => { skipped = count; });
+  assert.equal(skipped, 2);
+  assert.deepEqual(registry.savedServers, [{id:'nas',url:'http://nas:8080',title:'LAN',addedAt:''}]);
 });
 
 test('unreadable/unwritable recovery provides repair steps without claiming memory-only saves', async () => {

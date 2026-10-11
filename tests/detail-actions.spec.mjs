@@ -1,15 +1,17 @@
 import { test, expect } from '@playwright/test';
+import { connectSavedServerFixture, enterOfflineModeFromWelcome, installSavedServerFixture, openFixtureBookDetail, openOfflineFixtureBookDetail } from './helpers/offline-mode-fixture.mjs';
 
 const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
-async function installTauriHttpMock(page, { offlineMode = false } = {}) {
-  await page.addInitScript(({ serverUrl, bookId, offlineMode }) => {
+async function installTauriHttpMock(page, { downloaded = false } = {}) {
+  await installSavedServerFixture(page, SERVER_URL);
+  await page.addInitScript(({ serverUrl, bookId, downloaded }) => {
     const requests = new Map();
     const responseBodies = new Map();
     const httpRequests = [];
-    const nativeOfflineBooks = offlineMode ? [{
+    const nativeOfflineBooks = downloaded ? [{
       id: `${serverUrl}::${bookId}::epub`,
       serverUrl,
       bookId,
@@ -42,7 +44,8 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
           },
         };
       }
-      if (path === '/api/welcome') return { err: 'not_invited' };
+      if (path === '/api/shelf') return { err: 'ok', books: [payloadFor(`${serverUrl}/api/book/${bookId}`).book] };
+      if (path === '/api/welcome') return { err: 'free' };
       if (path === '/api/user/info') {
         return { err: 'user.need_login', sys: { title: 'Moke 测试书库', version: '3.15.0' } };
       }
@@ -58,7 +61,10 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
     });
 
     window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       invoke: async (command, args = {}) => {
+        if (command === 'moke_runtime_platform') return 'linux';
+        if (command === 'plugin:window|get_all_windows') return ['main'];
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;
           requests.set(rid, args.clientConfig);
@@ -101,32 +107,7 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
     window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     window.__MOKE_TEST_HTTP_REQUESTS__ = httpRequests;
 
-    localStorage.setItem('moke-privacy-consent', '2026-08-14');
-    localStorage.setItem('moke-server-storage', JSON.stringify({
-      state: {
-        serverUrl,
-        offlineMode,
-        protocol: 'https',
-        host: 'books.test',
-        port: '',
-        hasHydrated: true,
-        isConnected: !offlineMode,
-        user: null,
-        capabilities: {
-          shelfApi: true,
-          annotationApiStatus: 'unsupported',
-          annotationApiCheckedAt: Date.now(),
-          readingStateApi: true,
-          readingProgressApi: true,
-          readingStatsApi: true,
-          networkSourcesApi: true,
-          checkedAt: Date.now(),
-          version: '3.15.0',
-        },
-      },
-      version: 0,
-    }));
-  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, offlineMode });
+  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, downloaded });
 }
 
 for (const viewport of [
@@ -136,7 +117,8 @@ for (const viewport of [
   test(`online and download actions retain one-row layout on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await installTauriHttpMock(page);
-    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await connectSavedServerFixture(page, BASE_URL, SERVER_URL);
+    await openFixtureBookDetail(page, BOOK_ID);
 
     const group = page.getByTestId('book-primary-action-group');
     const online = page.getByTestId('online-read-action');
@@ -188,8 +170,9 @@ for (const viewport of [
 
   test(`offline mode exposes only its local reading action on ${viewport.name}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await installTauriHttpMock(page, { offlineMode: true });
-    await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+    await installTauriHttpMock(page, { downloaded: true });
+    await enterOfflineModeFromWelcome(page, BASE_URL);
+    await openOfflineFixtureBookDetail(page, BOOK_ID);
 
     const offlineRead = page.getByTestId('offline-read-primary-action');
     const cover = page.locator('.book-cover-shadow');
@@ -226,3 +209,30 @@ for (const viewport of [
     });
   });
 }
+
+test('a cold v1 document restores only the server list and requires explicit offline entry again', async ({ page }) => {
+  await installTauriHttpMock(page, { downloaded: true });
+  await page.goto(`${BASE_URL}/detail?id=${BOOK_ID}`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/welcome$/);
+  await expect(page.locator('li button').filter({ hasText: SERVER_URL })).toBeVisible();
+  await expect(page.getByRole('button', { name: '返回当前书架', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
+
+  await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
+  await expect(page).toHaveURL(/\/shelf$/);
+  await openOfflineFixtureBookDetail(page, BOOK_ID);
+  await expect(page.getByTestId('offline-read-primary-action')).toHaveText('离线阅读');
+  await expect(page.getByTestId('online-read-action')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
+  const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')));
+  expect(persisted.version).toBe(1);
+  expect(Object.keys(persisted.state)).toEqual(['savedServers']);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/welcome$/);
+  await expect(page.locator('li button').filter({ hasText: SERVER_URL })).toBeVisible();
+  await expect(page.getByTestId('offline-read-primary-action')).toHaveCount(0);
+  await expect(page.getByTestId('online-read-action')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '返回当前书架', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
+});

@@ -12,6 +12,11 @@ export function normalizeServerAddress(value: string): string {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('服务器地址须使用 HTTP 或 HTTPS');
   }
+  // Old URL-origin helpers could persist these missing-value sentinels. They
+  // are not server addresses; other single-label LAN hosts remain supported.
+  if (/^(null|undefined)\.?$/i.test(url.hostname)) {
+    throw new Error('请输入有效的服务器地址');
+  }
   // URL parsing collapses dot segments. Reject the supplied path before that
   // normalization can turn /book/.. into an apparently valid root address.
   const authority = absolute.slice(absolute.indexOf('://') + 3);

@@ -77,10 +77,9 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
           const state = useServerStore.getState();
-          const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
+          const candidate = state.beginActiveAccessConfirmation();
           if (candidate) {
-            state.requireAccess(candidate.requestId);
-            router.replace(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`);
+            router.replace(`/access?serverId=${encodeURIComponent(candidate.id)}&requestId=${candidate.requestId}`);
           } else router.replace('/welcome');
           return;
         }

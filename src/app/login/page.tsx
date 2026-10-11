@@ -82,8 +82,10 @@ export default function LoginPage() {
           router.push('/shelf');
         } else if (res.err === 'user.private.not_valid') {
           const state = useServerStore.getState();
-          const candidate = state.activeServerId ? state.beginConnection(state.activeServerId) : null;
-          if (candidate) { state.requireAccess(candidate.requestId); router.push(`/access?serverId=${candidate.id}&requestId=${candidate.requestId}`); }
+          const candidate = state.beginActiveAccessConfirmation();
+          if (candidate) {
+            router.push(`/access?serverId=${encodeURIComponent(candidate.id)}&requestId=${candidate.requestId}`);
+          } else router.replace('/welcome');
         } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
           setError(res.msg || '请输入人机验证码');
           setShowCaptcha(true);

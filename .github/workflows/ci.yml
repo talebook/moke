@@ -125,9 +125,9 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
 
   single-webview-smoke:
-    name: Single WebView document handoff smoke test (synthetic IPC)
+    name: Tauri frontend offline and Reader guard smoke tests (synthetic IPC)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -151,7 +151,7 @@ jobs:
             fi
             sleep 1
           done
-          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs --workers=1
+          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 MOKE_E2E_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs tests/connection-reader-guard.spec.mjs tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs --workers=1
       - name: Upload document handoff evidence
         if: always()
         uses: actions/upload-artifact@v4

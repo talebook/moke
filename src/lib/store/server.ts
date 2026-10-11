@@ -48,6 +48,7 @@ interface ServerState {
   recoverServers: () => Promise<void>;
   saveServer: (value: string) => Promise<SaveServerResult>;
   beginConnection: (id: string) => Candidate | null;
+  beginActiveAccessConfirmation: () => Candidate | null;
   cancelConnection: (requestId?: number) => void;
   requireAccess: (requestId: number) => void;
   activateCandidate: (requestId: number) => Promise<boolean>;
@@ -162,6 +163,16 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       const candidate = { id, url: server.url, requestId: ++requestNumber, needsAccessCode: false };
       set({ candidate, readerReturnTo: null, readerReturnError: '', serverListNotice: '' });
       return candidate;
+    },
+    beginActiveAccessConfirmation: () => {
+      const activeServerId = get().activeServerId;
+      const candidate = activeServerId ? get().beginConnection(activeServerId) : null;
+      if (!candidate) {
+        set({ serverListNotice: '需要重新确认访问码，请从服务器列表重新连接。' });
+        return null;
+      }
+      get().requireAccess(candidate.requestId);
+      return get().candidate;
     },
     cancelConnection: (requestId) => {
       if (requestId !== undefined && get().candidate?.requestId !== requestId) return;

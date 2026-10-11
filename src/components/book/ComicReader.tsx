@@ -119,7 +119,7 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
         });
         disposeImages = bindComicImages(host.current, index => api.page(manifest, index),
           e => { setLoading(false); setNotice(comicErrorMessage(e)); },
-          () => setLoading(false));
+          () => setLoading(false), manifest.pages);
       } catch (e) { if (active()) { setError(comicErrorMessage(e)); setLoading(false); } }
     };
     void start();

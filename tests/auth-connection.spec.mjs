@@ -52,3 +52,20 @@ for(const form of ['login','access']) {
     expect(warnings.some(message=>message.includes(form==='login'?'[LoginPage] login flow failed':'[AccessPage] access verification failed'))).toBe(true);
   });
 }
+
+test('login requiring a new access code rebuilds the saved candidate and reaches the access form',async({page})=>{
+  const fixture=await installServerListFixture(page);
+  fixture.servers.get(fixture.origins[0]).loggedIn=false;
+  await page.goto(base+'/welcome',{waitUntil:'domcontentloaded'});
+  await page.locator('li button').first().click();
+  await page.getByRole('link',{name:'登录',exact:true}).click();
+  await page.getByPlaceholder('请输入用户名',{exact:true}).fill('fixture-reader');
+  await page.getByPlaceholder('请输入密码',{exact:true}).fill('fixture-password');
+  await page.route('**/api/user/sign_in',route=>route.fulfill({json:{err:'user.private.not_valid'}}));
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/\/access\?serverId=a&requestId=\d+$/);
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+  await expect(page.getByRole('button',{name:'确认',exact:true})).toBeEnabled();
+  await page.getByRole('button',{name:'确认',exact:true}).click();
+  await expect(page).toHaveURL(/\/shelf$/);
+});

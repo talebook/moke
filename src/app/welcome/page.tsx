@@ -84,6 +84,9 @@ export default function WelcomePage() {
     setConnectingId(id); setError(''); setNotice('');
     const timer = setTimeout(() => abort.abort(new Error('连接超时，请重试')), 20_000);
     try {
+      await requireClosedReaders();
+      abort.signal.throwIfAborted();
+      if (useServerStore.getState().candidate?.requestId !== attempt.requestId) return;
       const result = await checkSavedServer(attempt.url, { validate: validateServerConnection, welcome: checkWelcomeRequirement }, abort.signal);
       await requireClosedReaders();
       abort.signal.throwIfAborted();

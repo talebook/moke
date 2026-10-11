@@ -45,12 +45,21 @@ export function parseServerRegistry(raw: string | null, legacy: string | null = 
     };
   }
   if (parsed && parsed.version !== undefined && parsed.version !== 0) throw new Error('不支持的服务器配置版本，原数据已保留');
-  if (state?.serverUrl !== undefined && typeof state.serverUrl !== 'string') throw new Error('旧服务器地址损坏，原数据已保留');
+  if (state?.serverUrl !== undefined && typeof state.serverUrl !== 'string') {
+    onSkipped?.(1);
+    return emptyRegistry();
+  }
   const oldUrl = state?.serverUrl?.trim() || legacy?.trim();
+  if (!oldUrl) return emptyRegistry();
+  let url: string;
+  try { url = normalizeServerAddress(oldUrl); }
+  catch {
+    onSkipped?.(1);
+    return emptyRegistry();
+  }
   return {
-    ...emptyRegistry(),
-    savedServers: oldUrl ? [{ id: createLocalId(), url: normalizeServerAddress(oldUrl),
-      title: typeof state?.serverTitle === 'string' ? state.serverTitle : '', addedAt: new Date().toISOString() }] : [],
+    savedServers: [{ id: createLocalId(), url,
+      title: typeof state?.serverTitle === 'string' ? state.serverTitle : '', addedAt: new Date().toISOString() }],
   };
 }
 
@@ -63,6 +72,7 @@ export function serializeServerRegistry(registry: ServerRegistry): string {
 /** Explicit, serial, verified writes. Runtime/session changes never write this repository. */
 export class ServerRegistryRepository {
   private raw: string | null = null;
+  private legacyRaw: string | null = null;
   private loaded = false;
   private preserveRawOnWrite = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -78,17 +88,19 @@ export class ServerRegistryRepository {
       this.raw = await this.storage.getItem(SERVER_STORAGE_KEY);
       // A valid v1 list is authoritative; a broken/unavailable compatibility key cannot override it.
       const isV1 = this.raw && JSON.parse(this.raw)?.version === 1;
-      const legacy = isV1 ? null : await this.legacyStorage.getItem('moke_server_url');
+      this.legacyRaw = isV1 ? null : await this.legacyStorage.getItem('moke_server_url');
       let skipped = 0;
-      const registry = parseServerRegistry(this.raw, legacy, (count) => { skipped = count; });
+      const registry = parseServerRegistry(this.raw, this.legacyRaw, (count) => { skipped = count; });
       this.preserveRawOnWrite = skipped > 0;
       this.loaded = true;
       const encoded = serializeServerRegistry(registry);
-      // Existing v1 lists remain usable when storage becomes read-only. Only
-      // initial creation/migration must commit before claiming persistence.
-      if (!isV1 && encoded !== this.raw) await this.writeVerified(encoded);
+      // Existing lists and skipped legacy entries remain usable without a
+      // write. Valid initial creation/migration must commit before success.
+      if (!isV1 && !skipped && encoded !== this.raw) await this.writeVerified(encoded);
       return { ok: true, value: registry, ...(skipped ? {
-        notice: `有 ${skipped} 条服务器配置无效或重复，已跳过；有效条目可继续连接，原数据已保留。`,
+        notice: isV1
+          ? `有 ${skipped} 条服务器配置无效或重复，已跳过；有效条目可继续连接，原数据已保留。`
+          : '旧服务器地址无效，已跳过；可保存并连接新服务器，原数据已保留。',
       } : {}) };
     } catch (error) {
       this.loaded = false;
@@ -151,10 +163,17 @@ export class ServerRegistryRepository {
       await this.storage.setItem(key, this.raw);
       if (await this.storage.getItem(key) !== this.raw) throw new Error('原数据备份校验失败');
     }
+    // Preserve a damaged compatibility-only value before creating the list;
+    // a later connection may replace that key with its active-server mirror.
+    if (this.legacyRaw !== null && this.preserveRawOnWrite) {
+      const key = `${SERVER_STORAGE_KEY}-damaged-legacy-url-backup-${createLocalId()}`;
+      await this.storage.setItem(key, this.legacyRaw);
+      if (await this.storage.getItem(key) !== this.legacyRaw) throw new Error('旧地址备份校验失败');
+    }
     // Keep a backup of migrations before overwriting the legacy payload.
     let version: unknown;
     try { version = this.raw && JSON.parse(this.raw)?.version; } catch { version = 1; }
-    if (this.raw && version !== 1) {
+    if (this.raw && version !== 1 && !this.preserveRawOnWrite) {
       const key = `${SERVER_STORAGE_KEY}-legacy-backup`;
       await this.storage.setItem(key, this.raw);
       if (await this.storage.getItem(key) !== this.raw) throw new Error('迁移备份校验失败');

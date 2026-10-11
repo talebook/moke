@@ -18,3 +18,17 @@ test('canonicalizes hostname/default ports and retains non-default ports', () =>
   assert.equal(normalizeServerAddress('http://BOOKS.example.com:80'), 'http://books.example.com');
   assert.equal(normalizeServerAddress('https://books.example.com:8443'), 'https://books.example.com:8443');
 });
+
+test('rejects persisted missing-value sentinels even with a scheme, port or root dot', () => {
+  for (const value of ['null', ' undefined ', 'NULL', 'http://null', 'https://undefined:8080/', 'null.:8080', 'http://%6eull']) {
+    assert.throws(() => normalizeServerAddress(value), /有效的服务器地址/);
+  }
+});
+
+test('retains valid single-label LAN hosts alongside localhost, IP and domain hosts', () => {
+  for (const [value, expected] of [
+    ['nas', 'http://nas'], [' BOOKS:8080/ ', 'http://books:8080'], ['https://home-library', 'https://home-library'],
+    ['localhost:3000', 'http://localhost:3000'], ['192.168.1.5:8080', 'http://192.168.1.5:8080'],
+    ['[::1]:8080', 'http://[::1]:8080'], ['books.local', 'http://books.local'],
+  ]) assert.equal(normalizeServerAddress(value), expected);
+});

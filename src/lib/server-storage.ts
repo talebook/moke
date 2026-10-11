@@ -1,6 +1,7 @@
 import { SERVER_STORAGE_KEY, ServerRegistryRepository, type RegistryStorage } from './server-registry.ts';
 import { safeGetLocalStorageItem } from './browser-storage.ts';
 import { createLocalId } from './random-id.ts';
+import { normalizeServerAddress } from './server-url.ts';
 
 /** Unlike the compatibility helpers, unavailable storage is an explicit failure. */
 export const browserServerStorage: RegistryStorage = {
@@ -70,6 +71,12 @@ export function createServerRepository(): ServerRegistryRepository {
 
 export function writeActiveServerMirror(url: string): void {
   try {
+    const previous = window.localStorage.getItem('moke_server_url');
+    if (previous !== null) {
+      // A tolerant legacy load may still need to back up this exact value.
+      // The optional runtime mirror must not erase it on disconnect/restart.
+      try { normalizeServerAddress(previous); } catch { return; }
+    }
     if (url) window.localStorage.setItem('moke_server_url', url);
     else window.localStorage.removeItem('moke_server_url');
   } catch { /* This compatibility mirror never determines the saved list. */ }

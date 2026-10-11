@@ -4,9 +4,11 @@ import { readFile, stat } from 'node:fs/promises';
 
 const root = path.resolve(process.argv[2] || 'out');
 const port = Number(process.env.MOKE_TAURI_PREVIEW_PORT || 31391);
-const mime = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.avif': 'image/avif', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.epub': 'application/epub+zip' };
+const mime = { '.html': 'text/html', '.txt': 'text/x-component', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.avif': 'image/avif', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.epub': 'application/epub+zip' };
 
 // Next static exports use route.html while native navigation keeps /route.
+// Exported .txt payloads are RSC responses; an unknown content type makes the
+// router fall back to replacing the document and loses the runtime connection.
 // Serve only the export root, without proxying any API or native operation.
 const server = http.createServer(async (request, response) => {
   try {

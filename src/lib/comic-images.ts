@@ -12,6 +12,7 @@ export function bindComicImages(
   load: (index: number) => Promise<Blob>,
   onError: (error: unknown) => void,
   onReady: () => void,
+  pageDimensions: readonly { width: number; height: number }[],
 ) {
   let active = true;
   let running = 0;
@@ -79,6 +80,14 @@ export function bindComicImages(
         const match = img.getAttribute('src')?.match(/#comic-(\d+)$/);
         if (!match) return;
         const index = Number(match[1]);
+        const dimensions = pageDimensions[index];
+        if (!dimensions || !Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height)
+          || dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width > 40000 || dimensions.height > 40000
+          || dimensions.width * dimensions.height > 40000000) return;
+        // Lazy SVG placeholders have no intrinsic dimensions until decoded.
+        // Reserve their manifest ratio before that happens, including after
+        // eviction. This does not override the reader's original-size attrs.
+        img.style.aspectRatio = `${dimensions.width} / ${dimensions.height}`;
         placeholders.set(index, img.getAttribute('src')!);
         images.set(img, index);
         observers.observe(img);

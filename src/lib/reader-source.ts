@@ -76,8 +76,9 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   }
 
   function retireReaderWindow(label: string): void {
-    // book:closed has no Moke book id. Only an already associated label can
-    // settle a request; an unknown delayed close cannot release a newer open.
+    // Close events can lack a Moke book id (Reader-owned/library books). Only
+    // an already associated label can settle a request; an unknown delayed
+    // close cannot release a newer open.
     if (pending?.label === label && !pending.ambiguous) {
       pending = null;
     }
