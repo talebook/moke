@@ -140,8 +140,26 @@ test('embedded reader stylesheet hosts remain available without extra hosts', ()
   ].sort());
 });
 
-test('moke_navigate is compiled and registered only for Android and OpenHarmony', () => {
+test('Moke host commands use exact window/platform ACL and document guards', () => {
   const source = readFileSync(join(repoRoot, 'src-tauri/src/lib.rs'), 'utf8');
+  const readerService = readFileSync(
+    join(repoRoot, 'readest/apps/readest-app/src/services/nativeAppService.ts'),
+    'utf8',
+  );
+  const capabilities = Object.fromEntries(
+    [
+      'default.json',
+      'reader.json',
+      'reader-mobile.json',
+      'reader-android-navigation.json',
+      'ohos.json',
+    ].map((name) => [
+      name,
+      JSON.parse(readFileSync(join(repoRoot, 'src-tauri/capabilities', name), 'utf8')),
+    ]),
+  );
+  const permissions = (name) => new Set(capabilities[name].permissions);
+
   assert.match(
     source,
     /#\[cfg\(any\(target_env = "ohos", target_os = "android"\)\)\]\s*#\[tauri::command\]\s*fn moke_navigate/,
@@ -150,4 +168,40 @@ test('moke_navigate is compiled and registered only for Android and OpenHarmony'
     source,
     /#\[cfg\(any\(target_env = "ohos", target_os = "android"\)\)\]\s*moke_navigate,/,
   );
+  assert.match(source, /fn require_moke_shell[\s\S]*is_moke_shell_path/);
+  assert.match(source, /fn moke_navigate[\s\S]*is_allowed_moke_navigation\(&source, &target\)/);
+  assert.match(
+    source,
+    /is_moke_shell_path\(source\.path\(\)\)[\s\S]*target\.path\(\) == "\/readest\/reader"/,
+  );
+  assert.match(
+    source,
+    /is_moke_reader_path\(source\.path\(\)\)[\s\S]*target\.path\(\) == "\/library" && target\.query\(\)\.is_none\(\)/,
+  );
+  assert.match(source, /target\.fragment\(\)\.is_some\(\)/);
+  assert.match(source, /fn schedule_moke_navigation[\s\S]*from_millis\(100\)/);
+
+  for (const command of [
+    'allow-moke-list-downloaded-books',
+    'allow-moke-get-download-directory',
+  ]) {
+    assert.ok(permissions('default.json').has(command));
+    assert.ok(permissions('reader-mobile.json').has(command));
+    assert.ok(permissions('ohos.json').has(command));
+    assert.ok(!permissions('reader.json').has(command));
+  }
+
+  assert.deepEqual(capabilities['reader-android-navigation.json'].platforms, ['android']);
+  assert.deepEqual(capabilities['reader-android-navigation.json'].windows, ['main']);
+  assert.deepEqual(capabilities['reader-android-navigation.json'].permissions, ['allow-moke-navigate']);
+  assert.ok(permissions('ohos.json').has('allow-moke-navigate'));
+  for (const name of ['default.json', 'reader.json', 'reader-mobile.json']) {
+    assert.ok(!permissions(name).has('allow-moke-navigate'));
+  }
+
+  for (const capability of Object.values(capabilities)) {
+    assert.ok(!capability.windows.includes('*'));
+    assert.ok(!new Set(capability.permissions).has('allow-set-webview-info'));
+  }
+  assert.match(readerService, /if \(!window\.__MOKE_EMBEDDED\)[\s\S]*invoke\('set_webview_info'/);
 });

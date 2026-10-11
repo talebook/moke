@@ -11,6 +11,7 @@ const SERVER = 'https://books.example';
 const BOOK_ID = '42';
 const REVISION = 'abc-123';
 const SOURCE = `${SERVER}/read/resource/${BOOK_ID}.epub?revision=${REVISION}`;
+const LEGACY_SOURCE = `${SERVER}/api/book/${BOOK_ID}.epub`;
 const BOOTSTRAP = `${SERVER}/api/book/${BOOK_ID}/reader-bootstrap?engine=readest`;
 
 function fakeResponse({
@@ -49,10 +50,10 @@ function bootstrapResponse(payload = bootstrapPayload()) {
   return fakeResponse({ url: BOOTSTRAP, body: JSON.stringify(payload) });
 }
 
-function headResponse(overrides = {}) {
+function headResponse(overrides = {}, url = SOURCE, contentType = 'application/epub+zip') {
   return fakeResponse({
-    url: SOURCE,
-    contentType: 'application/epub+zip',
+    url,
+    contentType,
     headers: {
       'content-length': '10485760',
       'accept-ranges': 'bytes',
@@ -62,11 +63,34 @@ function headResponse(overrides = {}) {
   });
 }
 
-test('online source bootstrap is strict and preflights without downloading a body', async () => {
+function rangeResponse({
+  status = 206,
+  headers = {},
+  body = new Uint8Array([0x50]),
+  url = SOURCE,
+  contentType = 'application/epub+zip',
+} = {}) {
+  return fakeResponse({
+    status,
+    url,
+    contentType,
+    headers: {
+      'content-length': '1',
+      'content-range': 'bytes 0-0/10485760',
+      etag: '"epub-one"',
+      ...headers,
+    },
+    body,
+  });
+}
+
+test('online source bootstrap is strict and proves Range with only one body byte', async () => {
   const calls = [];
   const request = async (url, init) => {
     calls.push({ url, init });
-    return calls.length === 1 ? bootstrapResponse() : headResponse();
+    if (calls.length === 1) return bootstrapResponse();
+    if (init?.method === 'HEAD') return headResponse();
+    return rangeResponse();
   };
 
   const source = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
@@ -79,7 +103,7 @@ test('online source bootstrap is strict and preflights without downloading a bod
     etag: '"epub-one"',
     size: 10485760,
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].url, BOOTSTRAP);
   assert.equal(calls[0].init.redirect, 'manual');
   assert.equal(calls[0].init.maxRedirections, 0);
@@ -87,6 +111,9 @@ test('online source bootstrap is strict and preflights without downloading a bod
   assert.equal(calls[1].url, SOURCE);
   assert.equal(calls[1].init.method, 'HEAD');
   assert.equal(calls[1].init.headers['Accept-Encoding'], 'identity');
+  assert.equal(calls[2].url, SOURCE);
+  assert.equal(calls[2].init.method, 'GET');
+  assert.equal(calls[2].init.headers.Range, 'bytes=0-0');
 });
 
 test('bootstrap cannot authorize a different origin, book, path, query or MIME', async () => {
@@ -105,6 +132,26 @@ test('bootstrap cannot authorize a different origin, book, path, query or MIME',
       resolveTalebookOnlineSource(async () => bootstrapResponse(payload), SERVER, BOOK_ID),
       (error) => error instanceof OnlineReadingError && error.code === 'online.response_invalid',
     );
+  }
+});
+
+test('persisted equivalent origin spellings are canonicalized before preflight', async () => {
+  for (const serverUrl of [
+    `${SERVER}/`,
+    `${SERVER}///`,
+    ' HTTPS://BOOKS.EXAMPLE:443/ ',
+  ]) {
+    let call = 0;
+    const source = await resolveTalebookOnlineSource(async (url, init) => {
+      call += 1;
+      if (call === 1) {
+        assert.equal(url, BOOTSTRAP);
+        return bootstrapResponse();
+      }
+      if (init?.method === 'HEAD') return headResponse();
+      return rangeResponse();
+    }, serverUrl, ` ${BOOK_ID} `);
+    assert.equal(source.url, SOURCE);
   }
 });
 
@@ -130,41 +177,113 @@ test('redirects and invalid current server origins fail closed', async () => {
   ]) {
     await assert.rejects(
       resolveTalebookOnlineSource(async () => bootstrapResponse(), invalidServer, BOOK_ID),
-      (error) => error instanceof OnlineReadingError && error.code === 'online.response_invalid',
+      (error) =>
+        error instanceof OnlineReadingError &&
+        error.code === 'online.response_invalid' &&
+        error.stage === 'server-url',
     );
   }
 });
 
-test('old servers and permission errors produce actionable stable errors', async () => {
-  await assert.rejects(
-    resolveTalebookOnlineSource(
-      async () => fakeResponse({ status: 404, url: BOOTSTRAP, body: 'missing' }),
-      SERVER,
-      BOOK_ID,
-    ),
-    (error) => error instanceof OnlineReadingError && error.code === 'online.server_unsupported',
-  );
+test('pre-bootstrap Talebook falls back to its fixed ranged EPUB route', async () => {
+  const calls = [];
+  const request = async (url, init) => {
+    calls.push({ url, init });
+    if (url === BOOTSTRAP) {
+      return fakeResponse({ status: 404, url: BOOTSTRAP, contentType: 'text/html', body: 'missing' });
+    }
+    if (init?.method === 'HEAD') {
+      return headResponse({}, LEGACY_SOURCE, 'application/octet-stream');
+    }
+    return rangeResponse({ url: LEGACY_SOURCE, contentType: 'application/octet-stream' });
+  };
+
+  const source = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
+  assert.deepEqual(source, {
+    kind: 'talebook-online',
+    url: LEGACY_SOURCE,
+    format: 'epub',
+    mimeType: 'application/epub+zip',
+    revision: null,
+    etag: '"epub-one"',
+    size: 10485760,
+  });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].url, LEGACY_SOURCE);
+  assert.equal(calls[2].init.headers.Range, 'bytes=0-0');
+});
+
+test('legacy fallback never turns a Range-ignoring full response into online reading', async () => {
+  const bodyRead = () => {
+    throw new Error('full legacy body must not be read');
+  };
+  const fullResponse = rangeResponse({
+    status: 200,
+    url: LEGACY_SOURCE,
+    contentType: 'application/octet-stream',
+    headers: { 'content-length': '10485760' },
+    body: new Uint8Array([0x50]),
+  });
+  Object.defineProperty(fullResponse, 'arrayBuffer', { value: bodyRead });
+  let call = 0;
 
   await assert.rejects(
-    resolveTalebookOnlineSource(
-      async () => fakeResponse({
-        status: 403,
-        url: BOOTSTRAP,
-        body: JSON.stringify({ err: 'user.no_permission' }),
-      }),
-      SERVER,
-      BOOK_ID,
-    ),
-    (error) => error instanceof OnlineReadingError && error.code === 'online.permission_denied',
+    resolveTalebookOnlineSource(async () => {
+      call += 1;
+      if (call === 1) {
+        return fakeResponse({ status: 404, url: BOOTSTRAP, contentType: 'text/html' });
+      }
+      if (call === 2) return headResponse({}, LEGACY_SOURCE, 'application/octet-stream');
+      return fullResponse;
+    }, SERVER, BOOK_ID),
+    (error) => error instanceof OnlineReadingError && error.code === 'online.range_unsupported',
   );
+  assert.equal(call, 3);
+});
+
+test('structured bootstrap and permission errors do not downgrade to the download route', async () => {
+  for (const [status, body, code] of [
+    [404, { err: 'book.not_found' }, 'online.not_found'],
+    [403, { err: 'user.no_permission' }, 'online.permission_denied'],
+  ]) {
+    let calls = 0;
+    await assert.rejects(
+      resolveTalebookOnlineSource(
+        async () => {
+          calls += 1;
+          return fakeResponse({ status, url: BOOTSTRAP, body: JSON.stringify(body) });
+        },
+        SERVER,
+        BOOK_ID,
+      ),
+      (error) => error instanceof OnlineReadingError && error.code === code,
+    );
+    assert.equal(calls, 1);
+  }
 
   assert.match(onlineReadingErrorMessage(new OnlineReadingError('online.server_unsupported')), /更新服务器|下载后阅读/);
   assert.match(onlineReadingErrorMessage(new OnlineReadingError('online.permission_denied')), /权限|下载/);
 });
 
-test('preflight requires exact EPUB MIME, Range, size, ETag and stable URL', async () => {
+test('HEAD differences are tolerated only when the real Range probe is valid', async () => {
+  for (const head of [
+    headResponse({ 'accept-ranges': 'none' }),
+    fakeResponse({ status: 405, url: SOURCE, contentType: 'text/plain' }),
+  ]) {
+    let call = 0;
+    const source = await resolveTalebookOnlineSource(async () => {
+      call += 1;
+      if (call === 1) return bootstrapResponse();
+      if (call === 2) return head;
+      return rangeResponse();
+    }, SERVER, BOOK_ID);
+    assert.equal(source.size, 10485760);
+    assert.equal(source.etag, '"epub-one"');
+  }
+});
+
+test('preflight rejects invalid HEAD metadata before opening Reader', async () => {
   const cases = [
-    [headResponse({ 'accept-ranges': 'none' }), 'online.range_unsupported'],
     [headResponse({ 'content-length': '0' }), 'online.response_invalid'],
     [headResponse({ etag: '' }), 'online.response_invalid'],
     [headResponse({ 'content-encoding': 'gzip' }), 'online.response_invalid'],
@@ -181,6 +300,29 @@ test('preflight requires exact EPUB MIME, Range, size, ETag and stable URL', asy
   }
 });
 
+test('preflight rejects upstream 200, 416 and malformed 206 range responses', async () => {
+  const cases = [
+    [rangeResponse({ status: 200, body: new Uint8Array(10485760) }), 'online.range_unsupported'],
+    [rangeResponse({ status: 416, headers: { 'content-range': 'bytes */10485760' }, body: '' }), 'online.resource_changed'],
+    [rangeResponse({ headers: { 'content-range': 'bytes 1-1/10485760' } }), 'online.response_invalid'],
+    [rangeResponse({ headers: { 'content-length': '2' } }), 'online.response_invalid'],
+    [rangeResponse({ headers: { etag: '"epub-two"' } }), 'online.resource_changed'],
+  ];
+
+  for (const [probe, code] of cases) {
+    let call = 0;
+    await assert.rejects(
+      resolveTalebookOnlineSource(async () => {
+        call += 1;
+        if (call === 1) return bootstrapResponse();
+        if (call === 2) return headResponse();
+        return probe;
+      }, SERVER, BOOK_ID),
+      (error) => error instanceof OnlineReadingError && error.code === code,
+    );
+  }
+});
+
 test('aborted bootstrap and network failures stay retryable without leaking raw errors', async () => {
   await assert.rejects(
     resolveTalebookOnlineSource(async () => {
@@ -189,4 +331,149 @@ test('aborted bootstrap and network failures stay retryable without leaking raw 
     (error) => error instanceof OnlineReadingError && error.code === 'online.network' && !error.message.includes('password'),
   );
   assert.doesNotMatch(onlineReadingErrorMessage(new Error('secret-token')), /secret-token/);
+});
+
+test('online preflight retries a transient gateway failure and revalidates all metadata', async () => {
+  let attempts = 0;
+  const request = async (url, init) => {
+    if (url === BOOTSTRAP) {
+      attempts += 1;
+      if (attempts === 1) return fakeResponse({ url, status: 503 });
+      return bootstrapResponse();
+    }
+    if (init.method === 'HEAD') return headResponse();
+    return fakeResponse({ url: SOURCE, status: 206, contentType: 'application/epub+zip',
+      headers: { 'content-length': '1', 'content-range': 'bytes 0-0/10485760', etag: '"epub-one"' },
+      body: new Uint8Array([0]),
+    });
+  };
+  const result = await resolveTalebookOnlineSource(request, SERVER, BOOK_ID);
+  assert.equal(result.url, SOURCE);
+  assert.equal(attempts, 2);
+});
+
+test('cancelling an online preflight prevents another attempt', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const pending = resolveTalebookOnlineSource(async () => {
+    requests += 1;
+    controller.abort();
+    throw new TypeError('network');
+  }, SERVER, BOOK_ID, controller.signal);
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(requests, 1);
+});
+
+for (const [failedStage, expectedCalls] of [['bootstrap-status', 1], ['head-status', 2], ['range-status', 3]]) {
+  for (const status of [401, 302, 307]) {
+    test(`auth diagnostics preserve ${failedStage} HTTP ${status} without retry or downgrade`, async () => {
+      let calls = 0;
+      const request = async (url, init) => {
+        calls += 1;
+        if (calls === expectedCalls) return fakeResponse({
+          status, url, contentType: 'text/html',
+          headers: { location: 'https://auth.example/login?token=private-value' },
+          body: 'private-response-body',
+        });
+        if (url === BOOTSTRAP) return bootstrapResponse();
+        if (init?.method === 'HEAD') return headResponse();
+        throw new Error('must not continue after authorization failure');
+      };
+      await assert.rejects(resolveTalebookOnlineSource(request, SERVER, BOOK_ID), (error) => {
+        const expectedCode = status === 401 ? 'online.auth_required' : 'online.response_invalid';
+        assert.equal(error.code, expectedCode);
+        assert.equal(error.stage, failedStage);
+        assert.equal(error.status, status);
+        assert.equal(error.message, `${expectedCode}:${failedStage}:http-${status}`);
+        assert.equal(error.stack.includes('private-'), false);
+        assert.equal(error.stack.includes('auth.example'), false);
+        return true;
+      });
+      assert.equal(calls, expectedCalls);
+    });
+  }
+}
+
+test('HTTP 200 login envelope retains bootstrap body stage and cannot downgrade', async () => {
+  let calls = 0;
+  await assert.rejects(resolveTalebookOnlineSource(async () => {
+    calls += 1;
+    return bootstrapResponse({ err: 'user.need_login', msg: 'private-response-body' });
+  }, SERVER, BOOK_ID), (error) => {
+    assert.equal(error.message, 'online.auth_required:bootstrap-body:http-200');
+    return true;
+  });
+  assert.equal(calls, 1);
+});
+
+for (const status of [301, 308]) {
+  for (const legacy of [false, true]) {
+    test(`one HTTP ${status} HTTPS upgrade resolves ${legacy ? 'legacy' : 'modern'} source`, async () => {
+      const httpServer = SERVER.replace('https:', 'http:');
+      const httpBootstrap = BOOTSTRAP.replace('https:', 'http:');
+      const resource = legacy ? LEGACY_SOURCE : SOURCE;
+      const calls = [];
+      const result = await resolveTalebookOnlineSource(async (url, init) => {
+        calls.push({ url, init });
+        if (url === httpBootstrap) return fakeResponse({ status, url, headers: { location: BOOTSTRAP } });
+        if (url === BOOTSTRAP) return legacy
+          ? fakeResponse({ status: 404, url, contentType: 'text/html', body: 'missing' })
+          : bootstrapResponse();
+        assert.equal(url, resource);
+        return init.method === 'HEAD' ? headResponse({}, resource) : rangeResponse({ url: resource });
+      }, `${httpServer}:80`, BOOK_ID);
+      assert.equal(result.url, resource);
+      assert.equal(calls.length, 4);
+      assert.equal(calls.every(({ init }) => init.maxRedirections === 0 && init.redirect === 'manual'), true);
+      assert.equal(calls[3].init.headers.Range, 'bytes=0-0');
+    });
+  }
+}
+
+for (const target of [
+  'https://evil.example/api/book/42/reader-bootstrap?engine=readest',
+  `${SERVER}:8443/api/book/42/reader-bootstrap?engine=readest`,
+  `${SERVER}/login?engine=readest`,
+  `${BOOTSTRAP}&token=private-value`,
+  `${BOOTSTRAP}#fragment`,
+  BOOTSTRAP.replace('https://', 'https://user:private-value@'),
+  BOOTSTRAP.replace('https:', 'http:'),
+  '',
+]) {
+  test(`unverified bootstrap upgrade stays blocked (${target.includes('private') ? 'credential case' : target})`, async () => {
+    let calls = 0;
+    await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+      calls += 1;
+      return fakeResponse({ status: 308, url, headers: { location: target } });
+    }, SERVER.replace('https:', 'http:'), BOOK_ID), (error) => {
+      assert.equal(error.code, 'online.response_invalid');
+      assert.equal(error.status, 308);
+      assert.equal(error.message.includes('private-value'), false);
+      assert.equal(onlineReadingErrorMessage(error).includes('登录状态已失效'), false);
+      return true;
+    });
+    assert.equal(calls, 1);
+  });
+}
+
+for (const secondStatus of [308, 401, 403]) {
+  test(`HTTPS upgrade cannot follow another redirect or bypass HTTP ${secondStatus}`, async () => {
+    let calls = 0;
+    await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+      calls += 1;
+      return fakeResponse({ status: calls === 1 ? 308 : secondStatus, url, headers: { location: BOOTSTRAP } });
+    }, SERVER.replace('https:', 'http:'), BOOK_ID), (error) => error.status === secondStatus);
+    assert.equal(calls, 2);
+  });
+}
+
+test('cancellation after the redirect never sends the HTTPS follow-up', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  await assert.rejects(resolveTalebookOnlineSource(async (url) => {
+    calls += 1;
+    controller.abort();
+    return fakeResponse({ status: 308, url, headers: { location: BOOTSTRAP } });
+  }, SERVER.replace('https:', 'http:'), BOOK_ID, controller.signal), { name: 'AbortError' });
+  assert.equal(calls, 1);
 });

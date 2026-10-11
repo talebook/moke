@@ -8,9 +8,12 @@ test('book detail exposes online and offline actions separately', () => {
   assert.match(detail, /在线阅读/);
   assert.match(detail, /下载后阅读/);
   assert.match(detail, /离线阅读/);
-  assert.match(detail, /resolveTalebookOnlineSource\(request, serverUrl, book\.id/);
+  assert.match(detail, /resolveTalebookOnlineSource\(\s*request,\s*serverUrl,\s*book\.id/);
+  assert.match(detail, /isTauriApp \? tauriRangeFetch : request/);
   assert.match(detail, /filePath: source\.url/);
-  assert.match(detail, /mokeSourceServerUrl: serverUrl/);
+  assert.match(detail, /const sourceServerUrl = new URL\(source\.url\)\.origin/);
+  assert.match(detail, /sourceServerUrl,/);
+  assert.match(detail, /mokeSourceServerUrl: sourceServerUrl/);
 });
 
 test('online opening does not enter the offline download manager', () => {
@@ -24,7 +27,7 @@ test('online opening does not enter the offline download manager', () => {
 
 test('primary actions keep the original width while download is a fixed icon button', () => {
   const groupStart = detail.indexOf('data-testid="book-primary-action-group"');
-  const groupEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', groupStart);
+  const groupEnd = detail.indexOf('{!offlineMode && !canOpenPrimary &&', groupStart);
   assert.ok(groupStart >= 0 && groupEnd > groupStart);
   const group = detail.slice(groupStart, groupEnd);
 
@@ -45,7 +48,7 @@ test('primary actions keep the original width while download is a fixed icon but
 
 test('offline mode exposes only the local primary action', () => {
   const actionsStart = detail.indexOf('{offlineMode ? (');
-  const actionsEnd = detail.indexOf('{!offlineMode && !onlineFormat &&', actionsStart);
+  const actionsEnd = detail.indexOf('{!offlineMode && !canOpenPrimary &&', actionsStart);
   assert.ok(actionsStart >= 0 && actionsEnd > actionsStart);
   const actions = detail.slice(actionsStart, actionsEnd);
 

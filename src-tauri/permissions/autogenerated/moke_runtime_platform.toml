@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-runtime-platform"
+description = "Enables the moke_runtime_platform command without any pre-configured scope."
+commands.allow = ["moke_runtime_platform"]
+
+[[permission]]
+identifier = "deny-moke-runtime-platform"
+description = "Denies the moke_runtime_platform command without any pre-configured scope."
+commands.deny = ["moke_runtime_platform"]

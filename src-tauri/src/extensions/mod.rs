@@ -3,15 +3,16 @@
 //! 负责注册 Tauri commands、管理全局状态和启动 API 服务器。
 
 mod api_server;
+mod deadline_stream;
 mod discovery;
 mod events;
+mod http_transport;
 mod installer;
 mod lifecycle;
 mod package_path;
 mod permissions;
 mod security;
 mod storage;
-mod transport;
 mod trust;
 
 use std::collections::HashMap;

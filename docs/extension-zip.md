@@ -63,7 +63,7 @@ ZIP 根目录直接包含 `manifest.json`、可选 `signature.json`、后端纯�
 
 旧 manifest 不自动获得额外权限。缺权限响应为 403 / PERMISSION_REQUIRED，说明需更新 manifest、提升版本、重签、导入、重新确认。token 只通过后端环境传递，不提供给 iframe。
 
-REST/WS 使用本次会话 OS 分配的 loopback 端口，保持 Host/Origin/token 门禁。REST 在解析前限制 48 连接，16 KiB/64 请求头、1 MiB body、从接受连接起 5 秒总读取截止时间；拒绝后真正 shutdown，不排空 body。每连接一次请求；要求 HTTP/1.1，拒绝 Transfer-Encoding 和 Expect，请发送 Content-Length。SDK 的 JSON fetch 和常规 HTTP 客户端兼容，手动 chunked 流上传应改为有界 JSON。WS 最多 8 个待认证连接、32 客户端，HTTP upgrade 和 hello 共用 5 秒绝对截止时间与 128 KiB 总读取预算。
+REST/WS 使用本次会话 OS 分配的 loopback 端口，保持 Host/Origin/token 门禁。REST 在解析前限制 32 连接，16 KiB/64 请求头、1 MiB body、从接受连接起 5 秒总读取截止时间；拒绝后关闭连接，不排空 body。每连接一次请求，拒绝 Transfer-Encoding，POST/PUT 必须发送 Content-Length；Expect: 100-continue 只在认证通过且长度合法后响应。SDK 的 JSON fetch 和常规 HTTP 客户端兼容，手动 chunked 流上传应改为有界 JSON。WS 最多 8 个待认证连接、32 客户端，HTTP upgrade 和 hello 共用 5 秒绝对截止时间与 128 KiB 总读取预算。
 
 ## 安全保障边界
 

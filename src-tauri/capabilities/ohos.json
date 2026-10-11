@@ -247,6 +247,16 @@
     "allow-localsend-cancel-receive",
     "allow-localsend-send-files",
     "allow-localsend-cancel-send",
-    "allow-ext-reader-event"
+    "allow-ext-reader-event",
+    "allow-moke-runtime-platform",
+    "allow-moke-navigate",
+    "allow-moke-record-downloaded-book",
+    "allow-moke-delete-downloaded-book-file",
+    "allow-moke-open-downloaded-book",
+    "allow-moke-remove-downloaded-book",
+    "allow-moke-reset-download-directory",
+    "allow-moke-get-download-directory",
+    "allow-moke-download-storage-stats",
+    "allow-moke-list-downloaded-books"
   ]
 }

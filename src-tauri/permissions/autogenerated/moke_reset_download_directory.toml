@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-reset-download-directory"
+description = "Enables the moke_reset_download_directory command without any pre-configured scope."
+commands.allow = ["moke_reset_download_directory"]
+
+[[permission]]
+identifier = "deny-moke-reset-download-directory"
+description = "Denies the moke_reset_download_directory command without any pre-configured scope."
+commands.deny = ["moke_reset_download_directory"]

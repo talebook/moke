@@ -10,6 +10,7 @@ export async function startManagedOfflineBookDownload(input: {
   serverUrl: string;
   bookId: string;
   title: string;
+  media_type?: string;
   author?: string;
   coverUrl?: string;
   inShelf?: boolean;

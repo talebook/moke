@@ -46,7 +46,7 @@ test('host transport uses session ports and concrete validated CORS origins', ()
     earlyBodyLimit >= 0 && earlyBodyLimit < authCall,
     'declared oversized bodies must be rejected before authentication',
   );
-  assert.match(apiServer, /MAX_CONCURRENT_REQUESTS/);
+  assert.match(apiServer, /http_transport::serve/);
   assert.match(apiServer, /MAX_REQUEST_BODY_BYTES/);
 
   const events = read('src-tauri/src/extensions/events.rs');

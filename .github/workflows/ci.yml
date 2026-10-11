@@ -164,7 +164,7 @@ jobs:
           exit 1
 
       - name: Run browser smoke tests
-        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs --workers=1
+        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs tests/sample-book.spec.mjs --workers=1
 
       - name: Upload responsive screenshots and server log
         if: always()

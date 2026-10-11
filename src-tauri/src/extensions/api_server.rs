@@ -4,10 +4,9 @@
 //! 监听 `127.0.0.1`（仅本地可达），通过 token 认证拓展身份。
 
 use super::security::ValidatedOrigin;
-use super::EnabledExtension;
+use super::{http_transport, EnabledExtension};
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -18,10 +17,8 @@ use tauri::Manager;
 pub(crate) const MAX_COMMAND_WAIT_MS: u64 = 30_000;
 /// 同时阻塞等待阅读器命令回执的请求上限，避免耗尽 API 请求线程。
 pub(crate) const MAX_CONCURRENT_COMMAND_WAITS: usize = 32;
-/// Maximum number of HTTP handlers, including handlers waiting for reader receipts.
-pub(crate) const MAX_CONCURRENT_REQUESTS: usize = 48;
 /// Requests larger than this are rejected before their bodies are read.
-pub(crate) const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_REQUEST_BODY_BYTES: usize = http_transport::MAX_BODY_BYTES;
 const RETIRED_COMMAND_TTL: Duration = Duration::from_secs(60);
 const INTERNAL_REQUEST_ID_PREFIX: &str = "moke-pending:";
 
@@ -313,80 +310,16 @@ pub struct ServerContext {
 // 启动
 // ---------------------------------------------------------------------------
 
-#[derive(Default)]
-struct RequestLimiter {
-    active: AtomicUsize,
-}
-
-struct RequestPermit {
-    limiter: Arc<RequestLimiter>,
-}
-
-impl RequestLimiter {
-    fn try_acquire(self: &Arc<Self>) -> Option<RequestPermit> {
-        let mut active = self.active.load(Ordering::Acquire);
-        loop {
-            if active >= MAX_CONCURRENT_REQUESTS {
-                return None;
-            }
-            match self.active.compare_exchange_weak(
-                active,
-                active + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    return Some(RequestPermit {
-                        limiter: self.clone(),
-                    })
-                }
-                Err(current) => active = current,
-            }
-        }
-    }
-}
-
-impl Drop for RequestPermit {
-    fn drop(&mut self) {
-        self.limiter.active.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-fn dispatch_connection(
-    stream: std::net::TcpStream,
-    limiter: &Arc<RequestLimiter>,
-    handler: impl FnOnce(std::net::TcpStream) + Send + 'static,
-) -> Option<std::thread::JoinHandle<()>> {
-    // Acquire before parsing any bytes or creating a worker.
-    let Some(permit) = limiter.try_acquire() else {
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return None;
-    };
-    Some(std::thread::spawn(move || {
-        let _permit = permit;
-        handler(stream);
-    }))
-}
-
-/// 在独立线程中启动 REST API Server。`start_port == 0` 让操作系统为本次
-/// Moke 会话分配随机回环端口；非零值仅用于兼容测试和诊断。
+/// OS-assigned session port; admission and absolute read deadlines precede parsing.
 pub fn start(ctx: Arc<ServerContext>, start_port: u16) -> u16 {
     let listener = std::net::TcpListener::bind(("127.0.0.1", start_port))
         .unwrap_or_else(|e| panic!("无法启动 API Server: {e}"));
     let actual_port = listener.local_addr().unwrap().port();
-    let limiter = Arc::new(RequestLimiter::default());
     std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let ctx = ctx.clone();
-            dispatch_connection(stream, &limiter, move |stream| {
-                match super::transport::Request::read_headers(stream) {
-                    Ok(request) => handle_request(request, ctx, actual_port),
-                    Err((stream, status)) => super::transport::reject(stream, status),
-                }
-            });
-        }
+        http_transport::serve(listener, move |request| {
+            handle_request(request, ctx.clone(), actual_port)
+        });
     });
-
     actual_port
 }
 
@@ -399,7 +332,7 @@ fn header(name: &str, value: &str) -> tiny_http::Header {
 }
 
 fn single_header(
-    request: &super::transport::Request,
+    request: &http_transport::Request,
     name: &str,
 ) -> Result<Option<String>, ApiError> {
     let values: Vec<String> = request
@@ -433,7 +366,7 @@ fn with_security_headers(
 }
 
 fn respond_json(
-    request: super::transport::Request,
+    request: http_transport::Request,
     status: u16,
     body: String,
     cors_origin: Option<&str>,
@@ -445,7 +378,7 @@ fn respond_json(
     let _ = request.respond(response);
 }
 
-fn respond_error(request: super::transport::Request, error: ApiError, cors_origin: Option<&str>) {
+fn respond_error(request: http_transport::Request, error: ApiError, cors_origin: Option<&str>) {
     let body = serde_json::json!({
         "code": error.code,
         "error": error.message,
@@ -477,7 +410,7 @@ fn validate_requested_headers(value: Option<&str>) -> Result<(), ApiError> {
 }
 
 fn validate_preflight(
-    request: &super::transport::Request,
+    request: &http_transport::Request,
     ctx: &ServerContext,
     actual_port: u16,
 ) -> Result<String, ApiError> {
@@ -520,7 +453,7 @@ fn validate_preflight(
     Ok(value)
 }
 
-fn validate_body_length(request: &super::transport::Request) -> Result<(), ApiError> {
+fn validate_body_length(request: &http_transport::Request) -> Result<(), ApiError> {
     if request
         .body_length()
         .is_some_and(|length| length > MAX_REQUEST_BODY_BYTES)
@@ -531,12 +464,32 @@ fn validate_body_length(request: &super::transport::Request) -> Result<(), ApiEr
     }
 }
 
-fn read_request_body(request: &mut super::transport::Request) -> Result<String, ApiError> {
+fn validate_declared_body_length(
+    method: &tiny_http::Method,
+    declared: Option<usize>,
+) -> Result<Option<usize>, ApiError> {
+    if matches!(method, tiny_http::Method::Post | tiny_http::Method::Put) && declared.is_none() {
+        return Err(ApiError {
+            status: 411,
+            code: "LENGTH_REQUIRED",
+            message: "POST/PUT 请求必须提供 Content-Length".into(),
+        });
+    }
+    if declared.is_some_and(|length| length > MAX_REQUEST_BODY_BYTES) {
+        return Err(ApiError::payload_too_large());
+    }
+    Ok(declared)
+}
+
+fn read_request_body(request: &mut http_transport::Request) -> Result<String, ApiError> {
     validate_body_length(request)?;
+    let declared =
+        validate_declared_body_length(request.method(), request.body_length())?.unwrap_or(0);
 
     let mut bytes = Vec::new();
     request
         .as_reader()
+        .map_err(|error| ApiError::bad_request("BODY_READ_FAILED", error.to_string()))?
         .take((MAX_REQUEST_BODY_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|error| match error.kind() {
@@ -548,15 +501,14 @@ fn read_request_body(request: &mut super::transport::Request) -> Result<String, 
     if bytes.len() > MAX_REQUEST_BODY_BYTES {
         return Err(ApiError::payload_too_large());
     }
+    if bytes.len() != declared {
+        return Err(ApiError::bad_request("INVALID_BODY", "请求体未完整发送"));
+    }
     String::from_utf8(bytes)
         .map_err(|_| ApiError::bad_request("INVALID_BODY_ENCODING", "请求体必须是 UTF-8"))
 }
 
-fn handle_request(
-    mut request: super::transport::Request,
-    ctx: Arc<ServerContext>,
-    actual_port: u16,
-) {
+fn handle_request(mut request: http_transport::Request, ctx: Arc<ServerContext>, actual_port: u16) {
     let url = request.url().to_string();
     let method = request.method().clone();
 
@@ -1130,66 +1082,23 @@ mod tests {
     }
 
     #[test]
-    fn raw_socket_limit_precedes_header_parsing_and_recovers() {
-        use std::io::{Read, Write};
-        use std::net::{TcpListener, TcpStream};
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let limiter = Arc::new(RequestLimiter::default());
-        let mut clients = Vec::new();
-        let mut workers = Vec::new();
-        let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-        for _ in 0..MAX_CONCURRENT_REQUESTS {
-            clients.push(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
-            let stream = listener.accept().unwrap().0;
-            let gate = gate.clone();
-            workers.push(
-                dispatch_connection(stream, &limiter, move |stream| {
-                    let (lock, condition) = &*gate;
-                    let _guard = condition
-                        .wait_while(lock.lock().unwrap(), |released| !*released)
-                        .unwrap();
-                    drop(stream);
-                })
-                .unwrap(),
-            );
-        }
-        let mut rejected = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        assert!(
-            dispatch_connection(listener.accept().unwrap().0, &limiter, |_| panic!(
-                "must not parse"
-            ))
-            .is_none()
+    fn request_body_length_is_required_and_bounded_before_reading() {
+        assert_eq!(
+            validate_declared_body_length(&tiny_http::Method::Get, None).unwrap(),
+            None
         );
-        rejected
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        assert!(matches!(rejected.read(&mut [0]), Ok(0) | Err(_)));
-        {
-            let (lock, condition) = &*gate;
-            *lock.lock().unwrap() = true;
-            condition.notify_all();
-        }
-        for worker in workers {
-            worker.join().unwrap();
-        }
-        assert_eq!(limiter.active.load(Ordering::Acquire), 0);
-        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let worker = dispatch_connection(listener.accept().unwrap().0, &limiter, |stream| {
-            let request = super::super::transport::Request::read_headers(stream)
-                .ok()
-                .unwrap();
-            request
-                .respond(tiny_http::Response::from_string("ok"))
-                .unwrap();
-        })
-        .unwrap();
-        client
-            .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
-            .unwrap();
-        let mut response = String::new();
-        client.read_to_string(&mut response).unwrap();
-        assert!(response.ends_with("ok"));
-        worker.join().unwrap();
+        assert_eq!(
+            validate_declared_body_length(&tiny_http::Method::Post, Some(42)).unwrap(),
+            Some(42)
+        );
+        let missing = validate_declared_body_length(&tiny_http::Method::Post, None).unwrap_err();
+        assert_eq!(missing.status, 411);
+        let oversized = validate_declared_body_length(
+            &tiny_http::Method::Put,
+            Some(MAX_REQUEST_BODY_BYTES + 1),
+        )
+        .unwrap_err();
+        assert_eq!(oversized.status, 413);
     }
 
     #[test]
@@ -1555,14 +1464,6 @@ mod tests {
         let body_error = ApiError::payload_too_large();
         assert_eq!(body_error.status, 413);
         assert_eq!(body_error.code, "PAYLOAD_TOO_LARGE");
-
-        let limiter = Arc::new(RequestLimiter::default());
-        let permits: Vec<_> = (0..MAX_CONCURRENT_REQUESTS)
-            .map(|_| limiter.try_acquire().expect("capacity available"))
-            .collect();
-        assert!(limiter.try_acquire().is_none());
-        drop(permits);
-        assert!(limiter.try_acquire().is_some());
     }
 
     #[test]

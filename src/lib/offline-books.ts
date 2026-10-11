@@ -1,6 +1,8 @@
 'use client';
 
 import { debugLog } from './debug-log.ts';
+import { isSampleBook } from './sample-book-info.ts';
+import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
   hasEpubCentralDirectory,
   makeOfflineBookKey,
@@ -16,6 +18,7 @@ let databaseOwner: IDBFactory | undefined;
 let databasePromise: Promise<IDBDatabase> | undefined;
 
 export interface OfflineBookRecord {
+  media_type?: string;
   id: string;
   serverUrl: string;
   bookId: string;
@@ -33,6 +36,36 @@ export interface OfflineBookRecord {
   filePath?: string;
   relativePath?: string;
   storageRoot?: string;
+}
+
+interface OfflineMediaTypeRecord { id: string; media_type: string }
+
+// Metadata shares the existing keyPath store so old database versions need no
+// migration. It is never exposed as a downloaded book. Origin normalization
+// matches the native index's server identity (e.g. an explicit default port).
+function mediaTypeKey(serverUrl: string, bookId: string): string {
+  let server = serverUrl.replace(/\/+$/, '');
+  try { server = new URL(serverUrl).origin; } catch { /* legacy server value */ }
+  return `media-type::${makeOfflineBookKey(server, bookId)}`;
+}
+
+function isBookRecord(record: OfflineBookRecord | OfflineMediaTypeRecord): record is OfflineBookRecord {
+  return 'bookId' in record;
+}
+
+/** Refresh classification when an online detail is read, including old downloads. */
+export async function cacheOfflineMediaType(serverUrl: string, bookId: string, media_type?: string): Promise<void> {
+  if (!['comic', 'ebook', 'unknown'].includes(media_type || '')) return;
+  const database = await openDatabase();
+  const store = database.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME);
+  const records = await requestResult(store.getAll()) as (OfflineBookRecord | OfflineMediaTypeRecord)[];
+  const writes = [store.put({ id: mediaTypeKey(serverUrl, bookId), media_type })];
+  for (const record of records) {
+    if (isBookRecord(record) && sameServer(record.serverUrl, serverUrl) && record.bookId === bookId && record.media_type !== media_type) {
+      writes.push(store.put({ ...record, media_type }));
+    }
+  }
+  await Promise.all(writes.map(requestResult));
 }
 
 function formatFromRecord(record: Partial<OfflineBookRecord>): string {
@@ -99,14 +132,25 @@ async function getById(id: string): Promise<OfflineBookRecord | null> {
   return (await requestResult(transaction.objectStore(STORE_NAME).get(id))) ?? null;
 }
 
-async function putOfflineBookRecord(record: OfflineBookRecord): Promise<void> {
+async function putOfflineBookRecord(record: OfflineBookRecord): Promise<OfflineBookRecord> {
   const db = await openDatabase();
-  await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(record));
+  const store = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME);
+  // Read and merge inside the write transaction, after any slow native IPC.
+  // Both the returned value and disk cache must carry the latest classification.
+  const [latest, classification] = await Promise.all([
+    requestResult(store.get(record.id)) as Promise<OfflineBookRecord | undefined>,
+    requestResult(store.get(mediaTypeKey(record.serverUrl, record.bookId))) as Promise<OfflineMediaTypeRecord | undefined>,
+  ]);
+  const merged = { ...record, media_type: classification?.media_type ?? latest?.media_type ?? record.media_type };
+  await requestResult(store.put(merged));
+  return merged;
 }
 
 function sameServer(left: string, right: string): boolean {
+  if (left === right) return true;
   try {
-    return new URL(left).origin === new URL(right).origin;
+    const origin = new URL(left).origin;
+    return origin !== 'null' && origin === new URL(right).origin;
   } catch {
     return left.replace(/\/+$/, '') === right.replace(/\/+$/, '');
   }
@@ -118,7 +162,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
   const store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
   let records: OfflineBookRecord[];
   if (typeof store.getAll === 'function') {
-    records = await requestResult(store.getAll()) as OfflineBookRecord[];
+    records = (await requestResult(store.getAll()) as (OfflineBookRecord | OfflineMediaTypeRecord)[]).filter(isBookRecord);
   } else {
     records = [];
   }
@@ -127,7 +171,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
       const { invoke } = await import('@tauri-apps/api/core');
       const nativeRecords = await invoke<NativeOfflineBookRecord[]>('moke_list_downloaded_books');
       const indexedById = new Map(records.map((record) => [record.id, record]));
-      records = nativeRecords.map((nativeRecord) => {
+      records = await Promise.all(nativeRecords.map(async (nativeRecord) => {
         const indexed = indexedById.get(nativeRecord.id);
         const recovered: OfflineBookRecord = {
           ...indexed,
@@ -146,15 +190,17 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
           relativePath: nativeRecord.relativePath || indexed?.relativePath,
           storageRoot: nativeRecord.storageRoot || indexed?.storageRoot,
         };
-        void putOfflineBookRecord(recovered).catch(() => undefined);
-        return recovered;
-      });
+        try { return await putOfflineBookRecord(recovered); } catch (error) {
+          debugLog('warn', 'download', '原生离线书已恢复，但写回 WebView 记录失败', String(error));
+          return recovered;
+        }
+      }));
     } catch (error) {
       debugLog('warn', 'download', '读取原生离线书库失败，使用 WebView 索引', String(error));
     }
   }
   return records
-    .filter((record) => !serverUrl || sameServer(record.serverUrl, serverUrl))
+    .filter((record) => !serverUrl || sameServer(record.serverUrl, serverUrl) || isSampleBook(record))
     .map((record) => ({ ...record, format: formatFromRecord(record), size: record.size ?? record.blob?.size ?? 0 }))
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
@@ -178,7 +224,7 @@ export async function getOfflineBook(
       }
     } else {
       const records = await listOfflineBooks(serverUrl);
-      indexedRecord = records.find((record) => record.bookId === bookId)
+      indexedRecord = records.find((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))
         ?? await getById(makeOfflineBookKey(serverUrl, bookId));
     }
   } catch (error) {
@@ -222,7 +268,7 @@ export async function getOfflineBook(
       relativePath: nativeRecord.relativePath || indexedRecord?.relativePath,
       storageRoot: nativeRecord.storageRoot || indexedRecord?.storageRoot,
     };
-    try { await putOfflineBookRecord(recovered); } catch (error) {
+    try { return await putOfflineBookRecord(recovered); } catch (error) {
       debugLog('warn', 'download', '原生离线书已恢复，但写回 WebView 记录失败', String(error));
     }
     return recovered;
@@ -237,7 +283,7 @@ export async function setOfflineBookShelfState(
   bookId: string,
   inShelf: boolean,
 ): Promise<void> {
-  const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId);
+  const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
   for (const record of records) {
     const updated = { ...record, inShelf };
     await putOfflineBookRecord(updated);
@@ -334,6 +380,7 @@ async function removeStoredBookFile(record: OfflineBookRecord): Promise<void> {
 }
 
 export async function syncOfflineDownloadState(serverUrl: string, bookId: string, downloaded: boolean): Promise<void> {
+  if (isSampleBook({ serverUrl, bookId })) return;
   const { request } = await import('@/lib/api');
   const response = await request(`${serverUrl}/api/book/${bookId}/readstate`, {
     method: 'POST',
@@ -349,9 +396,25 @@ export async function deleteOfflineBook(
   bookId: string,
   format?: string,
 ): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
+  if (isSampleBook({ serverUrl, bookId })) {
+    return withSampleBookOperation(async () => {
+      // Also cover deletion through the library, not just developer settings.
+      // A successful deletion invalidates earlier imports across reloads.
+      invalidateSampleBookImports();
+      return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+    });
+  }
+  return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+}
+
+async function deleteOfflineBookUncoordinated(
+  serverUrl: string,
+  bookId: string,
+  format?: string,
+): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
   const records = format
     ? [await getOfflineBook(serverUrl, bookId, format)].filter(Boolean) as OfflineBookRecord[]
-    : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId);
+    : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
 
   for (const record of records) {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
@@ -369,7 +432,7 @@ export async function deleteOfflineBook(
   }
 
   // Only clear the server flag when no other local format remains.
-  if ((await listOfflineBooks(serverUrl)).some((record) => record.bookId === bookId)) return { remoteSynced: true };
+  if ((await listOfflineBooks(serverUrl)).some((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))) return { remoteSynced: true };
   try {
     await syncOfflineDownloadState(serverUrl, bookId, false);
     return { remoteSynced: true };
@@ -380,7 +443,7 @@ export async function deleteOfflineBook(
 
 export async function saveOfflineBook(input: {
   serverUrl: string; bookId: string; title: string; fileName: string; mimeType: string; blob: Blob;
-  format?: string; author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null;
+  media_type?: string; format?: string; author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null;
 }): Promise<void> {
   const fileName = sanitizeOfflineFileName(input.fileName);
   const format = normalizeOfflineFormat(input.format || fileName.split('.').pop() || 'epub');
@@ -403,6 +466,7 @@ export async function saveOfflineBook(input: {
     });
     return;
   }
+  await cacheOfflineMediaType(input.serverUrl, input.bookId, input.media_type);
   await commitOfflineBookRecord({ ...input, format, fileName, size: input.blob.size });
 }
 
@@ -560,9 +624,10 @@ export function shouldPreserveOfflinePartial(error: unknown, enabled?: boolean):
 
 export async function saveOfflineBookStream(input: {
   serverUrl: string; bookId: string; title: string; fileName: string; mimeType: string; format?: string;
-  author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnFailure?: boolean;
+  media_type?: string; author?: string; coverDataUrl?: string; inShelf?: boolean; sourceSignature?: string; downloadDirectory?: string | null; resume?: boolean; preservePartialOnFailure?: boolean;
   write: (writer: OfflineFileWriter) => Promise<string | void | { mimeType?: string; size?: number; sourceSignature?: string }>;
 }): Promise<void> {
+  await cacheOfflineMediaType(input.serverUrl, input.bookId, input.media_type);
   const fileName = sanitizeOfflineFileName(input.fileName);
   const format = normalizeOfflineFormat(input.format || fileName.split('.').pop() || 'epub');
   const previous = await getOfflineBook(input.serverUrl, input.bookId, format);
@@ -626,7 +691,7 @@ export async function saveOfflineBookStream(input: {
 
 async function commitOfflineBookRecord(input: {
   serverUrl: string; bookId: string; format: string; title: string; fileName: string; mimeType: string;
-  author?: string; coverDataUrl?: string; inShelf?: boolean; size?: number; blob?: Blob; updatedAt?: number; sourceSignature?: string; filePath?: string; relativePath?: string;
+  media_type?: string; author?: string; coverDataUrl?: string; inShelf?: boolean; size?: number; blob?: Blob; updatedAt?: number; sourceSignature?: string; filePath?: string; relativePath?: string;
   storageRoot?: string;
 }): Promise<void> {
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -636,6 +701,7 @@ async function commitOfflineBookRecord(input: {
     bookId: input.bookId,
     format: normalizeOfflineFormat(input.format),
     title: input.title,
+    media_type: input.media_type,
     author: input.author,
     coverDataUrl: input.coverDataUrl,
     inShelf: input.inShelf,

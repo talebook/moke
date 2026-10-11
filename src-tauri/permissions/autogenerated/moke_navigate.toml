@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-navigate"
+description = "Enables the moke_navigate command without any pre-configured scope."
+commands.allow = ["moke_navigate"]
+
+[[permission]]
+identifier = "deny-moke-navigate"
+description = "Denies the moke_navigate command without any pre-configured scope."
+commands.deny = ["moke_navigate"]

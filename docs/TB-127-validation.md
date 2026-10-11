@@ -104,3 +104,30 @@ Rust 回归覆盖有效签名/篡改/密钥轮换/降级、Node 签名 golden fi
 - 最终 DeepSec 0.2.0（来源 `fff031fc01fb36b95348214c8ee359f6ede8aa8b`），仓库根命令：`/opt/deepsec/fff031fc01fb36b95348214c8ee359f6ede8aa8b/venv/bin/deepsec shield scan . --layer l1,l2 --include-tests --format json --output -`。
 - 覆盖全仓 2457 文件（含测试及本地测试结果元数据），L1/L2，退出码 2；stderr 为空。候选路径已检查，无越出仓库的符号链接。43 条发现（16 critical / 20 high / 7 medium）的位置、规则及证据与调整前一致，处置沿用上表；本任务改动文件仍无 findings，全仓不能称安全通过。TSX 已覆盖，其余格式限制沿用前述说明。
 - stdout、stderr、退出码保留在 `.deepsec/`；脱敏报告及空状态桌面/窄屏、已安装列表截图附在 issue 回复中。未启用远程 LLM、L3 或 Spear。
+
+## 2026-10-11 PR #131 冲突整合
+
+开发者明确要求解决 #131 冲突，并将依赖 PR 的改动收拢到 #131 后关闭依赖 PR。本轮授权替代首次交付时“不关闭 #111/#115”的操作安排，目标仍为更新 #131 的工作分支。
+
+- 合入 main `05f5d145096b6fa1c015a87333d71ae89e5e1a44`。#111 `7530567aab7f1654986bbd93460a38b0c35302f6` 和 #115 `310c9b2177d16020904ebcbd74d09055d462bd42` 已经是原 #131 head 的祖先，保留完整提交历史，无需再次 cherry-pick。
+- 解决 Cargo、build.rs、主 WebView capability、生成 ACL 数据及 extensions API/events/mod 冲突。REST 复用 main 的有界 `http_transport`，保留 #131 的随机会话端口、Host/Origin/token 与权限快照检查；保留 main 的 POST/PUT Content-Length 和完整正文检查。连接上限采用 main 的 32，认证后支持合法 Expect: 100-continue，同步作者文档。
+- WebSocket 共用 main 的 DeadlineStream，保留 #131 更严格的 8 个待认证连接、32 个客户端、128 KiB 握手预算和 Origin/订阅权限门禁。合并并适配 main 的慢 Upgrade、Ping/慢认证帧、容量回收与事件重放真实 socket 回归，补充 Host/Origin/权限联合回归。移除被统一传输替代的旧 transport 模块。
+- Reader gitlink 随本次 main 合入更新为 `4b3db91bd1d94e5e9063639964f95a407334e81f`；本轮没有修改 Reader 代码。
+- 使用仓库固定 Tauri fork 的 tauri-build 编译并执行真实 `src-tauri/build.rs`，以 main 已生成的插件权限作为输入重新生成 app ACL、capability 及 schema。逐项比对插件 manifest 与 main 完全一致；Reader capability 不含 ZIP 管理权限。该构建脚本验证不等同完整原生编译。
+
+| 本轮检查 | 结果 |
+|---|---|
+| `pnpm install --frozen-lockfile` | 通过，pnpm 9.15.9、Node 24.21.0 |
+| `pnpm test` | 491 passed |
+| `pnpm typecheck` | 通过 |
+| `pnpm lint` | 0 errors / 23 warnings |
+| `cargo test --manifest-path tests/extension-transport/Cargo.toml --locked --offline` | 19 passed；编译实际生产 HTTP/WS/安全模块，目标目录与调试信息采用本轮临时配置 |
+| `cargo test --manifest-path packages/moke-ext/examples/reading-stats/backend/Cargo.toml --locked` | 4 passed |
+| `pnpm exec playwright test --config tests/extension-import.config.mjs` | 1 passed，IPC mock |
+| 官方 Playwright MCP，`http://127.0.0.1:32131/extensions` | 独立临时 context；1280×900 和 390×844，发布者/升级/权限 diff 展示、取消不提交、确认绑定 ticket/digest 均通过 |
+| Tauri build.rs / ACL 重新生成 | 退出 0，插件权限未变化，扩展管理只授予 main |
+| `git diff --check` | 通过 |
+
+MCP 首轮桌面控制台出现一条资源 404，未捕获失败请求；随后单独复查该页面无 >=400 响应或控制台错误。窄屏轮无控制台错误或失败请求。浏览器和本轮 Next 测试服务均已关闭。执行者为 Codex 当前 GPT-6 会话；数据为虚构扩展，Tauri IPC 使用 mock。
+
+完整 `cargo check --manifest-path src-tauri/Cargo.toml --lib --locked --offline` 未完成：缺少 vendor/openharmony-ability 等原生子模块，当前磁盘空间不足以继续完整构建。本轮没有重新运行完整 ZIP 原生安装/回滚验收、原生 OS 文件选择器、跨平台真机或 DeepSec 全仓扫描。历史自测/安全扫描不能代表本轮固定 head 的独立 QA 结论；新 head 与本轮证据交回 TB-127，由 Mika 安排现有 Sol/Grok 独立复核。

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-list-downloaded-books"
+description = "Enables the moke_list_downloaded_books command without any pre-configured scope."
+commands.allow = ["moke_list_downloaded_books"]
+
+[[permission]]
+identifier = "deny-moke-list-downloaded-books"
+description = "Denies the moke_list_downloaded_books command without any pre-configured scope."
+commands.deny = ["moke_list_downloaded_books"]

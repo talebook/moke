@@ -16,7 +16,8 @@ import { BookContextMenu, type ContextMenuItem } from '@/components/book/BookCon
 import { useViewPrefsStore } from '@/lib/store/view-prefs';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-download';
 import { startManagedOfflineBookDownload } from '@/lib/managed-offline-download';
-import { listOfflineBooks } from '@/lib/offline-books';
+import { listOfflineBooks, setOfflineBookShelfState } from '@/lib/offline-books';
+import { SAMPLE_BOOK } from '@/lib/sample-book-info';
 import { buildOfflineLibrary } from '@/lib/offline-library';
 import { useToast } from '@/lib/toast';
 import { useLongPressRegistry } from '@/lib/long-press';
@@ -24,6 +25,7 @@ import { Check, Download, ListChecks } from 'lucide-react';
 import { BookCoverFallback } from '@/components/book/BookCoverFallback';
 
 interface BookItem {
+  media_type?: string;
   id: string | number;
   title: string;
   authors?: Array<{ name: string }>;
@@ -70,14 +72,16 @@ function SearchContent() {
     () => results.filter((book) => hasFormat(book, activeFilter)),
     [activeFilter, results],
   );
+  const resultIds = JSON.stringify(results.map((book) => String(book.id)));
 
-  // Clear selection when results change
+  // A readstate refresh changes metadata, not the result set. Resetting on
+  // every new array closes the menu that requested that refresh.
   useEffect(() => {
     setSelectedIds(new Set());
     setBatchMode(false);
     setContextMenu(null);
     lastSelectedIdRef.current = null;
-  }, [activeFilter, results, query]);
+  }, [activeFilter, resultIds, query, serverUrl, offlineMode, searchScope]);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -187,17 +191,25 @@ function SearchContent() {
   };
 
   // ── Single-item actions (from right-click / long-press menu) ────────────
+  const updateShelf = async (id: string, inShelf: boolean) => {
+    if (id === SAMPLE_BOOK.bookId) {
+      await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, id, inShelf);
+      return { err: 'ok' };
+    }
+    const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ shelf: inShelf }),
+    });
+    return res.json();
+  };
+
   const setShelf = async (id: string, inShelf: boolean) => {
     const book = results.find((b) => String(b.id) === id);
     if (!book) return;
     try {
-      const res = await request(`${serverUrl}/api/book/${id}/shelf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ shelf: inShelf }),
-      });
-      const data = await res.json();
+      const data = await updateShelf(id, inShelf);
       if (data.err === 'user.need_login') {
         router.push('/login');
         return;
@@ -216,6 +228,7 @@ function SearchContent() {
   };
 
   const downloadOne = async (id: string) => {
+    if (id === SAMPLE_BOOK.bookId) return;
     const book = results.find((b) => String(b.id) === id);
     if (!book) return;
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -227,6 +240,7 @@ function SearchContent() {
       await startManagedOfflineBookDownload({
         serverUrl,
         bookId: id,
+        media_type: book.media_type,
         title: book.title,
         author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
         inShelf: Boolean(book.state?.wants),
@@ -250,7 +264,7 @@ function SearchContent() {
         icon: <Check className="w-3.5 h-3.5" />,
         onClick: () => setShelf(String(book.id), !inShelf),
       },
-      ...(isTauriApp
+      ...(isTauriApp && book.id !== SAMPLE_BOOK.bookId
         ? [{
             key: 'download',
             label: '下载',
@@ -270,6 +284,7 @@ function SearchContent() {
 
   const openContextMenu = async (bookId: string, x: number, y: number) => {
     setContextMenu({ x, y, bookId });
+    if (bookId === SAMPLE_BOOK.bookId) return;
     // 搜索结果不带 state，菜单打开时回查 /readstate 刷新真实书架状态（L5）。
     try {
       const res = await request(`${serverUrl}/api/book/${bookId}/readstate`, { credentials: 'include' });
@@ -300,12 +315,7 @@ function SearchContent() {
 
     if (action === 'add-shelf') {
       const settled = await Promise.allSettled(
-        ids.map((id) => request(`${serverUrl}/api/book/${id}/shelf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ shelf: true }),
-        }).then((r) => r.json())),
+        ids.map((id) => updateShelf(id, true)),
       );
       const succeeded: string[] = [];
       for (let i = 0; i < ids.length; i++) {
@@ -325,6 +335,7 @@ function SearchContent() {
     } else if (action === 'download') {
       let skipped = 0;
       for (const id of ids) {
+        if (id === SAMPLE_BOOK.bookId) continue;
         const book = results.find((b) => String(b.id) === id);
         if (!book) { fail++; continue; }
         const format = (book.files?.[0]?.format || 'epub').toLowerCase();
@@ -333,6 +344,7 @@ function SearchContent() {
           await startManagedOfflineBookDownload({
             serverUrl,
             bookId: id,
+            media_type: book.media_type,
             title: book.title,
             author: book.author || book.authors?.map((item) => item.name).filter(Boolean).join('、'),
             inShelf: Boolean(book.state?.wants),
@@ -523,7 +535,7 @@ function SearchContent() {
         totalCount={filteredResults.length}
         canAddShelf
         canRemoveShelf={false}
-        canDownload={isTauriApp}
+        canDownload={isTauriApp && Array.from(selectedIds).some((id) => id !== SAMPLE_BOOK.bookId)}
         onAction={runBatch}
         onClear={deselectAll}
         onSelectAll={selectAll}
