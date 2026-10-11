@@ -162,12 +162,12 @@ test('ambiguity revokes provisional early-event ownership and a close cannot rel
   await assert.rejects(boundary.withClosedReaderSession(async()=>assert.fail('must remain unresolved')),/完全退出.*重新启动/);
 });
 
-test('flush failure prevents the reserved session/offline change and allows retry', async () => {
+test('best-effort flush rejection permits the reserved session/offline change and allows retry', async () => {
   const {boundary}=fixture();
   let changed=false;
   const remove=boundary.registerReaderProgressFlush(async()=>{throw new Error('flush failed');});
-  await assert.rejects(boundary.withClosedReaderSession(async()=>{changed=true;}),/flush failed/);
-  assert.equal(changed,false);
+  await boundary.withClosedReaderSession(async()=>{changed=true;});
+  assert.equal(changed,true);
   remove();
   await boundary.withClosedReaderSession(async()=>{changed=true;});
   assert.equal(changed,true);
@@ -223,8 +223,9 @@ test('opening owns progress flush, rejects racing session changes and rechecks a
   await boundary.requireClosedReaders();
 });
 
-test('opening does not dispatch when the reserved progress flush fails', async () => {
+test('opening continues when its best-effort progress flush rejects', async () => {
   const {state,boundary}=fixture();const remove=boundary.registerReaderProgressFlush(async()=>{throw new Error('flush failed');});
-  await assert.rejects(boundary.openReaderFromSource(a,{}),/flush failed/);assert.equal(state.opens,0);
-  remove();await boundary.requireClosedReaders();
+  state.onOpen=async()=>{state.labels=['reader-after-failed-flush'];};
+  await boundary.openReaderFromSource(a,{});assert.equal(state.opens,1);
+  remove();state.labels=[];await boundary.requireClosedReaders();
 });

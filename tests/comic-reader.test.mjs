@@ -49,6 +49,17 @@ test('progress restores by page id, clamps stale indices, and normalizes percent
   assert.deepEqual(comicProgress(m, 99), { kind: 'comic', version: 1, pageId: 'p2', pageIndex: 2, percent: 100, completed: true });
 });
 
+test('manifest dimensions share the adapter bounds for integers, per-side limits and pixel area', () => {
+  for (const [width, height] of [[40000, 1], [1, 40000], [8000, 5000]]) {
+    const value = payload(); Object.assign(value.pages[0], {width,height});
+    assert.equal(parseComicManifest(value, '42').pages[0].width, width);
+  }
+  for (const [width, height] of [[0, 1100], [800, -1], [1.5, 600], [Infinity, 600], [40001, 1], [8000, 8000]]) {
+    const value = payload(); Object.assign(value.pages[0], {width,height});
+    assert.throws(() => parseComicManifest(value, '42'), /comic.manifest/);
+  }
+});
+
 test('host requests only fixed book paths, rejects redirects/MIME/errors, and keeps tokens out', async () => {
   const calls = [];
   const api = createComicApi(async (url, init) => {

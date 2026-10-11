@@ -1,3 +1,5 @@
+import { isUsablePageSize, type ComicPageSize } from './comic-size.ts';
+
 // An inert, local placeholder lets the unmodified reader retain its layout and
 // page explorer. Only this host adapter obtains authenticated image bytes.
 export function comicPlaceholder(index: number, width: number, height: number) {
@@ -9,7 +11,7 @@ export function comicPlaceholder(index: number, width: number, height: number) {
 
 export class ComicImageLayoutError extends Error {
   readonly diagnostics: { pageIndex: number | null; width: number | null; height: number | null };
-  constructor(index: number, dimensions?: { width: number; height: number }) {
+  constructor(index: number, dimensions?: ComicPageSize) {
     super('漫画页面尺寸信息无效，请重新加载。');
     this.name = 'ComicImageLayoutError';
     this.diagnostics = {
@@ -20,13 +22,14 @@ export class ComicImageLayoutError extends Error {
   }
 }
 
-export function bindComicImages(
-  host: HTMLElement,
-  load: (index: number) => Promise<Blob>,
-  onError: (error: unknown) => void,
-  onReady: () => void,
-  pageDimensions: readonly { width: number; height: number }[],
-) {
+interface ComicImageOptions {
+  load: (index: number) => Promise<Blob>;
+  onError: (error: unknown) => void;
+  onReady: () => void;
+  pageDimensions: readonly ComicPageSize[];
+}
+
+export function bindComicImages(host: HTMLElement, { load, onError, onReady, pageDimensions }: ComicImageOptions) {
   let active = true;
   let running = 0;
   const images = new Map<HTMLImageElement, number>();
@@ -95,9 +98,7 @@ export function bindComicImages(
         if (!match) return;
         const index = Number(match[1]);
         const dimensions = pageDimensions[index];
-        if (!dimensions || !Number.isSafeInteger(dimensions.width) || !Number.isSafeInteger(dimensions.height)
-          || dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width > 40000 || dimensions.height > 40000
-          || dimensions.width * dimensions.height > 40000000) {
+        if (!dimensions || !isUsablePageSize(dimensions)) {
           // Reader views can contain several images for the same page, and
           // mutations rescan them. Report once per page for this adapter run.
           if (!invalidDimensions.has(index)) {

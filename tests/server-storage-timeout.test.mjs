@@ -135,16 +135,17 @@ test('an unfinished reload blocks candidate activation while retaining the curre
   } finally {gate.resolve(); await load;}
 });
 
-test('offline exit still requires the Reader session boundary before changing hydration or mode', async context => {
+test('a rejected best-effort progress flush permits offline exit without releasing the registry read lock', async context => {
   context.mock.timers.enable({apis:['setTimeout']});
   const disk = storage(), gate = delayRead(disk), store = createServerStore(new ServerRegistryRepository(disk));
   const load = store.getState().loadServers();
   const remove = registerReaderProgressFlush(async () => {throw new Error('Reader progress cannot be flushed');});
   try {
-    const before = runtime(store.getState());
-    await assert.rejects(store.getState().enterOfflineMode(), /Reader progress/);
-    assert.deepEqual(runtime(store.getState()), before);
-    assert.equal(store.getState().hasHydrated, false);
+    const session = store.getState().sessionId;
+    await store.getState().enterOfflineMode();
+    assert.equal(store.getState().offlineMode, true);
+    assert.equal(store.getState().sessionId, session + 1);
+    assert.equal(store.getState().hasHydrated, true);
     assert.equal(store.getState().storageBusy, true);
   } finally {remove(); gate.resolve(); await load;}
 });

@@ -5,21 +5,21 @@ import { normalizeReaderProgressEvent, saveReadingProgress } from '@/lib/reading
 import { clearAnnotationLocateProgressSuppressionFromPayload, shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
 import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush, type ReaderSource } from '@/lib/reader-source';
-import { createReaderProgressQueue } from '@/lib/reader-progress-queue';
+import { createReaderProgressQueue, type ReaderProgressFailure } from '@/lib/reader-progress-queue';
 import { debugLog } from '@/lib/debug-log';
 
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
     let disposed = false;
-    const reportProgressFailure = (source?: Readonly<ReaderSource>) => {
+    const reportProgressFailure = (source?: Readonly<ReaderSource>, reason?: ReaderProgressFailure) => {
       try {
         debugLog('warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作',
-          source ? { serverUrl: source.serverUrl, bookId: source.bookId, sessionId: source.sessionId } : undefined);
+          { reason: reason ?? 'rejected', ...(source ? { serverUrl: source.serverUrl, bookId: source.bookId, sessionId: source.sessionId } : {}) });
       } catch { /* Diagnostics must not prevent cleanup or session changes. */ }
     };
-    const queue = createReaderProgressQueue((source, progress) =>
-      saveReadingProgress(source.bookId, progress, source.serverUrl), 1200, reportProgressFailure);
+    const queue = createReaderProgressQueue((source, progress, signal) =>
+      saveReadingProgress(source.bookId, progress, source.serverUrl, signal), 1200, reportProgressFailure);
     const flush = () => queue.flush().catch(() => reportProgressFailure());
     const unregisterFlush = registerReaderProgressFlush(flush);
     const cancel = startAsyncSubscription(async () => {

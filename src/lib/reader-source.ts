@@ -1,4 +1,5 @@
 import { MokeApiError } from './api-core.ts';
+import { runReaderProgressBestEffort } from './reader-progress-queue.ts';
 
 export interface ReaderSource { serverUrl: string; bookId: string; sessionId: number }
 
@@ -44,6 +45,24 @@ export function createReaderSourceBoundary(host: ReaderHost) {
   let readerSessionChanging = false;
   let pending: { source: ReaderSource; before: Set<string>; label: string | null; ambiguous: boolean } | null = null;
   const progressFlushes = new Set<() => Promise<void>>();
+  const runningFlushes = new WeakMap<() => Promise<void>, ReturnType<typeof runReaderProgressBestEffort>>();
+
+  async function flushReaderProgress(): Promise<void> {
+    await Promise.all([...progressFlushes].map((flush) => {
+      const running = runningFlushes.get(flush);
+      if (running) return running.complete;
+      const attempt = runReaderProgressBestEffort(() => flush(), (reason) => {
+        console.warn('[reader-progress] 阅读进度同步未完成，已继续处理连接与阅读器操作', { reason });
+      });
+      runningFlushes.set(flush, attempt);
+      // A timed-out non-queue callback may ignore cancellation. Reuse only
+      // that invocation; normal/recovered callbacks can flush future progress.
+      void attempt.settled.then(() => {
+        if (runningFlushes.get(flush) === attempt) runningFlushes.delete(flush);
+      });
+      return attempt.complete;
+    }));
+  }
 
   function bindReaderWindow(windowLabel: string, source: ReaderSource): void {
     // Readest labels are monotonic for this process. Never overwrite ownership.
@@ -106,7 +125,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
     if (labels.some(isReaderWindow)) {
       throw new MokeApiError('请先关闭当前阅读器及阅读器书库窗口，再重试连接。当前连接已保留。', 'reader.windows_open');
     }
-    await Promise.all([...progressFlushes].map((flush) => flush()));
+    await flushReaderProgress();
   }
 
   async function requireClosedReaders(): Promise<void> {
@@ -136,7 +155,7 @@ export function createReaderSourceBoundary(host: ReaderHost) {
       if (before.some(isReaderWindow)) throw new MokeApiError('请先关闭当前阅读器及阅读器书库窗口，再打开书籍', 'reader.windows_open');
       // Callers no longer run the connection guard first. Retain its progress
       // flush under this opening reservation, then check the latest session.
-      await Promise.all([...progressFlushes].map((flush) => flush()));
+      await flushReaderProgress();
       assertReaderSessionUnchanged({ sessionId: source.sessionId }, await host.getContext());
       const request = { source: Object.freeze({ ...source }), before: new Set(before), label: null as string | null, ambiguous: false };
       pending = request;

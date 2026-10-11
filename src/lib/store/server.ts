@@ -62,7 +62,6 @@ interface ServerState {
   cancelConnection: (requestId?: number) => void;
   requireAccess: (requestId: number) => void;
   activateCandidate: (requestId: number) => Promise<boolean>;
-  setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
   enterOfflineMode: (prepareDocumentReturn?: () => void) => Promise<void>;
   setConnected: (token: string, user: ReaderInfo) => void;
   setUser: (user: ReaderInfo | null) => void;
@@ -226,14 +225,6 @@ export function createServerStore(repository: ServerRegistryRepository = createS
           return true;
         });
       } finally { set({ saving: false }); }
-    },
-    // Legacy test/integration entry point: only updates the active runtime snapshot.
-    setServer: (protocol, host, port) => {
-      clearReaderReturn(returnChannel);
-      clearReadStateCache();
-      set({ ...disconnected, serverUrl: normalizeServerAddress(`${protocol}://${host}${port ? `:${port}` : ''}`),
-        protocol, host, port, offlineMode: false, isConnected: true,
-        connectionId: get().connectionId + 1, sessionId: get().sessionId + 1 });
     },
     enterOfflineMode: (prepareDocumentReturn) => withClosedReaderSession(async () => {
       clearReaderReturn(returnChannel);

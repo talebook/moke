@@ -51,10 +51,13 @@ function installImageHost(context, dimensions, { originalSize = false, pageDimen
     addEventListener() {},
     removeEventListener() {},
   };
-  const bindAdapter = () => bindComicImages(host, async index => {
-    requests.push(index);
-    return new Blob([new Uint8Array(16)], { type: 'image/png' });
-  }, error => { errors.push(error); }, () => {}, pageDimensions);
+  const bindAdapter = () => bindComicImages(host, {
+    load: async index => {
+      requests.push(index);
+      return new Blob([new Uint8Array(16)], { type: 'image/png' });
+    },
+    onError: error => { errors.push(error); }, onReady: () => {}, pageDimensions,
+  });
   const dispose = bindAdapter();
   context.after(dispose);
   return {
@@ -85,6 +88,13 @@ test('adapter ratios preserve the reader original-size width and height attribut
   assert.deepEqual(images.map(image => [image.width, image.height, image.style.aspectRatio]), [
     [800, 1100, '800 / 1100'], [900, 600, '900 / 600'],
   ]);
+});
+
+test('the image adapter accepts the manifest dimension and pixel-area boundaries', context => {
+  const dimensions = [{ width: 40000, height: 1 }, { width: 1, height: 40000 }, { width: 8000, height: 5000 }];
+  const { images, errors } = installImageHost(context, dimensions);
+  assert.deepEqual(images.map(image => image.style.aspectRatio), ['40000 / 1', '1 / 40000', '8000 / 5000']);
+  assert.deepEqual(errors, []);
 });
 
 test('cache eviction restores the placeholder with its ratio intact and reloads it on visibility', async context => {

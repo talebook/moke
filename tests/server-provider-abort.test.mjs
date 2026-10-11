@@ -15,7 +15,7 @@ const mocks = new Map([
     export const useEffect = (...args) => globalThis.__serverProviderAbortHarness.useEffect(...args);
     export const useRef = value => globalThis.__serverProviderAbortHarness.useRef(value);
   `],
-  ['react/jsx-runtime', 'export const jsx = (type, props) => ({type, props}); export const jsxs = jsx;'],
+  ['react/jsx-runtime', 'export { Fragment } from "react"; export const jsx = (type, props) => ({type, props}); export const jsxs = jsx;'],
   ['next/navigation', `
     export const useRouter = () => globalThis.__serverProviderAbortHarness.router;
     export const usePathname = () => globalThis.__serverProviderAbortHarness.pathname;
@@ -37,6 +37,7 @@ const mocks = new Map([
 const realModules = new Map([
   ['@/lib/server-capabilities', new URL('../src/lib/server-capabilities.ts', import.meta.url).href],
   ['@/lib/server-session', new URL('../src/lib/server-session.ts', import.meta.url).href],
+  ['@/lib/reader-return', new URL('../src/lib/reader-return.ts', import.meta.url).href],
 ]);
 registerHooks({ resolve(specifier, context, next) {
   if (mocks.has(specifier)) return {url:moduleUrl(mocks.get(specifier)),shortCircuit:true};

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import ts from 'typescript';
 import { createReaderSourceBoundary } from '../src/lib/reader-source.ts';
+import { READER_PROGRESS_TIMEOUT_MS } from '../src/lib/reader-progress-queue.ts';
 
 // Exercise the pinned Reader bridge and the production host subscription with
 // synthetic IPC/React effects. Persistence and annotation filtering have their
@@ -34,10 +35,10 @@ const mocks = new Map([
       return () => { host.unregisters++; unregister(); };
     };`],
   ['@/lib/reading-progress', `export const normalizeReaderProgressEvent = data => data;
-    export function saveReadingProgress(bookId, progress, serverUrl) {
+    export function saveReadingProgress(bookId, progress, serverUrl, signal) {
       const host = globalThis.__readerProgressEventsHost;
       host.writes.push({ bookId, progress, serverUrl });
-      return host.save ? host.save() : Promise.resolve();
+      return host.save ? host.save(signal) : Promise.resolve();
     }`],
   ['@/lib/annotations', `export const clearAnnotationLocateProgressSuppressionFromPayload = () => {};
     export const shouldSuppressAnnotationReaderProgress = () => false;`],
@@ -161,11 +162,67 @@ for (const failure of ['reject', 'throw']) {
     assert.equal(host.unregisters, 1);
     assert.equal(host.writes.length, 1);
     assert.equal(host.warnings.length, 1);
-    assert.deepEqual(host.warnings[0], ['warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作', source]);
+    assert.deepEqual(host.warnings[0], ['warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作', { reason: 'rejected', ...source }]);
     assert.doesNotMatch(JSON.stringify(host.warnings), /fixture-secret|internal response/);
     assert.deepEqual(unhandled, []);
   });
 }
+
+test('a hanging host save is aborted at its deadline and unmount unregisters before late rejection', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] });
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  context.after(() => {
+    if (previousPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    else process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+    host.save = null;
+  });
+  const unhandled = [];
+  const onUnhandled = error => { unhandled.push(error); };
+  process.on('unhandledRejection', onUnhandled);
+  context.after(() => process.off('unhandledRejection', onUnhandled));
+  const state = { sessionId: 1 };
+  host.boundary = createReaderSourceBoundary({
+    getWindowLabels: async () => [],
+    getContext: async () => ({ sessionId: state.sessionId, candidate: null }),
+    open: async () => assert.fail('the effect does not open a Reader'),
+    wait: async () => {}, now: () => 0,
+  });
+  const source = { serverUrl: 'https://a.test', bookId: '42', sessionId: 1 };
+  host.boundary.bindReaderWindow('reader-timeout', source);
+  host.writes = []; host.warnings = []; host.unregisters = 0; host.unlistens = 0;
+  let started, rejectSave, signal;
+  const entered = new Promise(resolve => { started = resolve; });
+  const stalled = new Promise((_, reject) => { rejectSave = reject; });
+  // This mock deliberately ignores cancellation to verify late rejection safety.
+  host.save = abortSignal => { signal = abortSignal; started(); return stalled; };
+  ReaderProgressProvider({ children: null });
+  const cleanup = host.effect();
+  let cleaned = false;
+  const clean = () => { if (!cleaned) { cleaned = true; cleanup(); } };
+  context.after(clean);
+  await new Promise(resolve => setImmediate(resolve));
+  host.listener({ payload: { window: 'reader-timeout', event: 'page:changed', data: { moke_book_id: '42', location: 'A-position' } } });
+  host.listener({ payload: { window: 'reader-timeout', event: 'book:closed', data: {} } });
+  await entered;
+  clean();
+  const changing = host.boundary.withClosedReaderSession(async () => { state.sessionId = 2; });
+  await new Promise(resolve => setImmediate(resolve));
+  context.mock.timers.tick(READER_PROGRESS_TIMEOUT_MS);
+  await changing;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(signal.aborted, true, 'the Provider forwards the request cancellation signal');
+  assert.equal(host.unlistens, 1);
+  assert.equal(host.unregisters, 1);
+  assert.equal(host.listener, null);
+  assert.equal(state.sessionId, 2);
+  assert.deepEqual(host.warnings, [['warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作', { reason: 'timeout', ...source }]]);
+  rejectSave(new Error('token=fixture-secret; late internal response'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(host.warnings.length, 1);
+  assert.doesNotMatch(JSON.stringify(host.warnings), /fixture-secret|internal response/);
+  assert.deepEqual(unhandled, []);
+});
 
 test('the pinned primary Reader close handler awaits the advertised book:closed contract', () => {
   const contract = JSON.parse(readFileSync(new URL('../readest/contract/moke-reader.v1.json', import.meta.url), 'utf8'));

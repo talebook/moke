@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { connectSavedServerFixture } from './helpers/saved-server-session.mjs';
 
 // Exercise the production store/Reader adapter with a synthetic IPC host. No
 // window/native EPUB claim is made by these tests.
@@ -18,9 +19,9 @@ function snapshot(){const s=useServerStore.getState();return {serverUrl:s.server
 async function inTauri(run){const old=process.env.NEXT_PUBLIC_APP_PLATFORM;process.env.NEXT_PUBLIC_APP_PLATFORM='tauri';try{await run();}finally{host.labels=[];host.onOpen=async()=>{};if(old===undefined)delete process.env.NEXT_PUBLIC_APP_PLATFORM;else process.env.NEXT_PUBLIC_APP_PLATFORM=old;useServerStore.getState().disconnect();}}
 
 test('Reader preparation is fenced by real connection, identity and mode transitions plus a pending candidate',()=>inTauri(async()=>{
-  useServerStore.getState().setServer('http','a.test','');
+  await connectSavedServerFixture(useServerStore,'http://a.test');
   for (const transition of [
-    () => useServerStore.getState().setServer('http','b.test',''),
+    () => connectSavedServerFixture(useServerStore,'http://b.test'),
     () => useServerStore.getState().setConnected('',{id:1,username:'reader'}),
     () => useServerStore.getState().logout(),
     () => useServerStore.getState().enterOfflineMode(),
@@ -41,8 +42,22 @@ test('Reader preparation is fenced by real connection, identity and mode transit
   assert.doesNotThrow(()=>assertReaderSessionUnchanged(preparedSession,useServerStore.getState()));
 }));
 
+test('saved-server fixture cannot bypass the production open-Reader boundary',()=>inTauri(async()=>{
+  await connectSavedServerFixture(useServerStore,'http://a.test');
+  const before=snapshot();
+  host.labels=['reader-fixture-guard'];
+  await assert.rejects(connectSavedServerFixture(useServerStore,'http://b.test'),{code:'reader.windows_open'});
+  assert.deepEqual(snapshot(),before);
+  assert.equal(useServerStore.getState().saving,false);
+  useServerStore.getState().cancelConnection();
+  host.labels=[];
+  await connectSavedServerFixture(useServerStore,'http://b.test');
+  assert.equal(useServerStore.getState().serverUrl,'http://b.test');
+  assert.equal(useServerStore.getState().sessionId,before.sessionId+1);
+}));
+
 test('unchanged offline sessions can bind downloaded A books and local sample books while the runtime connection is B',()=>inTauri(async()=>{
-  useServerStore.getState().setServer('http','b.test','');
+  await connectSavedServerFixture(useServerStore,'http://b.test');
   await useServerStore.getState().enterOfflineMode();
   const before=snapshot();
   const sources=[
@@ -62,7 +77,7 @@ test('unchanged offline sessions can bind downloaded A books and local sample bo
 }));
 
 test('settings offline transition rejects an open Reader and preserves origin/session/navigation',()=>inTauri(async()=>{
-  useServerStore.getState().setServer('http','a.test','');
+  await connectSavedServerFixture(useServerStore,'http://a.test');
   const before=snapshot();
   let pathname='/settings';
   host.labels=['reader-900'];
@@ -80,7 +95,7 @@ test('settings offline transition rejects an open Reader and preserves origin/se
 }));
 
 test('opening Reader and in-flight authentication both reject offline before state/navigation changes',()=>inTauri(async()=>{
-  useServerStore.getState().setServer('http','a.test','');
+  await connectSavedServerFixture(useServerStore,'http://a.test');
   const before=snapshot();
   let started,release;
   const entered=new Promise(resolve=>{started=resolve;});
@@ -104,8 +119,8 @@ test('opening Reader and in-flight authentication both reject offline before sta
   assert.equal(useServerStore.getState().offlineMode,true);
 }));
 
-test('offline waits for flush under a reservation, rejects a racing open and does not change state on flush failure',()=>inTauri(async()=>{
-  useServerStore.getState().setServer('http','a.test','');
+test('offline waits for best-effort flush under a reservation, rejects a racing open and proceeds after flush rejection',()=>inTauri(async()=>{
+  await connectSavedServerFixture(useServerStore,'http://a.test');
   const before=snapshot();
   let release,started;
   const entered=new Promise(resolve=>{started=resolve;});
@@ -117,8 +132,9 @@ test('offline waits for flush under a reservation, rejects a racing open and doe
     assert.deepEqual(snapshot(),before);
     await assert.rejects(openReaderFromSource({serverUrl:before.serverUrl,bookId:'42',sessionId:before.sessionId},{}),/状态正在变更/);
     release();
-    await assert.rejects(entering,/flush failed/);
-    assert.deepEqual(snapshot(),before);
+    await entering;
+    assert.equal(useServerStore.getState().offlineMode,true);
+    assert.equal(useServerStore.getState().sessionId,before.sessionId+1);
   }finally{remove();release();}
   await useServerStore.getState().enterOfflineMode();
   assert.equal(useServerStore.getState().offlineMode,true);

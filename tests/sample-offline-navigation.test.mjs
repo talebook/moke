@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { useServerStore } from '../src/lib/store/server.ts';
 import { registerReaderProgressFlush, withClosedReaderSession } from '../src/lib/reader-source.ts';
 import { clearReaderReturn, prepareOfflineLibraryEntry, takeReaderReturn } from '../src/lib/reader-return.ts';
+import { connectSavedServerFixture } from './helpers/saved-server-session.mjs';
 
 // Exercise the component's actual callback with captured hook values and the
 // production session boundary. No React/native rendering claim is made here.
@@ -23,13 +24,13 @@ function fixture(mode = 'router') {
   const values=new Map();let marker='';
   const tab={storage:{getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)},getMarker:()=>marker,setMarker:value=>{marker=value;},getArrival:()=>({pathname:'/library',navigationType:'navigate'})};
   const navigate = async (path, fallback, _platform, beforeDocument) => {
-    if(mode==='changed')useServerStore.getState().setServer('http','b.test','');
+    if(mode==='changed')await connectSavedServerFixture(useServerStore,'http://b.test');
     if(mode!=='router')beforeDocument();
     if(mode==='fallback')fallback(path);
     else state.navigations.push(path);
   };
   const prepare=()=>{if(mode==='denied')throw new Error('无法保存离线书库跳转信息');prepareOfflineLibraryEntry(tab);};
-  const runtime=async()=>{if(mode==='changed-probe')useServerStore.getState().setServer('http','b.test','');return mode==='router'?'web':'ios';};
+  const runtime=async()=>{if(mode==='changed-probe')await connectSavedServerFixture(useServerStore,'http://b.test');return mode==='router'?'web':'ios';};
   const handler = createCallback({ current: false }, value => { state.busy = value; }, value => { state.error = value; }, useServerStore, navigate, { push: path=>state.navigations.push(path) }, prepare, ()=>clearReaderReturn(tab), runtime, value=>value==='ios');
   return { state, handler, tab };
 }
@@ -73,7 +74,7 @@ test('sample library waits for offline entry, blocks duplicate clicks, then navi
 });
 
 test('sample library reports rejected offline entry without navigation and can retry', async () => {
-  useServerStore.getState().setServer('http', 'a.test', '');
+  await connectSavedServerFixture(useServerStore,'http://a.test');
   const before = useServerStore.getState();
   const { state, handler } = fixture();
   let entered, release;

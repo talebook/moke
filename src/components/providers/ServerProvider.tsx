@@ -7,6 +7,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
+import { clearReaderReturn } from '@/lib/reader-return';
 
 // Auth pages explain an absent connection themselves, including cold reloads.
 const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/reset-password', '/access', '/privacy', '/settings/developer'];
@@ -14,7 +15,7 @@ const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/reset-password', '/ac
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { serverUrl, offlineMode, hasHydrated, readerReturnTo, capabilities, connectionId, sessionId, loadServers, setServerTitle, setUser, setServerCapabilities } = useServerStore();
+  const { serverUrl, offlineMode, hasHydrated, storageBusy, storageError, readerReturnTo, capabilities, connectionId, sessionId, loadServers, setServerTitle, setUser, setServerCapabilities } = useServerStore();
   const previousPath = useRef(pathname);
   useEffect(() => {
     const previous = previousPath.current;
@@ -41,14 +42,16 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   const isEmbeddedReaderPath = pathname.startsWith('/readest');
 
   useEffect(() => {
-    if (!hasHydrated) return;
+    // Timeout hydration exposes an exit on public pages. It must not replace
+    // a /library document whose original read still owns a return receipt.
+    if (!hasHydrated || storageBusy) return;
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!serverUrl && !offlineMode) {
       // Use full-document navigation on single-WebView runtimes (OHOS) to avoid
       // getting stuck on the blank loading screen when RSC navigation fails.
       navigateFullDocument('/welcome', router.replace);
     }
-  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
+  }, [hasHydrated, storageBusy, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -58,7 +61,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     // 能力探测整轮（checkWelcomeRequirement + fetchCurrentUser + fetchServerInfo
     // + discoverServerCapabilities）较重，结果带 checkedAt 缓存：5 分钟内路由
-    // 切换不再整轮重跑。serverUrl 变化时 setServer 会重置 capabilities
+    // 切换不再整轮重跑。激活候选连接时会重置 capabilities
     // （checkedAt=null），因此会自然失效重探；user/title 同步随之节流。
     if (isServerCapabilitiesFresh(capabilitiesCheckedAt)) return;
 
@@ -145,7 +148,19 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
   // absent runtime connection (including return from a full-document reader).
   if (!PUBLIC_PATHS.includes(pathname) && !isExtensionPath && !isEmbeddedReaderPath
     && (!hasHydrated || (readerReturnTo && pathname !== readerReturnTo) || (!serverUrl && !offlineMode))) {
-    return <div role="status" className="flex min-h-screen items-center justify-center">正在加载连接信息…</div>;
+    return <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
+      <p>正在加载连接信息…</p>
+      {storageBusy && storageError && <>
+        <p role="alert" className="max-w-md text-sm">{storageError}</p>
+        <button className="rounded-full border px-4 py-2" onClick={() => {
+          // Abandon a waiting return only through an explicit action. Keep the
+          // original read locked and navigate within the current document.
+          clearReaderReturn();
+          useServerStore.getState().cancelConnection();
+          router.push('/welcome');
+        }}>返回服务器列表</button>
+      </>}
+    </div>;
   }
   // Same-server identity changes must also discard authenticated page data and
   // abort component requests. Do not increment sessionId for ordinary UI refreshes.

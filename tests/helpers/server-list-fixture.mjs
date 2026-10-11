@@ -18,7 +18,7 @@ export async function installServerListFixture(page) {
     let data;
     if (url.pathname === '/api/welcome') {
       if (request.method()==='POST') {server.invited=true;data={err:'ok'};}
-      else data={err:server.invited?'free':'ok'};
+      else data={err:server.invited?'free':(server.welcomeErr ?? 'ok')};
     } else if (url.pathname === '/api/user/info') data={err:'ok',sys:{title:`${server.name} 测试书库`,version:'3.15.0'},user:{id:server.name==='A'?101:202,username:`reader-${server.name}`,nickname:`${server.name} 测试读者`,is_login:server.loggedIn,permission:'admin'}};
     else if (url.pathname === '/api/user/sign_in') {server.loggedIn=true;data={err:'ok'};}
     else if (url.pathname === '/api/user/sign_out') {server.loggedIn=false;data={err:'ok'};}

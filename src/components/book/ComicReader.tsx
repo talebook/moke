@@ -117,15 +117,17 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
           onExit: () => close.current(),
           onError: () => { setLoading(false); setNotice('漫画页面无法显示，请重试加载。'); },
         });
-        disposeImages = bindComicImages(host.current, index => api.page(manifest, index),
-          e => {
+        disposeImages = bindComicImages(host.current, {
+          load: index => api.page(manifest, index),
+          onError: e => {
             setLoading(false);
             if (e instanceof ComicImageLayoutError) {
               console.warn('[ComicReader] invalid page dimensions:', e.diagnostics);
               setNotice(e.message);
             } else setNotice(comicErrorMessage(e));
           },
-          () => setLoading(false), manifest.pages);
+          onReady: () => setLoading(false), pageDimensions: manifest.pages,
+        });
       } catch (e) { if (active()) { setError(comicErrorMessage(e)); setLoading(false); } }
     };
     void start();

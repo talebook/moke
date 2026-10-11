@@ -70,6 +70,47 @@ test('login requiring a new access code rebuilds the saved candidate and reaches
   await expect(page).toHaveURL(/\/shelf$/);
 });
 
+test('not_invited from a saved-server welcome probe requires an access code before activation', async ({page}) => {
+  const fixture = await installServerListFixture(page);
+  const server = fixture.servers.get(fixture.origins[0]);
+  server.invited = false;
+  server.loggedIn = false;
+  server.welcomeErr = 'not_invited';
+  await page.goto(base + '/welcome', {waitUntil:'domcontentloaded'});
+  await page.locator('li button').first().click();
+  await expect(page).toHaveURL(/\/access\?serverId=a&requestId=\d+$/);
+  expect(fixture.requests.some(request => request.path === '/api/shelf')).toBe(false);
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+  await page.getByRole('button', {name:'确认',exact:true}).click();
+  await expect(page).toHaveURL(/\/shelf$/);
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  expect(fixture.requests.filter(request => request.path === '/api/welcome' && request.method === 'POST').map(request => request.origin)).toEqual([fixture.origins[0]]);
+});
+
+test('not_invited during provider access confirmation rebuilds the active candidate and reaches access', async ({page}) => {
+  const fixture = await installServerListFixture(page);
+  const server = fixture.servers.get(fixture.origins[0]);
+  let welcomeGets = 0;
+  await page.route(fixture.origins[0] + '/api/welcome', async route => {
+    // Initial connection is open. The subsequent provider check observes an
+    // expired invite; a successful POST reopens the same server's session.
+    if (route.request().method() === 'GET' && ++welcomeGets === 2) {
+      server.invited = false;
+      server.welcomeErr = 'not_invited';
+    }
+    await route.fallback();
+  });
+  await page.goto(base + '/welcome', {waitUntil:'domcontentloaded'});
+  await page.locator('li button').first().click();
+  await expect(page).toHaveURL(/\/access\?serverId=a&requestId=\d+$/);
+  expect(welcomeGets).toBeGreaterThanOrEqual(2);
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+  await page.getByRole('button', {name:'确认',exact:true}).click();
+  await expect(page).toHaveURL(/\/shelf$/);
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  expect(fixture.requests.filter(request => request.path === '/api/welcome' && request.method === 'POST').map(request => request.origin)).toEqual([fixture.origins[0]]);
+});
+
 for (const staleResult of ['ok', 'captcha.required']) {
   test(`reset aborts on leaving and ignores delayed A ${staleResult} while B submits`, async ({page}) => {
     const fixture = await installServerListFixture(page);

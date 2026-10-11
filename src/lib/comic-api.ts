@@ -1,4 +1,5 @@
 import { retryOnlineRead } from './online-retry.ts';
+import { isUsablePageSize } from './comic-size.ts';
 
 type RequestLike = (url: string, init?: RequestInit) => Promise<Response>;
 export interface ComicPage {
@@ -65,8 +66,7 @@ export function parseComicManifest(value: unknown, bookId: string): ComicManifes
   const ids = new Set<string>();
   const pages = [...data.pages].sort((a, b) => a.index - b.index).map((page, index) => {
     if (!page || page.index !== index || typeof page.id !== 'string' || !page.id || ids.has(page.id)
-      || !Number.isSafeInteger(page.width) || page.width <= 0 || page.width > 40000
-      || !Number.isSafeInteger(page.height) || page.height <= 0 || page.height > 40000 || page.width * page.height > 40000000
+      || !isUsablePageSize(page)
       || !IMAGE_TYPES.has(page.mime_type)) throw new ComicError('comic.manifest');
     ids.add(page.id);
     // Never consume the server's URL/token. Construct a page-scoped path and

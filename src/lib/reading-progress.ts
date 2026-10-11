@@ -5,6 +5,14 @@ import { debugLog } from '@/lib/debug-log';
 import { readingProgressForPersistence } from '@/lib/reading-progress-payload';
 import { useServerStore } from '@/lib/store/server';
 import { SAMPLE_BOOK } from '@/lib/sample-book-info';
+import { DEFAULT_SERVER_CAPABILITIES, type ServerCapabilities } from '@/lib/server-capabilities';
+
+// An unrelated source has not been probed. Keep a complete capability shape
+// without borrowing the active server's supported/unsupported result.
+const CROSS_SOURCE_PROGRESS_CAPABILITIES: Readonly<ServerCapabilities> = {
+  ...DEFAULT_SERVER_CAPABILITIES, readingProgressApi: true,
+};
+interface ProgressSession { serverUrl: string; connectionId: number; sessionId: number }
 
 export interface ReadingProgressPayload {
   schema: 'moke.readest.progress.v1';
@@ -70,53 +78,63 @@ export async function fetchReadingProgress(bookId: string | number, signal?: Abo
   if (bookId === SAMPLE_BOOK.bookId) return null;
   const active = useServerStore.getState();
   const serverUrl = sourceServerUrl ?? active.serverUrl;
-  const capabilities = active.serverUrl === serverUrl ? active.capabilities : { checkedAt: null, readingProgressApi: true };
-  if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return null;
+  const capabilities = active.serverUrl === serverUrl ? active.capabilities : CROSS_SOURCE_PROGRESS_CAPABILITIES;
+  if (!serverUrl || signal?.aborted || capabilities.checkedAt && !capabilities.readingProgressApi) return null;
 
   try {
     const response = await request(`${serverUrl}/api/book/${bookId}/progress`, {
       signal,
       credentials: 'include',
     });
+    signal?.throwIfAborted();
     const data = await readApiJson<ReadingProgressResponse>(response);
+    signal?.throwIfAborted();
     const progress = data.progress;
 
     if (!progress || progress.schema !== 'moke.readest.progress.v1') return null;
     return readingProgressForPersistence(progress as ReadingProgressPayload);
   } catch (error) {
-    markProgressUnsupported(error, serverUrl);
+    if (signal?.aborted) return null;
+    markProgressUnsupported(error, serverUrl, active);
     debugLog('warn', 'reading-progress', `读取阅读进度失败: ${bookId}`, getErrorMessage(error));
     return null;
   }
 }
 
-export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload, sourceServerUrl?: string): Promise<void> {
+export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload, sourceServerUrl?: string, signal?: AbortSignal): Promise<void> {
   if (bookId === SAMPLE_BOOK.bookId) return;
   const active = useServerStore.getState();
   const serverUrl = sourceServerUrl ?? active.serverUrl;
-  const capabilities = active.serverUrl === serverUrl ? active.capabilities : { checkedAt: null, readingProgressApi: true };
-  if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return;
+  const capabilities = active.serverUrl === serverUrl ? active.capabilities : CROSS_SOURCE_PROGRESS_CAPABILITIES;
+  if (!serverUrl || signal?.aborted || capabilities.checkedAt && !capabilities.readingProgressApi) return;
 
   try {
     const response = await request(`${serverUrl}/api/book/${bookId}/progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      signal,
       body: JSON.stringify({ progress: readingProgressForPersistence(progress) }),
     });
+    signal?.throwIfAborted();
     await readApiJson<ReadingProgressResponse>(response);
+    signal?.throwIfAborted();
   } catch (error) {
-    markProgressUnsupported(error, serverUrl);
+    if (signal?.aborted) return;
+    markProgressUnsupported(error, serverUrl, active);
     debugLog('warn', 'reading-progress', `保存阅读进度失败: ${bookId}`, getErrorMessage(error));
   }
 }
 
-function markProgressUnsupported(error: unknown, sourceServerUrl: string) {
+function markProgressUnsupported(error: unknown, sourceServerUrl: string, source: ProgressSession) {
   if (!(error instanceof MokeApiError)) return;
   if (error.status !== 404 && error.code !== 'page.not_found' && error.code !== 'handler.not_found' && error.code !== 'api.not_found') return;
 
-  const { capabilities, setServerCapabilities } = useServerStore.getState();
-  if (useServerStore.getState().serverUrl !== sourceServerUrl || !capabilities.readingProgressApi) return;
+  const current = useServerStore.getState();
+  const { capabilities, setServerCapabilities } = current;
+  if (source.serverUrl !== sourceServerUrl || current.serverUrl !== sourceServerUrl
+    || current.connectionId !== source.connectionId || current.sessionId !== source.sessionId
+    || !capabilities.readingProgressApi) return;
 
   setServerCapabilities({
     ...capabilities,

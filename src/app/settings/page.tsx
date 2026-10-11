@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2, MonitorCog } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { fetchServerInfo, request } from '@/lib/api';
+import { fetchServerInfo, getErrorMessage, request } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { resolveTheme, useSettingsStore } from '@/lib/store/settings';
@@ -74,7 +74,7 @@ export default function SettingsPage() {
   }, [offlineMode, serverUrl]);
 
   const handleDisconnect = async () => {
-    try { await requireClosedReaders(); } catch (error) { window.alert((error as Error).message); return; }
+    try { await requireClosedReaders(); } catch (error) { showToast(getErrorMessage(error, '无法断开连接，请重试。'), 'error'); return; }
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/welcome');
@@ -100,7 +100,7 @@ export default function SettingsPage() {
         safeRemoveLocalStorageItem('moke-auth-token');
         router.push('/login');
       });
-    } catch (error) { window.alert((error as Error).message); }
+    } catch (error) { showToast(getErrorMessage(error, '退出登录失败，请重试。'), 'error'); }
   };
 
   const handleSelectDownloadDirectory = async () => {
@@ -130,7 +130,7 @@ export default function SettingsPage() {
     try {
       await enterOfflineMode();
       router.push('/shelf');
-    } catch (error) { window.alert((error as Error).message); }
+    } catch (error) { showToast(getErrorMessage(error, '无法进入离线模式，请重试。'), 'error'); }
   };
 
   return (

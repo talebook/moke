@@ -3,7 +3,9 @@ import { logErrorMetadata } from './api-log.ts';
 export function readConnectionWelcome(value: unknown): { err: string; msg?: string; needsAccessCode: boolean } {
   const data = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const msg = typeof data.msg === 'string' ? data.msg : undefined;
-  if (data.err === 'ok') return { err: 'ok', msg, needsAccessCode: true };
+  // Talebook's Welcome GET uses ok/free; its base invite gate uses
+  // not_invited for an absent/expired invite. That state still requires a code.
+  if (data.err === 'ok' || data.err === 'not_invited') return { err: 'ok', msg, needsAccessCode: true };
   if (data.err === 'free') return { err: 'ok', msg, needsAccessCode: false };
   return { err: typeof data.err === 'string' ? data.err : 'server.invalid_response',
     msg: msg || '无法确认访问码状态，请重试', needsAccessCode: false };

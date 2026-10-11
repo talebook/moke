@@ -362,7 +362,9 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
   if (!response.ok) {
     logHttpErrorMetadata('checkWelcomeRequirement', response.status, data);
     return {
-      err: data.err || `http.${response.status}`,
+      // A success-shaped body cannot turn a failed HTTP request into an open
+      // connection. Invite-state compatibility applies only after HTTP success.
+      err: typeof data.err === 'string' && data.err !== 'ok' && data.err !== 'free' ? data.err : `http.${response.status}`,
       msg: data.msg || '访问码状态检查失败',
       needsAccessCode: false,
     };
