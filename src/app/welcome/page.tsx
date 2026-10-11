@@ -96,6 +96,9 @@ export default function WelcomePage() {
         router.push(`/access?serverId=${encodeURIComponent(id)}&requestId=${attempt.requestId}`);
       } else if (await store.activateCandidate(attempt.requestId)) {
         router.push('/shelf');
+      } else if (controller.current === abort && !abort.signal.aborted
+        && useServerStore.getState().candidate?.requestId === attempt.requestId) {
+        setError('连接未被确认，请重试');
       }
     } catch (failure) {
       if (useServerStore.getState().candidate?.requestId !== attempt.requestId) return;
@@ -123,6 +126,13 @@ export default function WelcomePage() {
     try { await requireClosedReaders(); store.disconnect(); }
     catch (failure) { setError((failure as Error).message); }
   };
+  const enterOffline = async (target: '/shelf' | '/library') => {
+    try { await store.enterOfflineMode(); router.push(target); }
+    catch (failure) { setError((failure as Error).message); }
+  };
+  const returnToCurrentShelf = () => {
+    controller.current?.abort(); store.cancelConnection(); router.push('/shelf');
+  };
   let preview = '';
   try { preview = normalizeServerAddress(address); } catch { /* Submit displays the validation error. */ }
 
@@ -144,6 +154,10 @@ export default function WelcomePage() {
           {!store.hasHydrated ? <p role="status">正在加载服务器列表…</p> : store.storageError ? (
             <div role="alert" className="text-sm space-y-3">
               <p className="break-words">{store.storageError}</p>
+              {store.storageBusy && <>
+                <button className={buttonStyle} disabled={store.saving} onClick={() => void enterOffline('/library')}>先使用离线书库</button>
+                {store.serverUrl && <button className={buttonStyle} disabled={store.saving} onClick={returnToCurrentShelf}>返回当前书架</button>}
+              </>}
               {!store.storageBusy && <>
                 <button className={buttonStyle} disabled={store.saving} onClick={() => void store.loadServers()}>重试加载</button>
                 <p>恢复会先备份可读取的原配置，再重建空列表；无法读取的旧浏览器配置和已有离线文件保留。备份失败时不覆盖原数据。</p>
@@ -178,14 +192,13 @@ export default function WelcomePage() {
               }}>取消</button>
             </form> : <button ref={addButton} className={`${primaryButtonStyle} w-full`} disabled={store.saving || Boolean(connectingId)} onClick={() => { setAdding(true); setError(''); setNotice(''); }}>加入服务器</button>}
           </>}
-          {store.serverUrl && <div className="flex gap-2 mt-4">
-            <button className={`${buttonStyle} flex-1`} onClick={() => { controller.current?.abort(); store.cancelConnection(); router.push('/shelf'); }}>返回当前书架</button>
+          {store.serverUrl && !(store.storageError && store.storageBusy) && <div className="flex gap-2 mt-4">
+            <button className={`${buttonStyle} flex-1`} onClick={returnToCurrentShelf}>返回当前书架</button>
             <button className={buttonStyle} disabled={Boolean(connectingId) || store.saving} onClick={() => void disconnect()}>断开</button>
           </div>}
           <button data-dom-id="btn-copy-demo-link" className={`${buttonStyle} w-full mt-4`} onClick={() => void handleCopyDemoLink()}>{demoLinkCopied ? '已复制' : '复制链接'}</button>
-          <button data-dom-id="btn-offline-mode" className={`${buttonStyle} w-full mt-4`} disabled={Boolean(connectingId) || store.saving} onClick={async () => {
-            try { await store.enterOfflineMode(); router.push('/shelf'); } catch (failure) { setError((failure as Error).message); }
-          }}>进入离线模式</button>
+          {!(store.storageError && store.storageBusy) && <button data-dom-id="btn-offline-mode" className={`${buttonStyle} w-full mt-4`}
+            disabled={Boolean(connectingId) || store.saving} onClick={() => void enterOffline('/shelf')}>进入离线模式</button>}
         </div>
         <div className="mt-6 text-xs text-muted-foreground flex gap-4">
           <span className="select-none" onClick={() => {

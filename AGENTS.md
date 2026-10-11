@@ -167,9 +167,10 @@ Tauri APIs.
 
 ### Frontend (`src/`)
 
-- `src/app/**` — App Router pages: `welcome` (enter server URL) → `access` (invite/access code) →
+- `src/app/**` — App Router pages: `welcome` (save/select a server, then explicitly connect) → `access` (invite/access code) →
   `login`/`register` → `shelf`/`library`/`search`/`detail`/`user`/`settings`. `src/app/page.tsx`
-  just redirects to `/welcome` or `/shelf` based on whether a server is configured.
+  always redirects to `/welcome`. Cold startup loads only the saved list; entering online pages
+  requires an explicit connection, and offline pages require an explicit offline entry.
 - `src/lib/api.ts` — **the single HTTP layer**. All server calls go through `request()`. Read its
   header comments before changing it; the constraints are real:
   - Tauri desktop **must use absolute `http(s)://` URLs** (no current origin to resolve against) and
@@ -177,14 +178,31 @@ Tauri APIs.
     self-signed / plain-HTTP LAN Talebook servers and login redirects work. Web uses native `fetch`.
   - `<img src>` can't carry the Rust-side session cookie cross-origin, so cover/image loads must go
     through `fetchImageObjectUrl()` (fetch bytes via `request()`, return an object URL).
-- `src/lib/store/server.ts` — zustand store (`persist`, key `moke-server-storage`) holding
-  `serverUrl`, connection state, and user. This is the source of truth for "which server am I on".
-  **Never use `window.location.href` for navigation** in the Tauri static-export build — a full-page
-  nav reloads the WebView and wipes all in-memory state (zustand resets, serverUrl lost). Use
-  `router.push`/`router.replace`.
-- `src/components/providers/ServerProvider.tsx` — wraps the app; after store hydration it redirects
-  to `/welcome` when no server, checks the access-code requirement, and syncs current user + server
-  title. `publicPaths` lists routes exempt from the redirect.
+- `src/lib/store/server.ts` — runtime zustand store without `persist`. It owns the current
+  `serverUrl`, active server ID, candidate connection, user, capabilities and offline mode; none
+  of these connection/session fields are restored from the saved list. Connection/session IDs
+  guard asynchronous results and remount pages when server or account identity changes.
+- `src/lib/server-registry.ts` — `ServerRegistryRepository` owns the `moke-server-storage` v1
+  envelope (`{ version: 1, state: { savedServers } }`). Only saved ID/URL/title/timestamp metadata
+  is persisted, never credentials, connection state or capability snapshots. Web stores it in
+  localStorage. `src/lib/server-storage.ts` stores Tauri JSON files and backups under
+  `AppData/books/.servers/`, using temporary files, rename and read-back verification. Old
+  browser configuration is a migration source when no native file exists; `moke_server_url`
+  is an optional browser compatibility mirror and cannot activate a connection. This directory
+  remains readable by Reader under its existing books/asset scope; only main may write it.
+- `src/components/providers/ServerProvider.tsx` — loads the list and gates protected pages until
+  hydration and any `readerReturnTo` redirect finish. Without a runtime server or offline mode,
+  it redirects to `/welcome` before those pages mount or start requests. `PUBLIC_PATHS`, extension
+  and embedded Reader routes are exempt. It also checks access requirements and syncs the user,
+  server title and capabilities with connection/session guards.
+- Ordinary app navigation uses `router.push`/`router.replace` to retain runtime identity.
+  Intentional single-WebView document navigation goes through `src/lib/moke-reader.ts`.
+  Reader launches recheck the captured session and prepare a one-use return receipt only
+  immediately before native document dispatch; fallback clears the receipt and rechecks the
+  session before routing. `src/lib/reader-return.ts` binds sessionStorage to a live `window.name`
+  marker, exact source and `/library` arrival. Online return reconfirms the saved server; offline
+  return restores only the authorized offline intent. Reload/history/cold startup cannot replay
+  this receipt. Do not restore runtime identity from a saved URL or bypass these checks.
 - `src/lib/offline-books.ts` — offline downloads. Stored in IndexedDB (`moke-offline-books`), and on
   Tauri additionally written to disk under `AppData/books/` via `@tauri-apps/plugin-fs` so the reader
   can open a real file path.

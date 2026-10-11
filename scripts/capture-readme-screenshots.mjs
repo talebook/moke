@@ -1,13 +1,18 @@
 // Capture the real Web UI with fictional, browser-local Talebook responses.
 // Start `pnpm dev-web --hostname 127.0.0.1 --port 3100` first.
+// MOKE_E2E_BASE_URL, MOKE_TEST_CHROMIUM_PATH and MOKE_README_SCREENSHOT_DIR
+// optionally select another Web preview, Chromium binary and output directory.
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect } from '@playwright/test';
 
-const appUrl = 'http://127.0.0.1:3100';
+const defaultAppUrl = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3100';
 const serverUrl = 'https://readme-library.invalid';
-const outputDir = fileURLToPath(new URL('../docs/screenshots/', import.meta.url));
+const serverTitle = '墨客示例书库';
+const defaultOutputDir = process.env.MOKE_README_SCREENSHOT_DIR
+  || fileURLToPath(new URL('../docs/screenshots/', import.meta.url));
 const titles = ['山间来信', '城市漫步', '星河手记', '草木之间', '海风与旅人', '时间的花园',
   '纸上远行', '午后书店', '雨天的诗', '湖畔笔记', '慢慢生活', '光与四季'];
 const authors = ['林远', '顾川', '江宁', '许青'];
@@ -42,27 +47,24 @@ function coverSvg(index) {
   </svg>`;
 }
 
-export async function captureReadmeScreenshots(page) {
+export async function captureReadmeScreenshots(page, {
+  appUrl = defaultAppUrl, outputDir = defaultOutputDir,
+} = {}) {
+  appUrl = new URL(appUrl).origin;
   await mkdir(outputDir, { recursive: true });
   const diagnostics = [];
   const context = page.context();
   page.setDefaultNavigationTimeout(120000);
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
-  await context.addInitScript(({ appUrl, serverUrl }) => {
+  await context.addInitScript(({ appUrl, serverUrl, serverTitle }) => {
     if (location.origin !== appUrl) return;
     // Seed only the disposable browser context; no real sessions are reused.
-    const saved = JSON.parse(localStorage.getItem('moke-server-storage') || '{}');
-    if (saved.state?.serverUrl !== serverUrl) {
-      localStorage.setItem('moke-server-storage', JSON.stringify({ version: 0, state: {
-        serverUrl, serverTitle: '墨客示例书库', isConnected: true, user: null, token: '',
-        protocol: 'https', host: 'readme-library.invalid', port: '', offlineMode: false,
-        capabilities: { shelfApi: true, readingStateApi: true, readingProgressApi: true,
-          readingStatsApi: false, networkSourcesApi: false, annotationApiStatus: 'unsupported',
-          annotationApiCheckedAt: Date.now(), checkedAt: Date.now(), version: 'demo' },
-      } }));
-    }
-  }, { appUrl, serverUrl });
+    localStorage.setItem('moke-server-storage', JSON.stringify({ version: 1, state: {
+      savedServers: [{ id: 'readme-library', url: serverUrl, title: serverTitle,
+        addedAt: '2026-01-01T00:00:00.000Z' }],
+    } }));
+  }, { appUrl, serverUrl, serverTitle });
 
   await context.route('**/*', async (route) => {
     const url = new URL(route.request().url());
@@ -77,12 +79,19 @@ export async function captureReadmeScreenshots(page) {
       if (cover) return route.fulfill({ contentType: 'image/svg+xml', headers,
         body: coverSvg(Number(cover[1]) - 1) });
       let data;
+      if (url.pathname === '/api/user/info') data = { err: 'ok',
+        sys: { title: serverTitle, version: 'demo' }, user: { is_login: false } };
+      if (url.pathname === '/api/welcome') data = { err: 'free' };
+      if (url.pathname === '/api/shelf') data = { err: 'ok', books };
       if (url.pathname === '/api/library') data = { err: 'ok', books, total: books.length };
       if (url.pathname === '/api/book/nav') data = { err: 'ok', navs: [
         { legend: '分类', tags: [{ name: '文学', count: 12 }, { name: '随笔', count: 12 }] },
       ] };
       const detail = url.pathname.match(/^\/api\/book\/(\d+)$/);
       if (detail) data = { err: 'ok', book: books[Number(detail[1]) - 1] };
+      if (/^\/api\/book\/\d+\/readstate$/.test(url.pathname)) data = { err: 'ok', read_state: 0 };
+      if (/^\/api\/book\/\d+\/progress$/.test(url.pathname)) data = { err: 'ok', progress: null };
+      if (['/api/reading/stats', '/api/network/sources'].includes(url.pathname)) data = { err: 'api.not_found' };
       if (data) return route.fulfill({ contentType: 'application/json', headers,
         body: JSON.stringify(data) });
     }
@@ -117,14 +126,23 @@ export async function captureReadmeScreenshots(page) {
   }
   async function capture(name) {
     await ready();
-    await page.screenshot({ path: `${outputDir}${name}.png`, animations: 'disabled' });
+    await page.screenshot({ path: join(outputDir, `${name}.png`), animations: 'disabled' });
     console.log(`Captured ${name}: ${page.url()}, ${JSON.stringify(page.viewportSize())}`);
   }
 
   await page.goto(`${appUrl}/settings/developer`, { waitUntil: 'networkidle' });
   await page.getByRole('button', { name: '同意并继续' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
-  await page.goto(`${appUrl}/library`, { waitUntil: 'networkidle' });
+  async function enterLibrary() {
+    // Every document load is disconnected. Confirm the saved entry explicitly,
+    // then keep its runtime identity through client-side navigation.
+    await page.goto(`${appUrl}/welcome`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: new RegExp(serverTitle) }).click();
+    await expect(page).toHaveURL(`${appUrl}/shelf`);
+    await page.getByRole('link', { name: '书库', exact: true }).click();
+    await expect(page).toHaveURL(`${appUrl}/library`);
+  }
+  await enterLibrary();
   const firstBook = page.locator('a[href="/detail?id=1"]').first();
   await expect(firstBook).toBeVisible();
   await expect(page.locator('.moke-sidebar')).toBeVisible();
@@ -141,7 +159,7 @@ export async function captureReadmeScreenshots(page) {
   await capture('book-detail-desktop');
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${appUrl}/library`, { waitUntil: 'networkidle' });
+  await enterLibrary();
   await expect(firstBook).toBeVisible();
   await expect(page.locator('.moke-sidebar')).toBeHidden();
   await expect(page.locator('.moke-tab-bar')).toBeVisible();
@@ -155,7 +173,9 @@ export async function captureReadmeScreenshots(page) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true,
+    ...(process.env.MOKE_TEST_CHROMIUM_PATH ? { executablePath: process.env.MOKE_TEST_CHROMIUM_PATH } : {}),
+  });
   try {
     const context = await browser.newContext({ deviceScaleFactor: 1, locale: 'zh-CN' });
     await captureReadmeScreenshots(await context.newPage());

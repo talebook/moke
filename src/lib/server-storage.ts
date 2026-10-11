@@ -18,13 +18,22 @@ export function createNativeServerStorage(): RegistryStorage {
   let recovering = false;
   return {
     prepareRecovery: () => { recovering = true; return () => { recovering = false; }; },
+    readRecoverySources() {
+      if (!recovering) return undefined;
+      try {
+        return { browserRaw: window.localStorage.getItem(SERVER_STORAGE_KEY), browserUnavailable: false };
+      } catch {
+        // ArkWeb may deny even the storage getter. Unreadable browser data
+        // stays untouched and must not prevent creation of a native list.
+        return { browserRaw: null, browserUnavailable: true };
+      }
+    },
     async getItem(key) {
       const { BaseDirectory, exists, open } = await import('@tauri-apps/plugin-fs');
       const path = `books/.servers/${key}.json`;
       if (!await exists(path, { baseDir: BaseDirectory.AppData })) {
-        // An explicit recovery may start a native list even if ArkWeb cannot read
-        // its old storage. Those inaccessible browser values remain untouched.
-        if (recovering) return null;
+        // Preserve readable fallback bytes during recovery too. The safe read
+        // returns null when ArkWeb denies access, leaving that data untouched.
         return safeGetLocalStorageItem(key);
       }
       const file = await open(path, { baseDir: BaseDirectory.AppData, read: true });

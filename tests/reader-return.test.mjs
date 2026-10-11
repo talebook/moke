@@ -235,7 +235,7 @@ test('B candidate, login, logout and disconnect invalidate an earlier A return r
   }
 });
 
-test('a B candidate during A return confirmation prevents the late A result from activating', async () => {
+test('A return confirmation locks new B candidates until its original load finishes', async () => {
   const disk=registry(),tab=channel(),original=createServerStore(disk.repository,tab);
   await original.getState().loadServers();
   const server=(await original.getState().saveServer(a.url)).value;
@@ -245,15 +245,29 @@ test('a B candidate during A return confirmation prevents the late A result from
   let entered,release;
   const started=new Promise(resolve=>{entered=resolve;});
   const wait=new Promise(resolve=>{release=resolve;});
-  const originalFetch=globalThis.fetch;
-  globalThis.fetch=async url=>{if(String(url).endsWith('/api/user/info')){entered();await wait;}return Response.json(String(url).endsWith('/api/welcome')?{err:'free'}:{err:'ok',user:{is_login:false}});};
+  const originalFetch=globalThis.fetch,requests=[];
+  globalThis.fetch=async url=>{requests.push(String(url));if(String(url).endsWith('/api/user/info')){entered();await wait;}return Response.json(String(url).endsWith('/api/welcome')?{err:'free'}:{err:'ok',user:{is_login:false}});};
+  const returned=createServerStore(disk.repository,tab);
+  const load=returned.getState().loadServers();
   try {
-    const returned=createServerStore(disk.repository,tab);
-    const load=returned.getState().loadServers();
     await started;
-    returned.getState().beginConnection(other.id);
-    release();await load;
+    assert.equal(returned.getState().storageBusy,true);
+    assert.equal(returned.getState().beginConnection(other.id),null);
+    assert.equal(returned.getState().candidate,null);
     assert.equal(returned.getState().serverUrl,'');
-    assert.equal(returned.getState().candidate.id,other.id);
-  } finally {release();globalThis.fetch=originalFetch;}
+    assert.deepEqual(requests,[`${a.url}/api/user/info`]);
+    release();await load;
+    assert.equal(returned.getState().storageBusy,false);
+    assert.equal(returned.getState().hasHydrated,true);
+    assert.equal(returned.getState().serverUrl,a.url);
+    assert.equal(returned.getState().activeServerId,server.id);
+    assert.equal(returned.getState().candidate,null);
+    assert.deepEqual(requests,[`${a.url}/api/user/info`,`${a.url}/api/welcome`]);
+    const candidate=returned.getState().beginConnection(other.id);
+    assert.equal(candidate.id,other.id);
+    assert.equal(returned.getState().candidate,candidate);
+    assert.equal(returned.getState().serverUrl,a.url,'starting B preserves confirmed A until activation');
+    assert.equal(await returned.getState().activateCandidate(candidate.requestId),true);
+    assert.equal(returned.getState().serverUrl,b.url);
+  } finally {release();await load;globalThis.fetch=originalFetch;}
 });

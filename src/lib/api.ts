@@ -176,22 +176,6 @@ export async function fetchImageObjectUrl(imageUrl: string): Promise<string> {
   }
 }
 
-export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: string }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
-  const body = new URLSearchParams();
-
-  if (code) {
-    body.append('invite_code', code);
-  }
-
-  const response = await request(`${serverUrl}/api/welcome`, {
-    method: code ? 'POST' : 'GET',
-    body: code ? body : undefined,
-    credentials: 'include',
-  });
-  return readJsonResponse(response);
-}
-
 export async function fetchCurrentUser(server?: string, signal?: AbortSignal): Promise<CurrentUserResult> {
   const serverUrl = server ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const response = await request(`${serverUrl}/api/user/info`, {
@@ -219,11 +203,13 @@ export async function fetchServerInfo(server?: string, signal?: AbortSignal): Pr
   };
 }
 
-async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boolean> {
+async function probeJsonEndpoint(serverUrl: string, path: string, signal?: AbortSignal): Promise<boolean> {
   try {
+    signal?.throwIfAborted();
     const response = await request(`${serverUrl}${path}`, {
-      credentials: 'include',
+      credentials: 'include', signal,
     });
+    signal?.throwIfAborted();
 
     if (response.status === 404 || response.status === 405) return false;
 
@@ -231,31 +217,37 @@ async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boole
     if (!contentType.includes('application/json')) return response.ok;
 
     const data = await readJsonResponse<any>(response).catch(() => null);
+    signal?.throwIfAborted();
     const err = typeof data?.err === 'string' ? data.err : '';
 
     if (!err) return response.ok;
     if (err === 'page.not_found' || err === 'handler.not_found' || err === 'api.not_found') return false;
     return true;
   } catch (error) {
+    signal?.throwIfAborted();
     debugLog('warn', 'capabilities', `能力探测失败: ${path}`, getErrorMessage(error));
     return false;
   }
 }
 
-async function findSampleBookId(serverUrl: string): Promise<string | null> {
+async function findSampleBookId(serverUrl: string, signal?: AbortSignal): Promise<string | null> {
   const candidates = ['/api/shelf', '/api/library?num=1', '/api/library?page=1&num=1'];
 
   for (const path of candidates) {
     try {
-      const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
+      signal?.throwIfAborted();
+      const response = await request(`${serverUrl}${path}`, { credentials: 'include', signal });
+      signal?.throwIfAborted();
       if (!response.ok) continue;
 
       const data = await readJsonResponse<any>(response).catch(() => null);
+      signal?.throwIfAborted();
       const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
       if (Array.isArray(books) && books.length > 0 && books[0]?.id != null) {
         return String(books[0].id);
       }
     } catch (error) {
+      signal?.throwIfAborted();
       debugLog('warn', 'capabilities', `样本书籍探测失败: ${path}`, getErrorMessage(error));
     }
   }
@@ -263,20 +255,24 @@ async function findSampleBookId(serverUrl: string): Promise<string | null> {
   return null;
 }
 
-export async function discoverServerCapabilities(serverUrl: string): Promise<ServerCapabilities> {
+export async function discoverServerCapabilities(serverUrl: string, signal?: AbortSignal): Promise<ServerCapabilities> {
+  signal?.throwIfAborted();
   const infoResponse = await request(`${serverUrl}/api/user/info`, {
-    credentials: 'include',
+    credentials: 'include', signal,
   });
   const info = await readJsonResponse<UserInfoResponse>(infoResponse).catch(() => ({} as UserInfoResponse));
+  signal?.throwIfAborted();
 
-  return discoverGeneralServerCapabilities({
+  const capabilities = await discoverGeneralServerCapabilities({
     version: info.sys?.version || '',
-    findSampleBookId: () => findSampleBookId(serverUrl),
-    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path),
+    findSampleBookId: () => findSampleBookId(serverUrl, signal),
+    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path, signal),
     // The current Talebook contract has no HEAD/limit endpoint for annotations.
     // Do not download and discard a sample book's complete annotation list here.
     // The detail panel's first useful data load doubles as its one-shot probe.
   });
+  signal?.throwIfAborted();
+  return capabilities;
 }
 
 export async function validateServerConnection(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {

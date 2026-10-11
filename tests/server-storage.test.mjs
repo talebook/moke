@@ -90,6 +90,120 @@ test('fresh native install loads and writes when ArkWeb rejects its localStorage
   }
 }));
 
+test('native recovery preserves readable damaged browser registry bytes before creating the authoritative file', () => inNative(async () => {
+  const raw = ' \n {"version":1,"state":{"savedServers":["旧数据"]}\t broken';
+  const values = new Map([[SERVER_STORAGE_KEY, raw], ['moke_server_url', ' http://old.test \n']]);
+  globalThis.window = { localStorage: { getItem: key => values.get(key) ?? null } };
+  const repository = createServerRepository();
+  assert.equal((await repository.load()).ok, false);
+  assert.equal(files.has(`books/.servers/${SERVER_STORAGE_KEY}.json`), false);
+  assert.equal((await repository.recover()).ok, true);
+  const backupPath = [...files.keys()].find(path => path.includes(`${SERVER_STORAGE_KEY}-backup-`));
+  const backup = JSON.parse(new TextDecoder().decode(files.get(backupPath)));
+  assert.equal(backup.raw, raw);
+  assert.equal(backup.legacy, values.get('moke_server_url'));
+  assert.deepEqual(backup.sources, { browserRaw: raw, browserUnavailable: false });
+  assert.equal(new TextDecoder().decode(files.get(`books/.servers/${SERVER_STORAGE_KEY}.json`)), serializeServerRegistry(emptyRegistry()));
+  assert.equal(values.get(SERVER_STORAGE_KEY), raw);
+}));
+
+test('native recovery prioritizes native bytes and also backs up an independent readable browser copy', () => inNative(async () => {
+  const path = `books/.servers/${SERVER_STORAGE_KEY}.json`;
+  const nativeRaw = ' {"state": "原生损坏配置"\n';
+  for (const browserRaw of [' \t 浏览器损坏 JSON\n', serializeServerRegistry({ savedServers: [{ id:'b', url:'http://b.test', title:'Browser B', addedAt:'' }] })]) {
+    files.clear(); events.length = 0;
+    files.set(path, new TextEncoder().encode(nativeRaw));
+    const values = new Map([[SERVER_STORAGE_KEY, browserRaw], ['moke_server_url', 'http://legacy.test']]);
+    let browserPrimaryReads = 0;
+    globalThis.window = { localStorage: { getItem: key => {
+      if (key === SERVER_STORAGE_KEY) browserPrimaryReads++;
+      return values.get(key) ?? null;
+    } } };
+    const repository = createServerRepository();
+    assert.equal((await repository.load()).ok, false);
+    assert.equal(browserPrimaryReads, 0, 'ordinary native load never substitutes the browser copy');
+    assert.equal((await repository.recover()).ok, true);
+    const backupPath = [...files.keys()].find(name => name.includes(`${SERVER_STORAGE_KEY}-backup-`));
+    const backup = JSON.parse(new TextDecoder().decode(files.get(backupPath)));
+    assert.equal(backup.raw, nativeRaw);
+    assert.deepEqual(backup.sources, { browserRaw, browserUnavailable: false });
+    assert.equal(backup.legacy, 'http://legacy.test');
+    assert.equal(values.get(SERVER_STORAGE_KEY), browserRaw);
+    assert.equal(new TextDecoder().decode(files.get(path)), serializeServerRegistry(emptyRegistry()));
+  }
+}));
+
+test('native recovery succeeds when ArkWeb denies its storage getter or reads, retaining any native original', () => inNative(async () => {
+  const path = `books/.servers/${SERVER_STORAGE_KEY}.json`;
+  const nativeRaw = ' \n 原生原数据 {broken';
+  for (const nativeExists of [false, true]) for (const denied of [
+    { get localStorage() { throw new DOMException('getter denied', 'SecurityError'); } },
+    { localStorage: { getItem() { throw new DOMException('read denied', 'SecurityError'); } } },
+  ]) {
+    files.clear(); events.length = 0;
+    if (nativeExists) files.set(path, new TextEncoder().encode(nativeRaw));
+    globalThis.window = denied;
+    const repository = createServerRepository();
+    assert.equal((await repository.recover()).ok, true);
+    const backupPath = [...files.keys()].find(name => name.includes(`${SERVER_STORAGE_KEY}-backup-`));
+    const backup = JSON.parse(new TextDecoder().decode(files.get(backupPath)));
+    assert.equal(backup.raw, nativeExists ? nativeRaw : null);
+    assert.deepEqual(backup.sources, { browserRaw: null, browserUnavailable: true });
+    assert.equal(new TextDecoder().decode(files.get(path)), serializeServerRegistry(emptyRegistry()));
+  }
+}));
+
+test('a browser source changed during backup is not mistaken for the verified recovery snapshot', () => inNative(async () => {
+  const path = `books/.servers/${SERVER_STORAGE_KEY}.json`;
+  const nativeRaw = ' native original {broken';
+  const browserRaw = ' browser original {broken';
+  const changed = ' external browser {changed';
+  for (const nativeExists of [false, true]) {
+    files.clear(); events.length = 0;
+    if (nativeExists) files.set(path, new TextEncoder().encode(nativeRaw));
+    const values = new Map([[SERVER_STORAGE_KEY, browserRaw]]);
+    globalThis.window = { localStorage: { getItem: key => values.get(key) ?? null } };
+    const adapter = createNativeServerStorage();
+    const write = adapter.setItem;
+    adapter.setItem = async (key, value) => {
+      await write(key, value);
+      if (key.startsWith(`${SERVER_STORAGE_KEY}-backup-`)) values.set(SERVER_STORAGE_KEY, changed);
+    };
+    const result = await new ServerRegistryRepository(adapter, { getItem: () => null, setItem() {} }).recover();
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'configuration-changed');
+    assert.match(result.error, /重试加载/);
+    const backupPath = [...files.keys()].find(name => name.includes(`${SERVER_STORAGE_KEY}-backup-`));
+    const backup = JSON.parse(new TextDecoder().decode(files.get(backupPath)));
+    assert.equal(backup.raw, nativeExists ? nativeRaw : browserRaw);
+    assert.deepEqual(backup.sources, { browserRaw, browserUnavailable: false });
+    assert.equal(values.get(SERVER_STORAGE_KEY), changed);
+    assert.equal(files.has(path), nativeExists);
+    if (nativeExists) assert.equal(new TextDecoder().decode(files.get(path)), nativeRaw);
+    assert.equal(adapter.readRecoverySources(), undefined, 'finally releases the recovery scope on conflict');
+  }
+}));
+
+test('native recovery backup verification failure keeps both originals and releases its recovery scope', () => inNative(async () => {
+  const path = `books/.servers/${SERVER_STORAGE_KEY}.json`;
+  const nativeRaw = ' native {broken';
+  const browserRaw = ' browser {broken';
+  files.set(path, new TextEncoder().encode(nativeRaw));
+  globalThis.window = { localStorage: { getItem: key => key === SERVER_STORAGE_KEY ? browserRaw : null } };
+  const adapter = createNativeServerStorage();
+  const write = adapter.setItem;
+  adapter.setItem = async (key, value) => {
+    await write(key, value);
+    if (key.startsWith(`${SERVER_STORAGE_KEY}-backup-`)) files.set(`books/.servers/${key}.json`, new TextEncoder().encode('discarded backup'));
+  };
+  const result = await new ServerRegistryRepository(adapter, { getItem: () => null, setItem() {} }).recover();
+  assert.equal(result.ok, false);
+  assert.match(result.error, /原数据备份校验失败/);
+  assert.equal(new TextDecoder().decode(files.get(path)), nativeRaw);
+  assert.equal(window.localStorage.getItem(SERVER_STORAGE_KEY), browserRaw);
+  assert.equal(adapter.readRecoverySources(), undefined);
+}));
+
 test('native recovery scope ends on success and failure and never leaks to another adapter', () => inNative(async () => {
   const raw = serializeServerRegistry({ savedServers: [{ id:'a', url:'http://a.test', title:'A', addedAt:'' }] });
   globalThis.window = { localStorage: { getItem: (key) => key === SERVER_STORAGE_KEY ? raw : null } };
@@ -98,13 +212,17 @@ test('native recovery scope ends on success and failure and never leaks to anoth
     const adapter = createNativeServerStorage();
     const result = await new ServerRegistryRepository(adapter, { getItem: () => null, setItem() {} }).recover();
     assert.equal(result.ok, !rejected);
+    assert.equal(adapter.readRecoverySources(), undefined);
     if (!rejected) files.delete(`books/.servers/${SERVER_STORAGE_KEY}.json`);
     assert.equal(await adapter.getItem(SERVER_STORAGE_KEY), raw);
     const finish = adapter.prepareRecovery();
-    assert.equal(await adapter.getItem(SERVER_STORAGE_KEY), null);
+    assert.equal(await adapter.getItem(SERVER_STORAGE_KEY), raw);
+    assert.deepEqual(adapter.readRecoverySources(), { browserRaw: raw, browserUnavailable: false });
     assert.equal(await createNativeServerStorage().getItem(SERVER_STORAGE_KEY), raw);
+    assert.equal(createNativeServerStorage().readRecoverySources(), undefined);
     finish();
     assert.equal(await adapter.getItem(SERVER_STORAGE_KEY), raw);
+    assert.equal(adapter.readRecoverySources(), undefined);
   }
 }));
 

@@ -89,12 +89,14 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       // Keep recovery locked until this operation settles so a late file write
       // cannot race a new recovery or save.
       const timer = setTimeout(() => set({ hasHydrated: true,
-        storageError: '服务器列表读取超时，原数据已保留。请完全退出并重新启动应用后重试；若读取自行完成，列表会自动恢复。' }), 8000);
+        storageError: '服务器列表读取超时，原数据已保留。可先使用离线书库，有当前连接时也可返回当前书架。读取结束前不能重新加载或重建列表；若读取自行完成，列表会自动恢复，也可完全退出并重新启动应用后重试。' }), 8000);
       loading = (async () => {
         const result = await repository.load();
         if (!result.ok) { clearReaderReturn(returnChannel); set({ storageError: result.error, hasHydrated: true }); return; }
         clearTimeout(timer);
-        set({ ...result.value, serverListNotice: result.notice ?? '', hasHydrated: false, storageError: '' });
+        // A timeout exit may already have opened an offline/current shelf.
+        // Keep that UI usable when this original read eventually completes.
+        set({ ...result.value, serverListNotice: result.notice ?? '', hasHydrated: get().hasHydrated, storageError: '' });
         // A cold launch only loads the list. A live Reader return consumes its
         // one-use browsing-context receipt before confirming the connection.
         let context = null;
@@ -148,7 +150,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       } finally { set({ saving: false }); }
     },
     saveServer: async (value) => {
-      if (get().saving || !get().hasHydrated || get().storageError) return { ok: false, error: '请先完成服务器列表加载或恢复' };
+      if (get().saving || get().storageBusy || !get().hasHydrated || get().storageError) return { ok: false, error: '请先完成服务器列表加载或恢复' };
       let url: string;
       try { url = normalizeServerAddress(value); }
       catch (error) { return { ok: false, error: (error as Error).message }; }
@@ -180,7 +182,7 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       // origin. Keep the live connection, but reload before trusting this list
       // for another connection. Ordinary read-only writes leave storageError
       // empty, so a successfully loaded list remains connectable.
-      if (!server || get().saving || get().storageError) return null;
+      if (!server || get().saving || get().storageBusy || get().storageError) return null;
       clearReaderReturn(returnChannel);
       const candidate = { id, url: server.url, requestId: ++requestNumber, needsAccessCode: false };
       set({ candidate, readerReturnTo: null, readerReturnError: '', serverListNotice: '' });
@@ -207,11 +209,11 @@ export function createServerStore(repository: ServerRegistryRepository = createS
     },
     activateCandidate: async (requestId) => {
       const candidate = get().candidate;
-      if (candidate?.requestId !== requestId || get().saving || get().storageError) return false;
+      if (candidate?.requestId !== requestId || get().saving || get().storageBusy || get().storageError) return false;
       set({ saving: true });
       try {
         return await withClosedReaderSession(async () => {
-          if (get().candidate?.requestId !== requestId || get().storageError) return false;
+          if (get().candidate?.requestId !== requestId || get().storageBusy || get().storageError) return false;
           const url = new URL(candidate.url);
           clearReaderReturn(returnChannel);
           clearReadStateCache();
@@ -239,7 +241,9 @@ export function createServerStore(repository: ServerRegistryRepository = createS
       // identity/remounting pages. Failure leaves the original page and mode intact.
       prepareDocumentReturn?.();
       clearReadStateCache();
-      set({ offlineMode: true, candidate: null, readerReturnTo: null, readerReturnError: '', serverListNotice: '', sessionId: get().sessionId + 1 });
+      // Runtime browsing is independent of an unfinished registry read. Keep
+      // the storage error/busy lock so no second migration or recovery races it.
+      set({ offlineMode: true, hasHydrated: true, candidate: null, readerReturnTo: null, readerReturnError: '', serverListNotice: '', sessionId: get().sessionId + 1 });
     }),
     setConnected: (token, user) => {
       clearReaderReturn(returnChannel);

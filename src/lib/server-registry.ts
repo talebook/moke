@@ -6,10 +6,15 @@ export interface SavedServer { id: string; url: string; title: string; addedAt: 
 export interface ServerRegistry {
   savedServers: SavedServer[];
 }
+export interface RegistryRecoverySources {
+  browserRaw: string | null;
+  browserUnavailable: boolean;
+}
 export interface RegistryStorage {
   getItem(key: string): string | null | Promise<string | null>;
   setItem(key: string, value: string): void | Promise<void>;
   prepareRecovery?: () => () => void;
+  readRecoverySources?: () => RegistryRecoverySources | undefined | Promise<RegistryRecoverySources | undefined>;
 }
 export type StorageResult<T> = { ok: true; value: T; notice?: string }
   | { ok: false; error: string; reason?: 'configuration-changed' };
@@ -136,6 +141,9 @@ export class ServerRegistryRepository {
       try {
         finishRecovery = this.storage.prepareRecovery?.();
         this.raw = await this.storage.getItem(SERVER_STORAGE_KEY);
+        // Native data remains authoritative, but an independently readable
+        // browser copy must also survive an explicit recovery.
+        const sources = await this.storage.readRecoverySources?.();
         let legacy: string | null = null;
         let legacyUnavailable = false;
         try { legacy = await this.legacyStorage.getItem('moke_server_url'); }
@@ -144,9 +152,12 @@ export class ServerRegistryRepository {
           legacyUnavailable = true;
         }
         const backupKey = `${SERVER_STORAGE_KEY}-backup-${createLocalId()}`;
-        const backup = JSON.stringify({ raw: this.raw, legacy, legacyUnavailable });
+        const backup = JSON.stringify({ raw: this.raw, legacy, legacyUnavailable, ...(sources ? { sources } : {}) });
         await this.storage.setItem(backupKey, backup);
         if (await this.storage.getItem(backupKey) !== backup) throw new Error('原数据备份校验失败');
+        if (sources && JSON.stringify(await this.storage.readRecoverySources?.()) !== JSON.stringify(sources)) {
+          throw new ServerRegistryConflictError();
+        }
         this.preserveRawOnWrite = false; // Recovery's verified backup already preserves it.
         await this.writeVerified(serializeServerRegistry(emptyRegistry()));
         this.loaded = true;

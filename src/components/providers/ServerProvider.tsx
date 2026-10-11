@@ -87,7 +87,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
           fetchCurrentUser(discoveryServerUrl, abort.signal),
           fetchServerInfo(discoveryServerUrl, abort.signal),
-          discoverServerCapabilities(discoveryServerUrl),
+          discoverServerCapabilities(discoveryServerUrl, abort.signal),
         ]);
         if (!isCurrent()) return;
 

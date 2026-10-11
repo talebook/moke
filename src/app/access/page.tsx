@@ -13,6 +13,8 @@ function AccessPageInner() {
   const searchParams = useSearchParams();
   const candidate = useServerStore((state) => state.candidate);
   const hasHydrated = useServerStore((state) => state.hasHydrated);
+  const storageBusy = useServerStore((state) => state.storageBusy);
+  const storageError = useServerStore((state) => state.storageError);
   const serverUrl = candidate?.url || '';
   const requestId = Number(searchParams.get('requestId'));
   const serverId = searchParams.get('serverId');
@@ -28,7 +30,9 @@ function AccessPageInner() {
     return state.candidate?.requestId === requestId && state.candidate.id === serverId;
   };
   useEffect(() => {
-    if (!hasHydrated || restoredContext.current) return;
+    // Hydration can become visible before the original read/confirmation has
+    // released its reservation. Only consume restoration once it is usable.
+    if (!hasHydrated || storageBusy || storageError || restoredContext.current) return;
     restoredContext.current = true;
     const state = useServerStore.getState();
     // A new document can reconstruct the saved identity, never an arbitrary
@@ -38,22 +42,31 @@ function AccessPageInner() {
     if (!attempt) return;
     state.requireAccess(attempt.requestId);
     router.replace(`/access?serverId=${encodeURIComponent(serverId)}&requestId=${attempt.requestId}`);
-  }, [hasHydrated, router, serverId]);
-  useEffect(() => () => { controller.current?.abort(); }, [requestId, serverId]);
+  }, [hasHydrated, storageBusy, storageError, router, serverId]);
+  useEffect(() => {
+    setLoading(false); setError(''); setShowCaptcha(false);
+    return () => { controller.current?.abort(); controller.current = null; };
+  }, [requestId, serverId]);
 
   const handleVerify = async (captchaData?: any) => {
     if (!code.trim() || loading || !validContext()) return;
     const abort = new AbortController();
     controller.current?.abort(); controller.current = abort;
+    const isCurrent = () => controller.current === abort && !abort.signal.aborted && validContext();
     setLoading(true);
     setError('');
     try {
       const res = await submitWelcomeCode(code, captchaData, serverUrl, abort.signal);
-      if (!validContext() || abort.signal.aborted) return;
+      if (!isCurrent()) return;
       if (res.err === 'ok') {
         await requireClosedReaders();
-        if (!validContext() || abort.signal.aborted) return;
-        if (!await useServerStore.getState().activateCandidate(requestId)) return;
+        if (!isCurrent()) return;
+        if (!await useServerStore.getState().activateCandidate(requestId)) {
+          if (isCurrent()) setError('连接未被确认，请重试');
+          return;
+        }
+        // Activation commits the current candidate atomically. Its session
+        // change can already have remounted this page and aborted its effect.
         setShowCaptcha(false);
         // 验证成功后进入书架主页，而不是 router.back()（那会退回 welcome 连接页）
         router.push('/shelf');
@@ -65,12 +78,14 @@ function AccessPageInner() {
         setShowCaptcha(false);
       }
     } catch (e) {
-      if (!abort.signal.aborted && validContext()) {
+      if (isCurrent()) {
         console.warn('[AccessPage] access verification failed:', e);
         setError(getErrorMessage(e, '无法连接服务器'));
       }
     }
-    finally { setLoading(false); }
+    finally {
+      if (controller.current === abort) { controller.current = null; setLoading(false); }
+    }
   };
 
   return (

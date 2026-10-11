@@ -151,7 +151,7 @@ jobs:
             fi
             sleep 1
           done
-          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 MOKE_E2E_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs tests/connection-reader-guard.spec.mjs tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs --workers=1
+          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 MOKE_E2E_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs tests/connection-reader-guard.spec.mjs tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs tests/server-storage-timeout.spec.mjs --workers=1
       - name: Upload document handoff evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -201,7 +201,7 @@ jobs:
           exit 1
 
       - name: Run browser smoke tests
-        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs tests/sample-book.spec.mjs tests/server-list.spec.mjs tests/auth-connection.spec.mjs --workers=1
+        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs tests/sample-book.spec.mjs tests/server-list.spec.mjs tests/auth-connection.spec.mjs tests/readme-screenshots.spec.mjs --workers=1
 
       - name: Upload responsive screenshots and server log
         if: always()
