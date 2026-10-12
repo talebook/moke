@@ -1,42 +1,70 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverServerCapabilities } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
 import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
+import { clearReaderReturn } from '@/lib/reader-return';
 
-const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', '/settings/developer'];
+// Auth pages explain an absent connection themselves, including cold reloads.
+const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/reset-password', '/access', '/privacy', '/settings/developer'];
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  // 字段级订阅：能力探测一轮会连续 setServerTitle / setUser / setServerCapabilities，
-  // 整对象订阅会让每次 set 都重渲染整棵应用树；只订阅用到的字段即可。
+  // Field subscriptions retain the personal main rendering optimization.
   const serverUrl = useServerStore((state) => state.serverUrl);
   const offlineMode = useServerStore((state) => state.offlineMode);
   const hasHydrated = useServerStore((state) => state.hasHydrated);
+  const storageBusy = useServerStore((state) => state.storageBusy);
+  const storageError = useServerStore((state) => state.storageError);
+  const readerReturnTo = useServerStore((state) => state.readerReturnTo);
   const capabilities = useServerStore((state) => state.capabilities);
+  const connectionId = useServerStore((state) => state.connectionId);
+  const sessionId = useServerStore((state) => state.sessionId);
+  const loadServers = useServerStore((state) => state.loadServers);
   const setServerTitle = useServerStore((state) => state.setServerTitle);
   const setUser = useServerStore((state) => state.setUser);
   const setServerCapabilities = useServerStore((state) => state.setServerCapabilities);
+  const previousPath = useRef(pathname);
+  useEffect(() => {
+    const previous = previousPath.current;
+    previousPath.current = pathname;
+    // Route transitions, rather than component cleanup, also work with Strict
+    // Mode effect replay and Next's cached Activity pages.
+    if ((previous === '/access' && pathname !== '/access')
+      || (previous === '/welcome' && pathname !== '/welcome' && pathname !== '/access')) {
+      useServerStore.getState().cancelConnection();
+    }
+  }, [pathname]);
   const [discoveryServerUrl, capabilitiesCheckedAt] = getServerDiscoveryInputs(serverUrl, capabilities);
+
+  useEffect(() => { if (!useServerStore.getState().hasHydrated) void loadServers(); }, [loadServers]);
+
+  useEffect(() => {
+    if (!hasHydrated || !readerReturnTo) return;
+    if (pathname === readerReturnTo) useServerStore.setState({ readerReturnTo: null });
+    else router.replace(readerReturnTo);
+  }, [hasHydrated, pathname, readerReturnTo, router]);
 
   // 拓展管理页面是本地功能，不需要连接服务器
   const isExtensionPath = pathname.startsWith('/extensions');
   const isEmbeddedReaderPath = pathname.startsWith('/readest');
 
   useEffect(() => {
-    if (!hasHydrated) return;
+    // Timeout hydration exposes an exit on public pages. It must not replace
+    // a /library document whose original read still owns a return receipt.
+    if (!hasHydrated || storageBusy) return;
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!serverUrl && !offlineMode) {
       // Use full-document navigation on single-WebView runtimes (OHOS) to avoid
       // getting stuck on the blank loading screen when RSC navigation fails.
       navigateFullDocument('/welcome', router.replace);
     }
-  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
+  }, [hasHydrated, storageBusy, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -46,34 +74,38 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     // 能力探测整轮（checkWelcomeRequirement + fetchCurrentUser + fetchServerInfo
     // + discoverServerCapabilities）较重，结果带 checkedAt 缓存：5 分钟内路由
-    // 切换不再整轮重跑。serverUrl 变化时 setServer 会重置 capabilities
+    // 切换不再整轮重跑。激活候选连接时会重置 capabilities
     // （checkedAt=null），因此会自然失效重探；user/title 同步随之节流。
     if (isServerCapabilitiesFresh(capabilitiesCheckedAt)) return;
 
     let cancelled = false;
+    const abort = new AbortController();
+    const isCurrent = () => !cancelled && useServerStore.getState().connectionId === connectionId
+      && useServerStore.getState().sessionId === sessionId;
 
     const checkAccess = async () => {
-      const { user: userAtSyncStart, sessionRevision } = useServerStore.getState();
-      const isCurrentSession = () => {
-        const current = useServerStore.getState();
-        return !cancelled && current.serverUrl === discoveryServerUrl && current.sessionRevision === sessionRevision;
-      };
+      const userAtSyncStart = useServerStore.getState().user;
 
       try {
-        const welcome = await checkWelcomeRequirement(discoveryServerUrl);
-        if (!isCurrentSession()) return;
+        const welcome = await checkWelcomeRequirement(discoveryServerUrl, abort.signal);
+        if (!isCurrent()) return;
+        if (welcome.err !== 'ok') throw new Error(welcome.msg || '访问码状态检查失败');
         if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
-          router.replace(`/access?server=${encodeURIComponent(discoveryServerUrl)}`);
+          const state = useServerStore.getState();
+          const candidate = state.beginActiveAccessConfirmation();
+          if (candidate) {
+            router.replace(`/access?serverId=${encodeURIComponent(candidate.id)}&requestId=${candidate.requestId}`);
+          } else router.replace('/welcome');
           return;
         }
 
         const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
-          fetchCurrentUser(),
-          fetchServerInfo(),
-          discoverServerCapabilities(discoveryServerUrl),
+          fetchCurrentUser(discoveryServerUrl, abort.signal),
+          fetchServerInfo(discoveryServerUrl, abort.signal),
+          discoverServerCapabilities(discoveryServerUrl, abort.signal),
         ]);
-        if (!isCurrentSession()) return;
+        if (!isCurrent()) return;
 
         const currentState = useServerStore.getState();
         if (currentState.serverUrl !== discoveryServerUrl) return;
@@ -82,7 +114,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         const syncedUser = resolveUserAfterSync(userAtSyncStart, currentUser, userResult);
 
         if (serverResult.status === 'fulfilled') {
-          setServerTitle(serverResult.value.title || '');
+          void setServerTitle(serverResult.value.title || '', { serverUrl: discoveryServerUrl, connectionId, sessionId });
         } else {
           console.warn('[ServerProvider] server info sync failed:', serverResult.reason);
         }
@@ -111,10 +143,9 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
           console.warn('[ServerProvider] capabilities sync failed:', capabilitiesResult.reason);
         }
       } catch (e) {
-        if (!isCurrentSession()) return;
         // Welcome/network failures are transient. Preserve the last confirmed
         // user, title, and capability snapshot for the next sync attempt.
-        console.error('[ServerProvider] sync error:', e);
+        if (isCurrent()) console.warn('[ServerProvider] sync error:', e);
       }
     };
 
@@ -122,8 +153,29 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      abort.abort();
     };
-  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
+  }, [capabilitiesCheckedAt, connectionId, sessionId, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
 
-  return <>{children}</>;
+  // Protected pages must not start requests while loading or redirecting an
+  // absent runtime connection (including return from a full-document reader).
+  if (!PUBLIC_PATHS.includes(pathname) && !isExtensionPath && !isEmbeddedReaderPath
+    && (!hasHydrated || (readerReturnTo && pathname !== readerReturnTo) || (!serverUrl && !offlineMode))) {
+    return <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
+      <p>正在加载连接信息…</p>
+      {storageBusy && storageError && <>
+        <p role="alert" className="max-w-md text-sm">{storageError}</p>
+        <button className="rounded-full border px-4 py-2" onClick={() => {
+          // Abandon a waiting return only through an explicit action. Keep the
+          // original read locked and navigate within the current document.
+          clearReaderReturn();
+          useServerStore.getState().cancelConnection();
+          router.push('/welcome');
+        }}>返回服务器列表</button>
+      </>}
+    </div>;
+  }
+  // Same-server identity changes must also discard authenticated page data and
+  // abort component requests. Do not increment sessionId for ordinary UI refreshes.
+  return <Fragment key={`${connectionId}:${sessionId}:${offlineMode}`}>{children}</Fragment>;
 }

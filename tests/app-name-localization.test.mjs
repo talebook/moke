@@ -354,19 +354,23 @@ test('iOS 默认显示名优先使用 CFBundleDisplayName，缺失时回退 CFBu
   assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot));
 });
 
-test('iOS Preview 校验使用传入的构建配置，同时继续拒绝产品名不匹配', () => {
-  const { temporaryRoot, appleRoot } = createIosFixture();
-  const configPath = 'src-tauri/tauri.preview.ci.conf.json';
-  writeFileSync(path.join(temporaryRoot, configPath), '{"productName":"Moke Preview"}\n');
-  prepareIosAppNames(temporaryRoot, () => {
-    writeXcodeGenProjectFixture(appleRoot, { productName: 'Moke Preview' });
-    return { status: 0 };
-  }, configPath);
-  assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot, configPath));
-  assert.throws(() => verifyIosAppNames(temporaryRoot), /does not resolve CFBundleName to Moke/);
-  writeXcodeGenProjectFixture(appleRoot, { productName: 'Wrong' });
-  assert.throws(() => verifyIosAppNames(temporaryRoot, configPath), /to Moke Preview/);
-});
+for (const [name, configPath, productName] of [
+  ['Preview', 'src-tauri/tauri.preview.ci.conf.json', 'Moke Preview'],
+  ['自定义配置', 'src-tauri/tauri.ios.custom.conf.json', 'Moke Custom'],
+]) {
+  test(`iOS ${name} 校验使用传入的构建配置，同时继续拒绝产品名不匹配`, () => {
+    const { temporaryRoot, appleRoot } = createIosFixture();
+    writeFileSync(path.join(temporaryRoot, configPath), `${JSON.stringify({ productName })}\n`);
+    prepareIosAppNames(temporaryRoot, () => {
+      writeXcodeGenProjectFixture(appleRoot, { productName });
+      return { status: 0 };
+    }, configPath);
+    assert.doesNotThrow(() => verifyIosAppNames(temporaryRoot, configPath));
+    assert.throws(() => verifyIosAppNames(temporaryRoot), /does not resolve CFBundleName to Moke/);
+    writeXcodeGenProjectFixture(appleRoot, { productName: 'Wrong' });
+    assert.throws(() => verifyIosAppNames(temporaryRoot, configPath), new RegExp(`to ${productName}`));
+  });
+}
 
 test('iOS prepare 在 XcodeGen 不可用时失败', () => {
   const { temporaryRoot } = createIosFixture();

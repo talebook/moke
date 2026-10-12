@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { create } from 'zustand';
-import { checkWelcomeRequirement, fetchCurrentUser } from '@/lib/api';
+import { checkWelcomeRequirement, fetchCurrentUser, MokeApiError } from '@/lib/api';
 import { reconnectOfflineServer } from '@/lib/offline-reconnect';
 import { useServerStore } from '@/lib/store/server';
 
@@ -43,7 +43,8 @@ export function useOfflineReconnect() {
       router.push(result.target);
     } catch (error) {
       if (!controller.signal.aborted) {
-        setReconnectError(error instanceof Error && error.message.startsWith('连接超时')
+        setReconnectError(error instanceof MokeApiError && error.code.startsWith('reader.') ? error.message
+          : error instanceof Error && error.message.startsWith('连接超时')
           ? error.message : '无法恢复服务器连接，请检查网络后重试，或选择服务器重新连接。');
       }
     } finally {
@@ -62,7 +63,7 @@ export function useOfflineReconnect() {
 
   const chooseServer = () => {
     cancelConnection();
-    useServerStore.getState().leaveOfflineMode();
+    useServerStore.getState().cancelConnection();
     router.push('/welcome');
   };
 

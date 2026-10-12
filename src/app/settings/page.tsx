@@ -1,11 +1,12 @@
 'use client';
 
+import { requireClosedReaders, withClosedReaderSession } from '@/lib/reader-source';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Copy, Download, FolderOpen, LogOut, Moon, Package, Palette, PlugZap, RefreshCw, Settings2, ShieldAlert, ShieldCheck, Sun, User, Code2, MonitorCog } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
-import { fetchServerInfo, request } from '@/lib/api';
+import { fetchServerInfo, getErrorMessage, MokeApiError, request } from '@/lib/api';
 import { useOfflineReconnect } from '@/lib/use-offline-reconnect';
 import { useServerStore } from '@/lib/store/server';
 import { useDeveloperStore } from '@/lib/store/developer';
@@ -18,6 +19,13 @@ import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 import { Select } from '@/components/ui/Select';
+
+function getSettingsReaderError(error: unknown, action: string, fallback: string): string {
+  if (error instanceof MokeApiError && error.code === 'reader.windows_open') {
+    return `请先关闭当前阅读器及阅读器书库窗口，再${action}。当前连接已保留。`;
+  }
+  return getErrorMessage(error, fallback);
+}
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -58,7 +66,7 @@ export default function SettingsPage() {
 
     const loadServerInfo = async () => {
       try {
-        const data = await fetchServerInfo();
+        const data = await fetchServerInfo(serverUrl);
         if (!cancelled) {
           setServerVersion(data.version || '未知');
         }
@@ -76,23 +84,30 @@ export default function SettingsPage() {
     };
   }, [offlineMode, serverUrl]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = async () => {
+    try { await requireClosedReaders(); } catch (error) { showToast(getSettingsReaderError(error, '断开连接', '无法断开连接，请重试。'), 'error'); return; }
     disconnect();
     safeRemoveLocalStorageItem('moke-auth-token');
     router.push('/welcome');
   };
 
   const handleLogout = async () => {
-    if (serverUrl) {
-      try {
-        await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-      } catch (error) {
-        console.warn('Failed to sign out on server:', error);
-      }
-    }
-    logout();
-    safeRemoveLocalStorageItem('moke-auth-token');
-    router.push('/login');
+    const context = useServerStore.getState();
+    try {
+      await withClosedReaderSession(async () => {
+        if (serverUrl) {
+          try {
+            await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
+          } catch (error) {
+            console.warn('Failed to sign out on server:', error);
+          }
+        }
+        if (useServerStore.getState().connectionId !== context.connectionId || useServerStore.getState().sessionId !== context.sessionId) return;
+        logout();
+        safeRemoveLocalStorageItem('moke-auth-token');
+        router.push('/login');
+      });
+    } catch (error) { showToast(getSettingsReaderError(error, '退出登录', '退出登录失败，请重试。'), 'error'); }
   };
 
   const handleSelectDownloadDirectory = async () => {
@@ -118,9 +133,11 @@ export default function SettingsPage() {
     } catch { showToast('恢复默认目录失败', 'error'); }
   };
 
-  const handleEnterOfflineMode = () => {
-    enterOfflineMode();
-    router.push('/shelf');
+  const handleEnterOfflineMode = async () => {
+    try {
+      await enterOfflineMode();
+      router.push('/shelf');
+    } catch (error) { showToast(getSettingsReaderError(error, '进入离线模式', '无法进入离线模式，请重试。'), 'error'); }
   };
 
   return (
@@ -152,6 +169,7 @@ export default function SettingsPage() {
             </SettingsSection>
           )}
 
+          {!offlineMode && <SettingsLinkRow icon={PlugZap} label="服务器列表" description="加入并保存多个服务器，点击条目连接" href="/welcome" />}
           <SettingsSection title="连接与数据" description={offlineMode ? '连接 Talebook 服务器以使用在线功能' : '查看服务器信息与管理当前连接'}>
             {offlineMode ? (
               <>
@@ -173,7 +191,7 @@ export default function SettingsPage() {
               </>
             ) : (
               <>
-              <SettingsRow label="连接服务器" value={serverUrl} />
+              <SettingsRow label="当前服务器" value={serverUrl} />
               <SettingsRow label="服务器名称" value={serverTitle || '未知'} />
               <SettingsRow label="服务器版本" value={serverVersion} />
               <ActionRow

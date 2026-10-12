@@ -3,7 +3,7 @@ import { installLibraryLayoutMock } from './library-layout.mjs';
 /** Hold real frontend bridge promises so hydration cannot finish the gate early. */
 export async function installFirstPaintMock(page, { runtime = 'android', appearance = 'light' } = {}) {
   await installLibraryLayoutMock(page, {
-    offlineMode: true, nativeRuntime: runtime,
+    offlineMode: true, nativeRuntime: runtime, nativeNavigation: true,
     theme: appearance === 'dark' ? 'dark' : 'light', eink: appearance === 'eink',
   });
   await page.addInitScript(({ runtime }) => {

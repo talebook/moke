@@ -1,3 +1,5 @@
+import { readConnectionWelcome } from '@/lib/server-connection';
+import { throwIfAborted } from '@/lib/abort-signal';
 import type { ServerCapabilities } from '@/lib/store/server';
 import { useServerStore } from '@/lib/store/server';
 import { debugLog } from '@/lib/debug-log';
@@ -110,7 +112,7 @@ export async function request(
     }
   } catch (e) {
     const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-    if (isRequestCancelled(e)) {
+    if (options?.signal?.aborted || isRequestCancelled(e)) {
       debugLog('info', 'request', `⊘ ${method} ${urlStr} 已取消 (${Date.now() - startedAt}ms)`);
       throw e;
     }
@@ -365,24 +367,43 @@ interface UserInfoPayload {
 }
 
 const userInfoInflight = new Map<string, Promise<UserInfoPayload>>();
+// A successful sign-in changes the cookie before the new account is known.
+// Isolate its verification from old requests without remounting the form in
+// the middle of the Reader-reserved authentication operation.
+export function invalidateUserInfoCache(): void { userInfoInflight.clear(); }
+const userInfoSignalIds = new WeakMap<AbortSignal, number>();
+let nextUserInfoSignalId = 0;
 // Bound both headers and body, including native bridges that ignore abort.
 const USER_INFO_TIMEOUT_MS = 15_000;
 
-function fetchUserInfoPayload(serverUrl: string): Promise<UserInfoPayload> {
-  const key = `${useServerStore.getState().sessionRevision}\0${serverUrl}`;
+function fetchUserInfoPayload(serverUrl: string, signal?: AbortSignal): Promise<UserInfoPayload> {
+  throwIfAborted(signal);
+  if (signal && !userInfoSignalIds.has(signal)) userInfoSignalIds.set(signal, ++nextUserInfoSignalId);
+  // Share one provider round without letting an unrelated consumer's abort
+  // cancel another form. Cookie/session changes always get a distinct key.
+  const key = `${useServerStore.getState().sessionRevision}\0${serverUrl}\0${signal ? userInfoSignalIds.get(signal) : 'default'}`;
   const existing = userInfoInflight.get(key);
   if (existing) return existing;
 
   const controller = new AbortController();
   let expired = false;
   let timer: ReturnType<typeof setTimeout>;
+  let rejectStopped!: (reason: unknown) => void;
+  const cancel = () => {
+    expired = true;
+    const reason = signal?.reason ?? new DOMException('User info request cancelled', 'AbortError');
+    rejectStopped(reason);
+    controller.abort(reason);
+  };
   const timeout = new Promise<never>((_, reject) => {
+    rejectStopped = reject;
     timer = setTimeout(() => {
       expired = true;
       reject(new DOMException('User info request timed out', 'TimeoutError'));
       controller.abort();
     }, USER_INFO_TIMEOUT_MS);
   });
+  signal?.addEventListener('abort', cancel, { once: true });
   const loading = (async (): Promise<UserInfoPayload> => {
     const response = await request(`${serverUrl}/api/user/info`, { credentials: 'include', signal: controller.signal });
     if (expired) {
@@ -397,6 +418,7 @@ function fetchUserInfoPayload(serverUrl: string): Promise<UserInfoPayload> {
   })();
   const promise = Promise.race([loading, timeout]).finally(() => {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
     if (userInfoInflight.get(key) === promise) userInfoInflight.delete(key);
   });
 
@@ -420,20 +442,22 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
   return readJsonResponse(response);
 }
 
-export async function fetchCurrentUser(serverUrlOverride?: string): Promise<CurrentUserResult> {
+export async function fetchCurrentUser(serverUrlOverride?: string, signal?: AbortSignal): Promise<CurrentUserResult> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
-  const payload = await fetchUserInfoPayload(serverUrlOverride ?? serverUrl);
+  const payload = await fetchUserInfoPayload(serverUrlOverride ?? serverUrl, signal);
+  throwIfAborted(signal);
   if (payload.parseError) throw payload.parseError;
   return resolveCurrentUserResult(payload.data, payload.ok, payload.status);
 }
 
-export async function fetchServerInfo(): Promise<{ err: string; msg?: string; title: string; version: string }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+export async function fetchServerInfo(server?: string, signal?: AbortSignal): Promise<{ err: string; msg?: string; title: string; version: string }> {
+  const serverUrl = server ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   if (!serverUrl) {
     // 未连接服务器时直接返回空信息，避免发起无前缀 URL 的请求
     return { err: 'no_server', title: '', version: '' };
   }
-  const payload = await fetchUserInfoPayload(serverUrl);
+  const payload = await fetchUserInfoPayload(serverUrl, signal);
+  throwIfAborted(signal);
   if (payload.parseError) throw payload.parseError;
   const data = payload.data;
 
@@ -445,11 +469,13 @@ export async function fetchServerInfo(): Promise<{ err: string; msg?: string; ti
   };
 }
 
-async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boolean> {
+async function probeJsonEndpoint(serverUrl: string, path: string, signal?: AbortSignal): Promise<boolean> {
   try {
+    throwIfAborted(signal);
     const response = await request(`${serverUrl}${path}`, {
-      credentials: 'include',
+      credentials: 'include', signal,
     });
+    throwIfAborted(signal);
 
     if (response.status === 404 || response.status === 405) return false;
 
@@ -457,31 +483,37 @@ async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boole
     if (!contentType.includes('application/json')) return response.ok;
 
     const data = await readJsonResponse<any>(response).catch(() => null);
+    throwIfAborted(signal);
     const err = typeof data?.err === 'string' ? data.err : '';
 
     if (!err) return response.ok;
     if (err === 'page.not_found' || err === 'handler.not_found' || err === 'api.not_found') return false;
     return true;
   } catch (error) {
+    throwIfAborted(signal);
     debugLog('warn', 'capabilities', `能力探测失败: ${path}`, getErrorMessage(error));
     return false;
   }
 }
 
-async function findSampleBookId(serverUrl: string): Promise<string | null> {
+async function findSampleBookId(serverUrl: string, signal?: AbortSignal): Promise<string | null> {
   const candidates = ['/api/shelf', '/api/library?num=1', '/api/library?page=1&num=1'];
 
   for (const path of candidates) {
     try {
-      const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
+      throwIfAborted(signal);
+      const response = await request(`${serverUrl}${path}`, { credentials: 'include', signal });
+      throwIfAborted(signal);
       if (!response.ok) continue;
 
       const data = await readJsonResponse<any>(response).catch(() => null);
+      throwIfAborted(signal);
       const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
       if (Array.isArray(books) && books.length > 0 && books[0]?.id != null) {
         return String(books[0].id);
       }
     } catch (error) {
+      throwIfAborted(signal);
       debugLog('warn', 'capabilities', `样本书籍探测失败: ${path}`, getErrorMessage(error));
     }
   }
@@ -489,85 +521,89 @@ async function findSampleBookId(serverUrl: string): Promise<string | null> {
   return null;
 }
 
-export async function discoverServerCapabilities(serverUrl: string): Promise<ServerCapabilities> {
+export async function discoverServerCapabilities(serverUrl: string, signal?: AbortSignal): Promise<ServerCapabilities> {
+  throwIfAborted(signal);
   // 与 fetchCurrentUser / fetchServerInfo 共享同一次在途请求；
   // 解析失败时按原行为退化为空信息（网络错误仍向上抛出）。
-  const payload = await fetchUserInfoPayload(serverUrl);
+  const payload = await fetchUserInfoPayload(serverUrl, signal);
+  throwIfAborted(signal);
   const info = payload.parseError ? ({} as UserInfoResponse) : payload.data;
 
-  return discoverGeneralServerCapabilities({
+  const capabilities = await discoverGeneralServerCapabilities({
     version: info.sys?.version || '',
-    findSampleBookId: () => findSampleBookId(serverUrl),
-    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path),
+    findSampleBookId: () => findSampleBookId(serverUrl, signal),
+    probeJsonEndpoint: (path) => probeJsonEndpoint(serverUrl, path, signal),
     // The current Talebook contract has no HEAD/limit endpoint for annotations.
     // Do not download and discard a sample book's complete annotation list here.
     // The detail panel's first useful data load doubles as its one-shot probe.
   });
+  throwIfAborted(signal);
+  return capabilities;
 }
 
-export async function validateServerConnection(serverUrl: string): Promise<{ err: string; msg?: string }> {
-  const maxRetries = 1;
+// Keep compatible HTTP auth challenges separate from successful JSON states.
+// Talebook returns not_invited and not_installed with HTTP 200 (base.py:206-220 at
+// d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2). Both identify the server; an
+// incomplete installation must still fail checkSavedServer's welcome check.
+// The 401/403 pairs below are compatibility for the user/info probe only.
+const SERVER_CONNECTION_AUTH_HTTP_STATUS = new Map([
+  ['user.need_login', 401],
+  ['not_invited', 403],
+]);
+const SERVER_CONNECTION_STATES = new Set(['ok', 'not_installed', ...SERVER_CONNECTION_AUTH_HTTP_STATUS.keys()]);
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      console.log('[validateServerConnection] retry attempt', attempt);
-      await new Promise(r => setTimeout(r, 1500));
-    }
+export async function validateServerConnection(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {
+  // Each explicit connection attempt probes once; retry is a user action.
+  let response: Response;
 
-    let response: Response;
-
-    try {
-      response = await request(`${serverUrl}/api/user/info`, {
-        credentials: 'include',
-      });
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      console.error('[validateServerConnection] network error:', errorMsg);
-      debugLog('error', 'validate', `连接失败 (尝试 ${attempt + 1}/${maxRetries + 1})`, errorMsg);
-      if (attempt < maxRetries) continue;
-      return {
-        err: 'network.error',
-        msg: `无法连接到服务器，请检查地址和网络 (${errorMsg})`,
-      };
-    }
-
-    console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
-
-    let data: UserInfoResponse;
-    try {
-      data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
-    } catch (e) {
-      logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
-      if (attempt < maxRetries) continue;
-      return {
-        err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
-        msg: getErrorMessage(e, '服务器返回内容无效，不像是可用的 Talebook 服务。'),
-      };
-    }
-
-    if (!response.ok) {
-      logHttpErrorMetadata('validateServerConnection', response.status, data);
-      if (attempt < maxRetries) continue;
-      return {
-        err: data.err || `http.${response.status}`,
-        msg: data.msg || '服务器响应异常，请确认服务已正常启动',
-      };
-    }
-
-    if (data.err !== 'ok' && data.err !== 'not_invited' && data.err !== 'user.need_login' && data.err !== 'not_installed') {
-      console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
-      if (attempt < maxRetries) continue;
-      return {
-        err: data.err || 'server.invalid',
-        msg: data.msg || '服务器校验失败，请确认这是 Talebook 服务',
-      };
-    }
-
-    console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
-    return { err: 'ok' };
+  try {
+    response = await request(`${serverUrl}/api/user/info`, {
+      credentials: 'include', signal,
+    });
+  } catch (e) {
+    throwIfAborted(signal);
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    console.error('[validateServerConnection] network error:', errorMsg);
+    debugLog('error', 'validate', '连接失败', errorMsg);
+    return {
+      err: 'network.error',
+      msg: `无法连接到服务器，请检查地址和网络 (${errorMsg})`,
+    };
   }
 
-  return { err: 'server.invalid_response', msg: '服务器校验失败' };
+  console.log('[validateServerConnection] status=%s content-type=%s', response.status, response.headers.get('content-type'));
+
+  let data: UserInfoResponse;
+  try {
+    data = await readJsonResponse<UserInfoResponse>(response, '服务器返回内容无效，不像是可用的 Talebook 服务。');
+  } catch (e) {
+    throwIfAborted(signal);
+    logHttpErrorMetadata('validateServerConnection invalid response', response.status, e);
+    return {
+      err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
+      msg: getErrorMessage(e, '服务器返回内容无效，不像是可用的 Talebook 服务。'),
+    };
+  }
+
+  if (!response.ok && SERVER_CONNECTION_AUTH_HTTP_STATUS.get(data.err) !== response.status) {
+    logHttpErrorMetadata('validateServerConnection', response.status, data);
+    return {
+      // A known JSON state cannot turn a transport failure into success.
+      err: data.err && data.err !== 'ok' ? data.err : `http.${response.status}`,
+      msg: data.msg || '服务器响应异常，请确认服务已正常启动',
+    };
+  }
+
+  if (!SERVER_CONNECTION_STATES.has(data.err)) {
+    console.error('[validateServerConnection] unexpected err=%s', getSafeErrorCode(data));
+    return {
+      err: data.err || 'server.invalid',
+      msg: data.msg || '服务器校验失败，请确认这是 Talebook 服务',
+    };
+  }
+
+  console.log('[validateServerConnection] OK err=%s', getSafeErrorCode(data));
+  return { err: 'ok' };
 }
 
 export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortSignal): Promise<{ err: string; msg?: string; needsAccessCode: boolean }> {
@@ -579,6 +615,7 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
       signal,
     });
   } catch (e) {
+    throwIfAborted(signal);
     console.error('[checkWelcomeRequirement] network error:', e);
     return {
       err: 'network.error',
@@ -592,6 +629,7 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
   try {
     data = await readJsonResponse(response, '服务器返回内容无效，无法确认访问码状态。');
   } catch (e) {
+    throwIfAborted(signal);
     logHttpErrorMetadata('checkWelcomeRequirement invalid response', response.status, e);
     return {
       err: e instanceof MokeApiError ? e.code : 'server.invalid_response',
@@ -603,7 +641,10 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
   if (!response.ok) {
     logHttpErrorMetadata('checkWelcomeRequirement', response.status, data);
     return {
-      err: data.err || `http.${response.status}`,
+      // Talebook's Welcome bypasses the invite gate and returns HTTP 200 ok/free
+      // (user.py:467-477 at d5d21dda160d65d29cc0c9ab8a13ae6b4deb69d2).
+      // Even not_invited cannot make a failed welcome request require a code.
+      err: typeof data.err === 'string' && data.err !== 'ok' && data.err !== 'free' ? data.err : `http.${response.status}`,
       msg: data.msg || '访问码状态检查失败',
       needsAccessCode: false,
     };
@@ -611,23 +652,11 @@ export async function checkWelcomeRequirement(serverUrl: string, signal?: AbortS
 
   console.log('[checkWelcomeRequirement] err=%s', getSafeErrorCode(data));
 
-  if (data.err === 'ok') {
-    return {
-      err: 'ok',
-      msg: data.welcome || data.msg,
-      needsAccessCode: true,
-    };
-  }
-
-  return {
-    err: 'ok',
-    msg: data.msg,
-    needsAccessCode: false,
-  };
+  return readConnectionWelcome(data);
 }
 
-export async function submitWelcomeCode(code: string, captchaData?: any): Promise<{ err: string; msg?: string }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+export async function submitWelcomeCode(code: string, captchaData?: any, server?: string, signal?: AbortSignal): Promise<{ err: string; msg?: string }> {
+  const serverUrl = server ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   debugLog('info', 'submitCode', `读取到 serverUrl="${serverUrl}"`, { isEmpty: !serverUrl });
   const body = new URLSearchParams();
   body.append('invite_code', code);
@@ -645,7 +674,7 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
   const response = await request(`${serverUrl}/api/welcome`, {
     method: 'POST',
     body,
-    credentials: 'include',
+    credentials: 'include', signal,
   });
 
   const result = await readJsonResponse<{ err: string; msg?: string }>(response);
@@ -656,9 +685,9 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
 export async function downloadBookBlob(
   bookId: string | number,
   format = 'epub',
-  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal },
+  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal; serverUrl?: string },
 ): Promise<Blob> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options?.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
   try {
@@ -746,13 +775,14 @@ export async function streamBookDownload(
     onProgress?: (progress: number) => void;
     onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
     signal?: AbortSignal;
+    serverUrl?: string;
     resumeFrom?: number;
     onRangeReset?: () => Promise<void>;
     /** Tauri validates the completed on-disk tail, including bytes from an earlier range. */
     validateEpub?: boolean;
   },
 ): Promise<{ mimeType: string; size: number; sourceSignature?: string; resumed: boolean }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
   const requestedOffset = Math.max(0, options.resumeFrom || 0);
   const headers = new Headers();

@@ -1,12 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { waitForComicScroll } from './helpers/comic-scroll.mjs';
+import { clickAppLink, connectSavedServerFixture, enterOfflineModeFromSettings, enterOfflineModeFromWelcome, installSavedServerFixture, openFixtureBookDetail, openOfflineFixtureBookDetail } from './helpers/offline-mode-fixture.mjs';
 
 const BASE_URL = process.env.MOKE_E2E_BASE_URL || 'http://127.0.0.1:3000';
 const SERVER_URL = 'https://books.test';
 const BOOK_ID = '42';
 
-async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'comic', format = 'cbz', failPage = false, denied = false, preference = 'system', pageCount = 4, mixedSizes = false, imageBytes = 0, nativeDelay = 0, annotations = false, searchDownload = false, shortPages = false, eink = false } = {}) {
-  await page.addInitScript(({ serverUrl, bookId, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink }) => {
+async function installTauriHttpMock(page, { mediaType = 'comic', format = 'cbz', failPage = false, denied = false, preference = 'system', pageCount = 4, mixedSizes = false, imageBytes = 0, nativeDelay = 0, annotations = false, searchDownload = false, shortPages = false, eink = false } = {}) {
+  await installSavedServerFixture(page, SERVER_URL);
+  await page.addInitScript(({ serverUrl, bookId, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink }) => {
     const requests = new Map();
     const responseBodies = new Map();
     const httpRequests = [];
@@ -62,11 +64,11 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
         };
       }
       if (path === '/api/shelf') return { err: 'ok', books: [payloadFor(`${serverUrl}/api/book/${bookId}`).book] };
-      if (path === '/api/search') return { err: 'ok', books: [payloadFor(`${serverUrl}/api/book/${bookId}`).book] };
-      if (path.endsWith('/annotations')) return { err: 'ok', contract: 'talebook.annotations.v2', annotations: [
+      if (path === '/api/search' || path === '/api/library') return { err: 'ok', books: [payloadFor(`${serverUrl}/api/book/${bookId}`).book], total: 1, total_count: 1, navs: [] };
+      if (path.endsWith('/annotations')) return annotations ? { err: 'ok', contract: 'talebook.annotations.v2', annotations: [
         { id: 1, book_id: 42, annotation_type: 'note', is_private: true, content: 'Located note', chapter: 'Chapter 1', cfi: 'epubcfi(/6/2!/4/2)', sources: [] },
         { id: 2, book_id: 42, annotation_type: 'note', is_private: true, content: 'Chapter note', chapter: 'Chapter 2', sources: [] },
-      ] };
+      ] } : { err: 'page.not_found' };
       if (path.endsWith('/readstate')) return { err: 'ok', read_state: 1, wants: true };
       if (path.endsWith('/comic/pages')) return denied ? { err: 'comic.no_permission' } : {
         err: 'ok', contract_version: 1, book_id: 42, title: '漫画测试', revision: 'rev-1', pages_count: pageCount,
@@ -74,7 +76,7 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
       };
       if (path.endsWith('/comic/progress')) return { err: 'ok', progress };
       if (path.endsWith('/progress')) return { err: 'ok', progress: {} };
-      if (path === '/api/welcome') return { err: 'not_invited' };
+      if (path === '/api/welcome') return { err: 'free' };
       if (path === '/api/user/info') {
         return { err: 'ok', sys: { title: 'Moke 测试书库', version: '3.15.0' }, user: { id: 1, username: 'reader', is_login: true, extra: { read_history: [{ id: bookId, title: '漫画测试', state: { read_state: 1 } }] } } };
       }
@@ -90,10 +92,7 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
     });
 
     window.__TAURI_INTERNALS__ = {
-      metadata: {
-        currentWindow: { label: 'main' },
-        currentWebview: { label: 'main' },
-      },
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       invoke: async (command, args = {}) => {
         commands.push(command);
         events.push({ time: performance.now(), command, rid: args.rid, url: args.clientConfig?.url, method: args.clientConfig?.method });
@@ -104,6 +103,9 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
             capabilities: ['foundation'], expiresAt, offlineUntil: expiresAt, message: 'fixture' };
         }
         if (command === 'moke_runtime_platform') return 'linux';
+        // Model only the host window. open_reader assertions below cover IPC
+        // dispatch; this fixture does not claim a real Reader was created.
+        if (command === 'plugin:window|get_all_windows') return ['main'];
         if (command === 'plugin:http|fetch') {
           const rid = nextRid++;
           requests.set(rid, args.clientConfig);
@@ -185,32 +187,26 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
     window.__COMIC_POSTS__ = posts;
     if (!localStorage.getItem('moke-settings')) localStorage.setItem('moke-settings', JSON.stringify({ state: { readerPreference: preference, eink }, version: 0 }));
 
-    localStorage.setItem('moke-privacy-consent', '2026-08-14');
-    if (!localStorage.getItem('moke-server-storage')) localStorage.setItem('moke-server-storage', JSON.stringify({
-      state: {
-        serverUrl,
-        offlineMode,
-        protocol: 'https',
-        host: 'books.test',
-        port: '',
-        hasHydrated: true,
-        isConnected: !offlineMode,
-        user: { id: 1, username: 'reader', name: 'reader' },
-        capabilities: {
-          shelfApi: true,
-          annotationApiStatus: annotations ? 'supported' : 'unsupported',
-          annotationApiCheckedAt: Date.now(),
-          readingStateApi: true,
-          readingProgressApi: true,
-          readingStatsApi: true,
-          networkSourcesApi: true,
-          checkedAt: Date.now(),
-          version: '3.15.0',
-        },
-      },
-      version: 0,
-    }));
-  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, offlineMode, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink });
+  }, { serverUrl: SERVER_URL, bookId: BOOK_ID, mediaType, format, failPage, denied, preference, pageCount, mixedSizes, imageBytes, nativeDelay, annotations, searchDownload, shortPages, eink });
+}
+
+async function openConnectedBook(page) {
+  await connectSavedServerFixture(page, BASE_URL, SERVER_URL);
+  await openFixtureBookDetail(page, BOOK_ID);
+}
+
+async function openContinueBook(page, offline = false) {
+  // A native shortcut is an explicit action in the live, UI-confirmed session.
+  // Cold URLs/list metadata must not reconstruct an online/offline connection.
+  if (offline) await enterOfflineModeFromWelcome(page, BASE_URL);
+  else await connectSavedServerFixture(page, BASE_URL, SERVER_URL);
+  await page.evaluate(({ offline, serverUrl, bookId }) => {
+    if (offline) localStorage.setItem('moke-continue-reading', JSON.stringify({version:2,entries:{__offline__:{
+      serverUrl, mode:'offline', bookId, title:'漫画测试', format:'cbz', updatedAt:Date.now(),
+    }}}));
+    window.dispatchEvent(new Event('moke:continue-reading-request'));
+  }, {offline, serverUrl:SERVER_URL, bookId:BOOK_ID});
+  await expect(page).toHaveURL(/\/detail\?id=42(?:&|$)/);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -241,7 +237,7 @@ for (const width of [390, 1280]) {
   test(`comic renders, turns, restores, saves and exits at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await installTauriHttpMock(page);
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click();
     await expect(page.locator('.kr-page-count')).toHaveText('2 / 4');
     await expect.poll(() => page.locator('.kr-spread img').evaluate(img => img.src.startsWith('blob:') && img.naturalWidth === 800)).toBe(true);
@@ -267,7 +263,7 @@ for (const preference of ['embedded', 'system']) {
   for (const downloaded of [false, true]) {
     test(`Preview continue reading opens comic online with ${preference} preference (${downloaded ? 'downloaded' : 'not downloaded'})`, async ({ page }) => {
       await installTauriHttpMock(page, { preference, searchDownload: !downloaded });
-      await page.goto(`${BASE_URL}/detail?id=42&continue=1`);
+      await openContinueBook(page);
       await expect(page.locator('.kr-page-count')).toHaveText('2 / 4');
       expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
       const entry = await page.evaluate(() => JSON.parse(localStorage.getItem('moke-continue-reading')).entries['https://books.test::online']);
@@ -283,8 +279,8 @@ for (const preference of ['embedded', 'system']) {
 }
 
 test('Preview continue reading in offline mode explains the comic limitation without network access', async ({ page }) => {
-  await installTauriHttpMock(page, { offlineMode: true });
-  await page.goto(`${BASE_URL}/detail?id=42&continue=1`);
+  await installTauriHttpMock(page);
+  await openContinueBook(page, true);
   await expect(page.locator('.moke-comic-state')).toContainText('暂不支持本地离线解包');
   expect(new URL(page.url()).searchParams.has('continue')).toBe(false);
   expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
@@ -294,14 +290,14 @@ test('Preview continue reading in offline mode explains the comic limitation wit
 for (const format of ['epub', 'pdf']) {
   test(`Preview continue reading for comic ${format} explains the format gap`, async ({ page }) => {
     await installTauriHttpMock(page, { format });
-    await page.goto(`${BASE_URL}/detail?id=42&continue=1`);
+    await openContinueBook(page);
     await expect(page.locator('.moke-comic-state[role=alert]')).toContainText('漫画型 EPUB/PDF');
     expect(await page.evaluate(() => window.__MOKE_COMMANDS__.includes('open_reader') || window.__MOKE_COMMANDS__.includes('moke_open_downloaded_book'))).toBe(false);
   });
 
   test(`comic ${format} explains the format gap without opening ebook reader`, async ({ page }) => {
     await installTauriHttpMock(page, { format });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click();
     await expect(page.locator('.moke-comic-state[role=alert]')).toContainText('漫画型 EPUB/PDF');
     expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__.some(u => u.includes('/comic/')))).toBe(false);
@@ -310,7 +306,7 @@ for (const format of ['epub', 'pdf']) {
 
 test('manifest permission denial and page failure both show actionable errors', async ({ page }) => {
   await installTauriHttpMock(page, { denied: true });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByTestId('online-read-action').click();
   await expect(page.locator('.moke-comic-state[role=alert]')).toContainText('权限');
   await expect(page.getByRole('button', { name: '重试', exact: true })).toBeVisible();
@@ -318,7 +314,7 @@ test('manifest permission denial and page failure both show actionable errors', 
 
 test('page HTTP failure is visible with reload and return controls', async ({ page }) => {
   await installTauriHttpMock(page, { failPage: true });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByTestId('online-read-action').click();
   await expect(page.locator('.moke-comic-notice')).toContainText('权限');
   await expect(page.getByRole('button', { name: '重新加载' })).toBeVisible();
@@ -326,7 +322,7 @@ test('page HTTP failure is visible with reload and return controls', async ({ pa
 
 test('ebook uses the current system preference even from the primary action', async ({ page }) => {
   await installTauriHttpMock(page, { format: 'epub', mediaType: 'ebook' });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await expect(page.getByTestId('online-read-action')).toHaveText('阅读');
   await page.getByTestId('online-read-action').click();
   await expect.poll(() => page.evaluate(() => window.__MOKE_COMMANDS__.includes('moke_open_downloaded_book'))).toBe(true);
@@ -336,7 +332,8 @@ test('ebook uses the current system preference even from the primary action', as
 for (const entry of ['/shelf', '/user/history']) {
   test(`comic opens through actual ${entry} navigation`, async ({ page }) => {
     await installTauriHttpMock(page, { mediaType: 'unknown' });
-    await page.goto(`${BASE_URL}${entry}`);
+    await connectSavedServerFixture(page, BASE_URL, SERVER_URL);
+    if (entry !== '/shelf') await clickAppLink(page, entry);
     await page.locator('a[href="/detail?id=42"]').first().click();
     await page.getByTestId('online-read-action').click();
     await expect(page.locator('.kr-page-count')).toHaveText('2 / 4');
@@ -344,8 +341,9 @@ for (const entry of ['/shelf', '/user/history']) {
 }
 
 test('offline comic displays limitation and never requests server or opens ebook reader', async ({ page }) => {
-  await installTauriHttpMock(page, { offlineMode: true });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await installTauriHttpMock(page);
+  await enterOfflineModeFromWelcome(page, BASE_URL);
+  await openOfflineFixtureBookDetail(page);
   await page.getByTestId('offline-read-primary-action').click();
   await expect(page.locator('.moke-comic-state')).toContainText('暂不支持本地离线解包');
   expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
@@ -355,10 +353,10 @@ test('offline comic displays limitation and never requests server or opens ebook
 test('changing the preference in Settings immediately changes ebook opening', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1400 });
   await installTauriHttpMock(page, { mediaType: 'ebook', format: 'epub', preference: 'embedded' });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByTestId('offline-download-action').click();
   await expect.poll(() => page.evaluate(() => window.__MOKE_COMMANDS__.includes('open_reader'))).toBe(true);
-  await page.locator('a[href="/settings"]').first().click();
+  await clickAppLink(page, '/settings');
   await page.getByRole('button', { name: '选择阅读器' }).click();
   await page.getByRole('option', { name: '系统默认应用' }).click();
   await page.goBack();
@@ -370,7 +368,7 @@ test('changing the preference in Settings immediately changes ebook opening', as
 
 test('downloaded comic offline action does not silently switch to online requests', async ({ page }) => {
   await installTauriHttpMock(page);
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByTestId('offline-download-action').click();
   await expect(page.locator('.moke-comic-state')).toContainText('暂不支持本地离线解包');
   expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__.some(u => u.includes('/comic/')))).toBe(false);
@@ -395,7 +393,7 @@ for (const width of [390, 1280]) {
   test(`long webtoon keeps mixed page geometry and progress after eviction at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click();
     await expect(page.locator('.kr-page-count')).toHaveText('2 / 30');
     await page.getByRole('button', { name: 'Open reader settings', exact: true }).click();
@@ -405,7 +403,14 @@ for (const width of [390, 1280]) {
     const geometry = () => page.locator('.kr-continuous img').evaluateAll(imgs => imgs.map(img => {
       const r = img.getBoundingClientRect(); return { width: r.width, height: r.height, src: img.src };
     }));
-    await expect.poll(async () => (await geometry()).every((r, i) => Math.abs(r.height / r.width - (i % 2 ? 600 / 900 : 1100 / 800)) < 0.005)).toBe(true);
+    await expect.poll(async () => (await geometry()).flatMap((r, i) => {
+      const expectedRatio = i % 2 ? 600 / 900 : 1100 / 800;
+      const actualRatio = r.height / r.width;
+      return Math.abs(actualRatio - expectedRatio) < 0.005 ? [] : [{
+        pageIndex: i, width: r.width, height: r.height, actualRatio, expectedRatio,
+        source: r.src.startsWith('blob:') ? 'blob' : 'placeholder',
+      }];
+    })).toEqual([]);
     // More than twelve different loaded pages must exercise the count eviction.
     for (const i of [0, 5, 10, 15, 20, 25, 29]) {
       await page.locator('.kr-continuous').evaluate((el, i) => el.querySelectorAll('img')[i].scrollIntoView({ block: 'start', behavior: 'instant' }), i);
@@ -465,7 +470,7 @@ for (const change of ['expand', 'shrink', 'rotate-wide', 'rotate-tall', 'image-g
     const height = change === 'rotate-tall' ? 1280 : 900;
     await page.setViewportSize({ width, height });
     await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click();
     await enableWebtoon(page);
     await page.locator('.kr-reader').focus();
@@ -527,7 +532,7 @@ for (const width of [390, 1280]) {
   test(`webtoon follows a programmatic interior page through resize from ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click(); await enableWebtoon(page);
     await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
     await waitForComicScroll(page, 'start');
@@ -550,7 +555,7 @@ for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 });
       if (mode === 'reduced-motion') await page.emulateMedia({ reducedMotion: 'reduce' });
       await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true, eink: mode === 'eink' });
-      await page.goto(`${BASE_URL}/detail?id=42`);
+      await openConnectedBook(page);
       await page.getByTestId('online-read-action').click();
       await enableWebtoon(page, mode !== 'eink' && mode !== 'no-animation');
       await page.locator('.kr-continuous img').nth(29).waitFor();
@@ -619,7 +624,7 @@ for (const input of ['pointer', 'touch', 'mode-switch']) {
   test(`webtoon releases an in-flight jump on ${input}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await installTauriHttpMock(page, { pageCount: 30, mixedSizes: true });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click(); await enableWebtoon(page);
     await page.locator('.kr-reader').focus(); await page.keyboard.press('Home');
     await waitForComicScroll(page, 'start');
@@ -682,7 +687,7 @@ for (const pageCount of [1, 2]) {
   test(`webtoon preserves explicit selection in a short ${pageCount}-page document`, async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await installTauriHttpMock(page, { pageCount, shortPages: true });
-    await page.goto(`${BASE_URL}/detail?id=42`);
+    await openConnectedBook(page);
     await page.getByTestId('online-read-action').click();
     await enableWebtoon(page);
     await page.locator('.kr-reader').focus();
@@ -705,7 +710,7 @@ for (const pageCount of [1, 2]) {
 
 test('webtoon preserves original dimensions when the byte cache limit evicts images', async ({ page }) => {
   await installTauriHttpMock(page, { pageCount: 10, imageBytes: 10 * 1024 * 1024 });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByTestId('online-read-action').click();
   await page.getByRole('button', { name: 'Open reader settings', exact: true }).click();
   await page.locator('.kr-settings select').first().selectOption('webtoon');
@@ -725,17 +730,14 @@ test('webtoon preserves original dimensions when the byte cache limit evicts ima
 
 test('delayed native recovery retains a fresh comic PDF type in real IndexedDB', async ({ page }) => {
   await installTauriHttpMock(page, { format: 'pdf', nativeDelay: 1500 });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await expect.poll(async () => (await offlineRows(page)).find(row => row.bookId === '42')?.media_type).toBe('comic');
-  // Persist the offline mode as a real disconnect, then reopen without a detail fetch.
-  await page.evaluate(() => {
-    const stored = JSON.parse(localStorage.getItem('moke-server-storage')); stored.state.offlineMode = true;
-    localStorage.setItem('moke-server-storage', JSON.stringify(stored));
-  });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await enterOfflineModeFromSettings(page);
+  await openOfflineFixtureBookDetail(page);
   await page.getByTestId('offline-read-primary-action').click();
   await expect(page.locator('.moke-comic-state')).toContainText('暂不支持本地离线解包');
   expect(await page.evaluate(() => window.__MOKE_COMMANDS__.includes('open_reader') || window.__MOKE_COMMANDS__.includes('moke_open_downloaded_book'))).toBe(false);
+  expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__)).toEqual([]);
 });
 
 for (const batch of [false, true]) {
@@ -743,7 +745,13 @@ for (const batch of [false, true]) {
     test(`search ${batch ? 'batch' : 'single'} ${mediaType} ${format} download retains classification before offline open`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 900 });
       await installTauriHttpMock(page, { format, mediaType, searchDownload: true });
-      await page.goto(`${BASE_URL}/search?q=comic`);
+      await connectSavedServerFixture(page, BASE_URL, SERVER_URL);
+      await clickAppLink(page, '/library');
+      await page.getByPlaceholder('搜索书籍', { exact: true }).fill('comic');
+      // The shelf search is scoped differently. Use the real library search to
+      // exercise /api/search and its download metadata, as this regression needs.
+      await page.getByPlaceholder('搜索书籍', { exact: true }).press('Enter');
+      await expect(page).toHaveURL(/\/search\?scope=library&q=comic$/);
       const card = page.locator('a[href="/detail?id=42"]').first();
       await card.click({ button: 'right' });
       await expect(page.getByRole('menu')).toBeVisible();
@@ -756,11 +764,8 @@ for (const batch of [false, true]) {
       await expect.poll(async () => (await offlineRows(page)).find(row => row.bookId === '42')?.format).toBe(format);
       expect((await offlineRows(page)).find(row => row.bookId === '42')?.media_type).toBe(mediaType === 'missing' ? undefined : mediaType);
       expect(await page.evaluate(() => window.__MOKE_TEST_HTTP_REQUESTS__.some(url => new URL(url).pathname === '/api/book/42'))).toBe(false);
-      await page.evaluate(() => {
-        const stored = JSON.parse(localStorage.getItem('moke-server-storage')); stored.state.offlineMode = true;
-        localStorage.setItem('moke-server-storage', JSON.stringify(stored));
-      });
-      await page.goto(`${BASE_URL}/detail?id=42`);
+      await enterOfflineModeFromSettings(page);
+      await openOfflineFixtureBookDetail(page);
       await expect(page.getByRole('region', { name: '笔记与标注' })).toHaveCount(0);
       await page.getByTestId('offline-read-primary-action').click();
       if (mediaType === 'comic') {
@@ -776,7 +781,7 @@ for (const downloaded of [false, true]) {
   for (const format of ['cbz', 'pdf', 'epub']) {
     test(`comic ${format} notes disable unsupported precision (${downloaded ? 'downloaded' : 'not downloaded'}) and keep online reading available`, async ({ page }, testInfo) => {
       await installTauriHttpMock(page, { format, annotations: true, searchDownload: !downloaded });
-      await page.goto(`${BASE_URL}/detail?id=42`);
+      await openConnectedBook(page);
       await expect(page.getByRole('button', { name: '漫画不支持笔记精确定位，请使用在线阅读' })).toBeDisabled();
       await expect(page.getByText('无精确位置，已按章节展示')).toBeVisible();
       if (format === 'cbz' && downloaded) await page.screenshot({ path: testInfo.outputPath('comic-note-location.png') });
@@ -790,7 +795,7 @@ for (const downloaded of [false, true]) {
 
 test('ebook annotation precision still opens the embedded reader without changing the preference', async ({ page }) => {
   await installTauriHttpMock(page, { format: 'epub', mediaType: 'ebook', annotations: true });
-  await page.goto(`${BASE_URL}/detail?id=42`);
+  await openConnectedBook(page);
   await page.getByRole('button', { name: '精确定位', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__MOKE_COMMANDS__.includes('open_reader'))).toBe(true);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('moke-settings')).state.readerPreference)).toBe('system');

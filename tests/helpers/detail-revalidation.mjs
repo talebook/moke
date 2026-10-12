@@ -15,14 +15,43 @@ export async function installDetailRevalidationMock(page, { offlineMode = true, 
   }));
   await page.addInitScript(({ offlineMode, outcome }) => {
     const invoke = window.__TAURI_INTERNALS__.invoke;
-    const waiters = [];
-    let released = false;
+    const waiters = [], userWaiters = [];
+    const requests = new Map(), bodies = new Map();
+    let released = false, userReleased = false, userRequests = 0, rid = 7000;
     window.revalidation = {
       marker: Math.random(), pageshows: [], queries: 0, pending: false,
+      userPending: false, userResponses: [],
       release: () => { released = true; waiters.splice(0).forEach((resolve) => resolve()); },
+      releaseUser: () => { userReleased = true; userWaiters.splice(0).forEach((resolve) => resolve()); },
     };
     window.addEventListener('pageshow', (event) => window.revalidation.pageshows.push(event.persisted));
     window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
+      if (outcome === 'account' && command === 'plugin:http|fetch'
+        && new URL(args.clientConfig.url).pathname === '/api/user/info') {
+        const id = rid++;
+        // The explicit Welcome validation precedes Provider discovery. It
+        // must complete so the test can establish a real runtime connection.
+        requests.set(id, { url: args.clientConfig.url, validation: ++userRequests === 1 });
+        return id;
+      }
+      if (command === 'plugin:http|fetch_send' && requests.has(args.rid)) {
+        const { url, validation } = requests.get(args.rid);
+        if (!validation && !userReleased) {
+          window.revalidation.userPending = true;
+          await new Promise((resolve) => userWaiters.push(resolve));
+        }
+        const userId = validation ? 1 : 2;
+        const id = rid++;
+        bodies.set(id, JSON.stringify({ err: 'ok', user: {
+          id: userId, is_login: true, username: validation ? 'layout-test' : 'fixture-two', extra: {},
+        }, sys: { title: '布局测试书库' } }));
+        window.revalidation.userResponses.push({ phase: validation ? 'validation' : 'provider', userId });
+        return { status: 200, statusText: 'OK', url, rid: id, headers: [['content-type', 'application/json']] };
+      }
+      if (command === 'plugin:http|fetch_read_body' && bodies.has(args.rid)) {
+        const body = bodies.get(args.rid); bodies.delete(args.rid);
+        return [...new TextEncoder().encode(body), 0];
+      }
       const query = offlineMode ? command === 'moke_list_downloaded_books'
         : command === 'plugin:http|fetch' && args.clientConfig.url.endsWith('/api/book/42');
       if (query) {
@@ -85,36 +114,40 @@ export async function installReadyAnnotationsMock(page, { deferFirstPost = false
 export async function installAccountCancellationMock(page, { fail = false } = {}) {
   await installLibraryLayoutMock(page, { offlineMode: false, nativeRuntime: 'android', nativeBooks: [LAYOUT_OFFLINE_BOOK] });
   await page.addInitScript(({ fail }) => {
-    const storage = JSON.parse(localStorage.getItem('moke-server-storage'));
-    storage.state.capabilities.checkedAt = 0;
-    localStorage.setItem('moke-server-storage', JSON.stringify(storage));
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const requests = new Map(), bodies = new Map(), users = [], platforms = [];
     const bookRids = new Set(), bookBodies = new Set();
-    let rid = 9000, userReleased = false, platformReleased = false;
+    let rid = 9000, userReleased = false, platformReleased = false, userRequests = 0;
     window.__TAURI_OS_PLUGIN_INTERNALS__ = { get platform() {
       if (fail && platformReleased) throw new Error('fixture platform failure');
       return 'android';
     } };
     window.accountRace = {
-      pending: false, settled: 0, bookResponses: 0, opens: [],
+      pending: false, settled: 0, bookResponses: 0, opens: [], userResponses: [],
       releaseUser: () => { userReleased = true; users.splice(0).forEach((resolve) => resolve()); },
       releasePlatform: () => { platformReleased = true; platforms.splice(0).forEach((resolve) => resolve()); },
     };
     window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
-      if (command === 'plugin:http|fetch' && args.clientConfig.url.endsWith('/api/user/info')) {
-        const id = rid++; requests.set(id, args.clientConfig.url); return id;
+      if (command === 'plugin:http|fetch' && new URL(args.clientConfig.url).pathname === '/api/user/info') {
+        const id = rid++;
+        requests.set(id, { url: args.clientConfig.url, validation: ++userRequests === 1 });
+        return id;
       }
-      // Allow initial persisted identity hydration to settle before useful
-      // book data starts the opener, as in the confirmed QA reproduction.
+      // Give the real connected shelf and its background Provider discovery
+      // time to mount before book data starts the suspended opener.
       if (command === 'plugin:http|fetch' && args.clientConfig.url.endsWith('/api/book/42')) {
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
       if (command === 'plugin:http|fetch_send' && requests.has(args.rid)) {
-        if (!userReleased) await new Promise((resolve) => users.push(resolve));
+        const { url, validation } = requests.get(args.rid);
+        if (!validation && !userReleased) await new Promise((resolve) => users.push(resolve));
         const id = rid++;
-        bodies.set(id, JSON.stringify({ err: 'ok', user: { id: 2, is_login: true, username: 'fixture-two', extra: {} }, sys: { title: '测试书库' } }));
-        return { status: 200, statusText: 'OK', url: requests.get(args.rid), rid: id, headers: [['content-type', 'application/json']] };
+        const userId = validation ? 1 : 2;
+        bodies.set(id, JSON.stringify({ err: 'ok', user: {
+          id: userId, is_login: true, username: validation ? 'layout-test' : 'fixture-two', extra: {},
+        }, sys: { title: '布局测试书库' } }));
+        window.accountRace.userResponses.push({ phase: validation ? 'validation' : 'provider', userId });
+        return { status: 200, statusText: 'OK', url, rid: id, headers: [['content-type', 'application/json']] };
       }
       if (command === 'plugin:http|fetch_read_body' && bodies.has(args.rid)) {
         const body = bodies.get(args.rid); bodies.delete(args.rid); return [...new TextEncoder().encode(body), 0];

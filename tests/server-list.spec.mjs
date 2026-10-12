@@ -1,0 +1,201 @@
+import { test, expect as baseExpect } from '@playwright/test';
+import { installServerListFixture } from './helpers/server-list-fixture.mjs';
+const base=process.env.MOKE_TEST_BASE_URL || 'http://127.0.0.1:3000';
+// Server-list flows include a real 20s timeout and cold route compilation.
+test.setTimeout(180000);
+const expect = baseExpect.configure({ timeout: 45000 });
+
+async function start(page) {
+  await page.goto(`${base}/`);
+  await page.getByRole('button',{name:'同意并继续',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'服务器',exact:true})).toBeVisible();
+}
+async function save(page,url) {
+  await page.getByRole('button',{name:'加入服务器',exact:true}).click();
+  await expect(page.getByLabel('服务器地址',{exact:true})).toBeFocused();
+  await page.getByLabel('服务器地址',{exact:true}).fill(url);
+  await page.getByRole('button',{name:'保存到列表',exact:true}).click();
+  await expect(page.getByRole('button',{name:'加入服务器',exact:true})).toBeVisible();
+}
+async function list(page) { await page.getByRole('link').filter({hasText:'服务器列表'}).filter({visible:true}).first().click(); }
+
+for(const viewport of [{width:1280,height:900},{width:390,height:844}]) {
+  test(`save A/B, restart storage, authenticate and switch ${viewport.width}`,async({page,browser})=>{
+    await page.setViewportSize(viewport);
+    const fixture=await installServerListFixture(page);
+    await start(page);
+    await save(page,fixture.origins[0]);await save(page,fixture.origins[1]);
+    expect(fixture.requests).toHaveLength(0);
+    const before=await page.evaluate(()=>localStorage.getItem('moke-server-storage'));
+    await page.reload();await expect(page.locator('li')).toHaveCount(2);
+    expect(await page.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(before);
+    const actualStorage=await page.context().storageState();
+    const second=await browser.newContext({storageState:actualStorage,viewport});
+    const reopened=await second.newPage();
+    try {await reopened.goto(base);await expect(reopened.locator('li')).toHaveCount(2);expect(await reopened.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(before);}finally{await second.close();}
+    await page.locator('li button').first().click();
+    await expect(page).toHaveURL(/\/shelf/);await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.savedServers[0].title)).toBe('A 测试书库');
+    if(viewport.width<1024){await page.getByRole('link',{name:'我的',exact:true}).click();await page.getByRole('link',{name:'前往设置',exact:true}).click();}
+    await list(page);
+    await page.locator('li button').nth(1).click();await expect(page).toHaveURL(/\/access\?/);
+    await page.getByRole('button',{name:'返回',exact:true}).click();
+    await expect(page).toHaveURL(/\/welcome/);await expect(page.getByText('当前服务器',{exact:true})).toBeVisible();
+    await page.locator('li button').nth(1).click();await expect(page).toHaveURL(/\/access\?/);
+    // Simulate a WebView full-document reload: only the saved identity survives.
+    await page.reload();await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+    await expect(page.getByRole('button',{name:'确认',exact:true})).toBeEnabled();
+    await page.getByRole('button',{name:'确认',exact:true}).click();
+    await expect(page).toHaveURL(/\/shelf/);await expect(page.getByText('B 同编号藏书').first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.savedServers[1].title)).toBe('B 测试书库');
+    await expect(page.getByText('A 同编号藏书',{exact:true})).toHaveCount(0);
+    if(viewport.width<1024){await page.getByRole('link',{name:'我的',exact:true}).click();await page.getByRole('link',{name:'前往设置',exact:true}).click();}
+    await list(page);await page.getByRole('button',{name:'断开',exact:true}).click();
+    await expect(page.getByText('已断开，服务器列表已保留',{exact:true})).toBeVisible();
+    await expect(page.locator('li')).toHaveCount(2);
+    await page.reload();
+    await expect(page.locator('li button').first()).toContainText('A 测试书库');
+    await expect(page.locator('li button').nth(1)).toContainText('B 测试书库');
+  });
+}
+
+test('duplicate, invalid root, cancellation, storage failure and recovery',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  await save(page,fixture.origins[0]);await save(page,'https://A.example.test:443/');await expect(page.locator('li')).toHaveCount(1);
+  await page.getByRole('button',{name:'加入服务器',exact:true}).click();for(const address of ['https://a.example.test/path','https://a.example.test/path/..']){await page.getByLabel('服务器地址',{exact:true}).fill(address);await page.getByRole('button',{name:'保存到列表',exact:true}).click();await expect(page.getByText(/请填写服务器根地址/)).toBeVisible();}await page.getByRole('button',{name:'取消',exact:true}).click();await expect(page.getByRole('button',{name:'加入服务器',exact:true})).toBeFocused();
+  await page.evaluate(()=>{window.originalStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(key,value){if(key==='moke-server-storage')throw new DOMException('quota','QuotaExceededError');return window.originalStorageSet.call(this,key,value);};});
+  await page.getByRole('button',{name:'加入服务器',exact:true}).click();await page.getByLabel('服务器地址',{exact:true}).fill(fixture.origins[1]);await page.getByRole('button',{name:'保存到列表',exact:true}).click();await expect(page.getByText(/未保存/)).toBeVisible();await expect(page.locator('li')).toHaveCount(1);
+  await page.evaluate(()=>{Storage.prototype.setItem=window.originalStorageSet;});await page.getByRole('button',{name:'保存到列表',exact:true}).click();await expect(page.locator('li')).toHaveCount(2);
+  fixture.servers.get(fixture.origins[1]).fault='delay';await page.locator('li button').nth(1).click();await page.getByRole('button',{name:'取消连接',exact:true}).click();fixture.release();await expect(page).toHaveURL(/\/welcome/);await expect(page.locator('li')).toHaveCount(2);
+  fixture.servers.get(fixture.origins[1]).fault='busy';await page.locator('li button').nth(1).click();await expect(page.getByText(/模拟繁忙/)).toBeVisible();await expect(page.locator('li')).toHaveCount(2);
+  await page.evaluate(()=>localStorage.setItem('moke-server-storage','{broken'));await page.reload();await expect(page.getByText(/无法加载服务器列表/)).toBeVisible();expect(await page.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe('{broken');await page.getByRole('button',{name:'保留原数据并重建列表',exact:true}).click();await expect(page.getByText('尚未加入服务器')).toBeVisible();expect(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('moke-server-storage-backup-')).length)).toBe(1);
+});
+
+test('legacy migration, timeout, retry and B login retain source identity',async({page})=>{
+  // Plain HTTP/older WebViews expose getRandomValues but not randomUUID.
+  await page.addInitScript(() => Object.defineProperty(Crypto.prototype, 'randomUUID', { value: undefined, configurable: true }));
+  const fixture=await installServerListFixture(page);
+  await page.goto(base);
+  await page.evaluate(()=>localStorage.setItem('moke-server-storage',JSON.stringify({version:0,state:{serverUrl:'https://A.example.test:443/',serverTitle:'旧 A'}})));
+  await page.getByRole('button',{name:'同意并继续',exact:true}).click();
+  await expect(page.locator('li')).toHaveCount(1);
+  const migrated=await page.evaluate(()=>localStorage.getItem('moke-server-storage'));
+  await page.reload();await expect(page.locator('li')).toHaveCount(1);
+  expect(await page.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(migrated);
+  await save(page,fixture.origins[1]);
+  fixture.servers.get(fixture.origins[1]).fault='delay';
+  await page.locator('li button').nth(1).click();
+  await expect(page.locator('#server-error')).toContainText('连接超时',{timeout:25000});
+  fixture.release();fixture.servers.get(fixture.origins[1]).fault=null;
+  await page.locator('li button').nth(1).click();
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');await page.getByRole('button',{name:'确认',exact:true}).click();
+  await expect(page.getByText('B 同编号藏书').first()).toBeVisible();
+  await page.getByRole('link',{name:'登录',exact:true}).click();
+  await page.getByPlaceholder('请输入用户名').fill('fixture-reader');await page.getByPlaceholder('请输入密码').fill('fixture-password');
+  await page.getByRole('button',{name:'登录',exact:true}).click();
+  await expect(page.getByText('B 测试读者',{exact:true})).toBeVisible();
+  await list(page);await page.locator('li button').first().click();await expect(page.getByText('A 测试读者',{exact:true})).toBeVisible();
+  expect(fixture.requests.filter(r=>r.path==='/api/user/sign_in').map(r=>r.origin)).toEqual([fixture.origins[1]]);
+});
+
+test('read-only saved list still connects after reload and offline settings have one reconnect entry',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  await save(page,fixture.origins[0]);
+  await page.addInitScript(()=>{
+    const write=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(key,value){
+      if(key==='moke-server-storage')throw new DOMException('quota','QuotaExceededError');
+      return write.call(this,key,value);
+    };
+  });
+  await page.reload();await expect(page.locator('li')).toHaveCount(1);
+  await page.locator('li button').first().click();await expect(page).toHaveURL(/\/shelf/);
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await list(page);await page.getByRole('button',{name:'断开',exact:true}).click();
+  await expect(page.getByText('已断开，服务器列表已保留',{exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await page.getByRole('button',{name:'进入离线模式',exact:true}).click();
+  await page.getByRole('link',{name:'设置',exact:true}).click();
+  await expect(page.getByRole('button',{name:'连接服务器',exact:true})).toHaveCount(1);
+  await expect(page.getByRole('link',{name:'服务器列表',exact:true}).filter({visible:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'连接服务器',exact:true}).click();
+  // Disconnect removed the runtime source, so this entry requires an explicit
+  // saved-server choice rather than restoring the former identity.
+  await expect(page).toHaveURL(/\/welcome$/);
+  await page.locator('li button').first().click();
+  await expect(page).toHaveURL(/\/shelf$/);
+});
+
+test('access reload rejects an unknown saved identity without contacting a supplied URL',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  await save(page,fixture.origins[0]);
+  await page.goto(`${base}/access?serverId=missing&requestId=999&serverUrl=${encodeURIComponent(fixture.origins[1])}`);
+  await page.getByPlaceholder('请输入访问码').fill('fixture-code');
+  await expect(page.getByRole('button',{name:'确认',exact:true})).toBeDisabled();
+  await expect(page.getByText(/连接上下文已失效/)).toBeVisible();
+  expect(fixture.requests).toHaveLength(0);
+  await page.getByRole('button',{name:'返回',exact:true}).click();
+  await expect(page.locator('li')).toHaveCount(1);
+});
+
+test('partially damaged list retains valid entries and backs up before later saves',async({page})=>{
+  const fixture=await installServerListFixture(page);await start(page);
+  const raw=JSON.stringify({version:1,state:{savedServers:[{id:'a',url:fixture.origins[0],title:'A',addedAt:''},{id:'bad',url:'ftp://bad.test'}]}});
+  await page.evaluate(value=>localStorage.setItem('moke-server-storage',value),raw);await page.reload();
+  await expect(page.getByText(/有 1 条服务器配置无效或重复，已跳过/)).toBeVisible();await expect(page.locator('li')).toHaveCount(1);
+  expect(await page.evaluate(()=>localStorage.getItem('moke-server-storage'))).toBe(raw);
+  await save(page,fixture.origins[1]);
+  expect(await page.evaluate(()=>Object.keys(localStorage).filter(k=>k.startsWith('moke-server-storage-damaged-backup-')).map(k=>localStorage.getItem(k)))).toEqual([raw]);
+  await page.locator('li button').first().click();await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+});
+
+test('failed recovery explains how to repair unavailable storage',async({page})=>{
+  await page.addInitScript(()=>{
+    const read=Storage.prototype.getItem,write=Storage.prototype.setItem;
+    Storage.prototype.getItem=function(key){if(key==='moke-server-storage')throw new DOMException('denied','SecurityError');return read.call(this,key);};
+    Storage.prototype.setItem=function(key,value){if(key.startsWith('moke-server-storage'))throw new DOMException('denied','SecurityError');return write.call(this,key,value);};
+  });
+  await start(page);await page.getByRole('button',{name:'保留原数据并重建列表',exact:true}).click();
+  await expect(page.getByText(/恢复失败.*站点设置或系统设置.*可用空间.*完全退出并重新启动/)).toBeVisible();
+});
+
+test('a changed configuration exposes in-app reload without losing the current connection', async ({ page }) => {
+  const fixture = await installServerListFixture(page);
+  await start(page);
+  await save(page, fixture.origins[0]);
+  await page.locator('li button').first().click();
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await list(page);
+  await expect(page.locator('li button').first()).toContainText('A 测试书库');
+
+  const other = await page.context().newPage();
+  let changed;
+  try {
+    await other.goto(base + '/welcome');
+    changed = await other.evaluate(url => {
+      const registry = JSON.parse(localStorage.getItem('moke-server-storage'));
+      registry.state.savedServers.push({ id: 'external-b', url, title: '外部加入的 B', addedAt: '' });
+      const raw = JSON.stringify(registry);
+      localStorage.setItem('moke-server-storage', raw);
+      return raw;
+    }, fixture.origins[1]);
+  } finally { await other.close(); }
+
+  const requestsBeforeSave = fixture.requests.length;
+  await page.getByRole('button', { name: '加入服务器', exact: true }).click();
+  await page.getByLabel('服务器地址', { exact: true }).fill('https://c.example.test');
+  await page.getByRole('button', { name: '保存到列表', exact: true }).click();
+  await expect(page.getByRole('button', { name: '重试加载', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('moke-server-storage'))).toBe(changed);
+  await expect(page.getByRole('button', { name: '返回当前书架', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: '重试加载', exact: true }).click();
+  await expect(page.locator('li')).toHaveCount(2);
+  await expect(page.locator('li button').nth(1)).toContainText('外部加入的 B');
+  await page.getByRole('button', { name: '保存到列表', exact: true }).click();
+  await expect(page.locator('li')).toHaveCount(3);
+  expect(fixture.requests).toHaveLength(requestsBeforeSave);
+  await page.getByRole('button', { name: '返回当前书架', exact: true }).click();
+  await expect(page.getByText('A 同编号藏书').first()).toBeVisible();
+  await expect(page.getByText('A 测试读者', { exact: true })).toBeVisible();
+});

@@ -146,13 +146,19 @@ function parseArguments(argv, environment) {
 if (require.main === module) {
   try {
     const options = parseArguments(process.argv.slice(2), process.env);
-    const manifest = buildManifest(options);
-    fs.writeFileSync(options.output, `${JSON.stringify(manifest, null, 2)}\n`);
-    console.log(
-      '%s generated with %d platforms',
-      options.output,
-      Object.keys(manifest.platforms).length,
-    );
+    // Stable jobs may have no signatures, but strict Preview manifests must
+    // still fail rather than silently omit an expected release artifact.
+    if (!options.strict && findSigFiles(options.dir).length === 0) {
+      console.log('No .sig files found — skipping latest.json generation');
+    } else {
+      const manifest = buildManifest(options);
+      fs.writeFileSync(options.output, `${JSON.stringify(manifest, null, 2)}\n`);
+      console.log(
+        '%s generated with %d platforms',
+        options.output,
+        Object.keys(manifest.platforms).length,
+      );
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
-import { fetchCurrentUser, request } from '@/lib/api';
+import { fetchCurrentUser, getErrorMessage, invalidateUserInfoCache, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
-import { requestAnimatedBack } from '@/lib/native-back';
+import { ServerConnectionNotice } from '@/components/auth/ServerConnectionNotice';
+import { withClosedReaderSession } from '@/lib/reader-source';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
 interface TalebookLoginResponse {
@@ -15,7 +16,7 @@ interface TalebookLoginResponse {
   msg?: string;
 }
 
-async function login(serverUrl: string, username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
+async function login(serverUrl: string, signal: AbortSignal, username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
@@ -33,7 +34,7 @@ async function login(serverUrl: string, username: string, password: string, capt
   const response = await request(`${serverUrl}/api/user/sign_in`, {
     method: 'POST',
     body,
-    credentials: 'include',
+    credentials: 'include', signal,
   });
   return response.json();
 }
@@ -41,7 +42,7 @@ async function login(serverUrl: string, username: string, password: string, capt
 function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { invalidateSession, logout, serverTitle, setConnected } = useServerStore();
+  const { logout, serverTitle, setConnected, serverUrl, connectionId, sessionId, hasHydrated } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -50,49 +51,55 @@ function LoginPageInner() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
-  const { serverUrl } = useServerStore.getState();
+
+  const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => { controller.current?.abort(); }, []);
+  const current = () => useServerStore.getState().connectionId === connectionId && useServerStore.getState().sessionId === sessionId;
 
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password.trim() || loading || !hasHydrated || !serverUrl) return;
+    const abort = new AbortController(); controller.current = abort;
     setLoading(true);
     setError('');
-    let session = useServerStore.getState();
-    const isCurrentSession = () => {
-      const current = useServerStore.getState();
-      return current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
-    };
 
     try {
-      const res = await login(session.serverUrl, username, password, captchaData);
-      if (!isCurrentSession()) return;
+      await withClosedReaderSession(async () => {
+        if (!current() || abort.signal.aborted) return;
+        const res = await login(serverUrl, abort.signal, username, password, captchaData);
+        if (!current() || abort.signal.aborted) return;
 
-      if (res.err === 'ok') {
-        setShowCaptcha(false);
-        invalidateSession();
-        session = useServerStore.getState();
-        const info = await fetchCurrentUser();
-        if (!isCurrentSession()) return;
-        if (!info.isLogin || !info.user) {
-          logout();
-          setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
-          return;
+        if (res.err === 'ok') {
+          setShowCaptcha(false);
+          invalidateUserInfoCache();
+          const info = await fetchCurrentUser(serverUrl, abort.signal);
+          if (!current() || abort.signal.aborted) return;
+          if (!info.isLogin || !info.user) {
+            logout();
+            setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
+            return;
+          }
+
+          safeRemoveLocalStorageItem('moke-auth-token');
+          setConnected('', info.user);
+          router.push('/shelf');
+        } else if (res.err === 'user.private.not_valid') {
+          const state = useServerStore.getState();
+          const candidate = state.beginActiveAccessConfirmation();
+          if (candidate) {
+            router.push(`/access?serverId=${encodeURIComponent(candidate.id)}&requestId=${candidate.requestId}`);
+          } else router.replace('/welcome');
+        } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
+          setError(res.msg || '请输入人机验证码');
+          setShowCaptcha(true);
+        } else {
+          setError(res.msg || '登录失败，请检查用户名和密码');
         }
-
-        safeRemoveLocalStorageItem('moke-auth-token');
-        setConnected('', info.user);
-        router.push('/shelf');
-      } else if (res.err === 'user.private.not_valid') {
-        router.push('/access');
-      } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
-        setError(res.msg || '请输入人机验证码');
-        setShowCaptcha(true);
-      } else {
-        setError(res.msg || '登录失败，请检查用户名和密码');
-      }
+      });
     } catch (loginError) {
-      if (!isCurrentSession()) return;
-      console.error('[LoginPage] login flow failed:', loginError);
-      setError('无法连接服务器');
+      if (current() && !abort.signal.aborted) {
+        console.warn('[LoginPage] login flow failed:', loginError);
+        setError(getErrorMessage(loginError, '无法连接服务器'));
+      }
     } finally {
       setLoading(false);
     }
@@ -103,7 +110,7 @@ function LoginPageInner() {
       <div className="relative w-full max-w-[410px] my-8 overflow-hidden rounded-[32px] app-glass p-10">
         <div className="absolute -right-16 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-2xl" />
         <div className="relative">
-        <button type="button" onClick={() => requestAnimatedBack('/')} aria-label="返回" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => { controller.current?.abort(); router.replace('/welcome'); }} aria-label="返回" className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <div className="flex justify-center mb-8">
@@ -115,9 +122,8 @@ function LoginPageInner() {
         <h1 className="text-[22px] font-bold text-center text-foreground">登录</h1>
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">欢迎回到 {serverTitle || '书库'}</p>
 
-        {searchParams.get('reconnect') === '1' && (
-          <p role="status" className="mb-4 rounded-lg bg-muted p-3 text-sm text-foreground">登录状态已失效，请重新登录。</p>
-        )}
+        <ServerConnectionNotice hasHydrated={hasHydrated} serverUrl={serverUrl} />
+        {searchParams.get('reconnect') === '1' && <p role="status" className="mb-4 rounded-lg bg-muted p-3 text-sm text-foreground">登录状态已失效，请重新登录。</p>}
 
         {error && (
           <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">
@@ -161,7 +167,7 @@ function LoginPageInner() {
 
           <button
             type="submit"
-            disabled={loading || !username.trim() || !password.trim()}
+            disabled={loading || !hasHydrated || !serverUrl || !username.trim() || !password.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
           >
             {loading ? '登录中...' : '登录'}

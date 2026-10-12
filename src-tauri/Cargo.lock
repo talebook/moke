@@ -4343,6 +4343,7 @@ dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",
  "glob",
+ "httparse",
  "keyring",
  "keyring-core",
  "log",

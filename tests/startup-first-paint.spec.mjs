@@ -42,7 +42,17 @@ for (const runtime of ['android', 'ios', 'linux']) {
         expect(frame.background).toBe(backgrounds[appearance]);
       }
       await page.evaluate(() => window.firstPaintGate.releaseAuth());
-      await expect(page.getByRole('heading', { name: '我的书架', exact: true })).toBeVisible();
+      await expect(page).toHaveURL(/\/welcome(?:\?|$)/);
+      await expect(page.getByRole('heading', { name: '服务器', exact: true })).toBeVisible();
+      await expect(page.getByTestId('app-startup-screen')).toHaveCount(0);
+      // Persisted appearance and reading history cannot activate a connection
+      // or resume Reader before an explicit choice on the server list.
+      const coldTrace = await page.evaluate(() => ({
+        opens: sessionStorage.getItem('layout-reader-opens'),
+        detailOpens: sessionStorage.getItem('layout-detail-opens'),
+      }));
+      expect(coldTrace.opens).toBeNull();
+      expect(coldTrace.detailOpens).toBeNull();
       // The startup exception must keep normal content below the status bar.
       if (runtime !== 'linux') {
         const padding = await page.locator('.moke-app-root > :first-child').evaluate((el) => getComputedStyle(el).paddingTop);

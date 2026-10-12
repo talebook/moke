@@ -1,3 +1,5 @@
+import { isUsablePageSize, type ComicPageSize } from './comic-size.ts';
+
 // An inert, local placeholder lets the unmodified reader retain its layout and
 // page explorer. Only this host adapter obtains authenticated image bytes.
 export function comicPlaceholder(index: number, width: number, height: number) {
@@ -7,13 +9,27 @@ export function comicPlaceholder(index: number, width: number, height: number) {
   return `data:image/svg+xml,${encodeURIComponent(svg)}#comic-${index}`;
 }
 
-export function bindComicImages(
-  host: HTMLElement,
-  load: (index: number) => Promise<Blob>,
-  onError: (error: unknown) => void,
-  onReady: () => void,
-  dimensions: (index: number) => { width: number; height: number },
-) {
+export class ComicImageLayoutError extends Error {
+  readonly diagnostics: { pageIndex: number | null; width: number | null; height: number | null };
+  constructor(index: number, dimensions?: ComicPageSize) {
+    super('漫画页面尺寸信息无效，请重新加载。');
+    this.name = 'ComicImageLayoutError';
+    this.diagnostics = {
+      pageIndex: Number.isSafeInteger(index) && index >= 0 ? index : null,
+      width: typeof dimensions?.width === 'number' && Number.isFinite(dimensions.width) ? dimensions.width : null,
+      height: typeof dimensions?.height === 'number' && Number.isFinite(dimensions.height) ? dimensions.height : null,
+    };
+  }
+}
+
+interface ComicImageOptions {
+  load: (index: number) => Promise<Blob>;
+  onError: (error: unknown) => void;
+  onReady: () => void;
+  pageDimensions: readonly ComicPageSize[];
+}
+
+export function bindComicImages(host: HTMLElement, { load, onError, onReady, pageDimensions }: ComicImageOptions) {
   let active = true;
   let running = 0;
   const images = new Map<HTMLImageElement, number>();
@@ -22,6 +38,7 @@ export function bindComicImages(
   const loading = new Set<number>();
   const cache = new Map<number, { url: string; size: number }>();
   const failed = new Set<number>();
+  const invalidDimensions = new Set<number>();
   const visible = new Set<HTMLImageElement>();
   const observers = new IntersectionObserver(entries => {
     for (const entry of entries) {
@@ -80,11 +97,26 @@ export function bindComicImages(
         const match = img.getAttribute('src')?.match(/#comic-(\d+)$/);
         if (!match) return;
         const index = Number(match[1]);
-        // Native lazy loading may defer decoding even an inert SVG. Reserve
-        // the manifest geometry so off-screen webtoon pages never collapse.
-        const size = dimensions(index);
-        img.width = size.width;
-        img.height = size.height;
+        const dimensions = pageDimensions[index];
+        if (!dimensions || !isUsablePageSize(dimensions)) {
+          // Reader views can contain several images for the same page, and
+          // mutations rescan them. Report once per page for this adapter run.
+          if (!invalidDimensions.has(index)) {
+            invalidDimensions.add(index);
+            onError(new ComicImageLayoutError(index, dimensions));
+          }
+          return;
+        }
+        // Lazy SVG placeholders have no intrinsic dimensions until decoded.
+        // Reserve their manifest ratio before that happens, including after
+        // eviction. This does not override the reader's original-size attrs.
+        img.style.aspectRatio = `${dimensions.width} / ${dimensions.height}`;
+        // Original-size views need real intrinsic bounds before a native lazy
+        // placeholder is decoded. Preserve attributes already owned by Reader.
+        if (img.closest('.kr-continuous--original, .kr-scale--original')) {
+          if (!img.getAttribute('width')) img.width = dimensions.width;
+          if (!img.getAttribute('height')) img.height = dimensions.height;
+        }
         placeholders.set(index, img.getAttribute('src')!);
         images.set(img, index);
         observers.observe(img);

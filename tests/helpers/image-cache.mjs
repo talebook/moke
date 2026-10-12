@@ -6,13 +6,14 @@ export async function installCoverQueueMock(page) {
     const original = window.__TAURI_INTERNALS__.invoke;
     const requests = new Map();
     const bodies = new Map();
+    const coverBodyUrls = new Map();
     const waiting = [];
     let nextId = 9000;
     let released = false;
     // Binary PNG also decodes when the plugin constructs a Response stream
     // before overriding its headers (blob MIME may then be empty).
     const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAwAAAAICAIAAABChommAAAAEUlEQVR4nGPojtImiBhGFQEAIJ1mAeels6sAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
-    window.coverQueue = { started: [], cancelled: [], bodyCancelled: [] };
+    window.coverQueue = { started: [], cancelled: [], bodyCancelled: [], bodyCancelledUrls: [] };
     window.releaseOldCovers = () => {
       released = true;
       waiting.splice(0).forEach((resolve) => resolve());
@@ -31,7 +32,12 @@ export async function installCoverQueueMock(page) {
         return null;
       }
       if (command === 'plugin:http|fetch_cancel_body' && bodies.has(args.rid)) {
-        window.coverQueue.bodyCancelled.push(args.rid);
+        // Shelf/library bodies share this wrapper too. Only a cover body is
+        // evidence that a late abandoned image released its native resource.
+        if (coverBodyUrls.has(args.rid)) {
+          window.coverQueue.bodyCancelled.push(args.rid);
+          window.coverQueue.bodyCancelledUrls.push(coverBodyUrls.get(args.rid));
+        }
         return null;
       }
       if (command === 'plugin:http|fetch_send') {
@@ -41,6 +47,7 @@ export async function installCoverQueueMock(page) {
           if (url.includes('/old-') && !released) await new Promise((resolve) => waiting.push(resolve));
           const rid = nextId++;
           bodies.set(rid, png);
+          coverBodyUrls.set(rid, url);
           return { status: 200, statusText: 'OK', url, rid, headers: [['content-type', 'image/png']] };
         }
         const result = await original(command, args);

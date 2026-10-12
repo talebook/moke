@@ -23,6 +23,8 @@ const previewModule = readText('src-tauri/src/preview/mod.rs');
 const extensions = readText('src-tauri/src/extensions/mod.rs');
 const extensionApi = readText('src-tauri/src/extensions/api_server.rs');
 const extensionEvents = readText('src-tauri/src/extensions/events.rs');
+const extensionTransport = readText('src-tauri/src/extensions/http_transport.rs');
+const extensionDeadline = readText('src-tauri/src/extensions/deadline_stream.rs');
 
 test('Preview entitlement implementation exists only behind the Rust preview feature', () => {
   assert.match(cargoManifest, /^preview = \[[^\n]+dep:keyring[^\n]+dep:ring[^\n]+\]$/m);
@@ -165,14 +167,24 @@ test('update authorization requires a fresh online lease and cannot use offline 
 });
 
 test('extension loopback services bound unauthenticated resource use', () => {
-  assert.match(extensionApi, /MAX_CONCURRENT_API_REQUESTS/);
-  assert.match(extensionApi, /MAX_API_REQUEST_BODY_BYTES/);
+  assert.match(extensionApi, /http_transport::serve\(server/);
+  assert.match(extensionApi, /MAX_API_REQUEST_BODY_BYTES:\s*usize\s*=\s*http_transport::MAX_BODY_BYTES/);
   assert.match(extensionApi, /authenticate\([\s\S]*read_request_body/);
   assert.match(extensionApi, /body_length\(\)/);
   assert.match(extensionApi, /\.take\(\(MAX_API_REQUEST_BODY_BYTES \+ 1\) as u64\)/);
+  assert.match(extensionTransport, /MAX_CONNECTIONS:\s*usize\s*=\s*32/);
+  assert.match(extensionTransport, /MAX_BODY_BYTES:\s*usize\s*=\s*1024 \* 1024/);
+  assert.match(extensionTransport, /MAX_HEADER_BYTES:\s*usize\s*=\s*16 \* 1024/);
+  assert.match(extensionTransport, /REQUEST_TIMEOUT:\s*Duration\s*=\s*Duration::from_secs\(5\)/);
+  assert.match(extensionTransport, /acquire\(&active\)[\s\S]*thread::spawn[\s\S]*parse\(stream, deadline\)/);
+  assert.match(extensionTransport, /SERVER_BUSY/);
+  assert.match(extensionDeadline, /checked_duration_since\(Instant::now\(\)\)/);
+  assert.match(extensionDeadline, /set_read_timeout\(Some\(remaining\)\)/);
+  assert.match(extensionDeadline, /set_write_timeout\(Some\(remaining\)\)/);
   assert.match(extensionEvents, /MAX_PENDING_WS_HANDSHAKES/);
   assert.match(extensionEvents, /WS_HANDSHAKE_TIMEOUT/);
-  assert.match(extensionEvents, /set_read_timeout\(Some\(WS_HANDSHAKE_TIMEOUT\)\)/);
+  assert.match(extensionEvents, /perform_handshake_with_deadline\([\s\S]*Instant::now\(\) \+ WS_HANDSHAKE_TIMEOUT/);
+  assert.match(extensionEvents, /DeadlineStream::new\(stream, deadline\)/);
   assert.match(extensionEvents, /thread::spawn\(move \|\| \{[\s\S]*perform_handshake/);
   assert.match(extensionEvents, /max_message_size = Some\(MAX_WS_MESSAGE_BYTES\)/);
 });

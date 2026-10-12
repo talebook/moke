@@ -3,8 +3,10 @@
 //! 负责注册 Tauri commands、管理全局状态和启动 API 服务器。
 
 mod api_server;
+mod deadline_stream;
 mod discovery;
 mod events;
+mod http_transport;
 mod lifecycle;
 mod permissions;
 mod storage;
@@ -523,6 +525,18 @@ fn ext_reader_event(
     // 同时通过 Tauri event 发送给前端监听器
     app.emit(&full_event, &data)
         .map_err(|e| format!("发送事件失败: {e}"))?;
+
+    // Host progress must identify the actual IPC caller. Keep the Reader and
+    // extension protocol unchanged; this envelope is private to Moke's main UI.
+    if let Err(error) = app.emit_to(
+        "main",
+        "moke:reader:event",
+        serde_json::json!({
+            "window": source_window.label(), "event": event, "data": data,
+        }),
+    ) {
+        log::warn!("[ext] 发送宿主阅读事件失败: {error}");
+    }
 
     Ok(())
 }

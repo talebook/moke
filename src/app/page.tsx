@@ -20,12 +20,13 @@ export default function HomePage() {
   const serverUrl = useServerStore((state) => state.serverUrl);
   const offlineMode = useServerStore((state) => state.offlineMode);
   const hasHydrated = useServerStore((state) => state.hasHydrated);
+  const storageBusy = useServerStore((state) => state.storageBusy);
   const continueReadingOnLaunch = useSettingsStore((state) => state.continueReadingOnLaunch);
   const [message, setMessage] = useState('正在打开墨客…');
   const nativeShortcutHandledRef = useRef(false);
 
   useEffect(() => {
-    if (!hasHydrated || nativeShortcutHandledRef.current) return;
+    if (!hasHydrated || storageBusy || nativeShortcutHandledRef.current) return;
     let cancelled = false;
     const controller = new AbortController();
     // The history request timeout must not invalidate a legitimate navigation.
@@ -90,7 +91,7 @@ export default function HomePage() {
       window.removeEventListener('pagehide', cancelLaunch);
       window.removeEventListener(CONTINUE_READING_NATIVE_EVENT, handleNativeShortcut);
     };
-  }, [continueReadingOnLaunch, hasHydrated, offlineMode, serverUrl, router]);
+  }, [continueReadingOnLaunch, hasHydrated, storageBusy, offlineMode, serverUrl, router]);
 
   return <AppStartupScreen message={message} />;
 }

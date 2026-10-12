@@ -76,6 +76,47 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib --locked
 
+  single-webview-smoke:
+    name: Tauri frontend offline and Reader guard smoke tests (synthetic IPC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build
+      - name: Exercise full-document offline entry
+        run: |
+          node tests/helpers/tauri-preview-server.mjs > "$RUNNER_TEMP/moke-tauri-preview.log" 2>&1 &
+          moke_preview_pid=$!
+          trap 'kill "$moke_preview_pid" || true' EXIT
+          (
+            for attempt in {1..30}; do
+              if curl --silent --fail http://127.0.0.1:31391/settings/developer > /dev/null; then
+                exit 0
+              fi
+              sleep 1
+            done
+            cat "$RUNNER_TEMP/moke-tauri-preview.log"
+            exit 1
+          )
+          MOKE_TAURI_TEST_BASE_URL=http://127.0.0.1:31391 MOKE_E2E_BASE_URL=http://127.0.0.1:31391 pnpm exec playwright test tests/offline-document.spec.mjs tests/connection-reader-guard.spec.mjs tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs tests/server-storage-timeout.spec.mjs --workers=1
+      - name: Upload document handoff evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: single-webview-smoke-artifacts
+          path: |
+            test-results/**
+            ${{ runner.temp }}/moke-tauri-preview.log
+
   mobile-smoke:
     name: Mobile, tablet and desktop page smoke test
     runs-on: ubuntu-latest
@@ -116,7 +157,7 @@ jobs:
           exit 1
 
       - name: Run browser smoke tests
-        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs --workers=1
+        run: pnpm exec playwright test tests/responsive-smoke.spec.mjs tests/captcha-sandbox.spec.mjs tests/sample-book.spec.mjs tests/server-list.spec.mjs tests/auth-connection.spec.mjs tests/readme-screenshots.spec.mjs --workers=1
 
       - name: Upload responsive screenshots and server log
         if: always()

@@ -1,6 +1,8 @@
 'use client';
 
 import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-policy';
+import { assertReaderSessionUnchanged, openReaderFromSource } from '@/lib/reader-source';
+import { useServerStore } from '@/lib/store/server';
 import type { OfflineBookRecord } from '@/lib/offline-books';
 import { isSampleBook } from '@/lib/sample-book-info';
 import { getDebugPanelLaunchState } from '@/lib/store/developer';
@@ -27,6 +29,7 @@ export async function openOfflineBook(
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri' || !record.filePath) {
     throw new Error('book.offline.desktop_only');
   }
+  const source = { serverUrl: record.serverUrl, bookId: record.bookId, sessionId: useServerStore.getState().sessionId };
 
   if (useSettingsStore.getState().readerPreference === 'system') {
     onProgress?.('正在打开系统阅读器…');
@@ -41,7 +44,7 @@ export async function openOfflineBook(
   const sampleBook = isSampleBook(record);
   onProgress?.('正在恢复阅读进度…');
   const [restoreProgress, platform] = await Promise.all([
-    fetchReadingProgress(record.bookId, signal),
+    fetchReadingProgress(record.bookId, signal, record.serverUrl),
     getMokeRuntimePlatform(),
   ]);
   if (signal?.aborted) return false;
@@ -53,20 +56,21 @@ export async function openOfflineBook(
     mokeBookId: record.bookId,
     restoreProgress,
   };
+  assertReaderSessionUnchanged({ sessionId: source.sessionId }, useServerStore.getState());
 
   if (isSingleWebviewRuntime(platform)) {
     await openEmbeddedReaderBook(
       buildEmbeddedReaderUrl({ ...common, serverUrl: sampleBook ? '' : record.serverUrl }),
       navigate,
       platform,
+      { sessionId: source.sessionId },
       signal,
     );
     return !signal?.aborted;
   }
 
-  const { invoke } = await import('@tauri-apps/api/core');
   if (signal?.aborted) return false;
-  await invoke('open_reader', common);
+  await openReaderFromSource(source, common, signal);
   return false;
 }
 

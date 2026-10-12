@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installLibraryLayoutMock, LAYOUT_OFFLINE_BOOK, LAYOUT_SERVER_URL } from './helpers/library-layout.mjs';
+import { installLibraryLayoutMock, openLayoutRoute, navigateLayoutRoute, LAYOUT_OFFLINE_BOOK, LAYOUT_SERVER_URL } from './helpers/library-layout.mjs';
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 
@@ -34,52 +34,61 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
     await page.setViewportSize(viewport);
     await installLibraryLayoutMock(page, { offlineMode: true, continueReading: false, nativeRuntime: 'android' });
     await installShortcutBridge(page);
-    await page.goto(`${APP_URL}/shelf`);
+    await openLayoutRoute(page, APP_URL, '/shelf', { offlineMode: true });
     await expect(page.getByRole('heading', { name: '我的书架' })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false]);
+    const initial = await page.evaluate(() => window.shortcutUpdates);
+    expect(initial.length).toBeGreaterThan(0);
+    expect(initial.every(enabled => enabled === false)).toBe(true);
 
     await saveRecord(page, { __offline__: offlineEntry });
-    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false, true]);
+    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([...initial, true]);
     await saveRecord(page, { __offline__: { ...offlineEntry, progress: 0.4 } });
-    expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([false, true]);
+    expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([...initial, true]);
 
-    // The record persists after recreating the document; startup publishes it.
+    // The record persists, but a cold document has no active offline session.
     await page.reload();
-    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([true]);
+    await expect(page.getByRole('heading', { name: '服务器', exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false]);
+    await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '我的书架', exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.shortcutUpdates.at(-1))).toBe(true);
+    const resumed = await page.evaluate(() => window.shortcutUpdates);
     await saveRecord(page, {});
-    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([true, false]);
+    await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([...resumed, false]);
     await page.evaluate(() => {
       localStorage.setItem('moke-continue-reading', '{broken');
       window.dispatchEvent(new Event('storage'));
     });
-    expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([true, false]);
+    expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([...resumed, false]);
   });
 }
 
 test('an online shortcut ignores another server and offline records', async ({ page }) => {
   await installLibraryLayoutMock(page, { continueReading: false, nativeRuntime: 'android' });
   await installShortcutBridge(page);
-  await page.goto(`${APP_URL}/shelf`);
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false]);
+  await openLayoutRoute(page, APP_URL, '/shelf');
+  await expect(page.locator('.moke-sidebar a[href="/user"]')).toContainText('layout-test');
+  const initial = await page.evaluate(() => window.shortcutUpdates);
+  expect(initial.every(enabled => enabled === false)).toBe(true);
   await saveRecord(page, {
     '__offline__': offlineEntry,
     'https://other.books.test::online': { ...offlineEntry, mode: 'online', serverUrl: 'https://other.books.test' },
   });
-  expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([false]);
+  expect(await page.evaluate(() => window.shortcutUpdates)).toEqual(initial);
   await saveRecord(page, { [`${LAYOUT_SERVER_URL}::online`]: { ...offlineEntry, mode: 'online' } });
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false, true]);
-  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([...initial, true]);
+  await navigateLayoutRoute(page, '/settings');
   await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false, true, false]);
+  await expect.poll(() => page.evaluate(() => window.shortcutUpdates.at(-1))).toBe(false);
 });
 
 test('disconnecting the server hides its reading shortcut', async ({ page }) => {
   await installLibraryLayoutMock(page, { nativeRuntime: 'android' });
   await installShortcutBridge(page);
-  await page.goto(`${APP_URL}/settings`);
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([true]);
+  await openLayoutRoute(page, APP_URL, '/settings');
+  await expect.poll(() => page.evaluate(() => window.shortcutUpdates.at(-1))).toBe(true);
   await page.getByRole('button', { name: '断开连接', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([true, false]);
+  await expect.poll(() => page.evaluate(() => window.shortcutUpdates.at(-1))).toBe(false);
 });
 
 test('reading a downloaded book enables the previously hidden shortcut', async ({ page }) => {
@@ -92,15 +101,16 @@ test('reading a downloaded book enables the previously hidden shortcut', async (
   await page.route('**/readest/reader?**', (route) => route.fulfill({
     contentType: 'text/html; charset=utf-8', body: '<h1>模拟阅读器</h1>',
   }));
-  await page.goto(`${APP_URL}/detail?id=42&source=${encodeURIComponent(LAYOUT_SERVER_URL)}`);
+  await openLayoutRoute(page, APP_URL, `/detail?id=42&source=${encodeURIComponent(LAYOUT_SERVER_URL)}`, { offlineMode: true });
   await expect(page.getByTestId('offline-read-primary-action')).toBeVisible();
-  expect(await page.evaluate(() => window.shortcutUpdates)).toEqual([false]);
+  const initial = await page.evaluate(() => window.shortcutUpdates);
+  expect(initial.every(enabled => enabled === false)).toBe(true);
   await page.getByTestId('offline-read-primary-action').click();
-  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([false, true]);
+  await expect.poll(() => page.evaluate(() => window.shortcutUpdates)).toEqual([...initial, true]);
   await expect(page.getByRole('heading', { name: '模拟阅读器' })).toBeVisible();
 });
 
-test('a cold shortcut launch consumes the pending native request and opens the last book', async ({ page }) => {
+test('a cold shortcut request requires an explicit offline session before opening the last book', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await installLibraryLayoutMock(page, {
     offlineMode: true, nativeRuntime: 'android',
@@ -111,7 +121,11 @@ test('a cold shortcut launch consumes the pending native request and opens the l
     contentType: 'text/html; charset=utf-8', body: '<h1>模拟阅读器</h1>',
   }));
   await page.goto(`${APP_URL}/`);
-  await expect(page.getByRole('heading', { name: '模拟阅读器' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '服务器', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem('layout-reader-opens'))).toBeNull();
   expect(await page.evaluate(() => sessionStorage.getItem('shortcut-consumed'))).toBe('true');
+  await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('moke:continue-reading-request')));
+  await expect(page.getByRole('heading', { name: '模拟阅读器' })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('layout-reader-opens'))).toBe('1');
 });

@@ -55,7 +55,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node || 20 }}
+          node-version: ${{ matrix.node || 24 }}
           cache: 'pnpm'
 
       - name: Setup Java

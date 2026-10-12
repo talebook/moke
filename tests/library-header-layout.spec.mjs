@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installLibraryLayoutMock, LAYOUT_BOOK } from './helpers/library-layout.mjs';
+import { installLibraryLayoutMock, openLayoutRoute, navigateLayoutRoute, LAYOUT_BOOK } from './helpers/library-layout.mjs';
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 const viewports = [
@@ -13,17 +13,20 @@ const viewports = [
 
 async function expectHeaderLayout(page) {
   await expect(page.getByRole('button', { name: '网格视图', exact: true })).toBeVisible();
-  const layout = await page.locator('header').evaluate((header) => {
+  const layout = await page.locator('header:visible').evaluate((header) => {
     const rect = (element) => {
       const r = element.getBoundingClientRect();
       return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
     };
-    const toggle = header.querySelector('button[aria-label="网格视图"]').parentElement;
-    const history = header.querySelector('a[aria-label="查看历史记录"]');
+    // Responsive headers retain hidden mobile/desktop controls in the DOM.
+    // Geometry belongs to the actual controls shown at this viewport.
+    const visible = selector => [...header.querySelectorAll(selector)].find(element => element.getClientRects().length > 0);
+    const toggle = visible('button[aria-label="网格视图"]').parentElement;
+    const history = visible('a[aria-label="查看历史记录"]');
     return {
-      title: rect(header.querySelector('h1')), toggle: rect(toggle),
-      search: rect(header.querySelector('input[type="search"]')),
-      searchGroup: rect(header.querySelector('input[type="search"]').parentElement.parentElement),
+      title: rect(visible('h1')), toggle: rect(toggle),
+      search: rect(visible('input[type="search"]')),
+      searchGroup: rect(visible('input[type="search"]').parentElement.parentElement),
       history: history ? rect(history) : null,
       contentRight: header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight),
       overflow: document.documentElement.scrollWidth > innerWidth,
@@ -61,7 +64,7 @@ for (const viewport of viewports) {
     await page.setViewportSize(viewport);
     await installLibraryLayoutMock(page);
     for (const route of ['/shelf', '/library', '/search?q=布局', '/search?scope=shelf&q=布局']) {
-      await page.goto(`${APP_URL}${route}`);
+      await openLayoutRoute(page, APP_URL, route);
       await expectHeaderLayout(page);
       const listButton = page.getByRole('button', { name: '列表视图', exact: true }).filter({ visible: true });
       await listButton.focus();
@@ -80,7 +83,7 @@ for (const viewport of viewports) {
       await expect(page.getByText('找到 1 本书', { exact: true })).toBeVisible();
       await expectHeaderLayout(page);
     }
-    await page.goto(`${APP_URL}/library`);
+    await navigateLayoutRoute(page, '/library');
     await page.getByRole('button', { name: '在线', exact: true }).click();
     await expect(page.getByRole('heading', { name: '在线书库' })).toBeVisible();
     await expectHeaderLayout(page);
@@ -89,7 +92,7 @@ for (const viewport of viewports) {
   test(`continue card keeps a compact gap at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await installLibraryLayoutMock(page);
-    await page.goto(`${APP_URL}/shelf`);
+    await openLayoutRoute(page, APP_URL, '/shelf');
     const card = page.getByRole('link', { name: `继续阅读《${LAYOUT_BOOK.title}》` });
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('href', '/detail?id=42&continue=1');
@@ -108,7 +111,7 @@ for (const viewport of viewports) {
 test('offline and empty shelf keep the header and continue card compact', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await installLibraryLayoutMock(page, { offlineMode: true });
-  await page.goto(`${APP_URL}/shelf`);
+  await openLayoutRoute(page, APP_URL, '/shelf', { offlineMode: true });
   await expectHeaderLayout(page);
   await expect(page.getByRole('link', { name: '查看历史记录' })).toHaveCount(0);
   await expect(page.getByText('书架还是空的', { exact: true })).toBeVisible();
@@ -118,7 +121,7 @@ test('offline and empty shelf keep the header and continue card compact', async 
 
 test('shelf without a continue entry retains normal top padding', async ({ page }) => {
   await installLibraryLayoutMock(page, { continueReading: false });
-  await page.goto(`${APP_URL}/shelf`);
+  await openLayoutRoute(page, APP_URL, '/shelf');
   await expect(page.locator('.book-card-motion')).toBeVisible();
   await expect(page.getByRole('link', { name: /^继续阅读/ })).toHaveCount(0);
   await expectHeaderLayout(page);
@@ -127,7 +130,7 @@ test('shelf without a continue entry retains normal top padding', async ({ page 
 test('a long shelf can scroll its final book above the mobile navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 640 });
   await installLibraryLayoutMock(page, { bookCount: 20 });
-  await page.goto(`${APP_URL}/shelf`);
+  await openLayoutRoute(page, APP_URL, '/shelf');
   const lastBook = page.locator('.book-card-motion').last();
   await expect(page.locator('.book-card-motion')).toHaveCount(20);
   await lastBook.scrollIntoViewIfNeeded();

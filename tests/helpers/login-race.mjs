@@ -1,15 +1,10 @@
-import { installLibraryLayoutMock, LAYOUT_SERVER_URL } from './library-layout.mjs';
+import { installLibraryLayoutMock, openLayoutRoute, LAYOUT_SERVER_URL } from './library-layout.mjs';
 
 // Snapshot the anonymous payload when the request starts. The bridge ignores
 // cancellation so tests can deliver it after a successful sign-in.
 export async function installLoginRaceMock(page, { holdConfirmation = false } = {}) {
   await installLibraryLayoutMock(page, { continueReading: false });
   await page.addInitScript(({ serverUrl, holdConfirmation }) => {
-    const stored = JSON.parse(localStorage.getItem('moke-server-storage'));
-    stored.state.user = null;
-    stored.state.capabilities.checkedAt = null;
-    localStorage.setItem('moke-server-storage', JSON.stringify(stored));
-    localStorage.removeItem('moke-continue-reading');
     const original = window.__TAURI_INTERNALS__.invoke;
     const requests = new Map();
     const bodies = new Map();
@@ -17,9 +12,10 @@ export async function installLoginRaceMock(page, { holdConfirmation = false } = 
     const confirmedWaiters = [];
     let nextId = 20000;
     let signedIn = false;
+    let validated = false;
     let anonymousReleased = false;
     let confirmedReleased = !holdConfirmation;
-    window.loginRace = { infoStarted: [], signIns: 0, anonymousCompleted: 0 };
+    window.loginRace = { validationInfo: [], infoStarted: [], infoCompleted: [], profileReads: [], signIns: 0, anonymousCompleted: 0 };
     window.releaseAnonymousUser = () => {
       anonymousReleased = true;
       anonymousWaiters.splice(0).forEach((resolve) => resolve());
@@ -47,12 +43,19 @@ export async function installLoginRaceMock(page, { holdConfirmation = false } = 
           payload = { err: 'ok', sys: { title: authenticated ? '登录回归书库' : '旧匿名书库' }, user: authenticated
             ? { is_login: true, id: 7, username: 'race-reader', nickname: '回归读者', extra: {} }
             : { is_login: false } };
-          if (!parsed.search) {
+          if (!parsed.search && !validated) {
+            // The explicit Welcome connection validates this same endpoint.
+            // Let that first guest result settle; hold the later provider sync.
+            validated = true;
+            window.loginRace.validationInfo.push({ authenticated, userId: payload.user.id ?? null });
+          } else if (!parsed.search) {
             window.loginRace.infoStarted.push(authenticated ? 'confirmed' : 'anonymous');
             if (!authenticated && !anonymousReleased) await new Promise((resolve) => anonymousWaiters.push(resolve));
             if (authenticated && !confirmedReleased) await new Promise((resolve) => confirmedWaiters.push(resolve));
             if (!authenticated) window.loginRace.anonymousCompleted++;
+            window.loginRace.infoCompleted.push({ authenticated, userId: payload.user.id ?? null, title: payload.sys.title });
           }
+          if (parsed.searchParams.has('detail')) window.loginRace.profileReads.push({ authenticated, userId: payload.user.id ?? null });
         }
         if (payload) {
           const rid = nextId++;
@@ -71,7 +74,9 @@ export async function installLoginRaceMock(page, { holdConfirmation = false } = 
 }
 
 export async function openLoginWithAnonymousRequest(page, appUrl) {
-  await page.goto(`${appUrl}/shelf`);
+  // A cold document only restores the saved list. Use the real Welcome entry
+  // before starting the delayed provider request; no runtime account is seeded.
+  await openLayoutRoute(page, appUrl, '/shelf');
   await page.waitForFunction(() => window.loginRace.infoStarted.includes('anonymous'));
   // Mobile reaches login through the personal panel; desktop has a sidebar
   // link. Use visible controls so the hidden mobile tab cannot stall desktop.

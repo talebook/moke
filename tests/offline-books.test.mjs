@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import ts from 'typescript';
+import { assertReaderSessionUnchanged } from '../src/lib/reader-source.ts';
 import './helpers/app-imports.mjs';
 import { SAMPLE_BOOK } from '../src/lib/sample-book-info.ts';
 import { deleteSampleBook, getSampleBook, importSampleBook } from '../src/lib/sample-book.ts';
@@ -185,7 +187,24 @@ function createFakeIndexedDb() {
   };
 }
 
+function installSampleCoordination() {
+  const values = new Map();
+  globalThis.localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  let queue = Promise.resolve();
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {
+    locks: { request: (_name, operation) => {
+      const result = queue.then(operation);
+      queue = result.catch(() => undefined);
+      return result;
+    } },
+  } });
+}
+
 function installWebOfflineStore() {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   globalThis.window = { indexedDB };
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'web';
@@ -193,6 +212,7 @@ function installWebOfflineStore() {
 }
 
 function installTauriOfflineStore(appDataDir = '/data/user/0/org.houheya.moke', trackNativeBooks = false) {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   const calls = [];
   const recordedBooks = [];
@@ -323,7 +343,7 @@ test('示例文件读取失败或损坏不留下记录，失败后可以重试',
   assert.equal(store.records.size, 1);
 });
 
-test('导入未完成时删除，会等保存结束后删除而不会重新出现', async (t) => {
+test('删除不等待迟到导入，旧导入失败而不会重新出现', async (t) => {
   const store = installWebOfflineStore();
   let finishFetch;
   const started = Promise.withResolvers();
@@ -334,8 +354,10 @@ test('导入未完成时删除，会等保存结束后删除而不会重新出�
   const importing = importSampleBook();
   await started.promise;
   const deleting = deleteSampleBook();
+  await deleting;
+  const rejected = assert.rejects(importing, /已在另一窗口删除/);
   finishFetch(new Response(sampleEpub));
-  await Promise.all([importing, deleting]);
+  await rejected;
   assert.equal(await getSampleBook(), null);
   assert.equal(store.records.size, 0);
 });
@@ -354,6 +376,36 @@ test('跨服务器列出示例不会扩大单本读取、书架修改和删除�
   assert.equal((await getSampleBook()).inShelf, true);
   await setOfflineBookShelfState(SAMPLE_BOOK.serverUrl, SAMPLE_BOOK.bookId, false);
   assert.equal((await getSampleBook()).inShelf, false);
+});
+
+test('删除后新显式导入可立即开始，旧 fetch 完成不会覆盖新结果', async (t) => {
+  installWebOfflineStore();
+  const started = Promise.withResolvers();
+  const delayed = Promise.withResolvers();
+  const fetch = t.mock.method(globalThis, 'fetch', () => {
+    started.resolve();
+    return delayed.promise;
+  });
+  const oldImport = importSampleBook();
+  const rejected = assert.rejects(oldImport, /已在另一窗口删除/);
+  await started.promise;
+  // Also exercise deletion via the offline library's public API.
+  await deleteOfflineBook(SAMPLE_BOOK.serverUrl, SAMPLE_BOOK.bookId, SAMPLE_BOOK.format);
+  fetch.mock.mockImplementation(async () => new Response(sampleEpub));
+  const newBook = await importSampleBook();
+  delayed.resolve(new Response(sampleEpub));
+  await rejected;
+  assert.equal((await getSampleBook()).updatedAt, newBook.updatedAt);
+});
+
+test('不支持跨窗口锁时明确失败，不留下未经协调的文件或记录', async (t) => {
+  const store = installWebOfflineStore();
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
+  const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+  await assert.rejects(importSampleBook(), /不支持安全的多窗口/);
+  await assert.rejects(deleteSampleBook(), /不支持安全的多窗口/);
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.equal(store.records.size, 0);
 });
 
 test('Tauri 示例书登记原生索引，删除同时移除原生文件和两个索引', async (t) => {
@@ -582,6 +634,76 @@ test('重复保存会更新原记录，多个服务器之间互不覆盖', async
   assert.equal((await getOfflineBook('https://b.example', '7'))?.title, '另一服务器');
 });
 
+for (const platform of ['web', 'tauri']) {
+  for (const operation of ['read', 'delete']) {
+    test(`${platform} ${operation} with an empty source cannot select another server's matching download`, async (t) => {
+      const native = platform === 'tauri' ? installTauriOfflineStore(undefined, true) : null;
+      const indexedDB = native?.indexedDB ?? installWebOfflineStore();
+      t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected fetch'); });
+      for (const serverUrl of ['https://a.example', 'https://b.example']) {
+        await saveOfflineBook({
+          serverUrl, bookId: '7', title: serverUrl, format: 'pdf',
+          fileName: '7.pdf', mimeType: 'application/pdf', blob: new Blob([serverUrl]),
+        });
+      }
+
+      if (operation === 'read') {
+        assert.equal(await getOfflineBook('', '7', 'pdf'), null);
+        assert.equal(await getOfflineBook('', '7'), null);
+      } else {
+        await deleteOfflineBook('', '7', 'pdf');
+        await deleteOfflineBook('', '7');
+        assert.equal(native?.calls.filter(({ command }) => command === 'moke_delete_downloaded_book_file').length ?? 0, 0);
+      }
+      assert.equal(indexedDB.records.size, 2);
+      for (const serverUrl of ['https://a.example', 'https://b.example']) {
+        const record = await getOfflineBook(serverUrl, '7', 'pdf');
+        assert.equal(record?.serverUrl, serverUrl);
+        assert.equal(record?.title, serverUrl);
+      }
+    });
+  }
+}
+
+test('format fallback preserves the requested server when a sample with the same book ID is visible', async () => {
+  const indexedDB = installWebOfflineStore();
+  await saveOfflineBook({ ...SAMPLE_BOOK, blob: new Blob(['sample']) });
+  await saveOfflineBook({ ...SAMPLE_BOOK, serverUrl: 'https://a.example', blob: new Blob(['server book']) });
+
+  assert.equal((await listOfflineBooks('https://b.example')).length, 1, 'the sample remains globally visible');
+  assert.equal(await getOfflineBook('https://b.example', SAMPLE_BOOK.bookId, 'epub'), null);
+  assert.equal(await getOfflineBook('', SAMPLE_BOOK.bookId, 'epub'), null);
+  await deleteOfflineBook('https://b.example', SAMPLE_BOOK.bookId, 'epub');
+  await deleteOfflineBook('', SAMPLE_BOOK.bookId, 'epub');
+
+  assert.equal(indexedDB.records.size, 2);
+  assert.equal(await (await getSampleBook()).blob.text(), 'sample');
+  assert.equal(await (await getOfflineBook('https://a.example', SAMPLE_BOOK.bookId, 'epub')).blob.text(), 'server book');
+});
+
+for (const platform of ['web', 'tauri']) {
+  test(`${platform} format fallback still resolves normalized server origins and explicit local downloads`, async () => {
+    const native = platform === 'tauri' ? installTauriOfflineStore(undefined, true) : null;
+    if (!native) installWebOfflineStore();
+    const common = { bookId: '7', format: 'pdf', fileName: '7.pdf', mimeType: 'application/pdf' };
+    await saveOfflineBook({ ...common, serverUrl: 'https://a.example:443', title: 'Server', blob: new Blob(['server']) });
+    await saveOfflineBook({ ...common, serverUrl: '', title: 'Local', blob: new Blob(['local']) });
+
+    assert.equal((await getOfflineBook('https://a.example', '7', '.PDF')).title, 'Server');
+    const local = await getOfflineBook('', '7', 'pdf');
+    assert.equal(local.title, 'Local');
+    if (native) assert.match(local.filePath, /^\/data\/user\/0\/org\.houheya\.moke\/books\//);
+    else assert.equal(await local.blob.text(), 'local');
+    await deleteOfflineBook('', '7', 'pdf');
+    assert.equal(await getOfflineBook('', '7', 'pdf'), null);
+    assert.equal((await getOfflineBook('https://a.example', '7', 'pdf')).title, 'Server');
+    if (native) {
+      assert.deepEqual(native.calls.filter(({ command }) => command === 'moke_delete_downloaded_book_file')
+        .map(({ args }) => args.id), ['::7::pdf']);
+    }
+  });
+}
+
 test('删除只移除目标离线书籍，删除不存在的记录也不会失败', async () => {
   installWebOfflineStore();
 
@@ -652,6 +774,7 @@ test('删除后无目标格式时清标记，其他服务器同 ID 与样书不�
 });
 
 test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载状态', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
   globalThis.window = {
@@ -789,6 +912,7 @@ test('Tauri 自定义下载目录继续使用已授权的绝对路径', async ()
 });
 
 test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别格式化 key', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   const open = indexedDB.open.bind(indexedDB);
   const requestedVersions = [];
@@ -820,6 +944,7 @@ test('兼容已升级到 v2 的 IndexedDB，不用较低版本打开且可识别
 });
 
 test('桌面版以磁盘索引校验 IndexedDB，文件已不存在时不误显示阅读按钮', async () => {
+  installSampleCoordination();
   const indexedDB = createFakeIndexedDb();
   indexedDB.records.set('https://a.example::42', {
     id: 'https://a.example::42',
@@ -855,6 +980,23 @@ test('offline downloads retain classification and online refresh stays within se
   await cacheOfflineMediaType('https://a.test', '42', undefined);
   assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
 });
+
+for (const fileSize of [4096, 0, undefined]) {
+  test(`单本原生恢复保留磁盘大小优先级（${fileSize ?? '无磁盘大小'}）`, async () => {
+    const { indexedDB, recordedBooks } = installTauriOfflineStore('/app/data', true);
+    const record = {
+      id: 'https://source.test::42::pdf', serverUrl: 'https://source.test', bookId: '42', format: 'pdf',
+      title: '磁盘文件', fileName: 'book.pdf', mimeType: 'application/pdf', relativePath: 'books/book.pdf',
+      updatedAt: 12, size: 25,
+    };
+    indexedDB.records.set(record.id, record);
+    recordedBooks.push({ ...record, fileSize });
+    const expectedSize = fileSize ?? record.size;
+    assert.equal((await getOfflineBook(record.serverUrl, record.bookId, 'pdf')).size, expectedSize);
+    assert.equal(indexedDB.records.get(record.id).size, expectedSize);
+    assert.equal((await listOfflineBooks(record.serverUrl))[0].size, expectedSize);
+  });
+}
 
 test('native batch recovery waits for one commit and skips unchanged writes', async (t) => {
   const indexedDB = createFakeIndexedDb();
@@ -892,6 +1034,7 @@ for (const path of ['get', 'list']) {
   for (const existing of [false, true]) {
     for (const classificationFirst of [false, true]) {
       test(`native ${path} merges classification (${existing ? 'old row' : 'no row'}, ${classificationFirst ? 'classification first' : 'recovery first'})`, async () => {
+        installSampleCoordination();
         const indexedDB = createFakeIndexedDb();
         const native = {
           id: 'https://a.example::42::pdf', serverUrl: 'https://a.example:443', bookId: '42',
@@ -938,4 +1081,104 @@ test('classification persists without a downloaded row and newer refresh wins ov
     fileName: 'book.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']) });
   assert.equal((await getOfflineBook('https://a.example', '42', 'pdf')).media_type, 'ebook');
   assert.equal(indexedDB.records.get('https://a.example::42::pdf').media_type, 'ebook');
+});
+
+// Run the real launch orchestration with controlled platform and IPC boundaries.
+// Its dependencies have their own integration suites; these cases cover the
+// combined cancellation/source/callback contract after merging both branches.
+const offlineReaderModule = ts.transpileModule(
+  readFileSync(new URL('../src/lib/open-offline-book.ts', import.meta.url), 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+function offlineReaderFixture(t, platform = 'windows') {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  t.after(() => {
+    if (previousPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    else process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
+  });
+  const calls = [];
+  const context = { serverUrl: 'https://active.test', sessionId: 12, candidate: null };
+  const settings = { readerPreference: 'readest', eink: true };
+  const progress = { schema: 'moke.readest.progress.v1', location: 'source-book-location' };
+  const host = { restore: async (...args) => { calls.push(['progress', ...args]); return progress; } };
+  const modules = {
+    '@/lib/book-reader-policy': { resolveBookReader: () => 'readest' },
+    '@/lib/reader-source': {
+      assertReaderSessionUnchanged,
+      openReaderFromSource: async (...args) => { calls.push(['desktop', ...args]); },
+    },
+    '@/lib/store/server': { useServerStore: { getState: () => context } },
+    '@/lib/sample-book-info': {
+      isSampleBook: record => record.serverUrl === SAMPLE_BOOK.serverUrl && record.bookId === SAMPLE_BOOK.bookId,
+    },
+    '@/lib/store/developer': { getDebugPanelLaunchState: () => false },
+    '@/lib/store/settings': { useSettingsStore: { getState: () => settings } },
+    '@/lib/reading-progress': { fetchReadingProgress: (...args) => host.restore(...args) },
+    '@/lib/moke-reader': {
+      getMokeRuntimePlatform: async () => platform,
+      isSingleWebviewRuntime: value => value === 'ios',
+      buildEmbeddedReaderUrl: args => { calls.push(['url', args]); return '/readest/reader'; },
+      openEmbeddedReaderBook: async (...args) => { calls.push(['embedded', ...args]); },
+    },
+    '@tauri-apps/api/core': { invoke: async (...args) => { calls.push(['system', ...args]); } },
+  };
+  const exports = {};
+  new Function('require', 'exports', offlineReaderModule)(specifier => {
+    assert.ok(Object.hasOwn(modules, specifier), `unexpected launch dependency: ${specifier}`);
+    return modules[specifier];
+  }, exports);
+  const record = {
+    id: 'https://source.test::42::epub', serverUrl: 'https://source.test', bookId: '42',
+    filePath: '/books/source.epub', format: 'epub',
+  };
+  return { ...exports, calls, context, settings, progress, host, record };
+}
+
+test('离线开书保留来源进度、会话边界和 TB299 回调', async t => {
+  const fixture = offlineReaderFixture(t);
+  const abort = new AbortController(), updates = [];
+  assert.equal(await fixture.openOfflineBook(fixture.record, () => assert.fail('desktop must stay in document'), abort.signal, message => updates.push(message)), false);
+  assert.deepEqual(fixture.calls[0], ['progress', '42', abort.signal, fixture.record.serverUrl]);
+  const launch = fixture.calls.find(([kind]) => kind === 'desktop');
+  assert.deepEqual(launch[1], { serverUrl: fixture.record.serverUrl, bookId: '42', sessionId: 12 });
+  assert.equal(launch[3], abort.signal);
+  assert.deepEqual(launch[2], {
+    filePath: fixture.record.filePath, eink: true, debugPanel: false, mokeBookId: '42', restoreProgress: fixture.progress,
+  });
+  assert.deepEqual(updates, ['正在恢复阅读进度…', '正在打开阅读器…']);
+});
+
+test('单 WebView 样书开书同时传入会话和取消信号，不携带样书来源 URL', async t => {
+  const fixture = offlineReaderFixture(t, 'ios');
+  const abort = new AbortController(), navigate = () => {};
+  const record = { ...fixture.record, ...SAMPLE_BOOK };
+  assert.equal(await fixture.openOfflineBook(record, navigate, abort.signal), true);
+  assert.equal(fixture.calls.find(([kind]) => kind === 'url')[1].serverUrl, '');
+  assert.deepEqual(fixture.calls.find(([kind]) => kind === 'embedded'),
+    ['embedded', '/readest/reader', navigate, 'ios', { sessionId: 12 }, abort.signal]);
+  assert.equal(fixture.calls.some(([kind]) => kind === 'desktop'), false);
+});
+
+test('离线进度恢复期间会话变化时拒绝开书，保留来源边界', async t => {
+  const fixture = offlineReaderFixture(t);
+  fixture.host.restore = async () => { fixture.context.sessionId += 1; return fixture.progress; };
+  await assert.rejects(fixture.openOfflineBook(fixture.record, () => assert.fail('stale session must not navigate')), { code: 'reader.context_changed' });
+  assert.equal(fixture.calls.some(([kind]) => kind === 'desktop' || kind === 'embedded'), false);
+});
+
+test('离线恢复进度后取消时结束操作，不打开阅读器', async t => {
+  const fixture = offlineReaderFixture(t), abort = new AbortController(), updates = [];
+  fixture.host.restore = async () => { abort.abort(); return fixture.progress; };
+  assert.equal(await fixture.openOfflineBook(fixture.record, () => assert.fail('cancelled launch must not navigate'), abort.signal, message => updates.push(message)), false);
+  assert.deepEqual(updates, ['正在恢复阅读进度…']);
+  assert.deepEqual(fixture.calls, []);
+});
+
+test('已取消的离线开书不开始恢复、IPC 或导航', async t => {
+  const fixture = offlineReaderFixture(t), abort = new AbortController();
+  abort.abort();
+  assert.equal(await fixture.openOfflineBook(fixture.record, () => assert.fail('cancelled launch must not navigate'), abort.signal), false);
+  assert.deepEqual(fixture.calls, []);
 });

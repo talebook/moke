@@ -1,16 +1,17 @@
 import { useServerStore } from './store/server.ts';
 import type { CurrentUserResult } from './server-session.ts';
+import { throwIfAborted } from './abort-signal.ts';
 
 interface ReconnectApi {
   checkAccess: (serverUrl: string, signal: AbortSignal) => Promise<{ err: string; needsAccessCode: boolean }>;
-  fetchUser: (serverUrl: string) => Promise<CurrentUserResult>;
+  fetchUser: (serverUrl: string, signal?: AbortSignal) => Promise<CurrentUserResult>;
 }
 
 export type OfflineReconnectResult =
-  | { target: '/welcome' | '/shelf' | '/login?reconnect=1' | `/access?server=${string}` }
+  | { target: '/welcome' | '/shelf' | '/login?reconnect=1' | `/access?serverId=${string}&requestId=${number}` }
   | { cancelled: true };
 
-/** Restore the retained server/session; never call setServer (which clears auth). */
+/** Reconfirm the retained runtime session; a saved address or mirror never activates it. */
 export async function reconnectOfflineServer(
   api: ReconnectApi,
   signal: AbortSignal,
@@ -19,13 +20,13 @@ export async function reconnectOfflineServer(
   const before = useServerStore.getState();
   const isCurrent = () => {
     const current = useServerStore.getState();
-    return !signal.aborted && current.offlineMode
-      && current.serverUrl === before.serverUrl
-      && current.sessionRevision === before.sessionRevision;
+    return !signal.aborted && current.offlineMode && !current.candidate
+      && current.serverUrl === before.serverUrl && current.connectionId === before.connectionId
+      && current.sessionId === before.sessionId;
   };
   if (!isCurrent()) return { cancelled: true };
   if (!before.serverUrl) {
-    before.leaveOfflineMode();
+    if (!await before.leaveOfflineMode(before, undefined, signal)) return { cancelled: true };
     return { target: '/welcome' };
   }
 
@@ -38,8 +39,9 @@ export async function reconnectOfflineServer(
   };
   signal.addEventListener('abort', cancel, { once: true });
   const timer = setTimeout(() => {
-    rejectStopped(new Error('连接超时，请检查服务器和网络后重试。'));
-    controller.abort();
+    const error = new Error('连接超时，请检查服务器和网络后重试。');
+    rejectStopped(error);
+    controller.abort(error);
   }, timeoutMs);
 
   try {
@@ -49,20 +51,25 @@ export async function reconnectOfflineServer(
         if (controller.signal.aborted || !isCurrent()) return null;
         if (access.err !== 'ok') throw new Error('无法确认服务器访问权限，请检查连接后重试。');
         if (access.needsAccessCode) return { needsAccessCode: true, user: null };
-        const user = await api.fetchUser(before.serverUrl);
+        const user = await api.fetchUser(before.serverUrl, controller.signal);
+        if (controller.signal.aborted || !isCurrent()) return null;
         return { needsAccessCode: false, user };
       })(),
       stopped,
     ]);
     if (!result || !isCurrent()) return { cancelled: true };
-
-    // No mutation from the in-flight work: late replies after timeout or a
-    // server/session change cannot bring the app online or replace its user.
-    before.leaveOfflineMode();
     if (result.needsAccessCode) {
-      return { target: `/access?server=${encodeURIComponent(before.serverUrl)}` };
+      // The access page owns a real saved identity and request, retaining the
+      // offline account until that candidate has actually been confirmed.
+      const candidate = useServerStore.getState().beginActiveAccessConfirmation();
+      return candidate
+        ? { target: `/access?serverId=${encodeURIComponent(candidate.id)}&requestId=${candidate.requestId}` }
+        : { target: '/welcome' };
     }
-    if (result.user) useServerStore.getState().setUser(result.user.user);
+    if (!await before.leaveOfflineMode(before, result.user?.user, controller.signal)) {
+      throwIfAborted(controller.signal);
+      return { cancelled: true };
+    }
     return { target: before.user && !result.user?.isLogin ? '/login?reconnect=1' : '/shelf' };
   } catch (error) {
     if (!isCurrent()) return { cancelled: true };

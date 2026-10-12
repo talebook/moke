@@ -46,7 +46,7 @@ node scripts/build-komga-reader.mjs --check
 - 使用现有 `api.request()`，Tauri 使用已有原生 cookie jar；不新增 Rust 命令、ACL、任意代理或文件权限。
 - 仅构造当前书籍 `/api/book/<id>/comic/pages`、`pages/<index>?revision=...` 与 `progress` 路径。丢弃 manifest 中的签名 URL/token，禁止重定向并核对最终 URL。
 - 仅接受契约 v1、连续页序、唯一页 ID、合法 revision 和栅格图片 MIME。拒绝 SVG/HTML、无效尺寸、单页大于 32 MiB / 4000 万像素、manifest JSON 大于 8 MiB。每次请求（含正文）限时 15 秒；显式重试，不自动重试鉴权失败。
-- 固定版本 JS 只收到页面 ID、标题、尺寸和本地占位/Blob URL。宿主使用无脚本、无外部资源的尺寸 SVG 占位图，与 manifest 页宽高一致，加载和缓存回收前后保留连续滚动及原始尺寸模式的页框；服务端页面仍只接受栅格图片。宿主按可见页面及前后页预加载，最多 4 个并发请求；缓存保留当前可见页并清理超过 12 页 / 64 MiB 的非可见内容。退出中止请求、断开观察器、销毁阅读器并释放 Blob URL。
+- 固定版本 JS 只收到页面 ID、标题、尺寸和本地占位/Blob URL。宿主使用无脚本、无外部资源的尺寸 SVG 占位图，与 manifest 页宽高一致；注册图片时根据已验证的 manifest 设置 `aspect-ratio`，在浏览器懒加载尚未解码占位图时就保留高度，加载和缓存回收前后保留连续滚动及原始尺寸模式的页框。服务端页面仍只接受栅格图片。宿主按可见页面及前后页预加载，最多 4 个并发请求；缓存保留当前可见页并清理超过 12 页 / 64 MiB 的非可见内容。退出中止请求、断开观察器、销毁阅读器并释放 Blob URL。
 - 首张实际图片加载前显示加载状态；损坏图片、权限、接口缺失及文件更新有错误提示和重试/返回按钮。
 - 进度采用 Talebook `kind=comic, version=1`，按 pageId 恢复，旧页序夹取至有效范围；350ms 合并翻页事件，单写入队列保证顺序。重载保留当前页。阅读器退出、Escape、原生 BACK 都先保存；失败可重试或明确“不保存退出”。强制杀进程/关闭 WebView 的最后未确认写入不保证送达。
 - 使用安全区布局、键盘焦点约束及墨水屏高对比样式；不改变 Readest 窗口及在线 Range 实现。
@@ -56,10 +56,12 @@ node scripts/build-komga-reader.mjs --check
 1. `pnpm install --frozen-lockfile`，初始化仓库既有子模块以运行契约测试。
 2. `pnpm test`、`pnpm lint`、`pnpm typecheck`、`pnpm build`。
 3. 前台启动 `pnpm dev --port 3000`（端口占用时改用空闲端口并设置测试环境变量 `MOKE_E2E_BASE_URL`），另一终端运行 `pnpm exec playwright test tests/comic-reader.spec.mjs tests/detail-actions.spec.mjs --workers=1 --reporter=line`。
-4. 测试将 Tauri HTTP/IPC 替换为确定性本地 fixture，加载真实打包的 komga-reader JS/CSS 和 PNG 页面；390px/1280px 截图在 Playwright 输出目录。覆盖翻页/保存/恢复/退出、系统设置切换、书架及在读入口、漫画 EPUB/PDF、权限/页面失败、离线无请求及原按钮布局。
+4. 测试将 Tauri HTTP/IPC 替换为确定性本地 fixture，加载真实打包的 komga-reader JS/CSS 和 PNG 页面；390px/1280px 截图在 Playwright 输出目录。fixture 只写 v1 `savedServers` 列表；在线用例从服务器列表点击条目实际连接并运行能力探测，再沿应用链接打开书籍。离线用例通过欢迎页或设置页的“进入离线模式”按钮切换，在同一文档内导航；不往 localStorage 写 `offlineMode`、用户或能力快照。覆盖翻页/保存/恢复/退出、系统设置切换、书架及在读入口、漫画 EPUB/PDF、权限/页面失败、离线无请求及原按钮布局；另外覆盖新文档/重载只恢复列表，不伪装在线，也不自动恢复离线。
 5. 真机验收：连接支持漫画接口的 Talebook 并登录；从书架打开漫画，翻页后退出并重开；切换默认阅读器后分别打开同一漫画和普通电子书；断网、撤销权限和重新加载时核对提示。漫画在线打开不应创建整本离线下载。
 
 本轮验证为真实浏览器/真实阅读器产物 + 模拟 Talebook/Tauri 传输；未执行登录后的真实 Talebook + Tauri 二进制端到端，也未覆盖 Windows/macOS/Android/iOS/OHOS 实机和真实 CBR/RAR 解包。Readest 及 Tauri 原生源码没有修改，未重建完整原生安装包。不要把模拟 IPC 的成功表述为真机验收。
+
+服务器列表 v1 后，纯离线会话只保存在当前文档的运行时状态。重新加载或冷启动会回到服务器列表；再次点击“进入离线模式”后，本地书籍仍可用。旧的 v0 `offlineMode=true` 夹具及“写存储再 `page.goto`”步骤无法代表现在的断开语义。跨完整文档的单 WebView 返回另由一次性凭据覆盖，见 `tests/offline-document.spec.mjs`；它同样只模拟原生 IPC，不等同实机验证。
 
 安全扫描结论见本事项附件的 DeepSec 复核报告；L1/L2 不支持 CSS，样式与固定供应链来源人工核对。已知存量告警不会因为本次新代码没有命中而视为消除。
 

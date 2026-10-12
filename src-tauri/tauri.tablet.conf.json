@@ -2,6 +2,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "墨客 - Tablet Preview",
         "width": 768,
         "height": 1024,

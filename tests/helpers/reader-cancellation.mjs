@@ -75,9 +75,15 @@ export async function installReaderCancellationMock(page, {
     window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
       const from = location.pathname + location.search;
       const key = location.pathname === '/' ? 'startup' : new URLSearchParams(location.search).get('id');
+      // Cold/session redirects are real host navigation, not Reader dispatch.
+      // Do not claim success while leaving that protected document stranded.
+      if (command === 'moke_navigate' && !args.path.startsWith('/readest/')) return invoke(command, args);
       if (command === 'moke_navigate' || command === 'open_reader' || command === 'moke_open_downloaded_book') {
         race.calls.push({ command, args, from });
         if (delay === 'navigation' && command === 'moke_navigate') return hold(key);
+        // Desktop must expose the same synthetic creation/close receipt as the
+        // base fixture so a later reopen still obeys the real window guard.
+        if (command === 'open_reader') return invoke(command, args);
         // Record the navigation but keep this document available for assertions.
         return null;
       }
@@ -90,9 +96,10 @@ export async function installReaderCancellationMock(page, {
         const stage = document.querySelector('[data-testid="app-startup-screen"]')?.getAttribute('data-progress-message');
         const preparing = entry === 'startup'
           ? ['正在读取阅读记录…', '正在打开上次阅读的书籍…'].includes(stage)
-          : !location.search.includes('continue=1') && [
-            '正在恢复阅读进度…', '正在读取书籍并恢复阅读进度…',
-          ].includes(stage);
+          // The production opener consumes continue before issuing its probe.
+          // Its stage update may not paint by this animation frame; fence the
+          // actual consumed intent, rather than depend on React paint timing.
+          : !location.search.includes('continue=1');
         if (!preparing) return invoke(command, args);
         race.openerPending = key;
         return hold(key);

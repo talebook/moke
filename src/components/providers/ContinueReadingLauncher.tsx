@@ -7,8 +7,9 @@ import {
   CONTINUE_READING_CHANGED_EVENT,
   CONTINUE_READING_NATIVE_EVENT,
   continueReadingHref,
+  fetchContinueReadingFromHistory,
   getContinueReading,
-  resolveContinueReading,
+  rememberContinueReading,
 } from '@/lib/continue-reading';
 import { useServerStore } from '@/lib/store/server';
 import { useToast } from '@/lib/toast';
@@ -46,20 +47,58 @@ export function ContinueReadingLauncher({ children }: { children: React.ReactNod
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    let activeController: AbortController | null = null;
+    let activeTimeout: number | undefined;
+    let matchesActiveContext: (() => boolean) | null = null;
+    const cancelActive = () => {
+      const controller = activeController;
+      activeController = null;
+      matchesActiveContext = null;
+      openingRef.current = false;
+      if (activeTimeout !== undefined) window.clearTimeout(activeTimeout);
+      activeTimeout = undefined;
+      controller?.abort();
+    };
+    const unsubscribe = useServerStore.subscribe(() => {
+      if (matchesActiveContext && !matchesActiveContext()) cancelActive();
+    });
     const openLatest = async () => {
-      if (openingRef.current) return;
+      if (disposed || openingRef.current) return;
       openingRef.current = true;
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 3_000);
+      const captured = useServerStore.getState();
+      const { serverUrl, offlineMode, connectionId, sessionId, candidate } = captured;
+      const matchesContext = () => {
+        const current = useServerStore.getState();
+        return current.connectionId === connectionId && current.sessionId === sessionId
+          && current.serverUrl === serverUrl && current.offlineMode === offlineMode
+          && current.candidate === candidate && !candidate;
+      };
+      activeController = controller;
+      matchesActiveContext = matchesContext;
+      const isCurrent = () => !disposed && activeController === controller
+        && !controller.signal.aborted && matchesContext();
+      const timeout = window.setTimeout(() => {
+        if (activeController === controller) cancelActive();
+      }, 3_000);
+      activeTimeout = timeout;
       try {
-        const { serverUrl, offlineMode } = useServerStore.getState();
+        if (!isCurrent()) return;
         if (!serverUrl && !offlineMode) {
           useToast.getState().show('请先连接 Talebook 服务器');
           router.push('/welcome');
           return;
         }
-        const entry = getContinueReading(serverUrl, offlineMode ? 'offline' : 'online')
-          ?? (!offlineMode ? await resolveContinueReading(request, serverUrl, controller.signal) : null);
+        let entry = getContinueReading(serverUrl, offlineMode ? 'offline' : 'online');
+        if (!entry && !offlineMode) {
+          entry = await fetchContinueReadingFromHistory(request, serverUrl, controller.signal);
+          if (!isCurrent()) return;
+          // The convenience resolver persists before returning. Confirm this
+          // source/session first so an old account cannot replace its record.
+          if (entry) rememberContinueReading(entry);
+        }
+        if (!isCurrent()) return;
         if (!entry) {
           useToast.getState().show('暂无可继续阅读的书籍');
           router.push('/shelf');
@@ -67,11 +106,17 @@ export function ContinueReadingLauncher({ children }: { children: React.ReactNod
         }
         router.push(continueReadingHref(entry));
       } catch {
+        if (!isCurrent()) return;
         useToast.getState().show('暂时无法读取最近阅读记录');
         router.push('/shelf');
       } finally {
         window.clearTimeout(timeout);
-        openingRef.current = false;
+        if (activeController === controller) {
+          activeController = null;
+          matchesActiveContext = null;
+          activeTimeout = undefined;
+          openingRef.current = false;
+        }
       }
     };
 
@@ -99,6 +144,9 @@ export function ContinueReadingLauncher({ children }: { children: React.ReactNod
     }
 
     return () => {
+      disposed = true;
+      unsubscribe();
+      cancelActive();
       window.removeEventListener(CONTINUE_READING_NATIVE_EVENT, handleNativeRequest);
     };
   }, [router]);

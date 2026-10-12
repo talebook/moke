@@ -17,6 +17,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
+import { assertReaderSessionUnchanged, openReaderFromSource, ReaderOpenUnconfirmedError } from '@/lib/reader-source';
 import { buildEmbeddedReaderUrl, getMokeRuntimePlatform, isSingleWebviewRuntime, openEmbeddedReaderBook } from '@/lib/moke-reader';
 import { resolveServerAssetUrl } from '@/lib/utils';
 import { AuthImage } from '@/components/ui/AuthImage';
@@ -64,6 +65,7 @@ function DetailContent() {
   const offlineMode = useServerStore((state) => state.offlineMode);
   const capabilities = useServerStore((state) => state.capabilities);
   const user = useServerStore((state) => state.user);
+  const sessionId = useServerStore((state) => state.sessionId);
   const [comicOffline, setComicOffline] = useState(false);
   const [comicOpen, setComicOpen] = useState(false);
   const closeComic = useCallback(() => setComicOpen(false), []);
@@ -170,7 +172,7 @@ function DetailContent() {
       window.removeEventListener('pagehide', cancelReaderOpen);
       if (loadBookControllerRef.current === controller) loadBookControllerRef.current = null;
     };
-  }, [continueSourceServer, id, offlineMode, serverUrl, user?.id, returnRevision]);
+  }, [continueSourceServer, id, offlineMode, serverUrl, sessionId, user?.id, returnRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,7 +226,8 @@ function DetailContent() {
         setOpeningReader(false);
         setOpeningOnline(false);
         setContinuePending(false);
-        void useServerStore.persist.rehydrate();
+        // Runtime identity stays in this live browsing context; refresh only
+        // the display snapshot, never restore a connection from list metadata.
         // Even the same identity has a new one-shot Reader return snapshot.
         returnSnapshotRef.current = null;
         setRefreshingDetail(true);
@@ -572,7 +575,7 @@ function DetailContent() {
         // Remote progress is optional; a stalled progress endpoint must not
         // hold a successfully probed book on the connecting screen forever.
         retryOnlineRead(
-          (signal) => fetchReadingProgress(book.id, signal),
+          (signal) => fetchReadingProgress(book.id, signal, serverUrl),
           () => false,
           controller.signal,
           8_000,
@@ -580,6 +583,7 @@ function DetailContent() {
         getMokeRuntimePlatform(),
       ]);
       if (controller.signal.aborted) return;
+      assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
       // The preflight may have validated a same-host HTTP → HTTPS upgrade.
       // Keep progress identity on the saved server URL, but authorize the resolved source.
       const sourceServerUrl = new URL(source.url).origin;
@@ -592,28 +596,26 @@ function DetailContent() {
           debugPanel: getDebugPanelLaunchState(),
           mokeBookId: String(book.id),
           restoreProgress,
-          serverUrl: useServerStore.getState().serverUrl,
+          serverUrl,
           sourceServerUrl,
           runtimePlatform: currentPlatform,
         });
         rememberCurrentBook();
-        await openEmbeddedReaderBook(href, router.push, currentPlatform, controller.signal);
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { sessionId }, controller.signal);
         return !controller.signal.aborted;
       }
 
       await openAndRecordBookRead({
         signal: controller.signal,
         open: async () => {
-          const { invoke } = await import('@tauri-apps/api/core');
-          if (controller.signal.aborted) return;
-          await invoke('open_reader', {
+          await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: source.url,
             eink: useSettingsStore.getState().eink,
             debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
             mokeSourceServerUrl: sourceServerUrl,
-          });
+          }, controller.signal);
         },
         onOpened: () => {
           rememberCurrentBook();
@@ -678,6 +680,7 @@ function DetailContent() {
       if (offlineMode) {
         const record = await loadRecord();
         if (controller.signal.aborted) return;
+        assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
         if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
           setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
@@ -693,6 +696,7 @@ function DetailContent() {
       if (useSystemReader) {
         const record = await loadRecord();
         if (controller.signal.aborted) return;
+        assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
         if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
           setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
           return;
@@ -719,7 +723,7 @@ function DetailContent() {
         loadRecord,
         loadProgress: async () => targetAnnotation
           ? annotationReaderProgress(targetAnnotation, book.id)
-          : fetchReadingProgress(book.id, controller.signal),
+          : fetchReadingProgress(book.id, controller.signal, serverUrl),
         loadPlatform: getMokeRuntimePlatform,
         beforeSingleWebviewOpen: async (record) => {
           if (!record?.filePath) return;
@@ -732,6 +736,7 @@ function DetailContent() {
       if (controller.signal.aborted) return;
       const { record, platform: currentPlatform } = prepared;
       setReaderStage('正在打开阅读器…');
+      assertReaderSessionUnchanged({ sessionId }, useServerStore.getState());
       if (!record?.filePath || process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
         setMessage('无法打开书籍：未找到本地文件或当前环境不支持。');
         return;
@@ -758,26 +763,24 @@ function DetailContent() {
           restoreProgress,
           // The explicit navigation id lets the reader skip only startup and
           // annotation relocations; genuine page turns still sync directly.
-          serverUrl: useServerStore.getState().serverUrl,
+          serverUrl,
           runtimePlatform: currentPlatform,
         });
         rememberCurrentBook(record.format);
-        await openEmbeddedReaderBook(href, router.push, currentPlatform, controller.signal);
+        await openEmbeddedReaderBook(href, router.push, currentPlatform, { sessionId }, controller.signal);
         return !controller.signal.aborted;
       }
 
       await openAndRecordBookRead({
         signal: controller.signal,
         open: async () => {
-          const { invoke } = await import('@tauri-apps/api/core');
-          if (controller.signal.aborted) return;
-          await invoke('open_reader', {
+          await openReaderFromSource({ serverUrl, bookId: String(book.id), sessionId }, {
             filePath: record.filePath,
             eink: useSettingsStore.getState().eink,
             debugPanel: getDebugPanelLaunchState(),
             mokeBookId: String(book.id),
             restoreProgress,
-          });
+          }, controller.signal);
         },
         // The independent reader window is already usable. Release the
         // visible loading state now, while openingReaderRef continues to
@@ -796,7 +799,8 @@ function DetailContent() {
       if (annotationNavigationId) clearAnnotationLocateProgressSuppression(annotationNavigationId);
       if (controller.signal.aborted) return;
       console.error('Failed to open book:', e);
-      setMessage(targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
+      setMessage(e instanceof ReaderOpenUnconfirmedError ? e.message
+        : targetAnnotation ? '打开书籍或定位笔记失败，请重试。' : '打开书籍失败。');
     } finally {
       finishOpening();
     }

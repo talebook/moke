@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installLibraryLayoutMock } from './helpers/library-layout.mjs';
+import { installLibraryLayoutMock, openLayoutRoute } from './helpers/library-layout.mjs';
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 
@@ -28,13 +28,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 480 
     const errors = [];
     page.on('pageerror', (error) => errors.push(String(error)));
     await page.setViewportSize(viewport);
-    await page.addInitScript(() => {
-      localStorage.setItem('moke-privacy-consent', '2026-08-14');
-      localStorage.setItem('moke-server-storage', JSON.stringify({
-        state: { serverUrl: '', offlineMode: true }, version: 0,
-      }));
-    });
-    await page.goto(`${APP_URL}/settings`);
+    await installLibraryLayoutMock(page, { offlineMode: true, continueReading: false });
+    await openLayoutRoute(page, APP_URL, '/settings', { offlineMode: true });
     await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
     await removeDynamicViewportUnits(page);
     const content = page.locator('.moke-route-content');
@@ -68,7 +63,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 480 
         name: `标签${index + 1}`,
       })) }],
     });
-    await page.goto(`${APP_URL}/library`);
+    await openLayoutRoute(page, APP_URL, '/library');
     const trigger = page.getByText('标签', { exact: true }).locator('..').getByRole('button');
     await trigger.click();
     await page.getByRole('option', { name: '更多标签…' }).click();
@@ -100,7 +95,7 @@ for (const viewport of [
     await installLibraryLayoutMock(page, { continueReading: false,
       navs: [{ tags: Array.from({ length: 80 }, (_, index) => ({ name: `标签${index + 1}` })) }],
     });
-    await page.goto(`${APP_URL}/library`);
+    await openLayoutRoute(page, APP_URL, '/library');
     const trigger = page.getByText('标签', { exact: true }).locator('..').getByRole('button');
     await trigger.click();
     const panel = page.getByRole('listbox');
@@ -140,7 +135,7 @@ test('an open tag selector stays inside the viewport and flips to the roomier si
   await installLibraryLayoutMock(page, { continueReading: false,
     navs: [{ tags: Array.from({ length: 80 }, (_, index) => ({ name: `标签${index + 1}` })) }],
   });
-  await page.goto(`${APP_URL}/library`);
+  await openLayoutRoute(page, APP_URL, '/library');
   const trigger = page.getByText('标签', { exact: true }).locator('..').getByRole('button');
   await trigger.click();
   for (const height of [480, 400, 844]) {

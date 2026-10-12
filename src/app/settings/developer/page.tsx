@@ -11,7 +11,8 @@ import { APP_VERSION } from '@/lib/app-version';
 import { requestAnimatedBack } from '@/lib/native-back';
 import { deleteSampleBook, getSampleBook, importSampleBook } from '@/lib/sample-book';
 import { useServerStore } from '@/lib/store/server';
-import { navigateFullDocument } from '@/lib/moke-reader';
+import { getMokeRuntimePlatform, isSingleWebviewRuntime, navigateFullDocument } from '@/lib/moke-reader';
+import { clearReaderReturn, prepareOfflineLibraryEntry } from '@/lib/reader-return';
 
 export default function DeveloperSettingsPage() {
   const unlocked = useDeveloperStore((s) => s.unlocked);
@@ -185,6 +186,42 @@ function SampleBookPanel() {
     }
   };
 
+  const viewOfflineLibrary = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const initial = useServerStore.getState();
+      let platform = 'web';
+      try { platform = await getMokeRuntimePlatform(); }
+      catch (cause) { console.warn('[SampleBookPanel] using router navigation:', cause); }
+      await useServerStore.getState().enterOfflineMode(() => {
+        const state = useServerStore.getState();
+        if (state.sessionId !== initial.sessionId || state.candidate !== initial.candidate) {
+          throw new Error('连接或登录状态已改变，请重新进入离线书库。');
+        }
+        if (isSingleWebviewRuntime(platform)) prepareOfflineLibraryEntry();
+      });
+      const sessionId = useServerStore.getState().sessionId;
+      await navigateFullDocument('/library', (href) => {
+        clearReaderReturn();
+        router.push(href);
+      }, platform, () => {
+        const state = useServerStore.getState();
+        if (state.sessionId !== sessionId || !state.offlineMode || state.candidate) {
+          throw new Error('连接或登录状态已改变，请重新进入离线书库。');
+        }
+      });
+    } catch (cause) {
+      clearReaderReturn();
+      setError(cause instanceof Error ? cause.message : '无法进入离线书库，请重试。');
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <ActionRow
@@ -200,10 +237,7 @@ function SampleBookPanel() {
         <button
           type="button"
           disabled={busy}
-          onClick={() => {
-            useServerStore.getState().enterOfflineMode();
-            void navigateFullDocument('/library', router.push);
-          }}
+          onClick={() => void viewOfflineLibrary()}
           className="mx-4 my-3 text-sm text-primary hover:underline disabled:opacity-50"
         >
           在离线书库查看

@@ -2,6 +2,7 @@
 
 import { debugLog } from './debug-log.ts';
 import { isSampleBook } from './sample-book-info.ts';
+import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
   hasEpubCentralDirectory,
   makeOfflineBookKey,
@@ -282,6 +283,12 @@ export async function getOfflineBook(
           indexedRecord = await getById(makeOfflineBookKey(serverUrl, bookId, format));
         }
       }
+      if (!indexedRecord) {
+        const records = await listOfflineBooks(serverUrl);
+        indexedRecord = records.find((record) => record.bookId === bookId
+          && sameServer(record.serverUrl, serverUrl)
+          && formatFromRecord(record) === normalizeOfflineFormat(format)) ?? null;
+      }
     } else {
       const records = await listOfflineBooks(serverUrl);
       indexedRecord = records.find((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))
@@ -307,7 +314,8 @@ export async function getOfflineBook(
       && sameServer(record.serverUrl, serverUrl)
       && (!wantedFormat || formatFromRecord(record) === wantedFormat)
     )) ?? (indexedRecord
-      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName)
+      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName
+        && record.bookId === bookId && sameServer(record.serverUrl, indexedRecord.serverUrl))
       : undefined);
     if (!nativeRecord) return null;
 
@@ -322,7 +330,7 @@ export async function getOfflineBook(
       inShelf: nativeRecord.inShelf ?? indexedRecord?.inShelf,
       fileName: nativeRecord.fileName,
       mimeType: nativeRecord.mimeType || indexedRecord?.mimeType || 'application/octet-stream',
-      size: indexedRecord?.size ?? 0,
+      size: nativeRecord.fileSize ?? indexedRecord?.size ?? 0,
       updatedAt: nativeRecord.updatedAt,
       filePath: nativeRecord.filePath,
       relativePath: nativeRecord.relativePath || indexedRecord?.relativePath,
@@ -488,6 +496,22 @@ export function deleteOfflineBook(serverUrl: string, bookId: string, format?: st
 }
 
 async function deleteOfflineBookUnlocked(
+  serverUrl: string,
+  bookId: string,
+  format?: string,
+): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
+  if (isSampleBook({ serverUrl, bookId })) {
+    return withSampleBookOperation(async () => {
+      // Also cover deletion through the library, not just developer settings.
+      // A successful deletion invalidates earlier imports across reloads.
+      invalidateSampleBookImports();
+      return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+    });
+  }
+  return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+}
+
+async function deleteOfflineBookUncoordinated(
   serverUrl: string,
   bookId: string,
   format?: string,

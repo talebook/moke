@@ -136,6 +136,7 @@ export function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-white/10">
+        {!offlineMode && <Link href="/welcome" className="mb-3 flex items-center justify-center min-h-11 rounded-lg bg-white/10 text-sm text-primary-foreground">服务器列表</Link>}
         {offlineMode ? (
           <div className="space-y-2">
             {reconnectStatus && <p role="status" className="text-sm text-primary-foreground">正在恢复服务器连接…</p>}

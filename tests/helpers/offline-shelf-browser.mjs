@@ -4,7 +4,7 @@ import ts from 'typescript';
 // Run the real storage implementation against the browser's IndexedDB. Only
 // native IPC and diagnostics/network are replaced; there is no fake IDB.
 export async function installOfflineShelfModule(page) {
-  const modules = new Map(['offline-books', 'offline-book-core', 'sample-book-info'].map(name => {
+  const modules = new Map(['offline-books', 'offline-book-core', 'sample-book-info', 'sample-book-coordination', 'random-id'].map(name => {
     const source = readFileSync(new URL(`../../src/lib/${name}.ts`, import.meta.url), 'utf8')
       .replaceAll('process.env.NEXT_PUBLIC_APP_PLATFORM', "'tauri'")
       .replaceAll("'@tauri-apps/api/core'", "'./tauri-core.js'")

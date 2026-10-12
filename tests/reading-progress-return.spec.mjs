@@ -2,7 +2,14 @@ import { test, expect as baseExpect } from '@playwright/test';
 
 // Shared-host dev hydration and native module imports can exceed five seconds.
 const expect = baseExpect.configure({ timeout: 15_000 });
-import { installLibraryLayoutMock, LAYOUT_BOOK, LAYOUT_OFFLINE_BOOK, LAYOUT_SERVER_URL } from './helpers/library-layout.mjs';
+import { installLibraryLayoutMock, openLayoutRoute, navigateLayoutRoute, LAYOUT_BOOK, LAYOUT_OFFLINE_BOOK, LAYOUT_SERVER_URL } from './helpers/library-layout.mjs';
+
+// Detail history returns preserve runtime only when the browser restores the
+// actual document; a fresh document must return to the saved server list.
+test.use({ launchOptions: {
+  executablePath: process.env.MOKE_TEST_CHROMIUM_PATH || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+  ignoreDefaultArgs: ['--disable-back-forward-cache'],
+} });
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 const detail = `/detail?id=42&source=${encodeURIComponent(LAYOUT_SERVER_URL)}`;
@@ -15,11 +22,6 @@ async function installReturnMock(page, { offlineMode = true, fail = false, needL
   });
   await page.route('**/readest/reader?**', (route) => route.fulfill({ contentType: 'text/html; charset=utf-8', body: reader }));
   await page.addInitScript(({ offlineMode, fail }) => {
-    if (sessionStorage.getItem('changed-account')) {
-      const persisted = JSON.parse(localStorage.getItem('moke-server-storage'));
-      persisted.state.user.id = 2;
-      localStorage.setItem('moke-server-storage', JSON.stringify(persisted));
-    }
     const invoke = window.__TAURI_INTERNALS__.invoke;
     const pending = [];
     let released = false;
@@ -45,7 +47,7 @@ for (const offlineMode of [true, false]) {
   for (const fail of [false, true]) {
     test(`${offlineMode ? 'offline' : 'online'} Reader return shows detail before ${fail ? offlineMode ? 'missing-book' : 'failed' : 'slow'} revalidation`, async ({ page }) => {
       await installReturnMock(page, { offlineMode, fail });
-      await page.goto(APP_URL + detail);
+      await openLayoutRoute(page, APP_URL, detail, { offlineMode });
       await expect(page.getByRole('heading', { name: LAYOUT_BOOK.title })).toBeVisible();
       // Both modes open the downloaded EPUB; live metadata uses native or HTTP.
       await page.getByTestId(offlineMode ? 'offline-read-primary-action' : 'offline-download-action').click();
@@ -109,7 +111,7 @@ for (const appearance of ['normal', 'reduced', 'eink']) {
       };
       document.addEventListener('DOMContentLoaded', sample, { once: true });
     });
-    await page.goto(APP_URL + detail + '&continue=1', { waitUntil: 'commit' });
+    await openLayoutRoute(page, APP_URL, detail + '&continue=1', { offlineMode: true });
     await expect(page.getByTestId('app-startup-screen')).toHaveAttribute('data-progress-message', '正在打开上次阅读的书籍…');
     await page.evaluate(() => window.stageQuery.releaseBook());
     await expect(page.getByTestId('app-startup-screen')).toHaveAttribute('data-progress-message', '正在打开阅读器…');
@@ -140,7 +142,7 @@ for (const appearance of ['normal', 'reduced', 'eink']) {
 
 test('expired authorization removes the return snapshot and routes to login', async ({ page }) => {
   await installReturnMock(page, { offlineMode: false, needLogin: true });
-  await page.goto(APP_URL + detail);
+  await openLayoutRoute(page, APP_URL, detail);
   await page.getByTestId('offline-download-action').click();
   await expect(page.getByRole('heading', { name: '模拟阅读器', exact: true })).toBeVisible();
   await page.goBack({ waitUntil: 'commit' });
@@ -152,30 +154,24 @@ test('expired authorization removes the return snapshot and routes to login', as
   await expect(page.getByTestId('app-startup-screen')).toHaveCount(0);
 });
 
-for (const change of ['account', 'fresh-link']) {
-  test(`${change} cannot show the previous Reader return snapshot`, async ({ page }) => {
+for (const change of ['cold-reload', 'fresh-link']) {
+  test(`${change} cannot restore the previous Reader snapshot or runtime session`, async ({ page }) => {
     await installReturnMock(page);
-    await page.goto(APP_URL + detail);
+    await openLayoutRoute(page, APP_URL, detail, { offlineMode: true });
     await page.getByTestId('offline-read-primary-action').click();
     await expect(page.getByRole('heading', { name: '模拟阅读器', exact: true })).toBeVisible();
-    if (change === 'account') {
-      await page.evaluate(() => {
-        sessionStorage.setItem('changed-account', 'true');
-        // bfcache restores the document without running addInitScript again.
-        // Change the actual persisted account while Reader is open as well.
-        const stored = JSON.parse(localStorage.getItem('moke-server-storage'));
-        stored.state.user.id = 2;
-        localStorage.setItem('moke-server-storage', JSON.stringify(stored));
-      });
-      await page.goBack({ waitUntil: 'commit' });
-      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.user.id)).toBe(2);
-    } else {
-      await page.goto(APP_URL + detail, { waitUntil: 'commit' });
-    }
-    await page.waitForFunction(() => window.returnQuery?.pending);
+    await page.goto(APP_URL + detail, { waitUntil: 'commit' });
+    if (change === 'cold-reload') await page.reload({ waitUntil: 'commit' });
+    await expect(page.getByRole('heading', { name: '服务器', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: LAYOUT_BOOK.title })).toHaveCount(0);
     await expect(page.getByText('正在更新书籍信息…', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: '进入离线模式', exact: true }).click();
+    // Release the native library query only after the explicit offline action;
+    // a cold link itself cannot consume the Reader's /library return receipt.
+    await page.waitForFunction(() => window.returnQuery?.pending);
     await page.evaluate(() => window.returnQuery.release());
+    await expect(page.getByRole('heading', { name: '我的书架', exact: true })).toBeVisible();
+    await navigateLayoutRoute(page, detail);
     await expect(page.getByRole('heading', { name: LAYOUT_BOOK.title })).toBeVisible();
     await expect(page.getByTestId('offline-read-primary-action')).toBeEnabled();
   });

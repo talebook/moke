@@ -1,87 +1,69 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { normalizeReaderProgressEvent, saveReadingProgress, type ReadingProgressPayload } from '@/lib/reading-progress';
-import {
-  clearAnnotationLocateProgressSuppressionFromPayload,
-  shouldSuppressAnnotationReaderProgress,
-} from '@/lib/annotations';
+import { useEffect } from 'react';
+import { normalizeReaderProgressEvent, saveReadingProgress } from '@/lib/reading-progress';
+import { clearAnnotationLocateProgressSuppressionFromPayload, shouldSuppressAnnotationReaderProgress } from '@/lib/annotations';
 import { startAsyncSubscription } from '@/lib/async-subscription';
-import { getContinueReading, rememberContinueReading } from '@/lib/continue-reading';
+import { sourceForReaderEvent, retireReaderWindow, registerReaderProgressFlush, type ReaderSource } from '@/lib/reader-source';
+import { createReaderProgressQueue, type ReaderProgressFailure } from '@/lib/reader-progress-queue';
+import { debugLog } from '@/lib/debug-log';
+import { rememberContinueReading } from '@/lib/continue-reading';
 import { useServerStore } from '@/lib/store/server';
 
-const SAVE_DELAY_MS = 1200;
-
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
-  const serverUrl = useServerStore((s) => s.serverUrl);
-  const offlineMode = useServerStore((s) => s.offlineMode);
-  const progressSupported = useServerStore((s) => s.capabilities.readingProgressApi);
-  const capabilityChecked = useServerStore((s) => Boolean(s.capabilities.checkedAt));
-  const pendingRef = useRef(new Map<string, ReadingProgressPayload>());
-  const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
-    const progressServerUrl = offlineMode
-      ? (getContinueReading('', 'offline')?.serverUrl || serverUrl)
-      : serverUrl;
-    if (!progressServerUrl) return;
-    if (!offlineMode && capabilityChecked && !progressSupported) return;
-
-    const eventApi = import('@tauri-apps/api/event');
-    const reportListenError = (error: unknown) => {
-      console.warn('[ReaderProgressProvider] could not listen for reader progress:', error);
+    let disposed = false;
+    const reportProgressFailure = (source?: Readonly<ReaderSource>, reason?: ReaderProgressFailure) => {
+      try {
+        debugLog('warn', 'reader-progress', '阅读进度同步失败，已继续处理连接与阅读器操作',
+          { reason: reason ?? 'rejected', ...(source ? { serverUrl: source.serverUrl, bookId: source.bookId, sessionId: source.sessionId } : {}) });
+      } catch { /* Diagnostics must not prevent cleanup or session changes. */ }
     };
-    const cancelListeners = [
-      startAsyncSubscription(async () => {
-        const { listen } = await eventApi;
-        return listen<Record<string, unknown>>('reader:page:changed', (event) => {
-          const progress = normalizeReaderProgressEvent(event.payload);
-          if (!progress) return;
-          if (shouldSuppressAnnotationReaderProgress(progressServerUrl, progress)) return;
-
-          const bookId = progress.moke_book_id;
+    const queue = createReaderProgressQueue((source, progress, signal) =>
+      saveReadingProgress(source.bookId, progress, source.serverUrl, signal), 1200, reportProgressFailure);
+    const flush = () => queue.flush().catch(() => reportProgressFailure());
+    const unregisterFlush = registerReaderProgressFlush(flush);
+    const cancel = startAsyncSubscription(async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      return listen<{ window: string; event: string; data: Record<string, unknown> }>('moke:reader:event', (event) => {
+        if (disposed) return;
+        const payload = event.payload;
+        if (payload.event === 'annotation-locate:finished') {
+          clearAnnotationLocateProgressSuppressionFromPayload(payload.data);
+          return;
+        }
+        if (payload.event === 'book:closed') { retireReaderWindow(payload.window); void flush(); return; }
+        if (payload.event !== 'page:changed') return;
+        const progress = normalizeReaderProgressEvent(payload.data);
+        if (!progress) return;
+        const source = sourceForReaderEvent(payload.window, progress.moke_book_id);
+        // Unknown windows have no authenticated origin. Never guess from the active server.
+        if (!source) {
+          debugLog('warn', 'reader-progress', '无法确认阅读器来源，未同步进度',
+            { window: payload.window, bookId: progress.moke_book_id });
+          return;
+        }
+        if (shouldSuppressAnnotationReaderProgress(source.serverUrl, progress)) return;
+        const current = useServerStore.getState();
+        if (current.sessionId === source.sessionId) {
           rememberContinueReading({
-            serverUrl: progressServerUrl,
-            mode: offlineMode ? 'offline' : 'online',
-            bookId,
+            serverUrl: source.serverUrl,
+            mode: current.offlineMode ? 'offline' : 'online',
+            bookId: source.bookId,
             progress: progress.progress ?? progress.fraction,
             page: progress.page,
             totalPages: progress.total_pages,
           });
-          pendingRef.current.set(bookId, progress);
-
-          const existingTimer = timersRef.current.get(bookId);
-          if (existingTimer) clearTimeout(existingTimer);
-
-          const timer = setTimeout(() => {
-            const latest = pendingRef.current.get(bookId);
-            pendingRef.current.delete(bookId);
-            timersRef.current.delete(bookId);
-            if (latest) void saveReadingProgress(bookId, latest);
-          }, SAVE_DELAY_MS);
-
-          timersRef.current.set(bookId, timer);
-        });
-      }, reportListenError),
-      startAsyncSubscription(async () => {
-        const { listen } = await eventApi;
-        return listen<unknown>('reader:annotation-locate:finished', (event) => {
-          clearAnnotationLocateProgressSuppressionFromPayload(event.payload);
-        });
-      }, reportListenError),
-    ];
-
+        }
+        queue.schedule(source, progress);
+      });
+    }, (error) => console.warn('[ReaderProgressProvider] could not listen:', error));
     return () => {
-      for (const cancelListener of cancelListeners) cancelListener();
-      for (const timer of timersRef.current.values()) clearTimeout(timer);
-      for (const [bookId, progress] of pendingRef.current.entries()) {
-        void saveReadingProgress(bookId, progress);
-      }
-      timersRef.current.clear();
-      pendingRef.current.clear();
+      disposed = true;
+      cancel();
+      void flush().finally(unregisterFlush).catch(() => reportProgressFailure());
     };
-  }, [capabilityChecked, offlineMode, progressSupported, serverUrl]);
-
+  }, []);
   return <>{children}</>;
 }

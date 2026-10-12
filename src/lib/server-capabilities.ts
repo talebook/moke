@@ -1,6 +1,5 @@
 import {
   createUncheckedAnnotationCapability,
-  isAnnotationCapabilityStatus,
   type AnnotationCapabilityStatus,
 } from './annotation-capability.ts';
 
@@ -15,10 +14,6 @@ export interface ServerCapabilities {
   checkedAt: number | null;
   version: string;
 }
-
-export type PersistedServerCapabilities = Partial<ServerCapabilities> & {
-  annotationApi?: unknown;
-};
 
 export interface ServerCapabilityDiscoveryDependencies {
   version: string;
@@ -40,51 +35,6 @@ export const DEFAULT_SERVER_CAPABILITIES: ServerCapabilities = {
   checkedAt: null,
   version: '',
 };
-
-/**
- * Merge persisted capabilities while migrating the legacy annotationApi flag.
- * The removed key must not leak back into Zustand's next persisted snapshot.
- */
-export function mergePersistedServerCapabilities(
-  currentCapabilities: ServerCapabilities,
-  persistedCapabilities: PersistedServerCapabilities | undefined,
-): ServerCapabilities {
-  const persistedStatus = persistedCapabilities?.annotationApiStatus;
-  const legacyAnnotationApi = persistedCapabilities?.annotationApi;
-  const capabilitiesWithoutLegacy = { ...(persistedCapabilities ?? {}) };
-  delete capabilitiesWithoutLegacy.annotationApi;
-
-  // A legacy `false` may have come from a network failure, so it must be
-  // rechecked rather than migrated to a durable "unsupported" result.
-  const annotationApiStatus = isAnnotationCapabilityStatus(persistedStatus)
-    ? persistedStatus
-    : legacyAnnotationApi === true
-      ? 'supported'
-      : 'unchecked';
-  const persistedAnnotationCheckedAt = persistedCapabilities?.annotationApiCheckedAt;
-  const persistedGeneralCheckedAt = persistedCapabilities?.checkedAt;
-  const annotationApiCheckedAt = annotationApiStatus === 'unchecked'
-    ? null
-    : typeof persistedAnnotationCheckedAt === 'number'
-      ? persistedAnnotationCheckedAt
-      : typeof persistedGeneralCheckedAt === 'number'
-        ? persistedGeneralCheckedAt
-        : null;
-  const hasPersistedAnnotationCapability = isAnnotationCapabilityStatus(persistedStatus)
-    || typeof legacyAnnotationApi === 'boolean';
-
-  return {
-    ...currentCapabilities,
-    ...capabilitiesWithoutLegacy,
-    annotationApiStatus,
-    annotationApiCheckedAt,
-    // Stores created before annotationApi existed need one fresh general
-    // discovery instead of temporarily trusting stale capability flags.
-    checkedAt: hasPersistedAnnotationCapability && typeof persistedGeneralCheckedAt === 'number'
-      ? persistedGeneralCheckedAt
-      : null,
-  };
-}
 
 /**
  * Discover general server capabilities without probing annotation payloads.

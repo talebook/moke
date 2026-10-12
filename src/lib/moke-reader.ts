@@ -1,4 +1,6 @@
 import type { ReadingProgressPayload } from './reading-progress';
+import { assertReaderSessionUnchanged, withClosedReaderSession } from './reader-source.ts';
+import { clearReaderReturn, prepareReaderReturn } from './reader-return.ts';
 
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
@@ -173,8 +175,14 @@ export async function navigateFullDocument(
   href: string,
   fallback: (href: string) => void,
   platformOverride?: string,
+  beforeDocumentNavigationOrSignal?: (() => void) | AbortSignal,
   signal?: AbortSignal,
 ): Promise<void> {
+  // Keep the original cancellation call form as well as receipt preparation.
+  const beforeDocumentNavigation = typeof beforeDocumentNavigationOrSignal === 'function'
+    ? beforeDocumentNavigationOrSignal : undefined;
+  signal ??= typeof beforeDocumentNavigationOrSignal === 'function'
+    ? undefined : beforeDocumentNavigationOrSignal;
   if (signal?.aborted) return;
   if (!isSafeAppNavigationPath(href)) {
     console.warn('Refusing unsafe full-document navigation:', href);
@@ -205,6 +213,10 @@ export async function navigateFullDocument(
     return;
   }
   if (!requiresMokeNavigate(currentPlatform)) {
+    // Preparation is synchronous and immediately precedes document replacement.
+    // Its failure must propagate without trying the client router.
+    beforeDocumentNavigation?.();
+    if (signal?.aborted) return;
     // Crossing app boundaries intentionally discards the current shell state;
     // the launch URL carries all context the embedded reader needs.
     try {
@@ -216,9 +228,21 @@ export async function navigateFullDocument(
     }
     return;
   }
+  let invoke: typeof import('@tauri-apps/api/core').invoke;
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
+    ({ invoke } = await import('@tauri-apps/api/core'));
+  } catch (error) {
     if (signal?.aborted) return;
+    console.warn('Unable to load native navigation, using client-side navigation:', error);
+    fallback(href);
+    return;
+  }
+  // Module resolution can await. Recheck/prepare only after it finishes, then
+  // dispatch without another await between the guard and the native call.
+  if (signal?.aborted) return;
+  beforeDocumentNavigation?.();
+  if (signal?.aborted) return;
+  try {
     await invoke('moke_navigate', { path: href });
   } catch (error) {
     if (signal?.aborted) return;
@@ -231,6 +255,8 @@ export async function navigateFullDocument(
  * 桌面 reader-home（书库首页）窗口的 label。
  * 不能落入扩展的 `reader-*` 枚举（H20-L4）：该书库窗口不代表阅读器，
  * 扩展不应把它当作阅读器寻址/列出来。
+ * 但它仍持有阅读来源，并能自行创建 Reader：会话切换和 Moke 打开书籍
+ * 的保护边界会要求关闭该窗口；这与扩展寻址的 `reader-*` 枚举用途不同。
  */
 export function buildReaderHomeWindowLabel(timestamp: number = Date.now()): string {
   return `moke-home-${timestamp}`;
@@ -450,7 +476,37 @@ export async function openEmbeddedReaderBook(
   href: string,
   navigate: (href: string) => void,
   platformOverride?: string,
+  preparedSessionOrSignal?: { sessionId: number; signal?: AbortSignal } | AbortSignal,
   signal?: AbortSignal,
 ): Promise<void> {
-  await navigateFullDocument(href, navigate, platformOverride, signal);
+  const preparedSession = preparedSessionOrSignal && 'sessionId' in preparedSessionOrSignal
+    ? preparedSessionOrSignal : undefined;
+  signal ??= preparedSession?.signal ?? (preparedSession ? undefined : preparedSessionOrSignal as AbortSignal | undefined);
+  if (signal?.aborted) return;
+  await withClosedReaderSession(async () => {
+    const { useServerStore } = await import('./store/server.ts');
+    if (signal?.aborted) return;
+    const context = useServerStore.getState();
+    if (preparedSession) assertReaderSessionUnchanged(preparedSession, context);
+    if (context.candidate) throw new Error('正在变更连接，请稍候再试');
+    // Keep Readest's existing literal /library return contract. The one-use
+    // receipt stays in the live browsing context, never in a URL or list file.
+    clearReaderReturn();
+    try {
+      await navigateFullDocument(href, (target) => {
+        // The native helper may recover from assign/invoke failure using the
+        // client router. A receipt armed just before that failure must retire.
+        clearReaderReturn();
+        if (signal?.aborted) return;
+        assertReaderSessionUnchanged({ sessionId: context.sessionId }, useServerStore.getState());
+        navigate(target);
+      }, platformOverride, () => {
+        // Platform probing can await IPC; recheck before granting the handoff.
+        assertReaderSessionUnchanged({ sessionId: context.sessionId }, useServerStore.getState());
+        prepareReaderReturn(context);
+      }, signal);
+      if (signal?.aborted) clearReaderReturn();
+    }
+    catch (error) { clearReaderReturn(); throw error; }
+  });
 }
