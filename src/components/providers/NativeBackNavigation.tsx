@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { APP_BACK_EVENT } from '@/lib/native-back';
+import { overlayBackStack } from '@/lib/overlay-back';
 import {
   NativeBackTransitionController,
   shouldAnimateNativeBack,
@@ -113,6 +114,9 @@ export function NativeBackNavigation() {
     controllerRef.current = controller;
 
     const handleNativeBack = (event: NativeBackEvent) => {
+      // Window-targeted events can reach this earlier listener before the
+      // top overlay consumes BACK. Consult its ownership before queuing a route.
+      if (event.defaultPrevented || overlayBackStack.hasOpenEntry()) return;
       controller.requestBack(requestedBackTarget(event));
     };
     window.addEventListener(APP_BACK_EVENT, handleNativeBack);

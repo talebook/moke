@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,6 +16,7 @@ import {
   DEFAULT_PATCH_FILES,
   applyPatchesToPackage,
   ensureDomStorage,
+  ensureWindowsHvigorCli,
   findPackageDir,
   packageRootsFor,
   prepareOhos,
@@ -22,6 +24,12 @@ import {
 
 const patchDir = fileURLToPath(new URL('../scripts/ohos-ability-patch', import.meta.url));
 const toPosixPath = (value) => value.replaceAll('\\', '/');
+const gitmodules = readFileSync(new URL('../.gitmodules', import.meta.url), 'utf8');
+const tauriManifest = readFileSync(new URL('../src-tauri/Cargo.toml', import.meta.url), 'utf8');
+const releaseWorkflow = readFileSync(
+  new URL('../.github/workflows/build-release.yml', import.meta.url),
+  'utf8',
+);
 
 const UNPATCHED_MAIN_PAGE = `@Entry({ routeName: "RustAbility" })
 @Component
@@ -38,6 +46,64 @@ function WebBuilder(data: WebviewNodeData) {
     .onControllerAttached(() => {});
 }
 `;
+
+test('Windows OHOS preparation fixes the generated Hvigor CLI path', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ohos-hvigor-'));
+  try {
+    const entry = join(root, 'entry');
+    mkdirSync(entry);
+    const hvigorPath = join(entry, 'hvigorfile.ts');
+    writeFileSync(hvigorPath, 'execFileSync(`vendor/tauri/target/debug/cargo-tauri`, ["tauri"]);\n');
+    assert.equal(ensureWindowsHvigorCli(root, 'win32'), 'patched');
+    assert.match(readFileSync(hvigorPath, 'utf8'), /execFileSync\(resolve\(__dirname, "\.\.\/\.\.\/\.\.\/\.\.\/vendor\/tauri\/target\/debug\/cargo-tauri\.exe"\)/);
+    assert.equal(ensureWindowsHvigorCli(root, 'win32'), 'already-present');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('OHOS 临时使用 Tauri app-name-fix 分支并保留模板后备图标', () => {
+  const tauriSubmodule = gitmodules.match(
+    /\[submodule "tauri"\]([\s\S]*?)(?=\n\[submodule |$)/,
+  )?.[1];
+  assert.ok(tauriSubmodule, 'vendor/tauri submodule configuration is missing');
+  assert.match(tauriSubmodule, /url = https:\/\/github\.com\/hehetoshang\/tauri\.git/);
+  assert.match(tauriSubmodule, /branch = app-name-fix/);
+  assert.doesNotMatch(tauriSubmodule, /branch = dev/);
+
+  for (const crate of [
+    'tauri',
+    'tauri-build',
+    'tauri-codegen',
+    'tauri-macros',
+    'tauri-plugin',
+    'tauri-runtime',
+    'tauri-runtime-wry',
+    'tauri-utils',
+  ]) {
+    assert.match(
+      tauriManifest,
+      new RegExp(`${crate} = \\{ path = "\\.\\.\\/vendor\\/tauri\\/crates\\/${crate}"`),
+      `${crate} must resolve through vendor/tauri`,
+    );
+  }
+
+  assert.doesNotMatch(releaseWorkflow, /Generate OpenHarmony launcher icons/);
+  for (const path of [
+    'AppScope/resources/base/media/background.png',
+    'AppScope/resources/base/media/foreground.png',
+    'AppScope/resources/base/media/layered_image.json',
+    'entry/src/main/resources/base/media/background.png',
+    'entry/src/main/resources/base/media/foreground.png',
+    'entry/src/main/resources/base/media/layered_image.json',
+    'entry/src/main/resources/base/media/startIcon.png',
+  ]) {
+    assert.ok(
+      existsSync(new URL(`../vendor/tauri/crates/tauri-cli/templates/mobile/open-harmony/${path}`, import.meta.url)),
+      `official OpenHarmony template icon is missing: ${path}`,
+    );
+  }
+});
 
 function makeFakePackage(ohosRoot, roots) {
   for (const root of roots) {

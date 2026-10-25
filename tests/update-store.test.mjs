@@ -418,3 +418,29 @@ test('下载异常后可重新检查并重试下载', async () => {
   assert.equal(store.getState().status, 'downloaded');
   assert.equal(store.getState().error, null);
 });
+
+
+test('更新下载合并 250ms 内的分块进度，并在完成时写入最后字节数', async (t) => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  const update = makeUpdate(async (onEvent) => {
+    onEvent({ event: 'Started', data: { contentLength: 100 } });
+    onEvent({ event: 'Progress', data: { chunkLength: 10 } });
+    now = 1200;
+    onEvent({ event: 'Progress', data: { chunkLength: 20 } });
+    now = 1250;
+    onEvent({ event: 'Progress', data: { chunkLength: 30 } });
+    now = 1251;
+    onEvent({ event: 'Progress', data: { chunkLength: 40 } });
+    onEvent({ event: 'Finished', data: {} });
+  });
+  const store = createDesktopStore(async () => ({ check: async () => update }));
+  const emittedBytes = [];
+  store.subscribe((state, previous) => {
+    if (state.downloadedBytes !== previous.downloadedBytes) emittedBytes.push(state.downloadedBytes);
+  });
+  await store.getState().checkForUpdates();
+  assert.deepEqual(emittedBytes, [10, 60, 100]);
+  assert.equal(store.getState().downloadedBytes, 100);
+  assert.equal(store.getState().progressPercent, 100);
+});

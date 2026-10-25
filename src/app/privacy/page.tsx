@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ReactNode } from 'react';
+import { ExternalLink } from '@/components/ExternalLink';
 import { PrivacyBackButton } from './privacy-back-button';
 
 export const dynamic = 'force-static';
@@ -30,7 +31,7 @@ function renderInline(text: string): ReactNode[] {
     }
     if (token.startsWith('<http') && token.endsWith('>')) {
       const href = token.slice(1, -1);
-      return <a key={index} href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline">{href}</a>;
+      return <ExternalLink key={index} href={href} className="text-primary underline">{href}</ExternalLink>;
     }
     if (token.startsWith('<') && token.endsWith('>') && token.includes('@')) {
       const email = token.slice(1, -1);
@@ -83,7 +84,7 @@ export default function PrivacyPage() {
   const policy = readPrivacyPolicy();
 
   return (
-    <main className="min-h-dvh app-warm-bg px-4 py-6 sm:px-6 sm:py-10">
+    <main className="min-h-screen supports-[height:100dvh]:min-h-dvh app-warm-bg px-4 py-6 sm:px-6 sm:py-10">
       <article className="mx-auto max-w-3xl rounded-[28px] border border-amber-950/10 bg-background p-6 shadow-xl sm:p-10">
         <PrivacyBackButton />
         <div className="mt-6 space-y-4 text-sm leading-7 text-foreground/90">

@@ -24,8 +24,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout Readest submodule for contract tests
-        run: git submodule update --init readest
+      - name: Checkout submodules for contracts, OHOS preparation and dependency provenance
+        run: git submodule update --init readest vendor/tauri vendor/ohos-plugins
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -185,3 +185,53 @@ jobs:
 
       - name: Verify web build configuration
         run: pnpm build-web
+
+  native-ui:
+    name: Native frontend browser regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Start native frontend with synthetic IPC in browser tests
+        run: |
+          pnpm dev --hostname 127.0.0.1 > "$RUNNER_TEMP/moke-native-ui.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/moke-native-ui.pid"
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:3000/welcome > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/moke-native-ui.log"
+          exit 1
+      - name: Run native frontend regressions
+        run: >-
+          pnpm exec playwright test
+          tests/chrome96-layout.spec.mjs tests/library-header-layout.spec.mjs
+          tests/startup-first-paint.spec.mjs tests/image-cache.spec.mjs
+          tests/offline-shelf-race.spec.mjs tests/welcome-debug-panel.spec.mjs
+          --workers=1
+      - name: Upload browser results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ui-browser-artifacts
+          path: |
+            test-results/
+            ${{ runner.temp }}/moke-native-ui.log
+          if-no-files-found: warn
+      - name: Stop native frontend
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/moke-native-ui.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/moke-native-ui.pid")" || true
+          fi

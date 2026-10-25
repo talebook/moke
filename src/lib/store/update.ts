@@ -78,9 +78,27 @@ type UpdateStoreSetter = (
   partial: Partial<UpdateStore> | ((state: UpdateStore) => Partial<UpdateStore>),
 ) => void;
 
+const UPDATE_PROGRESS_EMIT_INTERVAL_MS = 250;
+
 function createDownloadHandler(set: UpdateStoreSetter) {
   let contentLength: number | null = null;
   let bytesDownloaded = 0;
+  let lastEmitAt = 0;
+
+  // Coalesce chunk callbacks so updater subscribers render at most every 250ms.
+  const emitProgress = (force: boolean) => {
+    const now = Date.now();
+    if (!force && now - lastEmitAt < UPDATE_PROGRESS_EMIT_INTERVAL_MS) return;
+    lastEmitAt = now;
+    const nextBytes = bytesDownloaded;
+    const nextPercent = contentLength
+      ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
+      : 0;
+    set((current) => ({
+      downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
+      progressPercent: Math.max(current.progressPercent, nextPercent),
+    }));
+  };
 
   return (event: DownloadEvent) => {
     switch (event.event) {
@@ -90,18 +108,11 @@ function createDownloadHandler(set: UpdateStoreSetter) {
         break;
       case 'Progress': {
         bytesDownloaded += event.data.chunkLength;
-        const nextBytes = bytesDownloaded;
-        const nextPercent = contentLength
-          ? Math.min(Math.round((nextBytes / contentLength) * 100), 100)
-          : 0;
-        // Keep shared progress monotonic if callbacks arrive out of order.
-        set((current) => ({
-          downloadedBytes: Math.max(current.downloadedBytes, nextBytes),
-          progressPercent: Math.max(current.progressPercent, nextPercent),
-        }));
+        emitProgress(false);
         break;
       }
       case 'Finished':
+        emitProgress(true);
         set({ progressPercent: 100 });
         break;
     }

@@ -47,6 +47,14 @@ const APP_ACL_COMMANDS: &[&str] = &[
     "moke_list_downloaded_books",
     // Host command implemented in src/extensions/mod.rs, not readestlib.
     "ext_reader_event",
+    "ext_list_extensions",
+    "ext_enable_extension",
+    "ext_disable_extension",
+    "ext_uninstall_extension",
+    "ext_get_api_port",
+    "ext_get_extensions_dir",
+    "ext_moke_list_offline_books",
+    "ext_diagnostics",
 ];
 
 fn main() {

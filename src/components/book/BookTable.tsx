@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { ArrowDown, ArrowUp, ArrowUpDown, Bookmark, Check, Download } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -194,6 +194,29 @@ function SortHeader({ label, sortKey, sort, onChange, className, align = 'left',
   );
 }
 
+const MOBILE_TABLE_QUERY = '(max-width: 767.98px)';
+
+/**
+ * 与 Tailwind `md` 断点对齐的媒体查询。
+ *
+ * 表格视图原本同时挂载移动卡片列表与桌面表格，仅靠 CSS 隐藏其中一套：
+ * 每行书因此渲染两次（DOM 与 AuthImage 都翻倍）。这里改为按视口只渲染一套。
+ * 服务端/预渲染快照固定为桌面（与静态导出的初始 HTML 一致），
+ * 分支上的 `md:hidden` / `hidden md:block` 仍保留，因此水合前后都不会出现两套同显。
+ */
+function useIsMobileLayout(): boolean {
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    const query = window.matchMedia(MOBILE_TABLE_QUERY);
+    query.addEventListener('change', onStoreChange);
+    return () => query.removeEventListener('change', onStoreChange);
+  }, []);
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia(MOBILE_TABLE_QUERY).matches,
+    () => false,
+  );
+}
+
 export function BookTable({
   books,
   showStatus = false,
@@ -206,7 +229,8 @@ export function BookTable({
   onSortChange,
   getRowHref,
 }: BookTableProps) {
-  const { serverUrl } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const isMobileLayout = useIsMobileLayout();
   const [sort, setSort] = useState<SortState | null>(null);
   const { makeHandlers: makeLongPressHandlers } = useLongPressRegistry();
   const selectable = Boolean(batchMode && selectedIds && onToggleSelect);
@@ -256,6 +280,7 @@ export function BookTable({
           排序仅作用于当前页，翻页后按新页内容重新排序。
         </p>
       )}
+      {isMobileLayout ? (
       <div className="overflow-hidden rounded-[22px] app-card md:hidden">
         {sorted.map((row) => {
           const id = String(row.id);
@@ -303,7 +328,7 @@ export function BookTable({
           );
         })}
       </div>
-
+      ) : (
       <div className="hidden overflow-hidden rounded-[24px] app-card md:block">
         <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse table-fixed min-w-[640px]">
@@ -415,6 +440,7 @@ export function BookTable({
         </table>
         </div>
       </div>
+      )}
     </>
   );
 }

@@ -6,7 +6,8 @@ import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { logErrorMetadata } from '@/lib/api-log';
 import { useServerStore } from '@/lib/store/server';
-import { useDeveloperStore } from '@/lib/store/developer';
+import { UNLOCK_THRESHOLD, useDeveloperStore } from '@/lib/store/developer';
+import { externalLinkClick } from '@/lib/external-link';
 import { safeGetLocalStorageItem, safeSetLocalStorageItem } from '@/lib/browser-storage';
 import { debugLog } from '@/lib/debug-log';
 import { APP_VERSION } from '@/lib/app-version';
@@ -26,23 +27,24 @@ export default function WelcomePage() {
 
   useEffect(() => () => {
     if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+    if (versionClickTimerRef.current) clearTimeout(versionClickTimerRef.current);
   }, []);
 
-  // 主页版本号连点 8 次：解锁并直接进入开发者选项（无任何提示）
+  // 连点版本号显示或隐藏日志浮钮；日志面板仍由浮钮显式打开。
   const versionClicksRef = useRef(0);
   const versionClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleVersionClick = () => {
     versionClicksRef.current += 1;
     if (versionClickTimerRef.current) clearTimeout(versionClickTimerRef.current);
-    if (versionClicksRef.current >= 8) {
+    if (versionClicksRef.current >= UNLOCK_THRESHOLD) {
       versionClicksRef.current = 0;
-      useDeveloperStore.getState().unlock();
-      router.push('/settings/developer');
+      const developer = useDeveloperStore.getState();
+      developer.setShowDebugPanel(!developer.showDebugPanel);
       return;
     }
     versionClickTimerRef.current = setTimeout(() => {
       versionClicksRef.current = 0;
-    }, 2000);
+    }, 1200);
   };
 
   const normalizeServerUrl = (value: string) => {
@@ -219,8 +221,8 @@ export default function WelcomePage() {
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground">
-            <span onClick={handleVersionClick} className="cursor-default select-none">{APP_VERSION}</span>
-            <a href="https://github.com/talebook/moke" target="_blank" rel="noopener noreferrer" className="hover:underline">
+            <button type="button" onClick={handleVersionClick} className="select-none rounded px-1 py-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{APP_VERSION}</button>
+            <a href="https://github.com/talebook/moke" onClick={externalLinkClick('https://github.com/talebook/moke')} rel="noopener noreferrer" className="hover:underline">
               GitHub
             </a>
           </div>

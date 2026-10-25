@@ -16,6 +16,8 @@ cd ..
 
 `.env.moke-reader` 已随 Reader 仓库提交，无需本地创建。`pnpm setup:vendors` 会转调 Reader app 的 `setup-vendors` 子脚本，生成 PDF.js、SimpleCC 和 Jieba 资源。只启动开发服务器时也需要完成这一步。
 
+PDF.js 的脚本、Worker、WASM、CMap 和标准字体由 Reader 的 `public/vendor/pdfjs` 统一提供。嵌入 Moke 后路径为 `/readest/vendor/pdfjs/`；Moke 主应用不需要单独的 PDF.js 副本或 `@pdfjs/*` 别名，避免在根目录 `public/` 重复打包。
+
 ## 开发与打包
 
 ```bash
@@ -27,7 +29,7 @@ pnpm tauri build     # 构建完整应用安装包
 
 `pnpm build:reader` 会自动执行资源生成步骤，产物位于 `readest/out/readest`。Moke 打包时通过 `pnpm copy:reader` 复制到 `out/readest`，以 `/readest` 路径提供服务；`pnpm tauri build` 已配置自动构建 Moke、构建 Reader 和复制资源，无需重复手动构建。
 
-Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri dev` 会同时启动该服务与端口 3000 的 Moke 前端。协议、鉴权、错误和版本兼容说明见当前子模块版本的 [`docs/MOKE_CONTRACT.md`](https://github.com/hehetoshang/readest-reader/blob/4b3db91bd1d94e5e9063639964f95a407334e81f/docs/MOKE_CONTRACT.md)；`mokeServerUrl` 始终是开发者配置的 Talebook 地址，不是 Reader 服务地址。
+Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri dev` 会同时启动该服务与端口 3000 的 Moke 前端。协议、鉴权、错误和版本兼容说明见当前子模块版本的 [`docs/MOKE_CONTRACT.md`](https://github.com/hehetoshang/readest-reader/blob/0b75933bde1712bf693ca811b77ba3c921bd05a5/docs/MOKE_CONTRACT.md)；`mokeServerUrl` 始终是开发者配置的 Talebook 地址，不是 Reader 服务地址。
 
 ## 在线阅读兼容性
 
@@ -37,7 +39,7 @@ Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri d
 
 ## 原生联调
 
-真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。经过脱敏的环境、命令轮廓与实测结果见当前子模块版本的 [`docs/E2E_EVIDENCE.md`](https://github.com/hehetoshang/readest-reader/blob/4b3db91bd1d94e5e9063639964f95a407334e81f/docs/E2E_EVIDENCE.md)。
+真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。Reader 仓库保留的历史桌面联调环境、命令与结果见当前子模块版本的 [`docs/E2E_EVIDENCE.md`](https://github.com/hehetoshang/readest-reader/blob/0b75933bde1712bf693ca811b77ba3c921bd05a5/docs/E2E_EVIDENCE.md)。该记录对应文中注明的历史提交，不代表本次鸿蒙适配已经完成设备或安装包验收。
 
 ## 安全边界与回归检查
 
@@ -50,3 +52,5 @@ node --test tests/reader-only-build.test.mjs
 ```
 
 Reader 实现变更应先通过 readest-reader 仓库的 PR，再在 Moke 中更新子模块版本。
+
+当前 Reader 固定为 `0b75933bde1712bf693ca811b77ba3c921bd05a5`，本次兼容性改动已先通过 Reader [PR #6](https://github.com/hehetoshang/readest-reader/pull/6) 和 [PR #7](https://github.com/hehetoshang/readest-reader/pull/7) 合并，包含 OHOS 插件降级、Chrome 96 兼容、字体资源路径及菜单清理。Moke 通过子模块更新接入。

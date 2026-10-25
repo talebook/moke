@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useRef } from 'react';
+import { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
 import { useRouter } from 'next/navigation';
 import { BookOpen, History, Search } from 'lucide-react';
@@ -42,8 +42,10 @@ interface BookItem {
   };
 }
 
-function BookCard({
+// Avoid rerendering every cover when only the page selection or search text changes.
+const BookCard = memo(function BookCard({
   book,
+  serverUrl,
   viewGrid = true,
   priority = false,
   batchMode = false,
@@ -52,6 +54,7 @@ function BookCard({
   onContextAction,
 }: {
   book: BookItem;
+  serverUrl: string;
   viewGrid?: boolean;
   priority?: boolean;
   batchMode?: boolean;
@@ -60,7 +63,6 @@ function BookCard({
   /** Right-click / long-press: open the context menu at (x, y) for this book. */
   onContextAction?: (id: string, x: number, y: number) => void;
 }) {
-  const { serverUrl } = useServerStore();
   const authorName = book.author || book.authors?.[0]?.name || '';
   const bookId = String(book.id);
   const coverUrl = resolveServerAssetUrl(serverUrl, book.img || book.thumb);
@@ -171,10 +173,11 @@ function BookCard({
       </span>
     </Link>
   );
-}
+});
 
 export default function ShelfPage() {
-  const { serverUrl, offlineMode } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
   const router = useRouter();
   const toast = useToast((s) => s.show);
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
@@ -242,7 +245,7 @@ export default function ShelfPage() {
     lastSelectedIdRef.current = null;
   };
 
-  const toggleSelect = (id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+  const toggleSelect = useCallback((id: string, mods: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
     if (!batchMode) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -264,7 +267,7 @@ export default function ShelfPage() {
       }
       return next;
     });
-  };
+  }, [batchMode, books]);
 
   const selectAll = () => {
     setSelectedIds(new Set(books.map((b) => String(b.id))));
@@ -365,9 +368,9 @@ export default function ShelfPage() {
     },
   ];
 
-  const openContextMenu = (bookId: string, clientX: number, clientY: number) => {
+  const openContextMenu = useCallback((bookId: string, clientX: number, clientY: number) => {
     setContextMenu({ x: clientX, y: clientY, bookId });
-  };
+  }, []);
 
   // ── Batch actions ────────────────────────────────────────────────────────
   const runBatch = async (action: BatchAction): Promise<{ ok: number; fail: number }> => {
@@ -428,39 +431,18 @@ export default function ShelfPage() {
 
   return (
     <DesktopLayout>
-      <div className="moke-shelf-bg flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
+      <div className="moke-shelf-bg flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,rgba(184,149,106,0.18),transparent_32%),linear-gradient(180deg,#fffdf8_0%,#fbf9f2_44%,#f6f0e6_100%)]">
         <header className="sticky top-0 z-10 shrink-0 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:px-8 md:py-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:gap-6">
-            <div>
-              <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
-                <BookOpen className="h-3.5 w-3.5" />
-                <span>{books.length > 0 ? `${books.length} 本藏书` : '私人阅读空间'}</span>
-              </div>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
-            </div>
-            <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row md:items-center">
-              <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="search"
-                    placeholder="搜索书籍"
-                    value={shelfSearchQ}
-                    onChange={(e) => setShelfSearchQ(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submitShelfSearch(); }}
-                    className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
-                  />
+          <div className="flex flex-col gap-3 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,390px)_auto] md:items-center">
+            <div className="flex min-w-0 items-center justify-between gap-3 md:contents">
+              <div className="min-w-0 md:col-start-1 md:row-start-1">
+                <div className="mb-1 flex items-center gap-2 text-xs font-medium text-primary/80">
+                  <BookOpen className="h-3.5 w-3.5" />
+                  <span>{books.length > 0 ? `${books.length} 本藏书` : '私人阅读空间'}</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={submitShelfSearch}
-                  disabled={!shelfSearchQ.trim()}
-                  className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                    搜索
-                </button>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">我的书架</h1>
               </div>
-              <div className="flex items-center justify-end gap-2">
+              <div className="flex shrink-0 items-center justify-end gap-2 md:col-start-3 md:row-start-1">
                 {!offlineMode && <Link
                   href="/user/history"
                   aria-label="查看历史记录"
@@ -471,6 +453,27 @@ export default function ShelfPage() {
                 </Link>}
                 <ViewModeToggle value={viewMode} onChange={setViewMode} />
               </div>
+            </div>
+            <div className="flex w-full min-w-0 items-center gap-2 md:col-start-2 md:row-start-1 md:w-auto">
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <input
+                  type="search"
+                  placeholder="搜索书籍"
+                  value={shelfSearchQ}
+                  onChange={(e) => setShelfSearchQ(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitShelfSearch(); }}
+                  className="w-full h-10 pl-10 pr-3 text-sm rounded-2xl border border-amber-950/10 bg-white/70 text-foreground shadow-sm outline-none transition focus:border-primary/60 focus:bg-white focus:shadow-[0_8px_24px_-18px_rgba(74,57,35,0.55)]"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={submitShelfSearch}
+                disabled={!shelfSearchQ.trim()}
+                className="h-10 shrink-0 rounded-2xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                搜索
+              </button>
             </div>
           </div>
         </header>
@@ -510,6 +513,7 @@ export default function ShelfPage() {
                     <BookCard
                       key={String(book.id)}
                       book={book}
+                      serverUrl={serverUrl}
                       priority={index === 0}
                       viewGrid={viewMode === 'grid'}
                       batchMode={batchMode}

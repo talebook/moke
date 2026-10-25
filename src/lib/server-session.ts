@@ -1,7 +1,7 @@
 // These relative `.ts` imports are intentional: this module and the server
 // store are exercised directly by Node's strip-types test runner, which does
 // not resolve the application's `@/` alias.
-import { MokeApiError, readJsonResponse } from './api-core.ts';
+import { MokeApiError } from './api-core.ts';
 
 export const SERVER_CAPABILITIES_TTL_MS = 5 * 60 * 1000;
 
@@ -48,13 +48,15 @@ export interface CurrentUserResult {
  * HTTP errors, and unexpected application failures throw so callers can retain
  * their last confirmed user.
  */
-export async function readCurrentUserResponse(response: Response): Promise<CurrentUserResult> {
-  const data = await readJsonResponse<UserInfoResponse>(response, '登录状态响应无效。');
-
+export function resolveCurrentUserResult(
+  data: UserInfoResponse,
+  responseOk: boolean,
+  status: number,
+): CurrentUserResult {
   const info = data.user || {};
   const isLogin = Boolean(info.is_login);
   const isConfirmedGuest = data.err === 'user.need_login'
-    || (response.ok && data.err === 'ok' && !isLogin);
+    || (responseOk && data.err === 'ok' && !isLogin);
 
   if (isConfirmedGuest) {
     return {
@@ -65,11 +67,11 @@ export async function readCurrentUserResponse(response: Response): Promise<Curre
     };
   }
 
-  if (!response.ok) {
+  if (!responseOk) {
     throw new MokeApiError(
-      String(data.msg || `服务器返回 ${response.status}。`),
-      String(data.err || `http.${response.status}`),
-      response.status,
+      String(data.msg || `服务器返回 ${status}。`),
+      String(data.err || `http.${status}`),
+      status,
     );
   }
 
@@ -77,7 +79,7 @@ export async function readCurrentUserResponse(response: Response): Promise<Curre
     throw new MokeApiError(
       String(data.msg || '登录状态同步失败。'),
       String(data.err || 'server.user_sync_failed'),
-      response.status,
+      status,
     );
   }
 
