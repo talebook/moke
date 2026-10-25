@@ -99,7 +99,10 @@ test('zero-reference queued covers are removed without issuing requests', async 
   assert.equal((await queued).error.name, 'AbortError');
   old.forEach((url) => cache.releaseImageObjectUrl(url, 0));
   await tick();
-  assert.equal(calls.includes('https://books.test/queued'), false);
+  assert.equal(calls.some(url => {
+    const parsed = new URL(url);
+    return parsed.origin === 'https://books.test' && parsed.pathname === '/queued';
+  }), false);
 });
 
 test('shared references and StrictMode immediate remount retain one task', async (t) => {
@@ -162,8 +165,35 @@ test('cancelled and failed loads retry; late responses cannot replace or delete 
   assert.equal(requests, 4);
 });
 
-for (const stage of ['request', 'body', 'queue']) {
-  test(`total timeout bounds ${stage} and permits retry`, async (t) => {
+test('queued covers keep a full request deadline after waiting more than 15 seconds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const started = [];
+  const cache = await installCache(t, async (url, init) => {
+    started.push({ url, signal: init.signal });
+    await new Promise(resolve => setTimeout(resolve, 4_000));
+    return response();
+  });
+  const covers = Array.from({ length: 30 }, (_, index) =>
+    observe(cache.acquire(`https://books.test/slow-cover/${index}`)));
+  await tick();
+  assert.equal(started.length, 6, 'only six covers should use the transport at once');
+  for (let wave = 1; wave <= 4; wave++) {
+    t.mock.timers.tick(4_000);
+    await Promise.all(covers.slice((wave - 1) * 6, wave * 6));
+    await tick();
+    assert.equal(started.length, (wave + 1) * 6);
+  }
+  // The final six spent 16 seconds queued. Their transport just started and
+  // must still be able to consume a normal four-second response body.
+  assert.ok(started.slice(-6).every(({ signal }) => !signal.aborted));
+  t.mock.timers.tick(4_000);
+  const results = await Promise.all(covers);
+  assert.ok(results.every(result => typeof result.value === 'string'), 'every cover must finish successfully');
+  assert.ok(started.every(({ signal }) => !signal.aborted));
+});
+
+for (const stage of ['request', 'body']) {
+  test(`active timeout bounds ${stage} and permits retry`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     let fail = true;
     let signal;
@@ -173,9 +203,6 @@ for (const stage of ['request', 'body', 'queue']) {
       if (stage === 'body') return new Response(new ReadableStream({ pull: () => new Promise(() => {}) }));
       return new Promise(() => {});
     });
-    if (stage === 'queue') {
-      for (let i = 0; i < 6; i++) observe(cache.acquire(`https://books.test/blocker/${i}`));
-    }
     const url = 'https://books.test/timeout';
     const pending = observe(cache.acquire(url));
     await tick();

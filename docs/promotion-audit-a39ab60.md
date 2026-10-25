@@ -20,14 +20,16 @@ This is a follow-up to the selective promotion in PR #140 and preserves its PR #
 | `9895288`, `5bbe334` (#31/#32) | Forward Hvigor's external buildMode into the Rust build, including correction of the earlier properties-based patch. |
 | `55fe8d6`, `f8c2484` | Pinned OHOS Tauri fixes and aligned fs 2.7.1 Rust/JS packages. |
 | `410d2c5` | Declare all extension commands in the generated app ACL and grant desktop management commands to the main window. |
-| `8510fb4`, `64125b7`, `b4dcc67` | Final JS HTTP 2.8.3 cancellation fix, with the Rust HTTP 2.5.9 compatibility boundary retained. Intermediate revert/debug-log suppression commits are not replayed. |
+| `8510fb4`, `64125b7`, `b4dcc67` | Backport upstream JS HTTP 2.8.3's cancellation fix to matched JS/Rust HTTP 2.5.9 using pnpm patches. Intermediate revert/debug-log suppression commits are not replayed. |
 | `4caa8ae`, `a39ab60` | Version-tap debug-button toggle and system-browser external links. Extract the associated runtime panel state and accessibility handling without the server-management UI. |
 
 The debug panel also needs the narrower equivalent of `a2f4edb`'s overlay guard:
-native navigation checks the panel's open state before routing. Window-targeted events can
+native navigation and overlays share one ownership stack, registered during layout effects.
+Window-targeted events can
 reach the earlier route listener before a later overlay listener, including when the overlay
 subsequently consumes the event. Browser regressions reproduce the resulting background navigation
-and verify both cancelable and noncancelable back events. Gesture/transition features are excluded.
+and verify both cancelable and noncancelable back events. Unused predictive-event listeners
+are removed; gesture/transition features are excluded.
 
 Performance isolation adds an in-memory session revision to the existing single-server store;
 login and discovery invalidate or reject old probes accordingly. It does not introduce saved
@@ -42,7 +44,9 @@ server lists or change the stable connection-restoration policy.
   HAP version and dev-only dynamic ACL scope-ID fixes.
 - Wry: official OHOS branch at `6aaf4b84b6e420015c6a14f264f1c7399f150392`.
 - OHOS plugins: `abade34813aff19d15ee2529be7f5607deff9388`; fs 2.7.1 requires Rust >=1.90.
-  Local Reader-plugin copies preserve their licenses and limit modifications to OHOS cfg/fallbacks.
+  Root Cargo patches apply on every target. The local Reader-plugin copies preserve licenses;
+  their exact registry provenance, allowed differences and platform validation limits are recorded
+  in `docs/ohos-upstream-validation.md`.
 
 ## Preserved boundaries
 
@@ -56,23 +60,56 @@ server lists or change the stable connection-restoration policy.
   library, cover transitions and predictive/edge gestures are deferred to separate promotions.
 - Source `057f49d`'s saved-list error UI is deferred with server management. Its underlying dynamic
   capability scope-ID fix is included through the intentional Tauri pin.
+- Welcome-page version taps toggle only the debug float; About-page taps separately unlock
+  developer settings. The float preference persists, but panel-open state does not. Locked
+  release builds capture console output only while the panel is open, as documented in README.
+
+## Review follow-ups
+
+- Cover timeout begins when a worker starts the request. A 30-cover regression with six workers
+  proves that a 16-second queue wait does not consume the active request's 15-second budget.
+- Native recovery checks per-book mutation versions and pending work inside the IDB transaction.
+  Both get/list reject snapshots that predate deletion or shelf changes, including committed native
+  deletions whose IPC reply is still pending. Native-only recovery and sample-book coordination remain.
+- Shared user-info parsing preserves the current-user-specific invalid-response message without
+  changing the shared server-info error. Removed the unused standalone response parser.
+- OHOS init/dev/build consistently merge the stable platform config before caller overrides;
+  the pinned source CLI implements all three commands.
+- Reader docs link the actual gitlink and distinguish historical desktop E2E evidence from current
+  validation. Deferred server-management and Reader-return mechanisms are removed from the docs.
 
 ## Validation
 
-- Node 24.21.0: complete host suite **562/562** passed.
+- Node 24.21.0: complete host suite **588/588** passed.
 - ESLint and TypeScript passed; ESLint retains **23 existing warnings**, no errors.
 - Host and Reader production builds, plus Reader asset copying, passed.
 - Linux `cargo check --manifest-path src-tauri/Cargo.toml --lib --locked` passed and generated
   the extension command permissions and updated ACL schemas through the actual build script.
 - Actual OHOS opener Rust transport module: **4/4** std-only tests passed.
-- Production static frontend: **31/31** browser regressions passed, including legacy capability
+- Production static frontend: **37/37** browser regressions passed, including legacy capability
   constraints, layouts, late startup insets, cover cancellation, real IndexedDB races, debug panel
   back handling and production console capture. Earlier dev layout/startup group: **19/19** passed.
+- Offline dependency provenance checks cover **10 plugin patches / 385 local files** and reject
+  code changes, file additions/removals and unsupported Cargo patch declarations. The optional
+  registry verification also passed against **10 published archives / 494 original files**.
+- Initial-head (`22e3d81`) GitHub CI Rust library tests, frontend quality, Web smoke and native
+  browser regressions passed; the local follow-ups do not change Rust source.
 - Workflow YAML and `git diff --check` passed. Existing CI gates are preserved; native frontend
-  browser regressions are added separately, and quality tests initialize their Tauri template input.
+  browser regressions are added separately, and quality tests initialize their contract, Tauri template and dependency-provenance inputs.
+
+The initial desktop CI correctly rejected the mismatched HTTP JS/Rust minor versions before
+compilation. Both halves now remain 2.5.9, with only upstream cancellation catches and idempotent
+body disposal backported through a lockfile-pinned pnpm patch. Actual ESM/CJS package tests first
+failed **6/6** on unpatched 2.5.9, then passed **6/6** with the patch, preserving real read errors.
+A real Tauri CLI invocation passed its unchanged version check and reached an intentionally
+stopped compiler-runner probe. This verifies the preflight, not a complete installer build.
 
 Browser tests exercise the stable UI with synthetic native IPC and real browser IndexedDB.
 They do not establish device acceptance.
 Linux Rust checking does not establish OHOS/Android/iOS or Windows/macOS packaging compatibility.
 The current environment has no configured OHOS SDK; HAP assembly, upgrade/data retention and
 on-device back/forward navigation, safe-area and opener behavior remain platform acceptance work.
+
+Performance, layout, native dependency provenance and offline recovery were handled in parallel;
+an independent review found no blocking issue in the integrated follow-ups. The primary agent
+reviewed the diffs and ran the combined host production build and browser regression suite.

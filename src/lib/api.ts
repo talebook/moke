@@ -197,7 +197,7 @@ async function loadImageBlob(imageUrl: string, signal: AbortSignal): Promise<Blo
  */
 const IMAGE_CACHE_LIMIT = 128;
 const IMAGE_FETCH_CONCURRENCY = 6;
-// Includes queueing, the request, and response body consumption.
+// Bounds the active request and response body, excluding concurrency queue wait.
 const IMAGE_FETCH_TIMEOUT_MS = 15_000;
 
 interface ImageFetchTask {
@@ -226,6 +226,7 @@ function queueImageFetch(key: string, imageUrl: string): ImageFetchTask {
   const controller = new AbortController();
   let running = false;
   let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let resolve!: (objectUrl: string) => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<string>((resolvePromise, rejectPromise) => {
@@ -261,6 +262,7 @@ function queueImageFetch(key: string, imageUrl: string): ImageFetchTask {
       if (settled) return;
       running = true;
       activeImageFetches += 1;
+      timer = setTimeout(() => task.cancel(new DOMException('Image load timed out', 'TimeoutError')), IMAGE_FETCH_TIMEOUT_MS);
       // Only create an object URL in finish, so late results cannot leak URLs
       // or populate the cache of a replacement task with the same key.
       void loadImageBlob(imageUrl, controller.signal).then((blob) => finish(undefined, blob), finish);
@@ -271,7 +273,6 @@ function queueImageFetch(key: string, imageUrl: string): ImageFetchTask {
       finish(reason);
     },
   };
-  const timer = setTimeout(() => task.cancel(new DOMException('Image load timed out', 'TimeoutError')), IMAGE_FETCH_TIMEOUT_MS);
   imageObjectUrlInflight.set(key, task);
   imageFetchQueue.push(task);
   drainImageFetchQueue();
@@ -423,7 +424,19 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
 export async function fetchCurrentUser(): Promise<CurrentUserResult> {
   const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
   const payload = await fetchUserInfoPayload(serverUrl);
-  if (payload.parseError) throw payload.parseError;
+  if (payload.parseError) {
+    const error = payload.parseError;
+    // Parsing is shared, but current-user errors retain their original context
+    // without changing the error consumed by the server-title probe.
+    if (error instanceof MokeApiError && error.code === 'server.invalid_response') {
+      throw new MokeApiError(
+        error.message.replace(/^服务器返回内容无效/, '登录状态响应无效'),
+        error.code,
+        error.status,
+      );
+    }
+    throw error;
+  }
   return resolveCurrentUserResult(payload.data, payload.ok, payload.status);
 }
 

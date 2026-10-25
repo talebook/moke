@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface DeveloperState {
-  /** 开发者模式是否已解锁（点击版本号 8 次后永久解锁） */
+  /** 开发者模式是否已解锁（关于页版本号连点 8 次；解锁状态持久化） */
   unlocked: boolean;
   /**
    * 设置界面是否「显示」开发者选项入口。
@@ -13,7 +13,7 @@ interface DeveloperState {
   showDebugPanel: boolean;
   /** 当前日志面板是否展开，仅在本次运行中保留。 */
   debugPanelOpen: boolean;
-  /** 当前点击版本号的连击计数（不持久化，仅运行时使用） */
+  /** 关于页版本号连击计数；欢迎页独立计数，只切换调试浮钮（均不持久化）。 */
   versionTapCount: number;
   unlock: () => void;
   lock: () => void;
@@ -21,7 +21,7 @@ interface DeveloperState {
   setEnabled: (enabled: boolean) => void;
   setShowDebugPanel: (show: boolean) => void;
   setDebugPanelOpen: (open: boolean) => void;
-  /** 记录一次版本号点击，返回是否刚好触发解锁 */
+  /** 记录一次关于页版本号点击，返回是否刚好触发解锁。 */
   tapVersion: () => boolean;
   resetTap: () => void;
 }

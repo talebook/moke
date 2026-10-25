@@ -24,8 +24,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Checkout submodules for contract and OHOS preparation tests
-        run: git submodule update --init readest vendor/tauri
+      - name: Checkout submodules for contracts, OHOS preparation and dependency provenance
+        run: git submodule update --init readest vendor/tauri vendor/ohos-plugins
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { installOfflineShelfModule } from './helpers/offline-shelf-browser.mjs';
+import { exerciseDelayedOfflineRecovery, installOfflineShelfModule } from './helpers/offline-shelf-browser.mjs';
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
 
@@ -54,5 +54,26 @@ for (const committedBeforeReply of [false, true]) {
         classification: rows.find(row => row.id.startsWith('media-type::'))?.media_type };
     }, committedBeforeReply);
     expect(result).toEqual({ nativeIds: [], downloadedIds: [], classification: 'comic' });
+  });
+}
+
+for (const path of ['get', 'list']) {
+  for (const mutation of ['delete', 'shelf']) {
+    test(`real IDB: delayed native ${path} snapshot after completed ${mutation}`, async ({ page }) => {
+      await installOfflineShelfModule(page);
+      await page.goto(`${APP_URL}/__offline-test/`);
+      const result = await exerciseDelayedOfflineRecovery(page, { path, mutation });
+      const expected = mutation === 'delete' ? null : { inShelf: false };
+      expect(result).toEqual({ returned: expected, indexed: expected, native: expected,
+        recoveredOther: 'https://other.test::8::pdf', classification: 'comic' });
+    });
+  }
+
+  test(`real IDB: native ${path} recovery during deletion with native commit before reply`, async ({ page }) => {
+    await installOfflineShelfModule(page);
+    await page.goto(`${APP_URL}/__offline-test/`);
+    const result = await exerciseDelayedOfflineRecovery(page, { path, mutation: 'delete', pendingDeletion: true });
+    expect(result).toEqual({ returned: null, indexed: null, native: null,
+      recoveredOther: 'https://other.test::8::pdf', classification: 'comic' });
   });
 }

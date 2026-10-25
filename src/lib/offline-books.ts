@@ -151,12 +151,14 @@ async function putOfflineBookRecord(record: OfflineBookRecord): Promise<OfflineB
  *
  * listOfflineBooks 的恢复路径会为每条原生记录回写一次 WebView 索引；逐条各开一条
  * 事务在几百本时是明显的写放大（书架/书库/搜索/下载页每次挂载都会走一遍）。
- * 合并成单次事务后只提交一次。调用方等待事务完成，避免后续删除或修改
- * 与恢复写入交错，重新写回已经删除或过期的记录。
+ * 合并成单次事务后只提交一次。恢复还需检查原生快照之前捕获的修改版本，
+ * 避免慢 IPC 返回后重新写回已经删除或过期的记录。
  */
 async function putOfflineBookRecords(
   records: OfflineBookRecord[],
-  { onlyChanged = false, shelfStateOnly = false }: { onlyChanged?: boolean; shelfStateOnly?: boolean } = {},
+  { onlyChanged = false, shelfStateOnly = false, recovery }: {
+    onlyChanged?: boolean; shelfStateOnly?: boolean; recovery?: OfflineRecoverySnapshot;
+  } = {},
 ): Promise<OfflineBookRecord[]> {
   if (records.length === 0) return records;
   const db = await openDatabase();
@@ -174,6 +176,10 @@ async function putOfflineBookRecords(
       requestResult(store.get(record.id)) as Promise<OfflineBookRecord | undefined>,
       requestResult(store.get(mediaTypeKey(record.serverUrl, record.bookId))) as Promise<OfflineMediaTypeRecord | undefined>,
     ]);
+    // A native snapshot can predate a completed deletion/shelf update, or be
+    // taken while its IPC has committed but not replied. Check in the write
+    // transaction; a missing latest row must stay missing in either case.
+    if (recovery && !canRecoverOfflineBook(record, recovery)) return latest;
     // Shelf updates must not restore a deleted row or overwrite newer file
     // metadata. Native recovery intentionally still inserts missing rows.
     if (shelfStateOnly && !latest) return undefined;
@@ -216,7 +222,12 @@ function sameServer(left: string, right: string): boolean {
 }
 
 
-export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookRecord[]> {
+export function listOfflineBooks(serverUrl?: string): Promise<OfflineBookRecord[]> {
+  return readOfflineBooks(serverUrl);
+}
+
+async function readOfflineBooks(serverUrl?: string, mutation?: OfflineBookMutation): Promise<OfflineBookRecord[]> {
+  const recovery = captureOfflineRecovery(mutation);
   const db = await openDatabase();
   const store = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
   let records: OfflineBookRecord[];
@@ -252,7 +263,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
         return recovered;
       });
       try {
-        records = await putOfflineBookRecords(records, { onlyChanged: true });
+        records = await putOfflineBookRecords(records, { onlyChanged: true, recovery });
       } catch (error) {
         debugLog('warn', 'download', '原生离线书库已读取，但写回 WebView 索引失败', String(error));
       }
@@ -266,11 +277,21 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-export async function getOfflineBook(
+export function getOfflineBook(
   serverUrl: string,
   bookId: string,
   format?: string,
 ): Promise<OfflineBookRecord | null> {
+  return readOfflineBook(serverUrl, bookId, format);
+}
+
+async function readOfflineBook(
+  serverUrl: string,
+  bookId: string,
+  format?: string,
+  mutation?: OfflineBookMutation,
+): Promise<OfflineBookRecord | null> {
+  const recovery = captureOfflineRecovery(mutation);
   let indexedRecord: OfflineBookRecord | null = null;
   try {
     if (format) {
@@ -284,7 +305,7 @@ export async function getOfflineBook(
         }
       }
     } else {
-      const records = await listOfflineBooks(serverUrl);
+      const records = await readOfflineBooks(serverUrl, mutation);
       indexedRecord = records.find((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))
         ?? await getById(makeOfflineBookKey(serverUrl, bookId));
     }
@@ -329,7 +350,7 @@ export async function getOfflineBook(
       relativePath: nativeRecord.relativePath || indexedRecord?.relativePath,
       storageRoot: nativeRecord.storageRoot || indexedRecord?.storageRoot,
     };
-    try { return await putOfflineBookRecord(recovered); } catch (error) {
+    try { return (await putOfflineBookRecords([recovered], { onlyChanged: true, recovery }))[0] ?? null; } catch (error) {
       debugLog('warn', 'download', '原生离线书已恢复，但写回 WebView 记录失败', String(error));
     }
     return recovered;
@@ -340,15 +361,50 @@ export async function getOfflineBook(
 }
 
 const offlineBookMutations = new Map<string, Promise<unknown>>();
+const activeOfflineBookMutations = new Map<string, OfflineBookMutation>();
+const offlineBookMutationVersions = new Map<string, number>();
+let offlineBookMutationVersion = 0;
 
-function mutateOfflineBook<T>(serverUrl: string, bookId: string, mutation: () => Promise<T>): Promise<T> {
+interface OfflineBookMutation { key: string }
+interface OfflineRecoverySnapshot {
+  version: number;
+  pendingKeys: Set<string>;
+  mutation?: OfflineBookMutation;
+}
+
+function offlineBookMutationKey(serverUrl: string, bookId: string): string {
   let server = serverUrl.replace(/\/+$/, '');
   try { server = new URL(serverUrl).origin; } catch { /* legacy server value */ }
-  const key = makeOfflineBookKey(server, bookId);
+  return makeOfflineBookKey(server, bookId);
+}
+
+function captureOfflineRecovery(mutation?: OfflineBookMutation): OfflineRecoverySnapshot {
+  return { version: offlineBookMutationVersion, pendingKeys: new Set(offlineBookMutations.keys()), mutation };
+}
+
+function canRecoverOfflineBook(record: OfflineBookRecord, snapshot: OfflineRecoverySnapshot): boolean {
+  const key = offlineBookMutationKey(record.serverUrl, record.bookId);
+  // The current operation needs to recover native-only rows for its own
+  // deletion/shelf update. Other queued operations cannot execute until it ends.
+  if (snapshot.mutation && activeOfflineBookMutations.get(key) === snapshot.mutation) return true;
+  return !snapshot.pendingKeys.has(key)
+    && !offlineBookMutations.has(key)
+    && (offlineBookMutationVersions.get(key) ?? 0) <= snapshot.version;
+}
+
+function mutateOfflineBook<T>(serverUrl: string, bookId: string, mutation: (operation: OfflineBookMutation) => Promise<T>): Promise<T> {
+  const key = offlineBookMutationKey(serverUrl, bookId);
+  const operation = { key };
+  offlineBookMutationVersions.set(key, ++offlineBookMutationVersion);
   const previous = offlineBookMutations.get(key) ?? Promise.resolve();
   // Order native writes/removals as well as IDB commits. A late native shelf
   // invoke must never reinsert an index row after this client's deletion.
-  const pending = previous.catch(() => undefined).then(mutation).finally(() => {
+  const pending = previous.catch(() => undefined).then(() => {
+    activeOfflineBookMutations.set(key, operation);
+    return mutation(operation);
+  }).finally(() => {
+    offlineBookMutationVersions.set(key, ++offlineBookMutationVersion);
+    if (activeOfflineBookMutations.get(key) === operation) activeOfflineBookMutations.delete(key);
     if (offlineBookMutations.get(key) === pending) offlineBookMutations.delete(key);
   });
   offlineBookMutations.set(key, pending);
@@ -356,15 +412,16 @@ function mutateOfflineBook<T>(serverUrl: string, bookId: string, mutation: () =>
 }
 
 export function setOfflineBookShelfState(serverUrl: string, bookId: string, inShelf: boolean): Promise<void> {
-  return mutateOfflineBook(serverUrl, bookId, () => updateOfflineBookShelfState(serverUrl, bookId, inShelf));
+  return mutateOfflineBook(serverUrl, bookId, (operation) => updateOfflineBookShelfState(serverUrl, bookId, inShelf, operation));
 }
 
 async function updateOfflineBookShelfState(
   serverUrl: string,
   bookId: string,
   inShelf: boolean,
+  mutation: OfflineBookMutation,
 ): Promise<void> {
-  const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
+  const records = (await readOfflineBooks(serverUrl, mutation)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
   const updatedRecords: OfflineBookRecord[] = [];
   try {
     for (const record of records) {
@@ -494,20 +551,21 @@ export async function deleteOfflineBook(
       // Also cover deletion through the library, not just developer settings.
       // A successful deletion invalidates earlier imports across reloads.
       invalidateSampleBookImports();
-      return mutateOfflineBook(serverUrl, bookId, () => deleteOfflineBookUncoordinated(serverUrl, bookId, format));
+      return mutateOfflineBook(serverUrl, bookId, (operation) => deleteOfflineBookUncoordinated(serverUrl, bookId, format, operation));
     });
   }
-  return mutateOfflineBook(serverUrl, bookId, () => deleteOfflineBookUncoordinated(serverUrl, bookId, format));
+  return mutateOfflineBook(serverUrl, bookId, (operation) => deleteOfflineBookUncoordinated(serverUrl, bookId, format, operation));
 }
 
 async function deleteOfflineBookUncoordinated(
   serverUrl: string,
   bookId: string,
   format?: string,
+  mutation?: OfflineBookMutation,
 ): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
-  const allRecords = format ? null : await listOfflineBooks(serverUrl);
+  const allRecords = format ? null : await readOfflineBooks(serverUrl, mutation);
   const records = format
-    ? [await getOfflineBook(serverUrl, bookId, format)].filter(Boolean) as OfflineBookRecord[]
+    ? [await readOfflineBook(serverUrl, bookId, format, mutation)].filter(Boolean) as OfflineBookRecord[]
     : (allRecords ?? []).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
 
   for (const record of records) {
@@ -528,7 +586,7 @@ async function deleteOfflineBookUncoordinated(
   // Only clear the server flag when no other local format remains.
   // The snapshot only selects deletion targets. A new format may have been
   // saved while native file/index deletion was awaiting completion.
-  const otherFormatRemains = (await listOfflineBooks(serverUrl))
+  const otherFormatRemains = (await readOfflineBooks(serverUrl, mutation))
     .some((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
   if (otherFormatRemains) return { remoteSynced: true };
   try {

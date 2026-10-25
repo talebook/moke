@@ -942,6 +942,103 @@ test('native batch recovery waits for one commit and skips unchanged writes', as
 });
 
 for (const path of ['get', 'list']) {
+  for (const mutation of ['delete', 'shelf']) {
+    test(`delayed native ${path} snapshot cannot undo a completed ${mutation}`, async (t) => {
+      const { indexedDB, recordedBooks } = installTauriOfflineStore('/data', true);
+      await saveOfflineBook({ serverUrl: 'https://books.test', bookId: '8', title: '漫画',
+        fileName: 'comic.pdf', format: 'pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']), inShelf: true });
+      const id = recordedBooks[0].id;
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const original = window.__TAURI_INTERNALS__.invoke;
+      let delayed = false;
+      window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        if (command === 'moke_list_downloaded_books' && !delayed) {
+          delayed = true;
+          const snapshot = await original(command, args);
+          entered.resolve();
+          await release.promise;
+          return snapshot;
+        }
+        return original(command, args);
+      };
+      t.mock.method(globalThis, 'fetch', async () => new Response('{"err":"ok"}'));
+      const recovering = path === 'get'
+        ? getOfflineBook('https://books.test', '8', 'pdf')
+        : listOfflineBooks('https://books.test').then(rows => rows[0] ?? null);
+      await entered.promise;
+      if (mutation === 'delete') await deleteOfflineBook('https://books.test:443', '8', 'pdf');
+      else await setOfflineBookShelfState('https://books.test:443', '8', false);
+      release.resolve();
+      const recovered = await recovering;
+      if (mutation === 'delete') {
+        assert.equal(recovered, null, 'old native snapshot must not revive a deleted download');
+        assert.equal(indexedDB.records.has(id), false);
+      } else {
+        assert.equal(recovered.inShelf, false, 'returned state must match the completed shelf update');
+        assert.equal(indexedDB.records.get(id).inShelf, false);
+      }
+    });
+  }
+}
+
+for (const path of ['get', 'list']) {
+  test(`native ${path} recovery begun during deletion cannot restore a row while delete reply is pending`, async (t) => {
+    const { indexedDB, recordedBooks } = installTauriOfflineStore('/data', true);
+    await saveOfflineBook({ serverUrl: 'https://books.test', bookId: '8', title: '漫画',
+      fileName: 'comic.pdf', format: 'pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']) });
+    const id = recordedBooks[0].id;
+    const fileDeletion = Promise.withResolvers();
+    const releaseFileDeletion = Promise.withResolvers();
+    const captured = Promise.withResolvers();
+    const releaseSnapshot = Promise.withResolvers();
+    const removed = Promise.withResolvers();
+    const releaseRemovalReply = Promise.withResolvers();
+    const original = window.__TAURI_INTERNALS__.invoke;
+    let delayNextSnapshot = false;
+    window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+      if (command === 'moke_delete_downloaded_book_file') {
+        fileDeletion.resolve();
+        await releaseFileDeletion.promise;
+      }
+      if (command === 'moke_list_downloaded_books' && delayNextSnapshot) {
+        delayNextSnapshot = false;
+        const snapshot = await original(command, args);
+        captured.resolve();
+        await releaseSnapshot.promise;
+        return snapshot;
+      }
+      const result = await original(command, args);
+      if (command === 'moke_remove_downloaded_book') {
+        removed.resolve();
+        await releaseRemovalReply.promise;
+      }
+      return result;
+    };
+    t.mock.method(globalThis, 'fetch', async () => new Response('{"err":"ok"}'));
+    const deleting = deleteOfflineBook('https://books.test:443', '8', 'pdf');
+    await fileDeletion.promise;
+    delayNextSnapshot = true;
+    const recovering = path === 'get'
+      ? getOfflineBook('https://books.test', '8', 'pdf')
+      : listOfflineBooks('https://books.test').then(rows => rows[0] ?? null);
+    await captured.promise;
+    releaseFileDeletion.resolve();
+    await removed.promise;
+    assert.equal(indexedDB.records.has(id), false);
+    assert.equal(recordedBooks.length, 0);
+    releaseSnapshot.resolve();
+    const recovered = await recovering;
+    // Check before releasing the deletion reply: completion-only versioning
+    // cannot detect this snapshot, which started after the mutation began.
+    assert.equal(recovered, null);
+    assert.equal(indexedDB.records.has(id), false);
+    releaseRemovalReply.resolve();
+    await deleting;
+  });
+}
+
+for (const path of ['get', 'list']) {
   for (const existing of [false, true]) {
     for (const classificationFirst of [false, true]) {
       test(`native ${path} merges classification (${existing ? 'old row' : 'no row'}, ${classificationFirst ? 'classification first' : 'recovery first'})`, async () => {

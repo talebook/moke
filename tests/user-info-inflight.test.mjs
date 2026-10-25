@@ -81,6 +81,67 @@ test('normal same-session user, title and capability probes share one body; sett
   assert.equal(calls, 2);
 });
 
+for (const [body, userMessage, serverMessage] of [
+  ['<html>invalid JSON</html>', '登录状态响应无效。', '服务器返回内容无效。'],
+  ['', '登录状态响应无效。', '服务器返回内容无效。'],
+  ['invalid JSON', '登录状态响应无效：invalid JSON', '服务器返回内容无效：invalid JSON'],
+]) {
+  test(`shared invalid JSON preserves consumer-specific messages (${JSON.stringify(body)})`, async (t) => {
+    const gate = Promise.withResolvers();
+    let calls = 0;
+    const api = await installApi(t, async () => { calls++; return gate.promise; });
+    const results = Promise.allSettled([api.fetchCurrentUser(), api.fetchServerInfo()]);
+    await tick();
+    assert.equal(calls, 1);
+    const response = new Response(body);
+    const read = t.mock.method(response, 'text');
+    gate.resolve(response);
+    const [user, server] = await results;
+    assert.equal(user.status, 'rejected');
+    assert.equal(server.status, 'rejected');
+    assert.equal(user.reason.code, 'server.invalid_response');
+    assert.equal(user.reason.status, 200);
+    assert.equal(user.reason.message, userMessage);
+    assert.equal(server.reason.code, 'server.invalid_response');
+    assert.equal(server.reason.status, 200);
+    assert.equal(server.reason.message, serverMessage);
+    assert.notEqual(user.reason, server.reason, 'consumer mapping must not mutate the shared parse error');
+    assert.equal(read.mock.callCount(), 1);
+  });
+}
+
+for (const failure of ['network', 'body', 'http']) {
+  test(`current-user JSON message mapping preserves ${failure} failures`, async (t) => {
+    const gate = Promise.withResolvers();
+    const networkError = new Error('transport unavailable');
+    const api = await installApi(t, async () => gate.promise);
+    const results = Promise.allSettled([api.fetchCurrentUser(), api.fetchServerInfo()]);
+    await tick();
+    if (failure === 'network') gate.reject(networkError);
+    else {
+      const response = failure === 'http'
+        ? new Response('<html>Unauthorized</html>', { status: 401 })
+        : new Response('');
+      if (failure === 'body') response.text = async () => { throw new Error('body unavailable'); };
+      gate.resolve(response);
+    }
+    const [user, server] = await results;
+    assert.equal(user.status, 'rejected');
+    assert.equal(server.status, 'rejected');
+    assert.equal(user.reason, server.reason, 'unrelated errors must pass through unchanged');
+    if (failure === 'network') assert.equal(user.reason, networkError);
+    if (failure === 'body') {
+      assert.equal(user.reason.code, 'server.response_read_failed');
+      assert.equal(user.reason.message, '服务器响应读取失败，请稍后重试。');
+    }
+    if (failure === 'http') {
+      assert.equal(user.reason.code, 'http.401');
+      assert.equal(user.reason.status, 401);
+      assert.equal(user.reason.message, '服务器返回 401，且响应内容无效。');
+    }
+  });
+}
+
 test('successful sign-in isolates suspended anonymous info before confirmation and invalidates old capabilities/covers', async (t) => {
   const anonymous = Promise.withResolvers();
   const confirmed = Promise.withResolvers();

@@ -4,14 +4,16 @@ import test from 'node:test';
 import { tauriCommand } from '../scripts/tauri.mjs';
 
 test('OHOS dev uses the pinned source CLI and preserves device arguments', () => {
-  const args = ['-v', 'ohos', 'dev', '--host', '10.0.2.2', '--no-watch'];
+  const args = ['-v', 'ohos', 'dev', 'test-device', '--host', '10.0.2.2', '--no-watch', '--config', '{"build":{"devUrl":"http://10.0.2.2:3000"}}'];
   const command = tauriCommand(args);
   assert.equal(command.command, 'cargo');
   assert.ok(command.args.includes('--locked'));
   assert.ok(command.args.includes('--no-default-features'));
   assert.equal(command.args[command.args.indexOf('--features') + 1], 'rustls');
   assert.match(command.args[command.args.indexOf('--manifest-path') + 1], /vendor[/\\]tauri[/\\]Cargo.toml$/);
-  assert.deepEqual(command.args.slice(command.args.indexOf('--') + 1), args);
+  assert.deepEqual(command.args.slice(command.args.indexOf('--') + 1), [
+    '-v', 'ohos', 'dev', '--config', 'src-tauri/tauri.ohos.conf.json', ...args.slice(3),
+  ]);
 });
 
 test('standard commands and paths containing ohos still use the npm CLI', () => {

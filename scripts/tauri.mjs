@@ -10,7 +10,7 @@ export function tauriCommand(args) {
   // Published npm binaries do not contain the official experimental OHOS CLI.
   if (args.find((arg) => !arg.startsWith('-')) === 'ohos') {
     const subcommandIndex = args.indexOf('ohos') + 1;
-    const ohosArgs = ['init', 'build'].includes(args[subcommandIndex])
+    const ohosArgs = ['init', 'dev', 'build'].includes(args[subcommandIndex])
       ? [
           ...args.slice(0, subcommandIndex + 1),
           '--config', 'src-tauri/tauri.ohos.conf.json',

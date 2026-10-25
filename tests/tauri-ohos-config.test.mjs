@@ -19,9 +19,9 @@ test('additional OHOS config can override the default flavor', () => {
   ]);
 });
 
-test('OHOS dev retains its platform auto configuration', () => {
+test('OHOS dev explicitly loads the same stable platform config', () => {
   const { args } = tauriCommand(['ohos', 'dev']);
-  assert.deepEqual(args.slice(args.indexOf('--') + 1), ['ohos', 'dev']);
+  assert.deepEqual(args.slice(args.indexOf('--') + 1), ['ohos', 'dev', '--config', 'src-tauri/tauri.ohos.conf.json']);
 });
 
 test('OHOS retains the stable package identifier without a validator patch', () => {

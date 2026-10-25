@@ -1,6 +1,10 @@
-/** A native back gesture belongs to the most recently opened overlay. */
+/** A native BACK request belongs to the most recently opened overlay. */
 export class OverlayBackStack {
   private readonly entries: Array<{ close: () => void }> = [];
+
+  hasOpenEntry(): boolean {
+    return this.entries.length > 0;
+  }
 
   register(close: () => void) {
     const entry = { close };
@@ -14,12 +18,15 @@ export class OverlayBackStack {
     };
   }
 
-  consume(event: Event, commit: boolean): boolean {
+  consume(event: Event): boolean {
     const entry = this.entries.at(-1);
     if (!entry) return false;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (commit) entry.close();
+    entry.close();
     return true;
   }
 }
+
+// The route listener and every overlay must consult the same ownership stack.
+export const overlayBackStack = new OverlayBackStack();

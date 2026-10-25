@@ -1,7 +1,7 @@
 // These relative `.ts` imports are intentional: this module and the server
 // store are exercised directly by Node's strip-types test runner, which does
 // not resolve the application's `@/` alias.
-import { MokeApiError, readJsonResponse } from './api-core.ts';
+import { MokeApiError } from './api-core.ts';
 
 export const SERVER_CAPABILITIES_TTL_MS = 5 * 60 * 1000;
 
@@ -48,12 +48,6 @@ export interface CurrentUserResult {
  * HTTP errors, and unexpected application failures throw so callers can retain
  * their last confirmed user.
  */
-export async function readCurrentUserResponse(response: Response): Promise<CurrentUserResult> {
-  const data = await readJsonResponse<UserInfoResponse>(response, '登录状态响应无效。');
-  return resolveCurrentUserResult(data, response.ok, response.status);
-}
-
-/** 解析结果已知时的纯函数版本（供已去重解析 user/info 的调用方复用）。 */
 export function resolveCurrentUserResult(
   data: UserInfoResponse,
   responseOk: boolean,

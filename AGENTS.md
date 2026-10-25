@@ -213,9 +213,10 @@ Tauri APIs.
 - `tauri-plugin-fs` and `@tauri-apps/plugin-fs` are pinned to 2.7.1. The OHOS plugin fork reapplies
   its sandbox adapter to that upstream version, which requires Rust 1.90 or newer. Aggregate
   `write-all`/`write-files` permissions are sets; keep write paths command-scoped.
-- `@tauri-apps/plugin-http` is pinned to 2.8.3 to handle late cancellation rejections. Its Rust
-  half intentionally remains 2.5.9: Rust HTTP 2.8.3 requires Tauri 2.12, while the OHOS Wry/Tao
-  ports currently support the earlier stack. The existing five-command protocol remains compatible.
+- Both HTTP plugin halves are pinned to 2.5.9. A pnpm patch backports upstream 2.8.3's late-abort
+  rejection handling and idempotent body disposal to both JS module formats. Keep the patch in
+  `patches/` and its lockfile hash when updating dependencies. Rust HTTP 2.8.3 requires Tauri 2.12,
+  beyond the current OHOS Wry/Tao stack. Do not bypass the CLI's package-version checks.
 - Publication HTML is untrusted. It must stay inside Foliate's sandbox iframe and must not reach the
   top-level Tauri IPC bridge. Desktop scope widening additionally rejects paths that are not already
   in `fs_scope`; do not weaken either boundary when changing Reader commands or capabilities.
