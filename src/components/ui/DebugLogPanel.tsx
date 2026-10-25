@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useDebugLogStore, type DebugLogLevel, type DebugLogType } from '@/lib/debug-log';
 import { useDeveloperStore } from '@/lib/store/developer';
+import { useOverlayBack } from '@/components/ui/use-overlay-back';
 
 // Moke 主题色（见 tailwind.config.ts），调试面板统一走浅色暖色系
 const theme = {
@@ -49,7 +50,10 @@ const defaultFilter: LevelFilterState = {
 };
 
 export function DebugLogPanel() {
-  const [open, setOpen] = useState(false);
+  const open = useDeveloperStore((s) => s.debugPanelOpen);
+  const setOpen = useDeveloperStore((s) => s.setDebugPanelOpen);
+  const panel = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DebugLogType>('console');
   const [filters, setFilters] = useState<Record<DebugLogType, LevelFilterState>>({
@@ -60,6 +64,38 @@ export function DebugLogPanel() {
   const logs = useDebugLogStore((s) => s.logs);
   const clear = useDebugLogStore((s) => s.clear);
   const showDebugPanel = useDeveloperStore((s) => s.showDebugPanel);
+  useOverlayBack(open, () => setOpen(false));
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeButton.current?.focus({ preventScroll: true });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+      }
+      if (event.key !== 'Tab') return;
+      const controls = panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
+      if (!controls?.length) { event.preventDefault(); return; }
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!panel.current?.contains(document.activeElement)
+        || (event.shiftKey ? document.activeElement === first : document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus({ preventScroll: true });
+    };
+  }, [open, setOpen]);
 
   const errorCount = logs.filter((l) => l.level === 'error').length;
   const currentFilter = filters[activeTab];
@@ -89,16 +125,16 @@ export function DebugLogPanel() {
       [activeTab]: { ...prev[activeTab], [level]: !prev[activeTab][level] },
     }));
 
-  // 仅在开发者开启「显示调试面板按钮」时渲染
-  if (!showDebugPanel) {
+  // 连接页可临时打开面板，无需启用持久化的浮动入口。
+  if (!showDebugPanel && !open) {
     return null;
   }
 
   return (
     <>
       {/* 浮动按钮 */}
-      <button
-        onClick={() => setOpen((v) => !v)}
+      {showDebugPanel && <button
+        onClick={() => setOpen(!open)}
         style={{
           position: 'fixed',
           right: 16,
@@ -116,9 +152,11 @@ export function DebugLogPanel() {
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
         }}
         aria-label="调试日志"
+        aria-expanded={open}
+        aria-controls="moke-debug-log-panel"
       >
         <img
-          src="/debug.avif"
+          src="/debug.png"
           alt="调试日志"
           style={{ width: 20, height: 20, objectFit: 'contain' }}
         />
@@ -144,7 +182,7 @@ export function DebugLogPanel() {
             {errorCount}
           </span>
         )}
-      </button>
+      </button>}
 
       {/* 日志面板 */}
       {open && (
@@ -161,6 +199,11 @@ export function DebugLogPanel() {
           onClick={() => setOpen(false)}
         >
           <div
+            ref={panel}
+            id="moke-debug-log-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="调试日志面板"
             onClick={(e) => e.stopPropagation()}
             style={{
               background: theme.bg,
@@ -194,7 +237,7 @@ export function DebugLogPanel() {
               <div style={{ flex: 1 }} />
               <button onClick={copyAll} style={btnStyle}>复制</button>
               <button onClick={clear} style={btnStyle}>清空</button>
-              <button onClick={() => setOpen(false)} style={btnStyle}>关闭</button>
+              <button ref={closeButton} onClick={() => setOpen(false)} style={btnStyle}>关闭</button>
             </div>
 
             {/* Tab 与级别过滤（同一行，过滤在右侧） */}

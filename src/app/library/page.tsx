@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Search, ArrowLeft, Loader2 } from 'lucide-react';
@@ -82,7 +82,8 @@ const TAG_DROPDOWN_LIMIT = 12;
 const MORE_TAGS_VALUE = '__moke_more_tags__';
 
 export default function LibraryPage() {
-  const { serverUrl, offlineMode } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
   const router = useRouter();
   const isTauriApp = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
@@ -690,25 +691,27 @@ export default function LibraryPage() {
   return (
     <DesktopLayout>
       {/* ── Header ── */}
-      <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:flex-row md:items-center md:px-8 md:py-5">
-        <div className="shrink-0">
-          {activeTab === 'local' ? (
-            <>
-              <p className="text-xs font-medium text-primary/80">共 {total} 本藏书</p>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">全部藏书</h1>
-            </>
-          ) : (
-            <>
-              <p className="text-xs font-medium text-primary/80">在线书库</p>
-              <h1 className="text-2xl font-semibold tracking-tight text-foreground">在线书库</h1>
-            </>
-          )}
+      <header className="sticky top-0 z-10 flex shrink-0 flex-col gap-3 border-b border-amber-950/10 bg-[#fffdf8]/80 px-4 py-4 backdrop-blur-xl sm:px-6 md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,390px)_auto] md:items-center md:px-8 md:py-5">
+        <div className="flex min-w-0 items-center justify-between gap-3 md:contents">
+          <div className="min-w-0 md:col-start-1 md:row-start-1">
+            {activeTab === 'local' ? (
+              <>
+                <p className="text-xs font-medium text-primary/80">共 {total} 本藏书</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">全部藏书</h1>
+              </>
+            ) : (
+              <>
+                <p className="text-xs font-medium text-primary/80">在线书库</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">在线书库</h1>
+              </>
+            )}
+          </div>
+          <ViewModeToggle value={viewMode} onChange={setViewMode} className="md:col-start-3 md:row-start-1" />
         </div>
-        <div className="hidden flex-1 md:block" />
 
-        <div className="flex w-full min-w-0 items-center gap-2 md:w-auto">
+        <div className="flex w-full min-w-0 items-center gap-2 md:col-start-2 md:row-start-1 md:w-auto">
           {/* Search — switches mode per tab */}
-          <div className="flex min-w-0 flex-1 items-center gap-2 md:w-[390px] md:flex-none">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <div className="relative min-w-0 flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               <input
@@ -729,7 +732,6 @@ export default function LibraryPage() {
               {activeTab === 'online' && networkSearchLoading ? '搜索中' : '搜索'}
             </button>
           </div>
-          <ViewModeToggle value={viewMode} onChange={setViewMode} className="ml-1 shrink-0" />
         </div>
       </header>
 
@@ -1061,6 +1063,13 @@ export default function LibraryPage() {
 
 // ── Sub-components ──────────────────────────────────────────────────────────────
 
+/** 网络书籍没有稳定 id：优先用「书源 + book_url」合成，缺失时才退回下标。 */
+function networkRowId(book: NetworkBook, idx: number): string {
+  return book.source_id != null && book.book_url
+    ? `network-${book.source_id}:${book.book_url}`
+    : `network-${idx}`;
+}
+
 function networkBookToRow(book: NetworkBook, idx: number): BookRow {
   const title = book.title || book.name || `未命名-${idx}`;
   const authorRaw = book.author || book.authors;
@@ -1069,11 +1078,10 @@ function networkBookToRow(book: NetworkBook, idx: number): BookRow {
     : Array.isArray(authorRaw)
       ? authorRaw.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
       : '';
-  // Network books don't carry a stable id; synthesize one from the index so the table
-  // can key rows. Rows are made clickable via `getRowHref`, which resolves the
-  // network-book detail page from `source_id` + `book_url` (see NetworkBookTable).
+  // 网络书籍没有稳定 id，这里合成一个，供表格行 key 与 getRowHref 使用
+  // （详情页地址由 source_id + book_url 解析，见 NetworkBookTable）。
   return {
-    id: `network-${idx}`,
+    id: networkRowId(book, idx),
     title,
     author,
     img: book.cover_url || book.img || book.thumb,
@@ -1094,9 +1102,21 @@ function NetworkBookTable({
   paged?: boolean;
   onSortChange?: (sort: SortState | null) => void;
 }) {
+  // 行只在 books 变化时重建：否则父级任意状态变化都会生成新数组，
+  // 让 BookTable 内部的排序 useMemo 无谓重跑、行 key 漂移导致重挂载。
+  const { rows, bookById } = useMemo(() => {
+    const byId = new Map<string, NetworkBook>();
+    const mapped = books.map((book, idx) => {
+      const row = networkBookToRow(book, idx);
+      byId.set(String(row.id), book);
+      return row;
+    });
+    return { rows: mapped, bookById: byId };
+  }, [books]);
+
   return (
     <BookTable
-      books={books.map((b, i) => networkBookToRow(b, i))}
+      books={rows}
       getRowHref={(row) =>
         row.source_id != null && row.book_url ? buildNetworkBookHref(row.source_id, row.book_url) : ''
       }
@@ -1105,8 +1125,7 @@ function NetworkBookTable({
       onContextAction={
         onContextAction
           ? (id, x, y) => {
-              const idx = parseInt(String(id).replace(/^network-/, ''), 10);
-              const book = books[idx];
+              const book = bookById.get(String(id));
               if (book) onContextAction(book, x, y);
             }
           : undefined
@@ -1275,6 +1294,11 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
 
 function TagFilterSelect({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
   const [showAllTags, setShowAllTags] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const closeAllTags = useCallback(() => {
+    setShowAllTags(false);
+    filterRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, []);
   const hasMoreTags = options.length > TAG_DROPDOWN_LIMIT;
   const compactTags = hasMoreTags
     ? Array.from(new Set([
@@ -1289,7 +1313,7 @@ function TagFilterSelect({ value, options, onChange }: { value: string; options:
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div ref={filterRef} className="flex shrink-0 items-center gap-1.5">
         <span className="text-xs shrink-0 text-muted-foreground">标签</span>
         <Select
           value={value}
@@ -1309,7 +1333,7 @@ function TagFilterSelect({ value, options, onChange }: { value: string; options:
           value={value}
           options={options}
           onSelect={onChange}
-          onClose={() => setShowAllTags(false)}
+          onClose={closeAllTags}
         />
       )}
     </>
@@ -1327,10 +1351,26 @@ function TagPickerDialog({
   onSelect: (value: string) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
+    dialogRef.current?.querySelector('button')?.focus({ preventScroll: true });
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key !== 'Tab') return;
+      const buttons = dialogRef.current?.querySelectorAll('button');
+      if (!buttons?.length) return;
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      const active = document.activeElement;
+      if (!dialogRef.current?.contains(active) ||
+          (event.shiftKey ? active === first : active === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
     };
 
     document.body.style.overflow = 'hidden';
@@ -1351,10 +1391,11 @@ function TagPickerDialog({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="all-tags-title"
-        className="flex max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
+        className="flex max-h-[85vh] supports-[height:100dvh]:max-h-[85dvh] w-full flex-col rounded-t-[28px] border border-amber-950/10 bg-white/95 shadow-2xl backdrop-blur sm:max-w-2xl sm:rounded-[28px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-amber-950/10 px-5 py-4 sm:px-6">
           <div>

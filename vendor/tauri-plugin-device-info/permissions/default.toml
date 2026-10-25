@@ -1,0 +1,3 @@
+[default]
+description = "Default permissions for the plugin"
+permissions = ["allow-get-device-info", "allow-get-battery-info", "allow-get-network-info", "allow-get-storage-info", "allow-get-display-info"]

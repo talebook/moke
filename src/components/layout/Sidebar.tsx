@@ -12,8 +12,13 @@ let previousSidebarTabIndex: number | null = null;
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { serverTitle, user, offlineMode } = useServerStore();
-  const { extensions, loaded, loadExtensions, getSidebarExtensions } = useExtensionStore();
+  const serverTitle = useServerStore((state) => state.serverTitle);
+  const user = useServerStore((state) => state.user);
+  const offlineMode = useServerStore((state) => state.offlineMode);
+  const extensions = useExtensionStore((state) => state.extensions);
+  const loaded = useExtensionStore((state) => state.loaded);
+  const loadExtensions = useExtensionStore((state) => state.loadExtensions);
+  const getSidebarExtensions = useExtensionStore((state) => state.getSidebarExtensions);
   const [sidebarExts, setSidebarExts] = useState<ReturnType<typeof getSidebarExtensions>>([]);
 
   useEffect(() => {

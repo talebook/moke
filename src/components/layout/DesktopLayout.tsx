@@ -12,7 +12,7 @@ export function DesktopLayout({ children }: { children: React.ReactNode }) {
   const dismiss = useToast((s) => s.dismiss);
 
   return (
-    <div className="flex h-dvh overflow-hidden app-warm-bg">
+    <div className="flex h-screen supports-[height:100dvh]:h-dvh overflow-hidden app-warm-bg">
       <Sidebar />
       <div className="moke-route-content flex-1 min-w-0 h-full flex flex-col overflow-hidden pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] lg:ml-[220px] lg:pb-0">
         {children}

@@ -188,7 +188,8 @@ Tauri APIs.
 - `src/lib/offline-books.ts` — offline downloads. Stored in IndexedDB (`moke-offline-books`), and on
   Tauri additionally written to disk under `AppData/books/` via `@tauri-apps/plugin-fs` so the reader
   can open a real file path.
-- `@/*` → `src/*` and `@pdfjs/*` → `public/vendor/pdfjs/*` path aliases (`tsconfig.json`).
+- `@/*` → `src/*` is the host path alias. PDF.js assets and the `@pdfjs/*` alias
+  belong to the embedded Reader workspace; do not duplicate them in Moke's `public/`.
 
 ### Tauri backend (`src-tauri/`)
 
@@ -204,9 +205,17 @@ Tauri APIs.
   dependency of `moke`, because permission manifests exposed via cargo `links` don't propagate through
   the `readestlib` layer. So those plugins are listed as direct deps purely so `build.rs` finds the
   permissions; actual plugin *registration* still happens once in `readestlib::register_reader_plugins`.
-- `src-tauri/build.rs` declares the bare Reader commands plus the host-owned `ext_reader_event` so
-  Tauri can generate explicit app-command ACL permissions. `tests/reader-only-build.test.mjs` compares
-  that list with `readestlib::reader_invoke_handler`; update both repositories together if it fails.
+- `src-tauri/build.rs` declares the Reader, Moke and extension commands for explicit app-command
+  ACL permissions. Every registered command must appear in `APP_ACL_COMMANDS`; otherwise Tauri
+  rejects it before dispatch, even when a capability grants it. Desktop extension management is
+  granted only to the main window. `tests/reader-only-build.test.mjs` and
+  `tests/extensions-acl.test.mjs` verify the declaration and capability boundaries.
+- `tauri-plugin-fs` and `@tauri-apps/plugin-fs` are pinned to 2.7.1. The OHOS plugin fork reapplies
+  its sandbox adapter to that upstream version, which requires Rust 1.90 or newer. Aggregate
+  `write-all`/`write-files` permissions are sets; keep write paths command-scoped.
+- `@tauri-apps/plugin-http` is pinned to 2.8.3 to handle late cancellation rejections. Its Rust
+  half intentionally remains 2.5.9: Rust HTTP 2.8.3 requires Tauri 2.12, while the OHOS Wry/Tao
+  ports currently support the earlier stack. The existing five-command protocol remains compatible.
 - Publication HTML is untrusted. It must stay inside Foliate's sandbox iframe and must not reach the
   top-level Tauri IPC bridge. Desktop scope widening additionally rejects paths that are not already
   in `fs_scope`; do not weaken either boundary when changing Reader commands or capabilities.
@@ -342,3 +351,13 @@ these in globals.css — the component is the source of truth:
 - `src/components/book/BookContextMenu.tsx` and `src/components/ui/Select.tsx` — already share
   the right-click menu visual language (`border-amber-950/10 bg-white/95 backdrop-blur`); the
   global rules above handle their e-ink adaptation without per-component code.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

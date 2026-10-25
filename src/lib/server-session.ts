@@ -50,11 +50,19 @@ export interface CurrentUserResult {
  */
 export async function readCurrentUserResponse(response: Response): Promise<CurrentUserResult> {
   const data = await readJsonResponse<UserInfoResponse>(response, '登录状态响应无效。');
+  return resolveCurrentUserResult(data, response.ok, response.status);
+}
 
+/** 解析结果已知时的纯函数版本（供已去重解析 user/info 的调用方复用）。 */
+export function resolveCurrentUserResult(
+  data: UserInfoResponse,
+  responseOk: boolean,
+  status: number,
+): CurrentUserResult {
   const info = data.user || {};
   const isLogin = Boolean(info.is_login);
   const isConfirmedGuest = data.err === 'user.need_login'
-    || (response.ok && data.err === 'ok' && !isLogin);
+    || (responseOk && data.err === 'ok' && !isLogin);
 
   if (isConfirmedGuest) {
     return {
@@ -65,11 +73,11 @@ export async function readCurrentUserResponse(response: Response): Promise<Curre
     };
   }
 
-  if (!response.ok) {
+  if (!responseOk) {
     throw new MokeApiError(
-      String(data.msg || `服务器返回 ${response.status}。`),
-      String(data.err || `http.${response.status}`),
-      response.status,
+      String(data.msg || `服务器返回 ${status}。`),
+      String(data.err || `http.${status}`),
+      status,
     );
   }
 
@@ -77,7 +85,7 @@ export async function readCurrentUserResponse(response: Response): Promise<Curre
     throw new MokeApiError(
       String(data.msg || '登录状态同步失败。'),
       String(data.err || 'server.user_sync_failed'),
-      response.status,
+      status,
     );
   }
 

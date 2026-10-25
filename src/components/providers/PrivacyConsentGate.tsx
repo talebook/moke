@@ -63,7 +63,7 @@ export function PrivacyConsentGate({ children }: { children: React.ReactNode }) 
   };
 
   if (state === 'loading') {
-    return <div className="min-h-dvh app-warm-bg" aria-label="正在加载隐私设置" />;
+    return <div className="min-h-screen supports-[height:100dvh]:min-h-dvh app-warm-bg" aria-label="正在加载隐私设置" />;
   }
 
   return (

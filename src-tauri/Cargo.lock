@@ -7735,8 +7735,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-biometric"
 version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "306175b744890b5e4aeb8add6aae7debec1b1504c5087bd0310ed7c9c6feae38"
 dependencies = [
  "log",
  "serde",
@@ -7799,8 +7797,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-device-info"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4c8d9a6d11719b36ea2af6c94e4d8bcc50b6ebe1b7064ad17ec02dd0b23aae9"
 dependencies = [
  "battery",
  "core-graphics 0.25.0",
@@ -7837,9 +7833,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-fs"
-version = "2.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7ecc274121aca0c036a2b42d1cbe83d368d348f54e0bb8a735c2b1548e8f371"
+version = "2.7.1"
 dependencies = [
  "anyhow",
  "dunce",
@@ -7862,8 +7856,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-haptics"
 version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01b167d598ada05c599f4460595108c8d1aa636030a97d19796c1bcda97d881d"
 dependencies = [
  "log",
  "serde",
@@ -7900,8 +7892,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-log"
 version = "2.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6792296e6f389268016c77db21ebae1fc0568f2fccf88b1ec7e2ea71330afb4c"
 dependencies = [
  "android_logger",
  "fern",
@@ -7966,9 +7956,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-opener"
-version = "2.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29"
+version = "2.5.5"
 dependencies = [
  "dunce",
  "glob",
@@ -8048,8 +8036,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-sharekit"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875bdd9fb587e38505db5394df2542f2af4f63d5b2b6356728c9d73692c26900"
 dependencies = [
  "log",
  "objc2",
@@ -8068,9 +8054,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-shell"
-version = "2.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8457dbf9e2bab1edd8df22bb2c20857a59a9868e79cb3eac5ed639eec4d0c73b"
+version = "2.3.6"
 dependencies = [
  "encoding_rs",
  "log",
@@ -8083,6 +8067,7 @@ dependencies = [
  "shared_child",
  "tauri",
  "tauri-plugin",
+ "tauri-plugin-opener",
  "thiserror 2.0.19",
  "tokio",
 ]
@@ -8090,8 +8075,6 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-sign-in-with-apple"
 version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9402eb8a70fdff5127fccc1f1666ebb06b5efc10e0eb656d8a70c798e26142e"
 dependencies = [
  "serde",
  "tauri",

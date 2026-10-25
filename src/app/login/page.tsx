@@ -15,8 +15,7 @@ interface TalebookLoginResponse {
   msg?: string;
 }
 
-async function login(username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
-  const { serverUrl } = useServerStore.getState();
+async function login(serverUrl: string, username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
@@ -41,7 +40,7 @@ async function login(username: string, password: string, captchaData?: any): Pro
 
 export default function LoginPage() {
   const router = useRouter();
-  const { logout, serverTitle, setConnected } = useServerStore();
+  const { invalidateSession, logout, serverTitle, setConnected } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -56,13 +55,22 @@ export default function LoginPage() {
     if (!username.trim() || !password.trim()) return;
     setLoading(true);
     setError('');
+    let session = useServerStore.getState();
+    const isCurrentSession = () => {
+      const current = useServerStore.getState();
+      return current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
+    };
 
     try {
-      const res = await login(username, password, captchaData);
+      const res = await login(session.serverUrl, username, password, captchaData);
+      if (!isCurrentSession()) return;
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
+        invalidateSession();
+        session = useServerStore.getState();
         const info = await fetchCurrentUser();
+        if (!isCurrentSession()) return;
         if (!info.isLogin || !info.user) {
           logout();
           setError('登录请求已成功，但服务器没有建立登录状态。请检查浏览器是否阻止了跨站 Cookie，或确认当前服务器地址是否可被前端正常携带会话。');
@@ -81,6 +89,7 @@ export default function LoginPage() {
         setError(res.msg || '登录失败，请检查用户名和密码');
       }
     } catch (loginError) {
+      if (!isCurrentSession()) return;
       console.error('[LoginPage] login flow failed:', loginError);
       setError('无法连接服务器');
     } finally {

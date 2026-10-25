@@ -146,6 +146,65 @@ async function putOfflineBookRecord(record: OfflineBookRecord): Promise<OfflineB
   return merged;
 }
 
+/**
+ * 批量写回：一条事务里完成多个 put。
+ *
+ * listOfflineBooks 的恢复路径会为每条原生记录回写一次 WebView 索引；逐条各开一条
+ * 事务在几百本时是明显的写放大（书架/书库/搜索/下载页每次挂载都会走一遍）。
+ * 合并成单次事务后只提交一次。调用方等待事务完成，避免后续删除或修改
+ * 与恢复写入交错，重新写回已经删除或过期的记录。
+ */
+async function putOfflineBookRecords(
+  records: OfflineBookRecord[],
+  { onlyChanged = false, shelfStateOnly = false }: { onlyChanged?: boolean; shelfStateOnly?: boolean } = {},
+): Promise<OfflineBookRecord[]> {
+  if (records.length === 0) return records;
+  const db = await openDatabase();
+  const transaction = db.transaction(STORE_NAME, 'readwrite');
+  const committed = new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'));
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'));
+  });
+  const store = transaction.objectStore(STORE_NAME);
+  const mergedRecords = Promise.all(records.map(async (record) => {
+    // Native IPC may have overlapped an online classification refresh. Merge
+    // inside the same write transaction, even when native metadata is unchanged.
+    const [latest, classification] = await Promise.all([
+      requestResult(store.get(record.id)) as Promise<OfflineBookRecord | undefined>,
+      requestResult(store.get(mediaTypeKey(record.serverUrl, record.bookId))) as Promise<OfflineMediaTypeRecord | undefined>,
+    ]);
+    // Shelf updates must not restore a deleted row or overwrite newer file
+    // metadata. Native recovery intentionally still inserts missing rows.
+    if (shelfStateOnly && !latest) return undefined;
+    const merged: OfflineBookRecord = shelfStateOnly
+      ? { ...latest!, inShelf: record.inShelf }
+      : { ...record, media_type: classification?.media_type ?? latest?.media_type ?? record.media_type };
+    if (!onlyChanged || needsIndexedRecovery(latest, merged)) await requestResult(store.put(merged));
+    return merged;
+  }));
+  return (await Promise.all([mergedRecords, committed]))[0].filter((record): record is OfflineBookRecord => record !== undefined);
+}
+
+/** 原生索引与 WebView 索引是否已有差异（无差异就不必回写，避免每次列表都写盘）。 */
+function needsIndexedRecovery(indexed: OfflineBookRecord | undefined, recovered: OfflineBookRecord): boolean {
+  if (!indexed) return true;
+  return indexed.serverUrl !== recovered.serverUrl
+    || indexed.bookId !== recovered.bookId
+    || indexed.format !== recovered.format
+    || indexed.title !== recovered.title
+    || indexed.media_type !== recovered.media_type
+    || indexed.author !== recovered.author
+    || indexed.inShelf !== recovered.inShelf
+    || indexed.fileName !== recovered.fileName
+    || indexed.mimeType !== recovered.mimeType
+    || indexed.size !== recovered.size
+    || indexed.updatedAt !== recovered.updatedAt
+    || indexed.filePath !== recovered.filePath
+    || indexed.relativePath !== recovered.relativePath
+    || indexed.storageRoot !== recovered.storageRoot;
+}
+
 function sameServer(left: string, right: string): boolean {
   if (left === right) return true;
   try {
@@ -171,7 +230,7 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
       const { invoke } = await import('@tauri-apps/api/core');
       const nativeRecords = await invoke<NativeOfflineBookRecord[]>('moke_list_downloaded_books');
       const indexedById = new Map(records.map((record) => [record.id, record]));
-      records = await Promise.all(nativeRecords.map(async (nativeRecord) => {
+      records = nativeRecords.map((nativeRecord) => {
         const indexed = indexedById.get(nativeRecord.id);
         const recovered: OfflineBookRecord = {
           ...indexed,
@@ -190,11 +249,13 @@ export async function listOfflineBooks(serverUrl?: string): Promise<OfflineBookR
           relativePath: nativeRecord.relativePath || indexed?.relativePath,
           storageRoot: nativeRecord.storageRoot || indexed?.storageRoot,
         };
-        try { return await putOfflineBookRecord(recovered); } catch (error) {
-          debugLog('warn', 'download', '原生离线书已恢复，但写回 WebView 记录失败', String(error));
-          return recovered;
-        }
-      }));
+        return recovered;
+      });
+      try {
+        records = await putOfflineBookRecords(records, { onlyChanged: true });
+      } catch (error) {
+        debugLog('warn', 'download', '原生离线书库已读取，但写回 WebView 索引失败', String(error));
+      }
     } catch (error) {
       debugLog('warn', 'download', '读取原生离线书库失败，使用 WebView 索引', String(error));
     }
@@ -278,25 +339,57 @@ export async function getOfflineBook(
   }
 }
 
-export async function setOfflineBookShelfState(
+const offlineBookMutations = new Map<string, Promise<unknown>>();
+
+function mutateOfflineBook<T>(serverUrl: string, bookId: string, mutation: () => Promise<T>): Promise<T> {
+  let server = serverUrl.replace(/\/+$/, '');
+  try { server = new URL(serverUrl).origin; } catch { /* legacy server value */ }
+  const key = makeOfflineBookKey(server, bookId);
+  const previous = offlineBookMutations.get(key) ?? Promise.resolve();
+  // Order native writes/removals as well as IDB commits. A late native shelf
+  // invoke must never reinsert an index row after this client's deletion.
+  const pending = previous.catch(() => undefined).then(mutation).finally(() => {
+    if (offlineBookMutations.get(key) === pending) offlineBookMutations.delete(key);
+  });
+  offlineBookMutations.set(key, pending);
+  return pending;
+}
+
+export function setOfflineBookShelfState(serverUrl: string, bookId: string, inShelf: boolean): Promise<void> {
+  return mutateOfflineBook(serverUrl, bookId, () => updateOfflineBookShelfState(serverUrl, bookId, inShelf));
+}
+
+async function updateOfflineBookShelfState(
   serverUrl: string,
   bookId: string,
   inShelf: boolean,
 ): Promise<void> {
   const records = (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
-  for (const record of records) {
-    const updated = { ...record, inShelf };
-    await putOfflineBookRecord(updated);
-    if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('moke_record_downloaded_book', { book: {
-        id: updated.id, serverUrl: updated.serverUrl, bookId: updated.bookId,
-        title: updated.title, author: updated.author, inShelf: updated.inShelf,
-        fileName: updated.fileName, relativePath: updated.relativePath,
-        storageRoot: updated.storageRoot, mimeType: updated.mimeType, updatedAt: updated.updatedAt,
-      } });
+  const updatedRecords: OfflineBookRecord[] = [];
+  try {
+    for (const record of records) {
+      const updated = { ...record, inShelf };
+      if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('moke_record_downloaded_book', { book: {
+          id: updated.id, serverUrl: updated.serverUrl, bookId: updated.bookId,
+          title: updated.title, author: updated.author, inShelf: updated.inShelf,
+          fileName: updated.fileName, relativePath: updated.relativePath,
+          storageRoot: updated.storageRoot, mimeType: updated.mimeType, updatedAt: updated.updatedAt,
+        } });
+      }
+      updatedRecords.push(updated);
     }
+  } catch (error) {
+    // Keep the formats already committed natively in sync, while preserving
+    // the original native failure if the best-effort WebView write also fails.
+    await putOfflineBookRecords(updatedRecords, { shelfStateOnly: true }).catch((writeError) => {
+      debugLog('warn', 'download', '部分书架状态写回 WebView 失败', String(writeError));
+    });
+    throw error;
   }
+  // 多格式并存时逐条 put 会各开一条事务，合并为一次批量写入。
+  await putOfflineBookRecords(updatedRecords, { shelfStateOnly: true });
 }
 
 async function deleteRecordOnly(id: string): Promise<void> {
@@ -401,10 +494,10 @@ export async function deleteOfflineBook(
       // Also cover deletion through the library, not just developer settings.
       // A successful deletion invalidates earlier imports across reloads.
       invalidateSampleBookImports();
-      return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+      return mutateOfflineBook(serverUrl, bookId, () => deleteOfflineBookUncoordinated(serverUrl, bookId, format));
     });
   }
-  return deleteOfflineBookUncoordinated(serverUrl, bookId, format);
+  return mutateOfflineBook(serverUrl, bookId, () => deleteOfflineBookUncoordinated(serverUrl, bookId, format));
 }
 
 async function deleteOfflineBookUncoordinated(
@@ -412,9 +505,10 @@ async function deleteOfflineBookUncoordinated(
   bookId: string,
   format?: string,
 ): Promise<{ remoteSynced: boolean; remoteError?: unknown }> {
+  const allRecords = format ? null : await listOfflineBooks(serverUrl);
   const records = format
     ? [await getOfflineBook(serverUrl, bookId, format)].filter(Boolean) as OfflineBookRecord[]
-    : (await listOfflineBooks(serverUrl)).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
+    : (allRecords ?? []).filter((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
 
   for (const record of records) {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
@@ -432,7 +526,11 @@ async function deleteOfflineBookUncoordinated(
   }
 
   // Only clear the server flag when no other local format remains.
-  if ((await listOfflineBooks(serverUrl)).some((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl))) return { remoteSynced: true };
+  // The snapshot only selects deletion targets. A new format may have been
+  // saved while native file/index deletion was awaiting completion.
+  const otherFormatRemains = (await listOfflineBooks(serverUrl))
+    .some((record) => record.bookId === bookId && sameServer(record.serverUrl, serverUrl));
+  if (otherFormatRemains) return { remoteSynced: true };
   try {
     await syncOfflineDownloadState(serverUrl, bookId, false);
     return { remoteSynced: true };

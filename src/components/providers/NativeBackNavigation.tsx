@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { APP_BACK_EVENT } from '@/lib/native-back';
+import { useDeveloperStore } from '@/lib/store/developer';
 import {
   NativeBackTransitionController,
   shouldAnimateNativeBack,
@@ -113,6 +114,9 @@ export function NativeBackNavigation() {
     controllerRef.current = controller;
 
     const handleNativeBack = (event: NativeBackEvent) => {
+      // Window-targeted events can reach this earlier listener before the
+      // debug overlay consumes BACK. Avoid queuing a route behind its close.
+      if (event.defaultPrevented || useDeveloperStore.getState().debugPanelOpen) return;
       controller.requestBack(requestedBackTarget(event));
     };
     window.addEventListener(APP_BACK_EVENT, handleNativeBack);

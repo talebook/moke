@@ -7,7 +7,9 @@ import { navigateFullDocument } from '@/lib/moke-reader';
 
 export default function HomePage() {
   const router = useRouter();
-  const { serverUrl, offlineMode, hasHydrated } = useServerStore();
+  const serverUrl = useServerStore((state) => state.serverUrl);
+  const offlineMode = useServerStore((state) => state.offlineMode);
+  const hasHydrated = useServerStore((state) => state.hasHydrated);
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -25,7 +27,7 @@ export default function HomePage() {
   }, [hasHydrated, offlineMode, serverUrl, router]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
+    <div className="moke-startup-screen fixed inset-0 flex items-center justify-center bg-background">
       <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/20 border-t-primary" />
     </div>
   );

@@ -35,7 +35,7 @@ function extractInlineScript(src) {
 
 const inlineScript = extractInlineScript(layoutSrc);
 
-function runScript({ theme, prefersDark, eink, autoEink }) {
+function runScript({ theme, prefersDark, eink, autoEink, rawSettings, storageUnavailable }) {
   const classList = new Set();
   const attrs = {};
   const document = {
@@ -57,10 +57,12 @@ function runScript({ theme, prefersDark, eink, autoEink }) {
     throw new Error(`unexpected matchMedia query: ${query}`);
   };
   const localStorage = {
-    getItem: () => JSON.stringify({
-      state: { theme, eink },
-      version: 0,
-    }),
+    getItem: () => {
+      if (storageUnavailable) throw new Error('storage unavailable');
+      return rawSettings !== undefined ? rawSettings : JSON.stringify({
+        state: { theme, eink }, version: 0,
+      });
+    },
   };
   const fn = new Function('document', 'window', 'localStorage', inlineScript);
   fn(document, { matchMedia, getComputedStyle: () => ({}) }, localStorage);
@@ -68,6 +70,7 @@ function runScript({ theme, prefersDark, eink, autoEink }) {
     dark: classList.has('dark'),
     colorScheme: document.documentElement.style.colorScheme,
     dataEink: attrs['data-eink'] ?? null,
+    appearance: attrs['data-moke-appearance'],
   };
 }
 
@@ -82,15 +85,25 @@ for (const theme of themes) {
       for (const autoEink of autoEinkValues) {
         test(`inline script matches resolveTheme (${theme}, prefersDark=${prefersDark}, eink=${eink}, autoEink=${autoEink})`, () => {
           const expected = !eink && !autoEink && resolveTheme(theme, prefersDark) === 'dark';
-          const { dark, colorScheme, dataEink } = runScript({ theme, prefersDark, eink, autoEink });
+          const { dark, colorScheme, dataEink, appearance } = runScript({ theme, prefersDark, eink, autoEink });
           assert.equal(dark, expected);
           assert.equal(colorScheme, expected ? 'dark' : 'light');
           // Persisted e-ink must set data-eink before first paint so the
           // black/white theme applies without a warm-light flash (and dark is
           // suppressed). Auto-e-ink (media query) is handled by CSS, not here.
           assert.equal(dataEink, eink ? 'true' : null);
+          assert.equal(appearance, expected ? 'dark' : eink || autoEink ? 'eink' : 'light');
         });
       }
     }
   }
+}
+
+for (const storage of [{ rawSettings: '{broken' }, { rawSettings: null }, { storageUnavailable: true }]) {
+  test(`first paint falls back to system theme when settings cannot be read (${JSON.stringify(storage)})`, () => {
+    const result = runScript({ prefersDark: true, autoEink: false, ...storage });
+    assert.equal(result.dark, true);
+    assert.equal(result.appearance, 'dark');
+    assert.equal(result.colorScheme, 'dark');
+  });
 }

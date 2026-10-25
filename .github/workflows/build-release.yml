@@ -63,7 +63,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node || 20 }}
+          node-version: ${{ matrix.node || 24 }}
           cache: 'pnpm'
 
       - name: Setup Java
@@ -189,7 +189,7 @@ jobs:
       - name: Build Tauri CLI (from vendor/tauri submodule)
         if: matrix.platform == 'ohos'
         run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
+          cargo build --release --locked --no-default-features --features rustls --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
           echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
 
       - name: Cache readest Next.js
@@ -246,7 +246,7 @@ jobs:
       - name: Build Tauri CLI (from vendor/tauri submodule)
         if: matrix.platform == 'android'
         run: |
-          cargo build --release --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
+          cargo build --release --locked --no-default-features --features rustls --manifest-path "$GITHUB_WORKSPACE/vendor/tauri/Cargo.toml" -p tauri-cli
           echo "$GITHUB_WORKSPACE/vendor/tauri/target/release" >> "$GITHUB_PATH"
 
       - name: Initialize Tauri Android project
@@ -258,13 +258,11 @@ jobs:
         run: node scripts/prepare-mobile-app-names.mjs android
 
       # tauri android init scaffolds gen/android with Tauri's DEFAULT launcher icons.
-      # Regenerate them from src-tauri/icons/icon.png: since gen/android already
-      # exists, `tauri icon` writes straight into gen/android/app/src/main/res/
-      # (mipmaps + adaptive-icon xml), so the APK ships with Moke's icon instead of
-      # the default Tauri logo.
-      - name: Generate Android launcher icons
+      # Copy the committed launcher resources after init; keep their reviewed
+      # safe-zone and round-icon proportions instead of regenerating pixels.
+      - name: Copy Android launcher icons
         if: matrix.platform == 'android'
-        run: cargo tauri icon src-tauri/icons/icon.png
+        run: node scripts/prepare-mobile-icons.mjs android
 
       # `tauri android init` scaffolds a default MainActivity that lacks the
       # KeyDownInterceptor interface readest's native-bridge plugin requires, so
@@ -458,13 +456,10 @@ jobs:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
 
-      # ohos init 用模板默认图标（蓝底系统图标）。`tauri icon` 现在支持
-      # OpenHarmony：gen/ohos 已存在，它会把 Moke 图标写进
-      # gen/ohos/{entry,AppScope}/resources/base/media（foreground/background/
-      # startIcon），否则 APK 会带默认图标。CLI 来自上面编译的 vendor/tauri。
-      - name: Generate OpenHarmony launcher icons
+      # 初始化后复制已提交的高清图标，不在构建期间重新生成或缩放。
+      - name: Copy OpenHarmony launcher icons
         if: matrix.platform == 'ohos'
-        run: cargo tauri icon src-tauri/icons/icon.png
+        run: node scripts/prepare-mobile-icons.mjs ohos
         env:
           OHOS_HOME: ${{ env.OHOS_NDK_HOME }}
           HOS_SDK_HOME: ${{ env.HOS_SDK_HOME }}
@@ -491,6 +486,10 @@ jobs:
       - name: Apply OHOS back-key patch
         if: matrix.platform == 'ohos'
         run: node scripts/prepare-ohos.mjs
+
+      - name: Keep OHOS Rust release profile
+        if: matrix.platform == 'ohos'
+        run: node scripts/prepare-ohos-release.mjs
 
       - name: Build OHOS HAP
         if: matrix.platform == 'ohos'

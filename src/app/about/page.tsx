@@ -6,6 +6,7 @@ import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { useDeveloperStore } from '@/lib/store/developer';
 import { APP_VERSION } from '@/lib/app-version';
 import { requestAnimatedBack } from '@/lib/native-back';
+import { externalLinkClick } from '@/lib/external-link';
 import { sponsors } from './sponsors';
 
 interface Contributor {
@@ -213,9 +214,11 @@ export default function AboutPage() {
                     )}
                     <a
                       href={c.github}
-                      target="_blank"
                       rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        externalLinkClick(c.github)(event);
+                      }}
                       className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-card border border-transparent hover:border-border/60 hover:shadow-xs transition"
                       title="访问 GitHub 主页"
                     >

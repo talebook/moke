@@ -120,9 +120,12 @@ test('desktop fs write paths stay command-scoped instead of entering the plugin 
     readFileSync(join(repoRoot, 'src-tauri/gen/schemas/acl-manifests.json'), 'utf8'),
   );
   const fsPermissions = manifests.fs.permissions;
+  const fsPermissionSets = manifests.fs.permission_sets;
 
-  assert.ok(fsPermissions['write-all'].commands.allow.includes('write'));
-  assert.ok(fsPermissions['write-all'].commands.allow.includes('remove'));
+  // fs 2.7.1 moved the aggregate permissions to sets that reference the
+  // per-command permissions instead of listing commands directly.
+  assert.ok(fsPermissionSets['write-all'].permissions.includes('allow-write'));
+  assert.ok(fsPermissionSets['write-all'].permissions.includes('allow-remove'));
   assert.deepEqual(fsPermissions.scope.commands.allow, []);
   assert.deepEqual(fsPermissions.scope.commands.deny, []);
 

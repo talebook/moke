@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { DebugLogPanel } from '@/components/ui/DebugLogPanel';
+import dynamic from 'next/dynamic';
 import {
   broadcastDebugPanelVisibility,
   installConsoleCapture,
@@ -39,11 +39,17 @@ if (process.env.NODE_ENV !== 'production') {
 
 const isNativeAppBuild = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
+const DebugLogPanel = dynamic(
+  () => import('@/components/ui/DebugLogPanel').then((mod) => mod.DebugLogPanel),
+  { ssr: false },
+);
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const eink = useSettingsStore((s) => s.eink);
   const theme = useSettingsStore((s) => s.theme);
   const developerUnlocked = useDeveloperStore((s) => s.unlocked);
   const showDebugPanel = useDeveloperStore((s) => s.showDebugPanel);
+  const debugPanelOpen = useDeveloperStore((s) => s.debugPanelOpen);
 
   // The native backend owns the approved directory and restores its fs scope
   // before the WebView starts. Mirror that durable value into the frontend so
@@ -121,6 +127,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       const dark = !eink && !autoEinkMq.matches && resolved === 'dark';
       const el = document.documentElement;
       el.classList.toggle('dark', dark);
+      el.dataset.mokeAppearance = dark ? 'dark' : (eink || autoEinkMq.matches ? 'eink' : 'light');
       el.style.colorScheme = dark ? 'dark' : 'light';
       restoreStatusBar(dark);
     };
@@ -143,12 +150,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [theme, eink]);
 
-  // 生产环境仅在开发者解锁后安装 console 捕获；锁定后撤销。
+  // 普通成员仅在面板展开期间捕获 console，关闭后撤销。
   useEffect(() => {
     if (process.env.NODE_ENV !== 'production') return;
-    if (developerUnlocked) installConsoleCapture();
+    if (developerUnlocked || debugPanelOpen) installConsoleCapture();
     else uninstallConsoleCapture();
-  }, [developerUnlocked]);
+  }, [developerUnlocked, debugPanelOpen]);
 
   // Keep the Tauri shell at its designed scale on desktop touchpads and
   // keyboards. Mobile pinch is also declared unavailable in the viewport and
@@ -304,7 +311,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <NativeBackNavigation />
         <PrivacyConsentGate>{children}</PrivacyConsentGate>
       </div>
-      <DebugLogPanel />
+      {showDebugPanel && <DebugLogPanel />}
     </>
   );
 }

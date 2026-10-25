@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ext-uninstall-extension"
+description = "Enables the ext_uninstall_extension command without any pre-configured scope."
+commands.allow = ["ext_uninstall_extension"]
+
+[[permission]]
+identifier = "deny-ext-uninstall-extension"
+description = "Denies the ext_uninstall_extension command without any pre-configured scope."
+commands.deny = ["ext_uninstall_extension"]

@@ -2,13 +2,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "墨客 - Tablet Preview",
         "width": 768,
         "height": 1024,
         "minWidth": 360,
         "minHeight": 560,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "backgroundColor": "#fbfaf3"
       }
     ]
   }

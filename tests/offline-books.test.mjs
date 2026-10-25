@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import './helpers/app-imports.mjs';
 import { SAMPLE_BOOK } from '../src/lib/sample-book-info.ts';
 import { deleteSampleBook, getSampleBook, importSampleBook } from '../src/lib/sample-book.ts';
 
@@ -25,6 +26,13 @@ import {
   sanitizeOfflineFileName,
   shouldResumeOfflineDownload,
 } from '../src/lib/offline-book-core.ts';
+
+// Load the HTTP layer before installing minimal IndexedDB window fixtures.
+process.env.NEXT_PUBLIC_APP_PLATFORM = 'web';
+await import('../src/lib/api.ts');
+test.beforeEach((t) => {
+  t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected network request'); });
+});
 
 test('EPUB requires a ZIP central directory at the end of the file', async () => {
   const validEpub = new Blob([
@@ -78,6 +86,9 @@ function makeAsyncRequest(operation) {
 
 function createFakeIndexedDb() {
   const records = new Map();
+  const pendingCommits = [];
+  const commitWaiters = [];
+  let deferCommits = false;
   let storeCreated = false;
 
   const objectStore = {
@@ -92,9 +103,6 @@ function createFakeIndexedDb() {
         records.set(record.id, record);
         return record.id;
       });
-    },
-    getAll() {
-      return makeAsyncRequest(() => Array.from(records.values()));
     },
     delete(key) {
       return makeAsyncRequest(() => records.delete(key));
@@ -111,13 +119,53 @@ function createFakeIndexedDb() {
       storeCreated = true;
       return objectStore;
     },
-    transaction() {
-      return { objectStore: () => objectStore };
+    transaction(_storeName, mode) {
+      let pending = 0;
+      let completed = false;
+      const transaction = {
+        oncomplete: null,
+        onerror: null,
+        onabort: null,
+        error: null,
+        objectStore: () => ({
+          ...objectStore,
+          put(record) {
+            pending += 1;
+            return makeAsyncRequest(() => {
+              records.set(record.id, record);
+              pending -= 1;
+              finish();
+              return record.id;
+            });
+          },
+        }),
+      };
+      const finish = () => {
+        // Reads can enqueue writes in their promise callbacks. Complete only
+        // after those microtasks, as a real IndexedDB transaction does.
+        setImmediate(() => {
+          if (pending === 0 && !completed) {
+            completed = true;
+            if (deferCommits && mode === 'readwrite') {
+              pendingCommits.push(() => transaction.oncomplete?.());
+              commitWaiters.splice(0).forEach(resolve => resolve());
+            } else transaction.oncomplete?.();
+          }
+        });
+      };
+      queueMicrotask(finish);
+      return transaction;
     },
   };
 
   return {
     records,
+    deferCommits(value) { deferCommits = value; },
+    get pendingCommitCount() { return pendingCommits.length; },
+    waitForCommit() {
+      return pendingCommits.length ? Promise.resolve() : new Promise(resolve => commitWaiters.push(resolve));
+    },
+    flushCommits() { pendingCommits.splice(0).forEach((commit) => commit()); },
     open() {
       const request = {
         result: database,
@@ -486,6 +534,83 @@ test('同一本书多个格式可以并存且互不覆盖', async () => {
   assert.equal(await (await getOfflineBook('https://a.example', '8', 'pdf')).blob.text(), 'pdf');
 });
 
+test('批量更新书架状态会等待 IndexedDB 事务提交', async () => {
+  const indexedDB = installWebOfflineStore();
+  for (const format of ['epub', 'pdf']) {
+    await saveOfflineBook({
+      serverUrl: 'https://a.example', bookId: '8', title: '多格式', format,
+      fileName: `多格式.${format}`, mimeType: 'application/octet-stream', blob: new Blob([format]),
+    });
+  }
+
+  await new Promise((resolve) => setImmediate(resolve));
+  indexedDB.deferCommits(true);
+  let settled = false;
+  const update = setOfflineBookShelfState('https://a.example', '8', true).then(() => { settled = true; });
+  await indexedDB.waitForCommit();
+  assert.equal(indexedDB.pendingCommitCount, 1);
+  assert.equal(settled, false);
+
+  indexedDB.flushCommits();
+  await update;
+  assert.equal(settled, true);
+  assert.equal([...indexedDB.records.values()].filter((record) => record.inShelf).length, 2);
+});
+
+test('partial native shelf failure persists successful formats and keeps the original error', async () => {
+  const { indexedDB } = installTauriOfflineStore();
+  const native = ['epub', 'pdf'].map(format => ({
+    id: `https://books.test::8::${format}`, serverUrl: 'https://books.test', bookId: '8',
+    title: '多格式', fileName: `book.${format}`, filePath: `/data/book.${format}`,
+    inShelf: true, updatedAt: 123,
+  }));
+  const failure = new Error('native index write failed');
+  window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+    if (command === 'moke_list_downloaded_books') return native.map(row => ({ ...row }));
+    assert.equal(command, 'moke_record_downloaded_book');
+    if (args.book.id.endsWith('::pdf')) throw failure;
+    native[0] = { ...native[0], ...args.book };
+  };
+  await assert.rejects(setOfflineBookShelfState('https://books.test', '8', false), error => error === failure);
+  assert.equal(indexedDB.records.get(native[0].id).inShelf, false);
+  assert.equal(indexedDB.records.get(native[1].id).inShelf, true);
+});
+
+for (const committedBeforeReply of [false, true]) {
+  test(`shelf IPC and deletion leave neither index resurrected (native committed before reply: ${committedBeforeReply})`, async (t) => {
+    const { indexedDB, recordedBooks } = installTauriOfflineStore('/data', true);
+    await saveOfflineBook({ serverUrl: 'https://books.test', bookId: '8', title: '漫画',
+      fileName: 'comic.pdf', format: 'pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']), inShelf: true });
+    const id = recordedBooks[0].id;
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const original = window.__TAURI_INTERNALS__.invoke;
+    window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+      if (command !== 'moke_record_downloaded_book') return original(command, args);
+      const commit = () => {
+        const index = recordedBooks.findIndex(row => row.id === args.book.id);
+        if (index >= 0) recordedBooks.splice(index, 1);
+        recordedBooks.push(args.book);
+      };
+      if (committedBeforeReply) commit();
+      entered.resolve();
+      await release.promise;
+      if (!committedBeforeReply) commit();
+    };
+    t.mock.method(globalThis, 'fetch', async () => new Response('{"err":"ok"}'));
+    const updating = setOfflineBookShelfState('https://books.test', '8', false);
+    await entered.promise;
+    const deleting = deleteOfflineBook('https://books.test:443', '8', 'pdf');
+    // Let deletion run while the old native shelf call/reply is suspended.
+    for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve));
+    release.resolve();
+    await Promise.all([updating, deleting]);
+    assert.equal(recordedBooks.some(row => row.id === id), false, 'native index must stay deleted');
+    assert.equal(indexedDB.records.has(id), false, 'WebView row must stay deleted');
+    assert.deepEqual(await listOfflineBooks('https://books.test'), []);
+  });
+}
+
 test('重复保存会更新原记录，多个服务器之间互不覆盖', async () => {
   const indexedDB = installWebOfflineStore();
 
@@ -526,6 +651,54 @@ test('删除只移除目标离线书籍，删除不存在的记录也不会失�
 
   assert.equal(await getOfflineBook('https://a.example', '1'), null);
   assert.equal((await getOfflineBook('https://a.example', '2'))?.bookId, '2');
+});
+
+test('全格式删除保留异步原生删除期间新增的格式，不清服务器下载标记', async (t) => {
+  const { recordedBooks } = installTauriOfflineStore('/app/data', true);
+  const book = {
+    serverUrl: 'https://books.test', bookId: '42', title: '并发下载',
+    fileName: 'old.epub', mimeType: 'application/epub+zip', blob: new Blob(['old']),
+  };
+  await saveOfflineBook(book);
+  const oldId = recordedBooks[0].id;
+  const originalInvoke = window.__TAURI_INTERNALS__.invoke;
+  const deleting = Promise.withResolvers();
+  const resume = Promise.withResolvers();
+  t.mock.method(window.__TAURI_INTERNALS__, 'invoke', async (command, args) => {
+    if (command === 'moke_delete_downloaded_book_file') {
+      deleting.resolve();
+      await resume.promise;
+    }
+    return originalInvoke(command, args);
+  });
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(''));
+  const result = deleteOfflineBook(book.serverUrl, book.bookId);
+  await deleting.promise;
+  await saveOfflineBook({ ...book, format: 'pdf', fileName: 'new.pdf', mimeType: 'application/pdf' });
+  resume.resolve();
+  assert.deepEqual(await result, { remoteSynced: true });
+  assert.equal(recordedBooks.some((record) => record.id === oldId), false);
+  assert.equal((await getOfflineBook(book.serverUrl, book.bookId, 'pdf')).fileName, 'new.pdf');
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('删除后无目标格式时清标记，其他服务器同 ID 与样书不阻止同步', async (t) => {
+  installWebOfflineStore();
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    return new Response('');
+  });
+  const book = { ...SAMPLE_BOOK, blob: new Blob(['fixture']) };
+  await saveOfflineBook(book);
+  await saveOfflineBook({ ...book, serverUrl: 'https://books.test' });
+  await saveOfflineBook({ ...book, serverUrl: 'https://other.test' });
+  assert.deepEqual(await deleteOfflineBook('https://books.test', book.bookId), { remoteSynced: true });
+  assert.deepEqual(requests, [{ url: `https://books.test/api/book/${book.bookId}/readstate`, body: { download: 0 } }]);
+  assert.ok(await getOfflineBook('https://other.test', book.bookId));
+  assert.ok(await getSampleBook());
+  assert.deepEqual(await deleteOfflineBook(book.serverUrl, book.bookId), { remoteSynced: true });
+  assert.equal(requests.length, 1);
 });
 
 test('桌面版 IndexedDB 记录丢失后会从原生磁盘索引恢复已下载状态', async () => {
@@ -734,6 +907,38 @@ test('offline downloads retain classification and online refresh stays within se
   assert.equal(store.records.get('https://b.test::42::pdf').media_type, 'comic');
   await cacheOfflineMediaType('https://a.test', '42', undefined);
   assert.equal(store.records.get('https://a.test::42::pdf').media_type, 'ebook');
+});
+
+test('native batch recovery waits for one commit and skips unchanged writes', async (t) => {
+  const indexedDB = createFakeIndexedDb();
+  const nativeBooks = ['epub', 'pdf'].map(format => ({
+    id: `https://a.example::42::${format}`, serverUrl: 'https://a.example', bookId: '42',
+    title: '多格式漫画', fileName: `comic.${format}`, filePath: `/app-data/books/comic.${format}`,
+    mimeType: 'application/octet-stream', updatedAt: 123, fileSize: 10,
+  }));
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  globalThis.window = { indexedDB, __TAURI_INTERNALS__: {
+    invoke: async command => {
+      assert.equal(command, 'moke_list_downloaded_books');
+      return nativeBooks;
+    },
+  } };
+  await cacheOfflineMediaType('https://a.example', '42', 'comic');
+  await new Promise(resolve => setImmediate(resolve));
+  indexedDB.deferCommits(true);
+  const writes = t.mock.method(indexedDB.records, 'set');
+  let settled = false;
+  const recovering = listOfflineBooks().then(rows => { settled = true; return rows; });
+  await indexedDB.waitForCommit();
+  assert.equal(indexedDB.pendingCommitCount, 1);
+  assert.equal(settled, false);
+  indexedDB.flushCommits();
+  const rows = await recovering;
+  assert.deepEqual(rows.map(row => row.media_type), ['comic', 'comic']);
+  assert.equal(writes.mock.callCount(), 2);
+  indexedDB.deferCommits(false);
+  assert.deepEqual(await listOfflineBooks(), rows);
+  assert.equal(writes.mock.callCount(), 2, 'unchanged native records must not be rewritten');
 });
 
 for (const path of ['get', 'list']) {

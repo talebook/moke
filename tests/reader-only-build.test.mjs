@@ -29,6 +29,10 @@ const readerNativeHost = readFileSync(
   new URL('../readest/apps/readest-app/src-tauri/src/lib.rs', import.meta.url),
   'utf8',
 );
+const extensionsSource = readFileSync(
+  new URL('../src-tauri/src/extensions/mod.rs', import.meta.url),
+  'utf8',
+);
 const readerDirScanner = readFileSync(
   new URL('../readest/apps/readest-app/src-tauri/src/dir_scanner.rs', import.meta.url),
   'utf8',
@@ -63,6 +67,12 @@ function bracketedMacroBody(source, functionName, macroName) {
 
 function readerHandlerCommands(source) {
   const block = bracketedMacroBody(source, 'pub fn reader_invoke_handler', 'tauri::generate_handler!');
+  return [...block.matchAll(/^\s*([a-z_][a-z0-9_:]*)\s*,\s*$/gim)]
+    .map((match) => match[1].split('::').pop());
+}
+
+function extensionHandlerCommands(source) {
+  const block = bracketedMacroBody(source, 'pub fn invoke_handler', 'tauri::generate_handler!');
   return [...block.matchAll(/^\s*([a-z_][a-z0-9_:]*)\s*,\s*$/gim)]
     .map((match) => match[1].split('::').pop());
 }
@@ -125,7 +135,11 @@ test('Moke ACL command manifest stays aligned with Reader plus the explicit host
     'moke_list_downloaded_books',
   ];
   const expected = [
-    ...new Set([...readerHandlerCommands(readerNativeHost), ...mokeHostCommands, 'ext_reader_event']),
+    ...new Set([
+      ...readerHandlerCommands(readerNativeHost),
+      ...mokeHostCommands,
+      ...extensionHandlerCommands(extensionsSource),
+    ]),
   ].sort();
   assert.deepEqual([...new Set(appAclCommands(tauriBuild))].sort(), expected);
 });

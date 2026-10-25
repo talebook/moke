@@ -26,9 +26,6 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ],
-      "@pdfjs/*": [
-        "./public/vendor/pdfjs/*"
       ]
     }
   },

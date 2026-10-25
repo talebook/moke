@@ -120,7 +120,9 @@ export default function DownloadsPage() {
       } catch { if (!cancelled) setAvailableBytes(null); }
     };
     void loadSpace();
-    const timer = window.setInterval(() => { void loadSpace(); }, STORAGE_STATS_REFRESH_INTERVAL_MS);
+    // 页面在后台（最小化/切走）时不刷新磁盘统计：定时器仍触发但跳过 syscall/IPC，
+    // 回到前台后恢复正常刷新，避免后台空转。
+    const timer = window.setInterval(() => { if (!document.hidden) void loadSpace(); }, STORAGE_STATS_REFRESH_INTERVAL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
