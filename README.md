@@ -76,6 +76,16 @@
 
 OpenHarmony 安装包目前处于 alpha 阶段，建议在测试设备上体验；iOS/iPadOS 和 OpenHarmony 的签名、安装要求见对应版本的发布说明。
 
+### macOS 安装
+
+macOS 下载 `.dmg` 安装包后，需要先移除下载文件的隔离标记，再打开安装包。在终端进入 DMG 文件所在目录，执行：
+
+```bash
+sudo xattr -rd com.apple.quarantine "MyReader-<xxxxxxxxxxx>.dmg"
+```
+
+请将 `MyReader-<xxxxxxxxxxx>.dmg` 替换为实际下载的文件名，例如 `Moke_1.6.0_aarch64.dmg`。保留文件名两侧的双引号，以兼容文件名中的空格。
+
 ### Moke Preview 赞助内测
 
 [Moke Preview](https://github.com/hehetoshang/moke-preview-builds) 是面向希望提前体验新功能并参与反馈的赞助者的预览通道。安装包与发布说明在独立仓库提供，具体可用平台及安装要求以对应版本的发布说明为准。
