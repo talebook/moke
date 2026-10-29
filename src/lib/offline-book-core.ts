@@ -151,7 +151,16 @@ export function validateDownloadedBookHeader(
   // Binary PalmDB headers can start with an arbitrary book title. NULs and
   // other binary controls distinguish that title from a real error document.
   const plainText = !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/.test(text);
-  const html = /^(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(text);
+  // Scan comments once; a repeated lazy comment regex can backtrack
+  // exponentially on a malformed response containing many comment markers.
+  let documentStart = 0;
+  while (text.startsWith('<!--', documentStart)) {
+    const commentEnd = text.indexOf('-->', documentStart + 4);
+    if (commentEnd < 0) break;
+    documentStart = commentEnd + 3;
+    while (documentStart < text.length && /\s/.test(text[documentStart]!)) documentStart += 1;
+  }
+  const html = /^(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(text.slice(documentStart));
   const json = /^[{[]/.test(text);
   if (plainText && (html || json)) {
     // Even a JSON-looking title is valid PalmDB data. Wait for the header

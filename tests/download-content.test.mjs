@@ -92,3 +92,12 @@ test('an incomplete MOBI header may have a JSON-looking title without losing its
   assert.doesNotThrow(() => validateDownloadedBookHeader(complete, 'azw3'));
   assert.throws(() => validateDownloadedBookHeader(title, 'azw3'), /book.download.invalid_response/);
 });
+
+test('leading HTML comments are scanned without ambiguous repeated matches', async t => {
+  const comments = '<!-- header -->\n'.repeat(200);
+  t.mock.method(globalThis, 'fetch', async () => new Response(comments + '<html>Please login</html>'));
+  await assert.rejects(downloadBookBlob('1', 'pdf'), /book.download.invalid_response/);
+  await assert.rejects(streamBookDownload('1', 'pdf', { write: async () => {} }), /book.download.invalid_response/);
+  const incompleteComments = encode('<!--' + '--><!--'.repeat(580));
+  assert.doesNotThrow(() => validateDownloadedBookHeader(incompleteComments, 'pdf'));
+});
