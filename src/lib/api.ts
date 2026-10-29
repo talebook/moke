@@ -16,7 +16,9 @@ import {
   resolveAppPlatform,
 } from '@/lib/api-core';
 import {
+  BOOK_HEADER_WINDOW,
   classifyOfflineRangeResponse,
+  validateDownloadedBookHeader,
   hasEpubCentralDirectory,
   parseContentRange,
 } from '@/lib/offline-book-core';
@@ -65,6 +67,7 @@ function logOfflineWriteFailure(error: unknown, receivedBytes: number): void {
 }
 
 async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob> {
+  validateDownloadedBookHeader(new Uint8Array(await blob.slice(0, BOOK_HEADER_WINDOW).arrayBuffer()), format);
   if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
     throw new Error('book.epub.invalid');
   }
@@ -668,9 +671,9 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
 export async function downloadBookBlob(
   bookId: string | number,
   format = 'epub',
-  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal },
+  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal; serverUrl?: string },
 ): Promise<Blob> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options?.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
   try {
@@ -748,7 +751,7 @@ function keepTailBytes(tail: Uint8Array, chunk: Uint8Array, windowSize: number):
   return result;
 }
 
-/** 流式下载：把响应体逐块交给 write()，仅保留文件尾部用于 EPUB 校验，
+/** 流式下载：把响应体逐块交给 write()，仅保留有限首部及 EPUB 尾部用于校验，
  *  避免把整本书累积在内存中（大书/低内存设备 OOM）。 */
 export async function streamBookDownload(
   bookId: string | number,
@@ -759,12 +762,13 @@ export async function streamBookDownload(
     onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
     signal?: AbortSignal;
     resumeFrom?: number;
+    serverUrl?: string;
     onRangeReset?: () => Promise<void>;
     /** Tauri validates the completed on-disk tail, including bytes from an earlier range. */
     validateEpub?: boolean;
   },
 ): Promise<{ mimeType: string; size: number; sourceSignature?: string; resumed: boolean }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
   const requestedOffset = Math.max(0, options.resumeFrom || 0);
   const headers = new Headers();
@@ -818,6 +822,7 @@ export async function streamBookDownload(
       throw new Error('book.download.transfer_failed');
     }
 
+    if (!resumed) validateDownloadedBookHeader(new Uint8Array(await blob.slice(0, BOOK_HEADER_WINDOW).arrayBuffer()), format);
     try {
       await options.write(new Uint8Array(await blob.arrayBuffer()));
     } catch (error) {
@@ -835,11 +840,13 @@ export async function streamBookDownload(
   }
 
   let tail: Uint8Array = new Uint8Array(0);
+  let prefix: Uint8Array = new Uint8Array(0);
   while (true) {
     let result: ReadableStreamReadResult<Uint8Array>;
     try {
       result = await reader.read();
     } catch (error) {
+      if (!resumed) validateDownloadedBookHeader(prefix, format, false);
       if (isRequestCancelled(error)) throw error;
       logBinaryTransferFailure(url, response, error, received);
       throw new Error('book.download.transfer_failed');
@@ -849,6 +856,12 @@ export async function streamBookDownload(
     if (done) break;
     if (!value) continue;
 
+    if (!resumed && prefix.length < BOOK_HEADER_WINDOW) {
+      const next = new Uint8Array(Math.min(BOOK_HEADER_WINDOW, prefix.length + value.length));
+      next.set(prefix);
+      next.set(value.subarray(0, next.length - prefix.length), prefix.length);
+      prefix = next;
+    }
     try {
       await options.write(value);
     } catch (error) {
@@ -866,6 +879,7 @@ export async function streamBookDownload(
     if (total && total > 0) options.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
   }
   options.onProgress?.(99);
+  if (!resumed) validateDownloadedBookHeader(prefix, format);
   if (total != null && received !== total) throw new Error('book.download.incomplete');
   if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
     throw new Error('book.epub.invalid');

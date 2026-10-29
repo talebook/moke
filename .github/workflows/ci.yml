@@ -15,6 +15,43 @@ permissions:
   contents: read
 
 jobs:
+  reader-recovery:
+    name: Production Reader failure recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          standalone: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Reader dependencies
+        working-directory: readest
+        run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build && pnpm build:reader && pnpm copy:reader
+      - name: Verify failed Reader opens can return to the host
+        run: |
+          node scripts/serve-static-tests.mjs > "$RUNNER_TEMP/reader-static.log" 2>&1 &
+          READER_STATIC_PID=$!
+          trap 'kill "$READER_STATIC_PID"' EXIT
+          curl --retry 5 --retry-connrefused --retry-delay 1 --silent --fail http://127.0.0.1:3000/welcome > /dev/null
+          pnpm exec playwright test tests/reader-open-recovery.spec.mjs --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reader-recovery-results
+          path: |
+            test-results/
+            ${{ runner.temp }}/reader-static.log
+          if-no-files-found: warn
+
   quality:
     name: Frontend quality
     runs-on: ubuntu-latest

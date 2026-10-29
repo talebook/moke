@@ -822,7 +822,8 @@ test('Tauri 自定义下载目录继续使用已授权的绝对路径', async ()
   });
 
   for (const { command, args } of calls.filter(({ command }) => command.startsWith('plugin:fs|'))) {
-    if (command === 'plugin:fs|write') continue;
+    // Handle-based operations carry a resource id rather than a path.
+    if (['plugin:fs|write', 'plugin:fs|read', 'plugin:fs|seek'].includes(command)) continue;
     if (command === 'plugin:fs|rename') {
       assert.match(args.oldPath, /^\/storage\/emulated\/0\/Moke\//);
       assert.match(args.newPath, /^\/storage\/emulated\/0\/Moke\//);
@@ -1089,4 +1090,163 @@ test('classification persists without a downloaded row and newer refresh wins ov
     fileName: 'book.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']) });
   assert.equal((await getOfflineBook('https://a.example', '42', 'pdf')).media_type, 'ebook');
   assert.equal(indexedDB.records.get('https://a.example::42::pdf').media_type, 'ebook');
+});
+
+
+// Exercise the actual plugin-fs JS protocol against a byte-addressed fake disk,
+// rather than returning a valid EPUB independently of what was written.
+function installByteAddressedOfflineStore() {
+  const state = installTauriOfflineStore('/app-data', true);
+  const files = new Map();
+  const handles = new Map();
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  let nextRid = 100;
+  window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
+    if (!command.startsWith('plugin:fs|') && command !== 'plugin:resources|close') return invoke(command, args);
+    state.calls.push({ command, args });
+    const handle = handles.get(args.rid);
+    if (command === 'plugin:fs|mkdir') return null;
+    if (command === 'plugin:fs|exists') return files.has(args.path);
+    if (command === 'plugin:fs|stat') {
+      if (!files.has(args.path)) throw new Error('Not found');
+      return { size: files.get(args.path).length, mtime: null, atime: null, birthtime: null };
+    }
+    if (command === 'plugin:fs|open') {
+      if (args.options.truncate) files.set(args.path, new Uint8Array());
+      if (!files.has(args.path)) {
+        if (!args.options.create) throw new Error('Not found');
+        files.set(args.path, new Uint8Array());
+      }
+      const rid = nextRid++;
+      handles.set(rid, { path: args.path, offset: 0 });
+      return rid;
+    }
+    if (command === 'plugin:fs|seek') return (handle.offset = args.offset);
+    if (command === 'plugin:fs|ftruncate') {
+      files.set(handle.path, files.get(handle.path).slice(0, args.len));
+      return null;
+    }
+    if (command === 'plugin:fs|write') {
+      const previous = files.get(handle.path);
+      const next = new Uint8Array(Math.max(previous.length, handle.offset + args.data.length));
+      next.set(previous);
+      next.set(args.data, handle.offset);
+      files.set(handle.path, next);
+      handle.offset += args.data.length;
+      return args.data.length;
+    }
+    if (command === 'plugin:fs|read') {
+      const data = files.get(handle.path).slice(handle.offset, handle.offset + Math.min(args.len, 17));
+      handle.offset += data.length;
+      const response = new Uint8Array(data.length + 8);
+      response.set(data);
+      new DataView(response.buffer).setBigUint64(data.length, BigInt(data.length));
+      return response;
+    }
+    if (command === 'plugin:resources|close') { handles.delete(args.rid); return null; }
+    if (command === 'plugin:fs|remove') { files.delete(args.path); return null; }
+    if (command === 'plugin:fs|rename') {
+      assert.ok(files.has(args.oldPath));
+      files.set(args.newPath, files.get(args.oldPath));
+      files.delete(args.oldPath);
+      return null;
+    }
+    throw new Error(`Unexpected Tauri file command: ${command}`);
+  };
+  return { ...state, files };
+}
+
+function downloadedMobi() {
+  const bytes = new Uint8Array(128);
+  bytes.set(new TextEncoder().encode('BOOKMOBI'), 60);
+  return bytes;
+}
+
+const diskBook = {
+  serverUrl: 'https://guard.test', bookId: 'guard', title: 'Book', fileName: 'Book.azw3',
+  mimeType: 'application/octet-stream', format: 'azw3',
+};
+const diskBookPath = makeOfflineRelativePath(diskBook.serverUrl, diskBook.bookId, diskBook.format, diskBook.fileName);
+
+for (const badContent of ['<!doctype html><html>Please login</html>', '{"err":"user.need_login","msg":"请先登录"}']) {
+  test('错误下载不替换已有有效副本，也不保留为可续传文件: ' + badContent.slice(0, 15), async () => {
+    const { files, indexedDB, recordedBooks } = installByteAddressedOfflineStore();
+    const valid = downloadedMobi();
+    await saveOfflineBookStream({ ...diskBook, write: async writer => { await writer.write(valid); } });
+    const recordBefore = { ...indexedDB.records.get(makeOfflineBookKey(diskBook.serverUrl, diskBook.bookId, 'azw3')) };
+    await assert.rejects(saveOfflineBookStream({ ...diskBook, preservePartialOnFailure: true,
+      write: async writer => { await writer.write(new TextEncoder().encode(badContent)); },
+    }), /book.download.invalid_response/);
+    assert.deepEqual(files.get(diskBookPath), valid);
+    assert.equal(files.has(diskBookPath + '.part'), false);
+    assert.deepEqual(indexedDB.records.get(recordBefore.id), recordBefore);
+    assert.equal(recordedBooks.length, 1);
+  });
+}
+
+test('续传结束验证真实 part 首部，不能由有效后续字节掩盖错误首段', async () => {
+  const { files, indexedDB, recordedBooks } = installByteAddressedOfflineStore();
+  files.set(diskBookPath + '.part', new TextEncoder().encode('<!doctype html><html>Please login</html>'));
+  await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+    write: async writer => { assert.ok(writer.position > 0); await writer.write(downloadedMobi()); },
+  }), /book\.(?:download.invalid_response|mobi.invalid)/);
+  assert.equal(files.has(diskBookPath + '.part'), false);
+  assert.equal(files.has(diskBookPath), false);
+  assert.equal(recordedBooks.length, 0);
+  assert.equal(indexedDB.records.has(makeOfflineBookKey(diskBook.serverUrl, diskBook.bookId, 'azw3')), false);
+});
+
+test('正常 MOBI 续传拼合首部，短 read 也能完成首部校验', async () => {
+  const { files, recordedBooks } = installByteAddressedOfflineStore();
+  const bytes = downloadedMobi();
+  files.set(diskBookPath + '.part', bytes.slice(0, 32));
+  await saveOfflineBookStream({ ...diskBook, resume: true, write: async writer => {
+    assert.equal(writer.position, 32);
+    await writer.write(bytes.slice(32));
+  } });
+  assert.deepEqual(files.get(diskBookPath), bytes);
+  assert.equal(recordedBooks.length, 1);
+});
+
+test('传输中断只保留有效 partial，旧错误首段不继续保留', async () => {
+  for (const [partial, preserve] of [[downloadedMobi().slice(0, 70), true], [new TextEncoder().encode('{"err":"user.need_login"}'.padEnd(80)), false]]) {
+    const { files, recordedBooks } = installByteAddressedOfflineStore();
+    files.set(diskBookPath + '.part', partial);
+    await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+      write: async () => { throw new Error('book.download.incomplete'); },
+    }), /book.download.incomplete/);
+    assert.equal(files.has(diskBookPath + '.part'), preserve);
+    assert.equal(recordedBooks.length, 0);
+  }
+});
+
+
+test('封面等待期间切换服务器，书籍下载仍使用任务捕获的原服务器', async t => {
+  installWebOfflineStore();
+  const { useServerStore } = await import('../src/lib/store/server.ts');
+  const { downloadAndSaveOfflineBook } = await import('../src/lib/offline-download.ts');
+  const coverPending = Promise.withResolvers();
+  const coverStarted = Promise.withResolvers();
+  const calls = [];
+  useServerStore.setState({ serverUrl: 'https://original.test' });
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    if (url === 'https://original.test/cover') {
+      coverStarted.resolve();
+      return coverPending.promise;
+    }
+    assert.equal(url, 'https://original.test/api/book/1.pdf');
+    return new Response('%PDF-1.7 example');
+  });
+  const downloading = downloadAndSaveOfflineBook({
+    serverUrl: 'https://original.test', bookId: '1', title: 'Book', format: 'pdf',
+    coverUrl: 'https://original.test/cover',
+  });
+  await coverStarted.promise;
+  useServerStore.setState({ serverUrl: 'https://other.test' });
+  coverPending.resolve(new Response('', { status: 404 }));
+  await downloading;
+  assert.deepEqual(calls, ['https://original.test/cover', 'https://original.test/api/book/1.pdf']);
+  assert.ok(await getOfflineBook('https://original.test', '1', 'pdf'));
+  assert.equal(await getOfflineBook('https://other.test', '1', 'pdf'), null);
 });

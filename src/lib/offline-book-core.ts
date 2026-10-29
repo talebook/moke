@@ -128,3 +128,40 @@ export async function hasEpubCentralDirectory(blob: Blob): Promise<boolean> {
   }
   return false;
 }
+
+/** Bounded prefix only: do not accumulate a whole publication to validate it. */
+export const BOOK_HEADER_WINDOW = 4096;
+const MOBI_FORMATS = new Set(['mobi', 'azw', 'azw3']);
+// These formats can legitimately contain HTML/JSON-looking text. Never infer
+// an authentication failure just from their prose or an inaccurate MIME type.
+const TEXT_FORMATS = new Set(['txt', 'text', 'html', 'htm', 'xhtml', 'md', 'markdown', 'json', 'xml', 'fb2', 'svg', 'csv', 'rtf']);
+
+export function validateDownloadedBookHeader(
+  prefix: Uint8Array,
+  format: string,
+  complete = true,
+): void {
+  const normalized = normalizeOfflineFormat(format);
+  if (TEXT_FORMATS.has(normalized)) return;
+  const sample = prefix.subarray(0, BOOK_HEADER_WINDOW);
+  // The bounded window may end in the middle of a UTF-8 character. Ignore
+  // that unfinished character instead of mistaking its replacement glyph
+  // for evidence that an HTML/JSON response contains binary data.
+  const text = new TextDecoder().decode(sample, { stream: true }).replace(/^\uFEFF/, '').trimStart();
+  // Binary PalmDB headers can start with an arbitrary book title. NULs and
+  // other binary controls distinguish that title from a real error document.
+  const plainText = !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/.test(text);
+  const html = /^(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(text);
+  const json = /^[{[]/.test(text);
+  if (plainText && (html || json)) {
+    // Even a JSON-looking title is valid PalmDB data. Wait for the header
+    // signature before judging an incomplete MOBI-family prefix.
+    if (!MOBI_FORMATS.has(normalized) || complete || sample.length >= 68) {
+      throw new Error('book.download.invalid_response');
+    }
+  }
+  if (MOBI_FORMATS.has(normalized) && (complete || sample.length >= 68)) {
+    const signature = new TextDecoder().decode(sample.subarray(60, 68));
+    if (signature !== 'BOOKMOBI' && signature !== 'TEXtREAd') throw new Error('book.mobi.invalid');
+  }
+}

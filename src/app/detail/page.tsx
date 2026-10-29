@@ -408,6 +408,10 @@ function DetailContent() {
         setMessage('下载已取消。');
       } else if (reason.startsWith('http.')) {
         setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
+      } else if (reason === 'book.download.invalid_response') {
+        setMessage('下载失败：服务器返回了登录页或错误信息。请重新登录后重新下载该书。');
+      } else if (reason === 'book.mobi.invalid') {
+        setMessage('下载失败：MOBI/AZW 文件格式异常。请重新登录后重新下载；若仍失败，请检查书库中的原文件。');
       } else if (reason === 'book.epub.invalid') {
         setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
       } else if (reason === 'book.download.transfer_failed') {
