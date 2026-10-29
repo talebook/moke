@@ -33,7 +33,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Reader dependencies
         working-directory: readest
-        run: pnpm install --frozen-lockfile
+        # Reader's packageManager pins pnpm 11; the host action installs pnpm 9.
+        run: corepack pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm build && pnpm build:reader && pnpm copy:reader
       - name: Verify failed Reader opens can return to the host
