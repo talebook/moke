@@ -14,6 +14,34 @@ const SOURCE = `${SERVER}/read/resource/${BOOK_ID}.epub?revision=${REVISION}`;
 const LEGACY_SOURCE = `${SERVER}/api/book/${BOOK_ID}.epub`;
 const BOOTSTRAP = `${SERVER}/api/book/${BOOK_ID}/reader-bootstrap?engine=readest`;
 
+test('a same-server login redirect requests login without following or authorizing the redirect', async () => {
+  let calls = 0;
+  await assert.rejects(resolveTalebookOnlineSource(async () => {
+    calls += 1;
+    return fakeResponse({ status: 302, url: BOOTSTRAP, headers: { location: '/login' } });
+  }, SERVER, BOOK_ID), error => error instanceof OnlineReadingError && error.code === 'online.auth_required');
+  assert.equal(calls, 1);
+});
+
+test('legacy Range probes distinguish authentication documents from unsupported ranges and permissions', async () => {
+  for (const [status, contentType, body, expected] of [
+    [200, 'application/json', '{"err":"user.need_login"}', 'online.auth_required'],
+    [403, 'application/json', '{"err":"user.need_login"}', 'online.auth_required'],
+    [200, 'text/html', '<form action="/login"><input type="password"></form>', 'online.auth_required'],
+    [403, 'application/json', '{"err":"permission.denied"}', 'online.permission_denied'],
+    [200, 'application/epub+zip', new Uint8Array(1), 'online.range_unsupported'],
+  ]) {
+    const request = async (url, init) => {
+      if (url === BOOTSTRAP) return fakeResponse({ status: 404, url: BOOTSTRAP, contentType: 'text/html', body: 'Not found' });
+      if (init?.method === 'HEAD') return headResponse({}, LEGACY_SOURCE);
+      return fakeResponse({ status, url: LEGACY_SOURCE, contentType, body });
+    };
+    await assert.rejects(resolveTalebookOnlineSource(request, SERVER, BOOK_ID),
+      error => error instanceof OnlineReadingError && error.code === expected,
+      `${status}: ${expected}`);
+  }
+});
+
 function fakeResponse({
   status = 200,
   url,
