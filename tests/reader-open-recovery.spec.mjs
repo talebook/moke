@@ -2,19 +2,20 @@ import { test, expect } from '@playwright/test';
 import { installLibraryLayoutMock } from './helpers/library-layout.mjs';
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:3000';
+test.setTimeout(90_000);
 
 for (const runtime of ['android', 'ohos']) {
-  test(`a cached invalid book keeps an exit and returns to Moke on ${runtime}`, async ({ page }) => {
+  test(`a failed cached book automatically returns to Moke on ${runtime}`, async ({ page }) => {
     await installLibraryLayoutMock(page, { nativeRuntime: runtime });
     await page.route('http://rangefile.localhost/**', route => route.abort());
-    await page.addInitScript(() => {
+    await page.addInitScript((runtime) => {
       const original = window.__TAURI_INTERNALS__.invoke;
       const content = new TextEncoder().encode('{"err":"user.need_login","msg":"Please sign in"}'.padEnd(100));
       const handles = new Map();
       let nextId = 2000;
       window.__READER_TEST_CALLS = [];
       window.__TAURI_OS_PLUGIN_INTERNALS__ = {
-        platform: 'android', osType: 'android', arch: 'aarch64', version: '15',
+        platform: runtime, os_type: runtime, osType: runtime, arch: 'aarch64', version: '15',
         family: 'unix', eol: '\n', locale: 'en-US',
       };
       window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
@@ -50,7 +51,10 @@ for (const runtime of ['android', 'ohos']) {
           new DataView(response.buffer).setBigUint64(bytes.length, BigInt(bytes.length));
           return response.buffer;
         }
-        if (command === 'parse_mobi_metadata') throw new Error('parse mobi: expected type header identifier BOOK or TEXT');
+        if (command === 'parse_mobi_metadata') {
+          localStorage.setItem('reader-invalid-book-parsed', '1');
+          throw new Error('parse mobi: expected type header identifier BOOK or TEXT');
+        }
         if (command === 'plugin:native-bridge|has_ambient_light_sensor') return { available: false };
         if (command === 'plugin:native-bridge|get_screen_brightness') return { brightness: 1 };
         if (command === 'plugin:native-bridge|get_safe_area_insets') return { top: 0, right: 0, bottom: 0, left: 0 };
@@ -62,17 +66,14 @@ for (const runtime of ['android', 'ohos']) {
         }
         return original(command, args);
       };
-    });
+    }, runtime);
     const params = new URLSearchParams({ moke: '1', mokeReturnTo: '/library',
       mokeRuntimePlatform: runtime, file: '/books/bad.azw3' });
     await page.goto(`${APP_URL}/readest/reader?${params}`);
-    await expect(page.getByRole('heading', { name: /Unable to open book|无法打开书籍/ })).toBeVisible({ timeout: 30_000 });
-    // The transient toast expires, while the recovery control must remain.
-    await expect(page.locator('.toast')).toBeVisible();
-    await expect(page.locator('.toast')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Go Back|返回/ })).toBeVisible();
-    await page.getByRole('button', { name: /Go Back|返回/ }).click();
-    await expect(page).toHaveURL(/\/library(?:\?.*)?$/);
+    // Assert the stable outcome; the component suite covers the transient
+    // notice and absence of a separate button without racing their lifetime.
+    await expect(page).toHaveURL(/\/library(?:\?.*)?$/, { timeout: 60_000 });
+    expect(await page.evaluate(() => localStorage.getItem('reader-invalid-book-parsed'))).toBe('1');
     expect(await page.evaluate(() => localStorage.getItem('reader-recovery-target'))).toBe('/library');
   });
 }

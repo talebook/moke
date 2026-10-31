@@ -9,7 +9,7 @@ git submodule sync --recursive
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
 cd readest
-pnpm install --frozen-lockfile
+corepack pnpm install --frozen-lockfile
 pnpm setup:vendors
 cd ..
 ```
@@ -29,7 +29,7 @@ pnpm tauri build     # 构建完整应用安装包
 
 `pnpm build:reader` 会自动执行资源生成步骤，产物位于 `readest/out/readest`。Moke 打包时通过 `pnpm copy:reader` 复制到 `out/readest`，以 `/readest` 路径提供服务；`pnpm tauri build` 已配置自动构建 Moke、构建 Reader 和复制资源，无需重复手动构建。
 
-Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri dev` 会同时启动该服务与端口 3000 的 Moke 前端。协议、鉴权、错误和版本兼容说明见当前子模块版本的 [`docs/MOKE_CONTRACT.md`](https://github.com/hehetoshang/readest-reader/blob/dbddfab6765abf69e6f1b9a4d466ed9e0a0a74d9/docs/MOKE_CONTRACT.md)；`mokeServerUrl` 始终是开发者配置的 Talebook 地址，不是 Reader 服务地址。
+Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri dev` 会同时启动该服务与端口 3000 的 Moke 前端。协议、鉴权、错误和版本兼容说明见当前子模块版本的 [`docs/MOKE_CONTRACT.md`](https://github.com/hehetoshang/readest-reader/blob/2f6040eecbb6934e16dc89eb666073bd197df07c/docs/MOKE_CONTRACT.md)；`mokeServerUrl` 始终是开发者配置的 Talebook 地址，不是 Reader 服务地址。
 
 ## 在线阅读兼容性
 
@@ -37,9 +37,11 @@ Reader 开发服务位于 <http://localhost:3001/readest/reader>。`pnpm tauri d
 
 在线 EPUB 按需读取当前页面所需字节，不写入离线书库。服务器不支持安全 Range 接口、权限失效或网络异常时，可以重试或明确改为下载后阅读。
 
+主动在线阅读或下载遇到 HTTP 401、明确的 `user.need_login` 或同源登录页跳转时，打开 Moke 的登录页面。登录成功后返回原页面，不自动重复下载；权限不足与 206 正文中断不触发登录。已经离开的页面、已切换的服务器或较新会话不受旧请求的认证失败打断。
+
 ## 原生联调
 
-真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。Reader 仓库保留的历史桌面联调环境、命令与结果见当前子模块版本的 [`docs/E2E_EVIDENCE.md`](https://github.com/hehetoshang/readest-reader/blob/dbddfab6765abf69e6f1b9a4d466ed9e0a0a74d9/docs/E2E_EVIDENCE.md)。该记录对应文中注明的历史提交，不代表本次鸿蒙适配已经完成设备或安装包验收。
+真实桌面联调可使用 `pnpm tauri:reader-e2e` 启用仅绑定 `127.0.0.1` 的可选 WebDriver 插件。`reader-e2e` 与 release profile 同时启用会编译失败，不能进入发布产物。Reader 仓库保留的历史桌面联调环境、命令与结果见当前子模块版本的 [`docs/E2E_EVIDENCE.md`](https://github.com/hehetoshang/readest-reader/blob/2f6040eecbb6934e16dc89eb666073bd197df07c/docs/E2E_EVIDENCE.md)。该记录对应文中注明的历史提交，不代表本次鸿蒙适配已经完成设备或安装包验收。
 
 ## 安全边界与回归检查
 
@@ -53,8 +55,8 @@ node --test tests/reader-only-build.test.mjs
 
 Reader 实现变更应先通过 readest-reader 仓库的 PR，再在 Moke 中更新子模块版本。
 
-当前 Reader 固定为 `dbddfab6765abf69e6f1b9a4d466ed9e0a0a74d9`，本次兼容性改动已先通过 Reader [PR #6](https://github.com/hehetoshang/readest-reader/pull/6) 和 [PR #7](https://github.com/hehetoshang/readest-reader/pull/7) 合并，包含 OHOS 插件降级、Chrome 96 兼容、字体资源路径及菜单清理。Moke 通过子模块更新接入。
+当前 Reader 固定为 `2f6040eecbb6934e16dc89eb666073bd197df07c`，本次兼容性改动已先通过 Reader [PR #6](https://github.com/hehetoshang/readest-reader/pull/6) 和 [PR #7](https://github.com/hehetoshang/readest-reader/pull/7) 合并，包含 OHOS 插件降级、Chrome 96 兼容、字体资源路径及菜单清理。Moke 通过子模块更新接入。
 
-Reader [PR #8](https://github.com/hehetoshang/readest-reader/pull/8) 补齐开书失败与空加载页的返回入口。Android/OHOS 使用固定的原生 `/library` 返回路径，失败时完整文档跳转；错误恢复的清理最多等待 1.5 秒，正常阅读退出仍等待进度保存。
+Reader [PR #8](https://github.com/hehetoshang/readest-reader/pull/8) 修正开书失败后的返回路径；[PR #9](https://github.com/hehetoshang/readest-reader/pull/9) 移除错误页和空加载页的独立返回按钮，改为错误提示约 2 秒后自动恢复，无来源的空页面同样返回，正常慢导入继续等待。Android/OHOS 使用固定的原生 `/library` 返回路径，失败时完整文档跳转；错误恢复的清理最多等待 1.5 秒，正常阅读退出仍等待进度保存。
 
-生产静态集成回归：先执行 `pnpm build && pnpm build:reader && pnpm copy:reader`，启动 `node scripts/serve-static-tests.mjs`，再运行 `pnpm exec playwright test tests/reader-open-recovery.spec.mjs --workers=1`。测试使用实际 Reader 产物与模拟原生 IPC，不能替代设备验收。
+生产静态集成回归：先执行 `pnpm build && pnpm build:reader && pnpm copy:reader`，启动 `node scripts/serve-static-tests.mjs`，再运行 `pnpm exec playwright test tests/reader-open-recovery.spec.mjs tests/auth-navigation.spec.mjs --workers=1`。测试使用实际产物与模拟原生 IPC，覆盖失败自动返回、主动操作登录、批量中断和过期认证错误隔离，不能替代设备验收。

@@ -1,6 +1,7 @@
 'use client';
 
 import { debugLog } from './debug-log.ts';
+import { MokeApiError } from './api-core.ts';
 import { isSampleBook } from './sample-book-info.ts';
 import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
@@ -787,6 +788,7 @@ async function replaceOfflineBookFile(partialTarget: OfflineFsPath, target: Offl
 
 export function shouldPreserveOfflinePartial(error: unknown, enabled?: boolean): boolean {
   if (!enabled) return false;
+  if (error instanceof MokeApiError && error.code === 'user.need_login') return true;
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   if (error instanceof TypeError) return true;
   const message = error instanceof Error ? error.message : String(error);
@@ -815,6 +817,9 @@ export async function saveOfflineBookStream(input: {
     target = handle.target;
     partialTarget = handle.partialTarget;
     relativePath = handle.relativePath;
+    // A legacy partial may contain an HTTP error page. Check it before any
+    // new request/append can mix valid book bytes into that error prefix.
+    if (writer.position > 0) await validateDiskBook(partialTarget, format, false);
     const result = await input.write(writer);
     const details = typeof result === 'string' ? { mimeType: result } : result || {};
     const size = details.size ?? writer.position;
@@ -855,7 +860,7 @@ export async function saveOfflineBookStream(input: {
         try { await removeDiskFile(partialTarget); } catch { /* best effort */ }
       }
     }
-    if (error instanceof DOMException || error instanceof TypeError) throw error;
+    if (error instanceof MokeApiError || error instanceof DOMException || error instanceof TypeError) throw error;
     if (error instanceof Error && (error.message.startsWith('book.') || error.message.startsWith('http.'))) throw error;
     debugLog(
       'error',

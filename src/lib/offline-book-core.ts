@@ -131,10 +131,49 @@ export async function hasEpubCentralDirectory(blob: Blob): Promise<boolean> {
 
 /** Bounded prefix only: do not accumulate a whole publication to validate it. */
 export const BOOK_HEADER_WINDOW = 4096;
-const MOBI_FORMATS = new Set(['mobi', 'azw', 'azw3']);
+const MOBI_FORMATS = new Set(['mobi', 'azw', 'azw3', 'prc', 'pdb']);
 // These formats can legitimately contain HTML/JSON-looking text. Never infer
 // an authentication failure just from their prose or an inaccurate MIME type.
 const TEXT_FORMATS = new Set(['txt', 'text', 'html', 'htm', 'xhtml', 'md', 'markdown', 'json', 'xml', 'fb2', 'svg', 'csv', 'rtf']);
+
+export function isTextBookFormat(format: string): boolean {
+  return TEXT_FORMATS.has(normalizeOfflineFormat(format));
+}
+
+/** Preserve bytes while recognizing ASCII document syntax, regardless of body encoding. */
+function bookResponsePrefixText(prefix: Uint8Array): string {
+  return String.fromCharCode(...prefix.subarray(0, BOOK_HEADER_WINDOW))
+    .replace(/^\xef\xbb\xbf/, '')
+    .replace(/^[\t\n\f\r ]+/, '');
+}
+
+/** Only the leading document structure matters; later binary bytes cannot hide HTML. */
+export function isHtmlBookResponsePrefix(prefix: Uint8Array): boolean {
+  const text = bookResponsePrefixText(prefix);
+  // Scan each declaration/comment once, avoiding ambiguous repeated matches
+  // on malformed gateway pages with many comment delimiters.
+  let position = 0;
+  while (position < text.length) {
+    if (text.startsWith('<!--', position)) {
+      const end = text.indexOf('-->', position + 4);
+      if (end < 0) return false;
+      position = end + 3;
+    } else if (/^<\?xml\b/i.test(text.slice(position, position + 6))) {
+      const end = text.indexOf('?>', position + 5);
+      if (end < 0) return false;
+      position = end + 2;
+    } else break;
+    while (position < text.length && /[\t\n\f\r ]/.test(text[position]!)) position++;
+  }
+  return /^(?:<!doctype\s+html\b|<(?:html|head|body|form)\b)/i.test(text.slice(position));
+}
+
+/** Known ebook identifiers disambiguate arbitrary Palm titles; this is no format whitelist. */
+export function hasKnownMobiHeader(prefix: Uint8Array): boolean {
+  const signature = String.fromCharCode(...prefix.subarray(60, 68));
+  return signature === 'BOOKMOBI' || signature === 'TEXtREAd'
+    || String.fromCharCode(...prefix.subarray(0, 4)) === 'TPZ0';
+}
 
 export function validateDownloadedBookHeader(
   prefix: Uint8Array,
@@ -144,33 +183,22 @@ export function validateDownloadedBookHeader(
   const normalized = normalizeOfflineFormat(format);
   if (TEXT_FORMATS.has(normalized)) return;
   const sample = prefix.subarray(0, BOOK_HEADER_WINDOW);
-  // The bounded window may end in the middle of a UTF-8 character. Ignore
-  // that unfinished character instead of mistaking its replacement glyph
-  // for evidence that an HTML/JSON response contains binary data.
-  const text = new TextDecoder().decode(sample, { stream: true }).replace(/^\uFEFF/, '').trimStart();
-  // Binary PalmDB headers can start with an arbitrary book title. NULs and
-  // other binary controls distinguish that title from a real error document.
-  const plainText = !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffd]/.test(text);
-  // Scan comments once; a repeated lazy comment regex can backtrack
-  // exponentially on a malformed response containing many comment markers.
-  let documentStart = 0;
-  while (text.startsWith('<!--', documentStart)) {
-    const commentEnd = text.indexOf('-->', documentStart + 4);
-    if (commentEnd < 0) break;
-    documentStart = commentEnd + 3;
-    while (documentStart < text.length && /\s/.test(text[documentStart]!)) documentStart += 1;
-  }
-  const html = /^(?:<!doctype\s+html\b|<html\b|<head\b|<body\b)/i.test(text.slice(documentStart));
+  const mobi = MOBI_FORMATS.has(normalized);
+  // Palm titles may be printable JSON-looking text even across the full 68-byte
+  // header. Topaz and other AZW variants are also valid download payloads;
+  // rendering support belongs to Reader, not this error-document filter.
+  if (mobi && hasKnownMobiHeader(sample)) return;
+  if (isHtmlBookResponsePrefix(sample)) throw new Error('book.download.invalid_response');
+  const text = bookResponsePrefixText(sample);
   const json = /^[{[]/.test(text);
-  if (plainText && (html || json)) {
-    // Even a JSON-looking title is valid PalmDB data. Wait for the header
-    // signature before judging an incomplete MOBI-family prefix.
-    if (!MOBI_FORMATS.has(normalized) || complete || sample.length >= 68) {
-      throw new Error('book.download.invalid_response');
-    }
+  if (json && mobi && !complete && sample.length < 68) {
+    // A complete API login error is not an ambiguous Palm title. Reject it
+    // before a later Range suffix can restore an otherwise valid identifier.
+    let loginError = false;
+    try { loginError = JSON.parse(text)?.err === 'user.need_login'; } catch { /* incomplete title/document */ }
+    if (loginError) throw new Error('book.download.invalid_response');
   }
-  if (MOBI_FORMATS.has(normalized) && (complete || sample.length >= 68)) {
-    const signature = new TextDecoder().decode(sample.subarray(60, 68));
-    if (signature !== 'BOOKMOBI' && signature !== 'TEXtREAd') throw new Error('book.mobi.invalid');
-  }
+  // An incomplete JSON-looking Palm title needs the later identifier to
+  // disambiguate it. Explicit HTML error starts need no such deferral.
+  if (json && (!mobi || complete || sample.length >= 68)) throw new Error('book.download.invalid_response');
 }

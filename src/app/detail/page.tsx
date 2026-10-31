@@ -14,6 +14,8 @@ import {
   endOfflineDownload,
 } from '@/lib/offline-download';
 import { useServerStore } from '@/lib/store/server';
+import { buildLoginHref, captureLoginNavigation, isLoginRequiredError } from '@/lib/auth-navigation';
+import { offlineDownloadErrorMessage } from '@/lib/offline-download-error';
 import { getDebugPanelLaunchState, useDeveloperStore } from '@/lib/store/developer';
 import { useSettingsStore } from '@/lib/store/settings';
 import { fetchReadingProgress } from '@/lib/reading-progress';
@@ -85,6 +87,7 @@ function DetailContent() {
   const { serverUrl, offlineMode, capabilities, user } = useServerStore();
   const [comicOffline, setComicOffline] = useState(false);
   const [comicOpen, setComicOpen] = useState(false);
+  const comicLoginNavigationRef = useRef<ReturnType<typeof captureLoginNavigation> | null>(null);
   const closeComic = useCallback(() => setComicOpen(false), []);
   const readerPreference = useSettingsStore(state => state.readerPreference);
   const [book, setBook] = useState<BookDetail | null>(null);
@@ -137,7 +140,13 @@ function DetailContent() {
         ? '离线阅读'
         : '下载后阅读';
   const ratingValue = typeof book?.rating === 'number' ? book.rating : book?.rating?.value;
-  const handleAnnotationAuthRequired = useCallback(() => router.push('/login'), [router]);
+  const handleAnnotationAuthRequired = useCallback(() => {
+    router.push(buildLoginHref(`/detail?${searchParams.toString()}`));
+  }, [router, searchParams]);
+  const handleComicAuthRequired = useCallback(() => {
+    const href = comicLoginNavigationRef.current?.();
+    if (href) router.push(href);
+  }, [router]);
 
   useEffect(() => {
     if (!id) return;
@@ -337,6 +346,7 @@ function DetailContent() {
 
   const handleDownload = async () => {
     if (!book || downloading) return;
+    const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
     setDownloading(true);
     setDownloadProgress(0);
     setMessage('');
@@ -399,30 +409,12 @@ function DetailContent() {
       setMessage('已下载到本地，现在可以阅读。');
       return true;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : '';
-      if (reason === 'book.download.in_progress') {
-        setMessage('该书籍正在下载中，请稍候。');
-      } else if (reason === 'book.download.paused') {
-        setMessage('下载已暂停，可在下载管理中继续。');
-      } else if (reason === 'book.download.cancelled') {
-        setMessage('下载已取消。');
-      } else if (reason.startsWith('http.')) {
-        setMessage(`下载失败，服务器返回 ${reason.replace('http.', '')}。`);
-      } else if (reason === 'book.download.invalid_response') {
-        setMessage('下载失败：服务器返回了登录页或错误信息。请重新登录后重新下载该书。');
-      } else if (reason === 'book.mobi.invalid') {
-        setMessage('下载失败：MOBI/AZW 文件格式异常。请重新登录后重新下载；若仍失败，请检查书库中的原文件。');
-      } else if (reason === 'book.epub.invalid') {
-        setMessage('下载失败：服务端返回的 EPUB 文件不完整或格式错误，请重新上传该书。');
-      } else if (reason === 'book.download.transfer_failed') {
-        setMessage('下载失败：接收文件内容时连接中断，请重试。');
-      } else if (reason === 'book.download.storage_failed' || reason === 'Failed to save book to file system') {
-        setMessage('下载失败：无法保存到本地，请检查存储空间或权限。');
-      } else if (!isTauriApp) {
-        setMessage('下载失败：当前浏览器模式下可能被跨域策略拦截。桌面版会走 Tauri 原生下载通道。');
-      } else {
-        setMessage('下载失败，请检查服务器连接或登录状态后重试。');
+      if (isLoginRequiredError(error)) {
+        const href = loginNavigation();
+        if (href) router.push(href);
+        return false;
       }
+      setMessage(offlineDownloadErrorMessage(error, isTauriApp ? 'tauri' : 'web'));
       setDownloadProgress(0);
     } finally {
       setDownloading(false);
@@ -431,8 +423,12 @@ function DetailContent() {
 
   const handleOnlineRead = async () => {
     if (!book) return;
+    const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
     const reader = resolveBookReader(book, useSettingsStore.getState().readerPreference);
-    if (reader === 'comic') { setComicOffline(false); setComicOpen(true); return; }
+    if (reader === 'comic') {
+      comicLoginNavigationRef.current = loginNavigation;
+      setComicOffline(false); setComicOpen(true); return;
+    }
     if (reader === 'system') {
       if (downloaded || await handleDownload()) await handleOfflineRead();
       return;
@@ -528,6 +524,11 @@ function DetailContent() {
       });
     } catch (error) {
       if (controller.signal.aborted) return;
+      if (isLoginRequiredError(error)) {
+        const href = loginNavigation();
+        if (href) router.push(href);
+        return;
+      }
       console.warn('Failed to open online book:', error);
       setMessage(onlineReadingErrorMessage(error));
     } finally {
@@ -542,6 +543,7 @@ function DetailContent() {
         setMessage('漫画不支持笔记精确定位，请使用在线阅读。');
         return;
       }
+      comicLoginNavigationRef.current = null;
       setComicOffline(true);
       setComicOpen(true);
       return;
@@ -1011,7 +1013,7 @@ function DetailContent() {
           </div>
         </div>
       )}
-      {comicOpen && book && <ComicReader book={book} serverUrl={serverUrl} offline={offlineMode || comicOffline} onClose={closeComic} />}
+      {comicOpen && book && <ComicReader book={book} serverUrl={serverUrl} offline={offlineMode || comicOffline} onClose={closeComic} onAuthRequired={handleComicAuthRequired} />}
     </DesktopLayout>
   );
 }
