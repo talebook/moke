@@ -17,6 +17,7 @@ import { getMokeRuntimePlatform } from '@/lib/moke-reader';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 import { useToast } from '@/lib/toast';
 import { Select } from '@/components/ui/Select';
+import { signOutSource } from '@/lib/source-sign-out';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -84,16 +85,12 @@ export default function SettingsPage() {
   };
 
   const handleLogout = async () => {
-    if (serverUrl) {
-      try {
-        await request(`${serverUrl}/api/user/sign_out`, { credentials: 'include' });
-      } catch (error) {
-        console.warn('Failed to sign out on server:', error);
-      }
-    }
-    logout();
-    safeRemoveLocalStorageItem('moke-auth-token');
-    router.push('/login');
+    const source = useServerStore.getState();
+    await signOutSource(source, request, useServerStore.getState, () => {
+      logout();
+      safeRemoveLocalStorageItem('moke-auth-token');
+      router.push('/login');
+    });
   };
 
   const handleSelectDownloadDirectory = async () => {

@@ -24,8 +24,9 @@ compile_error!("reader-e2e must not be enabled in release builds");
 ))]
 compile_error!("reader-e2e is supported only by desktop development builds");
 
-mod extensions;
+mod connection_authority;
 mod discovery;
+mod extensions;
 #[cfg(target_env = "ohos")]
 mod ohos_opener;
 
@@ -664,7 +665,10 @@ fn moke_list_downloaded_books(
             Ok(path) if path.is_file() => {
                 result.push(MokeDownloadedBookResponse {
                     file_path: path.to_string_lossy().into_owned(),
-                    file_size: path.metadata().map(|metadata| metadata.len()).unwrap_or_default(),
+                    file_size: path
+                        .metadata()
+                        .map(|metadata| metadata.len())
+                        .unwrap_or_default(),
                     book: book.clone(),
                 });
                 retained.push(book);
@@ -717,7 +721,10 @@ fn moke_list_downloaded_books(
                     updated_at,
                 },
                 file_path: path.to_string_lossy().into_owned(),
-                file_size: entry.metadata().map(|metadata| metadata.len()).unwrap_or_default(),
+                file_size: entry
+                    .metadata()
+                    .map(|metadata| metadata.len())
+                    .unwrap_or_default(),
             });
         }
     }
@@ -730,6 +737,16 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
+        connection_authority::moke_connection_document,
+        connection_authority::moke_connection_status,
+        connection_authority::moke_connection_begin,
+        connection_authority::moke_connection_check,
+        connection_authority::moke_connection_dispatch,
+        connection_authority::moke_connection_settle,
+        connection_authority::moke_connection_commit,
+        connection_authority::moke_connection_ack,
+        connection_authority::moke_connection_cancel,
+        connection_authority::moke_connection_mark_reader,
         discovery::moke_discovery_start,
         discovery::moke_discovery_snapshot,
         discovery::moke_discovery_admit,
@@ -787,12 +804,93 @@ fn apply_linux_wayland_workarounds() {
     }
 }
 
+/// This observes actual native document/window events. SPA routing keeps the
+/// current document, while a complete replacement revokes its connection lease.
+/// An unknown/late Reader attempt remains reserved for this process lifetime.
+fn connection_lifecycle_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("moke-connection-lifecycle")
+        .on_navigation(|webview, target| {
+            if let Some(authority) =
+                webview.try_state::<connection_authority::ConnectionAuthority>()
+            {
+                if webview.label() == "main" {
+                    authority.main_navigation_started();
+                }
+                if is_moke_reader_path(target.path()) {
+                    if let Err(error) = authority.mark_reader_attempt() {
+                        log::warn!("reader source reservation refused: {}", error.code);
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .on_webview_ready(|webview| {
+            if webview.label() != "main" {
+                if let Some(authority) =
+                    webview.try_state::<connection_authority::ConnectionAuthority>()
+                {
+                    if let Err(error) = authority.mark_reader_attempt() {
+                        log::warn!("reader source reservation failed: {}", error.code);
+                    }
+                }
+            }
+        })
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                if let Some(authority) =
+                    webview.try_state::<connection_authority::ConnectionAuthority>()
+                {
+                    if webview.label() == "main" {
+                        authority.main_document_started();
+                    }
+                    if is_moke_reader_path(payload.url().path()) {
+                        if let Err(error) = authority.mark_reader_attempt() {
+                            log::warn!("reader source reservation failed: {}", error.code);
+                        }
+                    }
+                }
+            }
+        })
+        .on_event(|app, event| {
+            if let tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } = event
+            {
+                if label == "main" {
+                    if let Some(authority) =
+                        app.try_state::<connection_authority::ConnectionAuthority>()
+                    {
+                        authority.main_document_destroyed();
+                    }
+                }
+            }
+        })
+        .build()
+}
+
+fn is_reader_source_dispatch(command: &str) -> bool {
+    matches!(
+        command,
+        "open_reader"
+            | "start_server"
+            | "download_file"
+            | "upload_file"
+            | "allow_paths_in_scopes"
+            | "moke_open_downloaded_book"
+            | "ext_reader_event"
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     apply_linux_wayland_workarounds();
 
     let builder = tauri::Builder::default()
+        .plugin(connection_lifecycle_plugin())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_os::init())
@@ -839,6 +937,7 @@ pub fn run() {
     // 通过命令名分派到对应的 handler，避免 Invoke 被移动两次。
     builder
         .manage(discovery::DiscoveryState::default())
+        .manage(connection_authority::ConnectionAuthority::default())
         .invoke_handler({
             let reader_handler = readestlib::reader_invoke_handler();
             #[cfg(not(target_env = "ohos"))]
@@ -846,6 +945,17 @@ pub fn run() {
             let moke_handler = moke_invoke_handler();
             move |invoke| {
                 let cmd = invoke.message.command().to_string();
+                if is_reader_source_dispatch(&cmd) {
+                    let reservation = invoke
+                        .message
+                        .webview_ref()
+                        .state::<connection_authority::ConnectionAuthority>()
+                        .mark_reader_attempt();
+                    if let Err(error) = reservation {
+                        invoke.resolver.reject(error);
+                        return true;
+                    }
+                }
                 #[cfg(not(target_env = "ohos"))]
                 if cmd.starts_with("ext_") {
                     ext_handler(invoke)
@@ -863,6 +973,14 @@ pub fn run() {
             }
         })
         .setup(|_app| {
+            // Bind the fixed noncredential provenance file before any shell
+            // HTTP activity. Failure keeps native connections restricted.
+            let authority = _app.state::<connection_authority::ConnectionAuthority>();
+            if let Err(error) = authority
+                .initialize_paths(_app.path().app_config_dir()?, _app.path().app_cache_dir()?)
+            {
+                log::warn!("native source initialization restricted: {}", error.code);
+            }
             // Restore only the directory that was explicitly selected and persisted earlier.
             if let Ok(Some(directory)) = read_download_directory(_app.handle()) {
                 let _ = _app.fs_scope().allow_directory(&directory, true);
@@ -1016,10 +1134,9 @@ mod moke_document_acl_tests {
     #[test]
     fn native_navigation_allows_only_exact_cross_document_transitions() {
         let shell = tauri::Url::parse("http://tauri.localhost/detail?id=11").unwrap();
-        let reader = tauri::Url::parse(
-            "http://tauri.localhost/readest/reader?file=book.epub&moke=1",
-        )
-        .unwrap();
+        let reader =
+            tauri::Url::parse("http://tauri.localhost/readest/reader?file=book.epub&moke=1")
+                .unwrap();
         let library = tauri::Url::parse("http://tauri.localhost/library").unwrap();
 
         assert!(is_allowed_moke_navigation(&shell, &reader));
@@ -1258,10 +1375,7 @@ mod fs_scope_tests {
 
         assert_eq!(dev["identifier"], "reader-dev-remote");
         assert_eq!(dev["local"], false);
-        assert_eq!(
-            dev["remote"]["urls"][0],
-            "http://localhost:3001/readest/**"
-        );
+        assert_eq!(dev["remote"]["urls"][0], "http://localhost:3001/readest/**");
         assert_eq!(dev["windows"], reader["windows"]);
         assert_eq!(dev["permissions"], reader["permissions"]);
     }

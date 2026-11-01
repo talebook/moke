@@ -1,6 +1,6 @@
 'use client';
 import { SAVED_READER_GUARD_MESSAGE } from '@/lib/saved-session-policy';
-import { markLegacyReaderAttempt } from '@/lib/reader-source-guard';
+import { reserveLegacyReaderAttempt } from '@/lib/reader-source-guard';
 
 import { retryOnlineRead } from '@/lib/online-retry';
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
@@ -274,12 +274,14 @@ function DetailContent() {
     if (!book) return;
 
     try {
-      await request(`${serverUrl}/api/book/${book.id}/readstate`, {
+      const response = await request(`${serverUrl}/api/book/${book.id}/readstate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(payload),
       });
+      const { drainResponseBodyQuietly } = await import('@/lib/api-core');
+      await drainResponseBodyQuietly(response);
     } catch (error) {
       console.warn('Failed to update reading state:', error);
     }
@@ -429,7 +431,8 @@ function DetailContent() {
 
   const handleOnlineRead = async () => {
     if (useServerStore.getState().savedServerId) { setMessage(SAVED_READER_GUARD_MESSAGE); return; }
-    markLegacyReaderAttempt();
+    try { await reserveLegacyReaderAttempt(); }
+    catch { setMessage('无法确认阅读器来源状态，请检查配置存储后重试。'); return; }
     if (!book) return;
     const reader = resolveBookReader(book, useSettingsStore.getState().readerPreference);
     if (reader === 'comic') { setComicOffline(false); setComicOpen(true); return; }
@@ -537,7 +540,8 @@ function DetailContent() {
 
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
     if (useServerStore.getState().savedServerId) { setMessage(SAVED_READER_GUARD_MESSAGE); return; }
-    markLegacyReaderAttempt();
+    try { await reserveLegacyReaderAttempt(); }
+    catch { setMessage('无法确认阅读器来源状态，请检查配置存储后重试。'); return; }
     if (!book) return;
     if (resolveBookReader(book, useSettingsStore.getState().readerPreference) === 'comic') {
       if (targetAnnotation) {

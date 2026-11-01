@@ -108,7 +108,10 @@ export function createComicApi(request: RequestLike, serverUrl: string, bookId: 
   async function json(path: string, init?: RequestInit): Promise<Record<string, unknown>> {
     return retryOnlineRead(async requestSignal => {
       const result = await response(path, requestSignal, init);
-      if (!result.headers.get('content-type')?.includes('application/json')) throw new ComicError('comic.response');
+      if (!result.headers.get('content-type')?.includes('application/json')) {
+        await result.body?.cancel().catch(() => undefined);
+        throw new ComicError('comic.response');
+      }
       const chunks = await readBoundedBody(result, 8 * 1024 * 1024);
       const data = JSON.parse(await new Blob(chunks as BlobPart[]).text());
       if (data?.err !== 'ok') throw new ComicError(typeof data?.err === 'string' ? data.err : 'comic.response');

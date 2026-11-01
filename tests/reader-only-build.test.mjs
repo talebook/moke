@@ -122,6 +122,16 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
 test('Moke ACL command manifest stays aligned with Reader plus the explicit host surface', () => {
   const mokeHostCommands = [
     'moke_runtime_platform',
+    'moke_connection_document',
+    'moke_connection_status',
+    'moke_connection_begin',
+    'moke_connection_check',
+    'moke_connection_dispatch',
+    'moke_connection_settle',
+    'moke_connection_commit',
+    'moke_connection_ack',
+    'moke_connection_cancel',
+    'moke_connection_mark_reader',
     'moke_discovery_start',
     'moke_discovery_snapshot',
     'moke_discovery_admit',
@@ -147,6 +157,21 @@ test('Moke ACL command manifest stays aligned with Reader plus the explicit host
     ]),
   ].sort();
   assert.deepEqual([...new Set(appAclCommands(tauriBuild))].sort(), expected);
+});
+
+test('native connection authority grants stay in the main capability', () => {
+  const main = JSON.parse(readFileSync(new URL('../src-tauri/capabilities/default.json', import.meta.url), 'utf8'));
+  const commands = appAclCommands(tauriBuild).filter((command) => command.startsWith('moke_connection_'));
+  assert.equal(commands.length, 10);
+  assert.deepEqual(main.windows, ['main']);
+  for (const command of commands) {
+    const permission = `allow-${command.replaceAll('_', '-')}`;
+    assert.ok(main.permissions.includes(permission), permission);
+    for (const file of ['reader.json', 'reader-mobile.json', 'reader-android-navigation.json', 'ohos.json']) {
+      const capability = JSON.parse(readFileSync(new URL(`../src-tauri/capabilities/${file}`, import.meta.url), 'utf8'));
+      assert.ok(!capability.permissions.includes(permission), `${file} must not acquire ${permission}`);
+    }
+  }
 });
 
 test('embedded Reader preserves the untrusted-publication filesystem boundary', () => {

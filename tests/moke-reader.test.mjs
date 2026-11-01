@@ -290,15 +290,27 @@ test('buildEmbeddedReaderHomeUrl carries mokeServerUrl only when non-empty', () 
 
 test('desktop reader-home keeps exactly one progress saver across window outcomes', async () => {
   const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const originalWarn = console.warn;
   const warnings = [];
+  let reservations = 0;
+  let expectedReservation = 0;
   process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
   console.warn = (...args) => warnings.push(args);
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    __TAURI_INTERNALS__: { invoke: async (command) => {
+      if (command === 'moke_runtime_platform') return 'linux';
+      assert.equal(command, 'moke_connection_mark_reader');
+      reservations++;
+    } },
+  } });
 
   const run = async (outcome) => {
+    expectedReservation++;
     const windowUrls = [];
     const navigatedUrls = [];
     const windowFactory = (_label, options) => {
+      assert.equal(reservations, expectedReservation, 'native reservation must precede any window dispatch');
       if (outcome === 'sync-error') {
         throw new Error('window constructor failed');
       }
@@ -354,16 +366,41 @@ test('desktop reader-home keeps exactly one progress saver across window outcome
     }
 
     assert.equal(warnings.length, 2);
+    assert.equal(reservations, 3);
     for (const [message, error] of warnings) {
       assert.equal(message, 'Falling back to current-window embedded reader navigation:');
       assert.ok(error instanceof Error);
     }
   } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
     console.warn = originalWarn;
     if (previousPlatform === undefined) {
       delete process.env.NEXT_PUBLIC_APP_PLATFORM;
     } else {
       process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
     }
+  }
+});
+
+test('failed native Reader reservation prevents a late window dispatch', async () => {
+  const previousPlatform = process.env.NEXT_PUBLIC_APP_PLATFORM;
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: {
+    __TAURI_INTERNALS__: { invoke: async (command) => {
+      if (command === 'moke_runtime_platform') return 'linux';
+      throw new Error('reservation-unconfirmed');
+    } },
+  } });
+  try {
+    await assert.rejects(openEmbeddedReaderHome({ eink: false, navigate: () => assert.fail('must not navigate'),
+      platformOverride: 'linux', windowFactory: () => assert.fail('must not create a window'),
+    }), /reservation-unconfirmed/);
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+    else delete globalThis.window;
+    if (previousPlatform === undefined) delete process.env.NEXT_PUBLIC_APP_PLATFORM;
+    else process.env.NEXT_PUBLIC_APP_PLATFORM = previousPlatform;
   }
 });

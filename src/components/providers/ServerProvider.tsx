@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useStore } from 'zustand';
 import { useRouter, usePathname } from 'next/navigation';
 import { fetchCurrentUser, fetchServerInfo, checkWelcomeRequirement, discoverServerCapabilities } from '@/lib/api';
 import { useServerStore } from '@/lib/store/server';
@@ -8,12 +9,20 @@ import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
 import { logErrorMetadata } from '@/lib/api-log';
+import { nativeConnection, isNativeConnectionRuntime } from '@/lib/native-connection';
 
-const PUBLIC_PATHS = ['/', '/welcome', '/join', '/login', '/register', '/access', '/privacy', '/settings/developer'];
+const PUBLIC_PATHS = ['/', '/welcome', '/join', '/login', '/register', '/reset-password', '/access', '/privacy', '/settings/developer'];
+const AUTH_PATHS = ['/login', '/register', '/reset-password', '/access'];
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const nativePhase = useStore(nativeConnection.state, (state) => state.phase);
+  const nativeRuntime = isNativeConnectionRuntime();
+  const sourceReady = !nativeRuntime || ((nativePhase === 'active' || nativePhase === 'attempt') && nativeConnection.isActive());
+  useEffect(() => {
+    if (nativeRuntime) void nativeConnection.initialize().catch(() => {});
+  }, [nativeRuntime]);
   // 字段级订阅：能力探测一轮会连续 setServerTitle / setUser / setServerCapabilities，
   // 整对象订阅会让每次 set 都重渲染整棵应用树；只订阅用到的字段即可。
   const serverUrl = useServerStore((state) => state.serverUrl);
@@ -31,16 +40,20 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hasHydrated) return;
+    if (nativeRuntime && !sourceReady && AUTH_PATHS.includes(pathname)) {
+      router.replace('/welcome'); return;
+    }
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
-    if (!serverUrl && !offlineMode) {
+    if ((!serverUrl || !sourceReady) && !offlineMode) {
       // Use full-document navigation on single-WebView runtimes (OHOS) to avoid
       // getting stuck on the blank loading screen when RSC navigation fails.
       navigateFullDocument('/welcome', router.replace);
     }
-  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, serverUrl, router]);
+  }, [hasHydrated, isEmbeddedReaderPath, isExtensionPath, nativeRuntime, offlineMode, pathname, serverUrl, sourceReady, router]);
 
   useEffect(() => {
     if (!hasHydrated) return;
+    if (!sourceReady) return;
     if (offlineMode) return;
     if (PUBLIC_PATHS.includes(pathname) || isExtensionPath || isEmbeddedReaderPath) return;
     if (!discoveryServerUrl) return;
@@ -76,8 +89,8 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
         }
 
         const [userResult, serverResult, capabilitiesResult] = await Promise.allSettled([
-          fetchCurrentUser(),
-          fetchServerInfo(),
+          fetchCurrentUser(discoveryServerUrl),
+          fetchServerInfo(discoveryServerUrl),
           discoverServerCapabilities(discoveryServerUrl),
         ]);
         if (!isCurrentSession()) return;
@@ -130,7 +143,7 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser]);
+  }, [capabilitiesCheckedAt, discoveryServerUrl, hasHydrated, isEmbeddedReaderPath, isExtensionPath, offlineMode, pathname, router, setServerCapabilities, setServerTitle, setUser, sourceReady]);
 
   return <>{children}</>;
 }

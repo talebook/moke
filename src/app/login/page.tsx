@@ -81,7 +81,7 @@ export default function LoginPage() {
         setShowCaptcha(false);
         invalidateSession();
         session = useServerStore.getState();
-        const info = await fetchCurrentUser();
+        const info = await fetchCurrentUser(session.serverUrl);
         if (!isCurrentSession()) return;
         if (!info.isLogin || !info.user) {
           logout();

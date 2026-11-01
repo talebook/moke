@@ -7,13 +7,14 @@ import Link from 'next/link';
 import { BookOpen, Check, Copy, Plus } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { loadSavedServers, saveServer, getSavedServersSnapshot, type SavedServerView } from '@/lib/saved-server-api';
-import { connectionState, savedServerConnection, submitSavedServerAccess } from '@/lib/saved-server-connection';
+import { connectionState, savedServerConnection, submitSavedServerAccess, requestSavedServerCaptcha } from '@/lib/saved-server-connection';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { UNLOCK_THRESHOLD, useDeveloperStore } from '@/lib/store/developer';
 import { externalLinkClick } from '@/lib/external-link';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { savedServerFocusId } from '@/lib/saved-server-focus';
+import { nativeConnection, isNativeConnectionRuntime } from '@/lib/native-connection';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
@@ -25,6 +26,7 @@ export default function WelcomePage() {
   const enterOfflineMode = useServerStore((state) => state.enterOfflineMode);
   const activeUrl = useServerStore((state) => state.serverUrl);
   const connection = useStore(connectionState, (value) => value.state);
+  const nativeStatus = useStore(nativeConnection.state, (value) => value);
   const [entries, setEntries] = useState<SavedServerView[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [listBusy, setListBusy] = useState(true);
@@ -139,6 +141,8 @@ export default function WelcomePage() {
     } else setError(`复制链接失败，请手动复制：${DEMO_LIBRARY_URL}`);
   };
   const connecting = connection?.phase === 'connecting';
+  const nativeBlocked = isNativeConnectionRuntime() && ['needs_restart', 'unsupported'].includes(nativeStatus.phase);
+  const activeConfirmed = !isNativeConnectionRuntime() || nativeConnection.isActive();
 
   return (
     <main className="min-h-screen flex flex-col md:flex-row app-warm-bg">
@@ -150,21 +154,22 @@ export default function WelcomePage() {
           <div className="flex items-center justify-between gap-3 mb-4"><h2 id="servers-title" className="text-xl font-semibold text-card-foreground">服务器列表</h2><button type="button" className={button} disabled={listBusy || saving || connecting || verifying} onClick={() => void reload()}>重新加载</button></div>
           <p className="text-sm text-muted-foreground mb-5">加入只保存地址；点击已保存的条目后才会连接。</p>
           {listError && <p role="alert" className="mb-4 text-sm text-destructive">{listError}</p>}
+          {isNativeConnectionRuntime() && nativeStatus.message && <p role="alert" className="mb-4 text-sm text-destructive">{nativeStatus.message}</p>}
           {error && <p role="alert" className="mb-4 text-sm text-destructive">{error}</p>}
           {notice && <p role="status" className="mb-4 text-sm text-foreground">{notice}</p>}
           {listBusy && <p role="status" className="mb-4 text-sm text-muted-foreground">正在加载服务器列表…</p>}
           {loaded && !listBusy && entries.length === 0 && <p className="mb-4 rounded-2xl border border-dashed border-border p-5 text-sm text-muted-foreground">尚未加入服务器。先保存一个书库地址。</p>}
           <ul className="space-y-3 mb-4" aria-label="已保存服务器">
             {entries.map((entry) => <li key={entry.id}>
-              <button id={`saved-${entry.id}`} type="button" className={`${button} w-full text-left break-all`} disabled={!loaded || listBusy || saving || verifying || entry.status !== 'ready'} onClick={() => void handleConnect(entry)}>
+              <button id={`saved-${entry.id}`} type="button" className={`${button} w-full text-left break-all`} disabled={!loaded || listBusy || saving || verifying || nativeBlocked || entry.status !== 'ready'} onClick={() => void handleConnect(entry)}>
                 <span className="block font-semibold">{entry.displayName || entry.title || '未命名书库'}</span><span className="block mt-1 text-xs text-muted-foreground">{entry.url || '无效地址已保留'}</span>
-                <span className="block mt-1 text-xs">{entry.status === 'needs-edit' ? '需要更正，原始记录已保留' : entry.status === 'collision' ? '地址冲突，原始记录已保留' : connection?.entryId === entry.id && connecting ? '连接中…' : entry.url === activeUrl ? '当前书库 · 点击重新确认连接' : '点击连接'}</span>
+                <span className="block mt-1 text-xs">{entry.status === 'needs-edit' ? '需要更正，原始记录已保留' : entry.status === 'collision' ? '地址冲突，原始记录已保留' : connection?.entryId === entry.id && connecting ? '连接中…' : entry.url === activeUrl && activeConfirmed ? '当前书库 · 点击重新确认连接' : '点击连接'}</span>
               </button>
             </li>)}
           </ul>
           {connection && connection.phase !== 'idle' && connection.phase !== 'connected' && <div className="mb-4 rounded-2xl border border-border p-3 text-sm" role="status">
             <p className="break-all">{connection.url}</p><p className="mt-1">{connecting ? '正在确认服务器与访问码状态…' : connection.message}</p>
-            {connection.code === 'source-in-use' && <p className="mt-2 text-muted-foreground">请先结束下载；此前尝试打开阅读器时需重启应用。同主机多个书库的直接切换和原生连接目前暂受限，已保存的条目会保留。</p>}
+            {connection.code === 'source-in-use' && <p className="mt-2 text-muted-foreground">请先结束下载。原生连接仅开放已验证的 Linux 路径；同主机或共享 Cookie 域的书库切换仍受限。阅读器或既有认证来源不明时，需独立干净配置或明确来源迁移，已保存条目会保留。</p>}
             {connecting && <button type="button" className={`${button} mt-3`} onClick={() => savedServerConnection.cancel()}>取消连接</button>}
             {connection.needsAccessCode && <form className="mt-3 space-y-3" onSubmit={(e) => { e.preventDefault(); void verifyAccess(); }}>
               <label className="block" htmlFor="candidate-access">该书库的访问码</label><input id="candidate-access" className={field} autoComplete="off" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} disabled={verifying} />
@@ -185,7 +190,7 @@ export default function WelcomePage() {
         </section>
         <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground"><button type="button" onClick={handleVersionClick} className="rounded px-1 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{APP_VERSION}</button><a href="https://github.com/talebook/moke" onClick={externalLinkClick('https://github.com/talebook/moke')} rel="noopener noreferrer" className="hover:underline">GitHub</a></div>
       </div>
-      <CaptchaModal isOpen={showCaptcha && Boolean(connection?.needsAccessCode)} serverUrl={connection?.url || ''} requireValidTls onClose={() => setShowCaptcha(false)} onSuccess={(data) => void verifyAccess(data)} />
+      <CaptchaModal isOpen={showCaptcha && Boolean(connection?.needsAccessCode)} serverUrl={connection?.url || ''} requireValidTls requestCaptcha={requestSavedServerCaptcha} onClose={() => setShowCaptcha(false)} onSuccess={(data) => void verifyAccess(data)} />
     </main>
   );
 }

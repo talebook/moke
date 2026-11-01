@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
 import { parseLibraryBaseUrl } from '../discovery/base-url.ts';
+import { nativeConnection, isNativeConnectionRuntime } from '../native-connection.ts';
 // Relative `.ts` imports keep this store directly executable by the Node test
 // runner; it cannot resolve the application's `@/` alias.
 import {
@@ -127,6 +128,7 @@ export const useServerStore = create<ServerState>()(
         return activated;
       },
       setServer: (protocol, host, port) => {
+        if (isNativeConnectionRuntime()) nativeConnection.invalidateActive();
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
         set((state) => ({
           serverUrl: url, offlineMode: false, protocol, host, port, savedServerId: null, savedEntryRevision: null,
@@ -135,7 +137,10 @@ export const useServerStore = create<ServerState>()(
           sessionRevision: state.sessionRevision + 1,
         }));
       },
-      enterOfflineMode: () => set({ offlineMode: true, isConnected: false }),
+      enterOfflineMode: () => {
+        if (isNativeConnectionRuntime()) nativeConnection.invalidateActive();
+        set({ offlineMode: true, isConnected: false });
+      },
       leaveOfflineMode: () => set({ offlineMode: false }),
       // The cookie has changed, but its user is not confirmed yet. Isolate
       // pending probes/covers and invalidate capabilities without logging in.
@@ -191,6 +196,7 @@ export const useServerStore = create<ServerState>()(
         }));
       },
       disconnect: () => {
+        if (isNativeConnectionRuntime()) nativeConnection.invalidateActive();
         set((state) => ({
           serverUrl: '', offlineMode: false, serverTitle: '', savedServerId: null, savedEntryRevision: null,
           capabilities: DEFAULT_SERVER_CAPABILITIES,
@@ -216,6 +222,12 @@ export const useServerStore = create<ServerState>()(
             persistedCapabilities,
           ),
           hasHydrated: true,
+          // Native authority lives in the running host/document. Persisted
+          // connection/auth data can select a row, never restore permission.
+          ...(process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? {
+            isConnected: false, token: '', user: null, serverTitle: '',
+            capabilities: DEFAULT_SERVER_CAPABILITIES,
+          } : {}),
         };
       },
       onRehydrateStorage: () => (state) => {
@@ -224,6 +236,25 @@ export const useServerStore = create<ServerState>()(
     }
   )
 );
+
+type ServerProjection = Pick<ServerState, 'savedServerId' | 'savedEntryRevision' | 'serverUrl' | 'protocol' | 'host' | 'port'
+  | 'offlineMode' | 'isConnected' | 'token' | 'user' | 'serverTitle' | 'capabilities'>;
+export function captureServerProjection(): ServerProjection {
+  const { savedServerId, savedEntryRevision, serverUrl, protocol, host, port, offlineMode,
+    isConnected, token, user, serverTitle, capabilities } = useServerStore.getState();
+  return { savedServerId, savedEntryRevision, serverUrl, protocol, host, port, offlineMode,
+    isConnected, token, user, serverTitle, capabilities };
+}
+/** Restore only our unacknowledged projection; epochs never move backwards. */
+export function restoreServerProjection(previous: ServerProjection, expectedRevision: number): boolean {
+  let restored = false;
+  useServerStore.setState((current) => {
+    if (current.sessionRevision !== expectedRevision) return current;
+    restored = true;
+    return { ...previous, sessionRevision: current.sessionRevision + 1 };
+  });
+  return restored;
+}
 
 // OHOS ArkWeb 上 persist 的 `onRehydrateStorage` 后置回调可能不触发
 // （postRehydrationCallback 丢失），导致 hasHydrated 卡在 false、根页面

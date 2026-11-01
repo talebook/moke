@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
+import { cancelResponseBodyQuietly } from '@/lib/api-core';
 import {
   buildCaptchaSandboxDocument,
   buildGeetestSandboxDocument,
@@ -16,6 +17,7 @@ interface CaptchaModalProps {
   isOpen: boolean;
   serverUrl: string;
   requireValidTls?: boolean;
+  requestCaptcha?: (url: string, init?: RequestInit) => Promise<Response>;
   onClose: () => void;
   onSuccess: (data: any) => void;
 }
@@ -26,7 +28,7 @@ interface CaptchaConfig extends GeetestCaptchaConfig {
   webCode?: unknown;
 }
 
-export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClose, onSuccess }: CaptchaModalProps) {
+export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, requestCaptcha, onClose, onSuccess }: CaptchaModalProps) {
   const [mode, setMode] = useState<'loading' | 'image' | 'geetest' | 'webcode' | 'error'>('loading');
   const [config, setConfig] = useState<CaptchaConfig | null>(null);
 
@@ -43,6 +45,9 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
   const configRequestIdRef = useRef(0);
   const successHandledRef = useRef(false);
   const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle());
+  const configControllerRef = useRef<AbortController | null>(null);
+  const captchaRequest = useCallback((url: string, init?: RequestInit) => requestCaptcha
+    ? requestCaptcha(url, init) : request(url, init, { requireValidTls }), [requestCaptcha, requireValidTls]);
 
   const completeCaptcha = useCallback((data: any) => {
     if (successHandledRef.current) return;
@@ -77,11 +82,14 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
 
   const loadCaptcha = useCallback(async () => {
     const requestId = ++configRequestIdRef.current;
+    configControllerRef.current?.abort();
+    const controller = new AbortController();
+    configControllerRef.current = controller;
     setLoading(true);
     setError('');
 
     try {
-      const configRes = await request(`${serverUrl}/api/captcha/config`, { credentials: 'include' }, { requireValidTls });
+      const configRes = await captchaRequest(`${serverUrl}/api/captcha/config`, { credentials: 'include', signal: controller.signal });
       const configData = await configRes.json();
       if (requestId !== configRequestIdRef.current) return;
 
@@ -96,7 +104,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
       setError(err instanceof Error ? err.message : '网络错误，无法加载验证码');
       setLoading(false);
     }
-  }, [serverUrl, requireValidTls]);
+  }, [serverUrl, captchaRequest]);
 
   const cancelImageCaptcha = useCallback(() => {
     imageRequestLifecycle.cancel();
@@ -106,10 +114,10 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
     setError('');
     return imageRequestLifecycle.load(
       async (signal) => {
-        const res = await request(`${serverUrl}/api/captcha/image`, {
+        const res = await captchaRequest(`${serverUrl}/api/captcha/image`, {
           credentials: 'include',
           signal,
-        }, { requireValidTls });
+        });
         return res.json();
       },
       {
@@ -118,7 +126,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
         onLoadingChange: setLoading,
       },
     );
-  }, [imageRequestLifecycle, serverUrl, requireValidTls]);
+  }, [imageRequestLifecycle, serverUrl, captchaRequest]);
 
   useEffect(() => {
     if (!config) return;
@@ -163,6 +171,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
 
     if (mode === 'webcode') {
       if (!config) return;
+      const controller = new AbortController();
 
       const fetchWebCode = async () => {
         try {
@@ -174,12 +183,11 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
 
           if (!html) {
             const provider = encodeURIComponent(config.provider || '');
-            const res = await request(
+            const res = await captchaRequest(
               `${serverUrl}/api/captcha/web_code?provider=${provider}`,
-              { credentials: 'include' },
-              { requireValidTls },
+              { credentials: 'include', signal: controller.signal },
             );
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) { await cancelResponseBodyQuietly(res); throw new Error(`HTTP ${res.status}`); }
 
             const data = await res.json();
             html = typeof data.html === 'string'
@@ -203,16 +211,18 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
       };
 
       void fetchWebCode();
+      return () => { disposed = true; controller.abort(); sandboxChannelRef.current = ''; };
     }
 
     return () => {
       disposed = true;
       sandboxChannelRef.current = '';
     };
-  }, [cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, requireValidTls]);
+  }, [cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, captchaRequest]);
 
   useEffect(() => {
     if (!isOpen) {
+      configControllerRef.current?.abort();
       cancelImageCaptcha();
       configRequestIdRef.current += 1;
       sandboxChannelRef.current = '';
@@ -229,6 +239,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClo
     setMode('loading');
     setConfig(null);
     void loadCaptcha();
+    return () => { configControllerRef.current?.abort(); };
   }, [cancelImageCaptcha, isOpen, loadCaptcha]);
 
   if (!isOpen) return null;

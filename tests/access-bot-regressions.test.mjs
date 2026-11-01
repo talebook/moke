@@ -204,6 +204,11 @@ test('Provider preserves confirmed auth and capabilities on an unconfirmed welco
   const store = (selector) => selector(state);
   store.getState = () => state;
   const harness = componentHarness('../src/components/providers/ServerProvider.tsx', {
+    'zustand': { useStore: (nativeState, selector) => selector(nativeState.getState()) },
+    '@/lib/native-connection': {
+      nativeConnection: { state: { getState: () => ({ phase: 'unbound' }) }, isActive: () => false },
+      isNativeConnectionRuntime: () => false,
+    },
     'next/navigation': { useRouter: () => ({ replace: () => calls.push('navigate') }), usePathname: () => '/shelf' },
     '@/lib/api': {
       checkWelcomeRequirement: async () => ({ err: 'network.error', needsAccessCode: false }),

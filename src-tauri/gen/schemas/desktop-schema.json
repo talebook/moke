@@ -2667,10 +2667,82 @@
           "markdownDescription": "Enables the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_connection_ack command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-ack",
+          "markdownDescription": "Enables the moke_connection_ack command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_begin command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-begin",
+          "markdownDescription": "Enables the moke_connection_begin command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-cancel",
+          "markdownDescription": "Enables the moke_connection_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-check",
+          "markdownDescription": "Enables the moke_connection_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-commit",
+          "markdownDescription": "Enables the moke_connection_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_dispatch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-dispatch",
+          "markdownDescription": "Enables the moke_connection_dispatch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-document",
+          "markdownDescription": "Enables the moke_connection_document command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_mark_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-mark-reader",
+          "markdownDescription": "Enables the moke_connection_mark_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_settle command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-settle",
+          "markdownDescription": "Enables the moke_connection_settle command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_connection_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-connection-status",
+          "markdownDescription": "Enables the moke_connection_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-delete-downloaded-book-file",
           "markdownDescription": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_discovery_admit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-discovery-admit",
+          "markdownDescription": "Enables the moke_discovery_admit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_discovery_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-discovery-commit",
+          "markdownDescription": "Enables the moke_discovery_commit command without any pre-configured scope."
         },
         {
           "description": "Enables the moke_discovery_snapshot command without any pre-configured scope.",
@@ -2955,10 +3027,82 @@
           "markdownDescription": "Denies the localsend_stop command without any pre-configured scope."
         },
         {
+          "description": "Denies the moke_connection_ack command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-ack",
+          "markdownDescription": "Denies the moke_connection_ack command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_begin command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-begin",
+          "markdownDescription": "Denies the moke_connection_begin command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-cancel",
+          "markdownDescription": "Denies the moke_connection_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-check",
+          "markdownDescription": "Denies the moke_connection_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-commit",
+          "markdownDescription": "Denies the moke_connection_commit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_dispatch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-dispatch",
+          "markdownDescription": "Denies the moke_connection_dispatch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_document command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-document",
+          "markdownDescription": "Denies the moke_connection_document command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_mark_reader command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-mark-reader",
+          "markdownDescription": "Denies the moke_connection_mark_reader command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_settle command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-settle",
+          "markdownDescription": "Denies the moke_connection_settle command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_connection_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-connection-status",
+          "markdownDescription": "Denies the moke_connection_status command without any pre-configured scope."
+        },
+        {
           "description": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope.",
           "type": "string",
           "const": "deny-moke-delete-downloaded-book-file",
           "markdownDescription": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_discovery_admit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-discovery-admit",
+          "markdownDescription": "Denies the moke_discovery_admit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_discovery_commit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-discovery-commit",
+          "markdownDescription": "Denies the moke_discovery_commit command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_discovery_snapshot command without any pre-configured scope.",

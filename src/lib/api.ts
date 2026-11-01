@@ -26,6 +26,7 @@ import {
   type UserInfoResponse,
 } from '@/lib/server-session';
 import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
+import { nativeConnection, type NativeRequestLease, type NativeDispatch } from './native-connection.ts';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
@@ -74,10 +75,13 @@ async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob>
 export async function request(
   url: string | URL,
   options?: RequestInit,
-  diagnostics?: { expectedStatuses?: readonly number[]; requireValidTls?: boolean },
+  diagnostics?: { expectedStatuses?: readonly number[]; requireValidTls?: boolean; nativeLease?: NativeRequestLease },
 ): Promise<Response> {
   const urlStr = url.toString();
   const method = (options?.method || 'GET').toUpperCase();
+  // Capture before the first import/transport await. A late A invocation may
+  // never obtain B's active token by rereading mutable state after the await.
+  const nativeLease = isTauriApp ? diagnostics?.nativeLease ?? nativeConnection.activeLease() : undefined;
 
   // 关键检测：Tauri 桌面端必须使用绝对 URL（http(s)://...），
   // 否则没有"当前域名"可拼接，会直接网络异常。
@@ -97,12 +101,12 @@ export async function request(
   });
 
   let response: Response;
-  const requireValidTls = diagnostics?.requireValidTls || Boolean(useServerStore.getState().savedServerId);
+  const requireValidTls = Boolean(nativeLease) || diagnostics?.requireValidTls || Boolean(useServerStore.getState().savedServerId);
   const effectiveOptions = requireValidTls ? { ...options, redirect: 'error' as const } : options;
   const startedAt = Date.now();
   try {
     if (isTauriApp) {
-      const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
+      const { nativeHttpRequest } = await import('./native-http.ts');
       // Preserve the old transport settings only for legacy sessions. Saved
       // candidates/sessions require valid TLS and reject redirects below.
       // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
@@ -112,7 +116,13 @@ export async function request(
         init.danger = { acceptInvalidCerts: false, acceptInvalidHostnames: false };
         init.maxRedirections = 0;
       }
-      response = await tauriFetch(urlStr, init as any);
+      let ticket: NativeDispatch | undefined;
+      response = await nativeHttpRequest(urlStr, init, {
+        async dispatch() { ticket = await nativeConnection.dispatch(nativeLease!, urlStr, method); },
+        assertCurrent() { if (!ticket) throw new Error('native-dispatch-unavailable'); nativeConnection.assertDispatchCurrent(ticket); },
+        async settle() { if (ticket) await nativeConnection.settle(ticket); },
+        uncertain: () => nativeConnection.markUncertain(),
+      });
     } else {
       response = await fetch(url, effectiveOptions);
     }
@@ -429,8 +439,8 @@ export async function welcomeCheck(code?: string): Promise<{ err: string; msg?: 
   return readJsonResponse(response);
 }
 
-export async function fetchCurrentUser(): Promise<CurrentUserResult> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+export async function fetchCurrentUser(source = useServerStore.getState().serverUrl): Promise<CurrentUserResult> {
+  const serverUrl = source;
   const payload = await fetchUserInfoPayload(serverUrl);
   if (payload.parseError) {
     const error = payload.parseError;
@@ -448,8 +458,8 @@ export async function fetchCurrentUser(): Promise<CurrentUserResult> {
   return resolveCurrentUserResult(payload.data, payload.ok, payload.status);
 }
 
-export async function fetchServerInfo(): Promise<{ err: string; msg?: string; title: string; version: string }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+export async function fetchServerInfo(source = useServerStore.getState().serverUrl): Promise<{ err: string; msg?: string; title: string; version: string }> {
+  const serverUrl = source;
   if (!serverUrl) {
     // 未连接服务器时直接返回空信息，避免发起无前缀 URL 的请求
     return { err: 'no_server', title: '', version: '' };
@@ -472,10 +482,10 @@ async function probeJsonEndpoint(serverUrl: string, path: string): Promise<boole
       credentials: 'include',
     });
 
-    if (response.status === 404 || response.status === 405) return false;
+    if (response.status === 404 || response.status === 405) { await cancelResponseBodyQuietly(response); return false; }
 
     const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) return response.ok;
+    if (!contentType.includes('application/json')) { await cancelResponseBodyQuietly(response); return response.ok; }
 
     const data = await readJsonResponse<any>(response).catch(() => null);
     const err = typeof data?.err === 'string' ? data.err : '';
@@ -495,7 +505,7 @@ async function findSampleBookId(serverUrl: string): Promise<string | null> {
   for (const path of candidates) {
     try {
       const response = await request(`${serverUrl}${path}`, { credentials: 'include' });
-      if (!response.ok) continue;
+      if (!response.ok) { await cancelResponseBodyQuietly(response); continue; }
 
       const data = await readJsonResponse<any>(response).catch(() => null);
       const books = data?.books || data?.items || data?.data?.books || data?.data?.items;
@@ -694,6 +704,7 @@ export async function downloadBookBlob(
     });
 
     if (!response.ok) {
+      await cancelResponseBodyQuietly(response);
       throw new Error(`http.${response.status}`);
     }
 
@@ -796,7 +807,7 @@ export async function streamBookDownload(
   let response = await fetchDownload(headers);
   let contentRange = parseContentRange(response.headers.get('content-range'));
   let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
-  if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
+  if (!response.ok && rangeMode !== 'retry-full') { await cancelResponseBodyQuietly(response); throw new Error(`http.${response.status}`); }
   if (rangeMode === 'retry-full') {
     if (response.status === 416) {
       await drainResponseBodyQuietly(response);
@@ -805,11 +816,11 @@ export async function streamBookDownload(
     }
     await options.onRangeReset?.();
     response = await fetchDownload(new Headers());
-    if (!response.ok) throw new Error(`http.${response.status}`);
+    if (!response.ok) { await cancelResponseBodyQuietly(response); throw new Error(`http.${response.status}`); }
     contentRange = parseContentRange(response.headers.get('content-range'));
     rangeMode = classifyOfflineRangeResponse(0, response.status, contentRange);
   }
-  if (rangeMode === 'invalid') throw new Error('book.download.range.invalid');
+  if (rangeMode === 'invalid') { await cancelResponseBodyQuietly(response); throw new Error('book.download.range.invalid'); }
   const resumed = rangeMode === 'resume';
   let received = resumed ? requestedOffset : 0;
   if (rangeMode === 'restart') await options.onRangeReset?.();

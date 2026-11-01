@@ -5,6 +5,7 @@ import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-book-cor
 import { saveOfflineBook, saveOfflineBookStream } from '@/lib/offline-books';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useServerStore } from '@/lib/store/server';
+import { cancelResponseBodyQuietly } from './api-core.ts';
 
 export { beginOfflineDownload, endOfflineDownload };
 
@@ -28,7 +29,7 @@ async function fetchCoverDataUrl(coverUrl?: string, signal?: AbortSignal): Promi
   if (!coverUrl) return undefined;
   try {
     const response = await request(coverUrl, { credentials: 'include', signal });
-    if (!response.ok) return undefined;
+    if (!response.ok) { await cancelResponseBodyQuietly(response); return undefined; }
     const blob = await response.blob();
     return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
