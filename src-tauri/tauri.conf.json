@@ -63,7 +63,12 @@
             "$APPCACHE/**/*",
             "$TEMP/**/*"
           ],
-          "deny": []
+          "deny": [
+            "$APPCONFIG/server-registry",
+            "$APPCONFIG/server-registry/**",
+            "$APPDATA/server-registry",
+            "$APPDATA/server-registry/**"
+          ]
         }
       }
     }

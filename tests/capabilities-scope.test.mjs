@@ -276,7 +276,7 @@ test('reader capabilities preserve settings, RSS, and updater operations', () =>
   }
 });
 
-test('main filesystem writes are limited to downloaded books', () => {
+test('main filesystem writes are limited to books and the private saved-server registry', () => {
   const main = readCapability('src-tauri/capabilities/default.json');
   const writePermissions = new Set([
     'fs:allow-mkdir',
@@ -289,18 +289,33 @@ test('main filesystem writes are limited to downloaded books', () => {
     .flatMap(permissionPaths);
 
   assert.ok(paths.length > 0);
-  assert.ok(paths.every((path) => path === '$APPDATA/books' || path.startsWith('$APPDATA/books/')));
+  assert.ok(paths.every((path) => path === '$APPDATA/books' || path.startsWith('$APPDATA/books/')
+    || path === '$APPCONFIG/server-registry' || path === '$APPCONFIG/server-registry/**'));
 });
 
 test('main download lifecycle grants scoped stat and atomic rename operations', () => {
   const main = readCapability('src-tauri/capabilities/default.json');
   for (const identifier of ['fs:allow-stat', 'fs:allow-rename']) {
     const paths = permissionPaths(findPermission(main, identifier));
-    assert.deepEqual(paths, ['$APPDATA/books/**']);
+    assert.deepEqual(paths, ['$APPDATA/books/**', '$APPCONFIG/server-registry', '$APPCONFIG/server-registry/**',
+      ...(identifier === 'fs:allow-stat' ? ['$APPDATA/books/.servers/moke-server-storage.json'] : [])]);
   }
   const identifiers = new Set(main.permissions.map(permissionIdentifier));
-  for (const identifier of ['fs:allow-read', 'fs:allow-seek', 'fs:allow-ftruncate']) {
+  for (const identifier of ['fs:allow-read', 'fs:allow-seek', 'fs:allow-ftruncate', 'fs:allow-fstat']) {
     assert.ok(identifiers.has(identifier), `main must grant handle operation ${identifier}`);
+  }
+});
+
+test('registry is denied by asset serving and dedicated Reader read grants are not expanded', () => {
+  // Mobile Reader shares the host main WebView and inherits its permissions;
+  // these static checks do not establish document-level plugin-fs isolation.
+  const denied = readTauriConfig().app.security.assetProtocol.scope.deny;
+  for (const path of ['$APPCONFIG/server-registry', '$APPCONFIG/server-registry/**',
+    '$APPDATA/server-registry', '$APPDATA/server-registry/**']) assert.ok(denied.includes(path));
+  for (const file of ['src-tauri/capabilities/reader.json', 'src-tauri/capabilities/reader-mobile.json']) {
+    const reader = readCapability(file);
+    const readPaths = permissionPaths(findPermission(reader, 'fs:read-files'));
+    assert.ok(!readPaths.some((path) => path.includes('server-registry') || path === '$APPCONFIG/**' || path === '$APPCONFIG/**/*'));
   }
 });
 
