@@ -10,5 +10,5 @@
     "start": "node bin/moke-ext.js"
   },
   "keywords": ["moke", "extension", "cli"],
-  "license": "MIT"
+  "license": "BSD-2-Clause"
 }

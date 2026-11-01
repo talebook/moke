@@ -5,7 +5,7 @@
   <p>
     <a href="https://github.com/talebook/moke/releases"><img src="https://img.shields.io/github/v/release/talebook/moke" alt="最新稳定版本" /></a>
     <a href="https://github.com/talebook/moke/actions/workflows/ci.yml"><img src="https://github.com/talebook/moke/actions/workflows/ci.yml/badge.svg" alt="CI 状态" /></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="GPLv3 许可证" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-blue" alt="BSD-2-Clause 许可证" /></a>
   </p>
   <p>
     <a href="https://github.com/talebook/moke/releases">稳定版下载</a> ·
@@ -196,4 +196,6 @@ cd ..
 
 ## 许可证
 
-Moke 使用 [GNU General Public License v3.0](LICENSE) 许可证。
+Moke 自有代码采用 [BSD 2-Clause License](LICENSE)（SPDX：`BSD-2-Clause`）。
+
+第三方代码、子模块和资源保留各自的许可证。其中内嵌的 [readest-reader](https://github.com/hehetoshang/readest-reader)（`readest/` 子模块）采用 `AGPL-3.0-only`。分发包含该阅读器的完整应用时，仍须遵循其许可证要求；根目录的 BSD-2-Clause 许可证不覆盖这些第三方组件。

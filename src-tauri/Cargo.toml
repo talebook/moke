@@ -3,7 +3,7 @@ name = "moke"
 version = "0.1.0"
 description = "Moke - Talebook Client"
 authors = ["Moke"]
-license = ""
+license = "BSD-2-Clause"
 repository = ""
 edition = "2021"
 
