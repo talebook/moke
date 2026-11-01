@@ -8,6 +8,7 @@
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use url::{Host, Url};
 use uuid::{Uuid, Variant, Version};
 
@@ -16,6 +17,10 @@ pub const SERVICE_TYPE: &str = "_talebook._tcp.local.";
 /// let an untrusted longer TTL retain a candidate beyond the profile lifetime.
 pub const MAX_TTL_SECS: u32 = 120;
 const MAX_RECORDS: usize = 4096;
+/// The OS resolver does not expose DNS TTLs. This is only a local validation
+/// lease, independent of the DNS-SD RR lifetimes.
+pub const HOSTNAME_VALIDATION_LEASE_MS: u64 = 30_000;
+static NEXT_TICKET_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RecordData {
@@ -266,15 +271,95 @@ pub fn is_lan_address(address: IpAddr) -> bool {
 
 #[derive(Clone, Debug)]
 struct Cached {
+    incarnation: u64,
     record: Record,
     received_at: u64,
     expires_at: u64,
 }
 
+/// Opaque proof of the current source and its DNS-SD RR incarnation. Results
+/// from old tickets cannot authorize a refreshed/replaced source or session.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ResolutionTicket {
+    serial: u64,
+    hostname: String,
+    row_id: String,
+    base_url: String,
+}
+
+impl ResolutionTicket {
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    pub fn row_id(&self) -> &str {
+        &self.row_id
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostnameFailure {
+    Empty,
+    LookupFailed,
+    Timeout,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SourceKey {
+    interface: String,
+    fullname: String,
+    row_id: String,
+    base_url: String,
+    addresses: BTreeSet<IpAddr>,
+    incarnations: Vec<u64>,
+}
+
+struct ValidSource {
+    key: SourceKey,
+    metadata: TxtMetadata,
+    base: BaseUrl,
+}
+
+struct ResolutionState {
+    ticket: ResolutionTicket,
+    // None is pending. Failed results stay until explicit retry or RR change.
+    outcome: Option<Result<u64, &'static str>>,
+}
+
+impl ResolutionState {
+    fn pending(source: &ValidSource) -> Self {
+        let BaseHost::Dns(hostname) = &source.base.host else {
+            unreachable!("only hostname sources have resolution state")
+        };
+        Self {
+            ticket: ResolutionTicket {
+                serial: NEXT_TICKET_ID.fetch_add(1, Ordering::Relaxed),
+                hostname: hostname.clone(),
+                row_id: source.metadata.id.clone(),
+                base_url: source.base.normalized.clone(),
+            },
+            outcome: None,
+        }
+    }
+
+    fn unavailable_reason(&self) -> Option<String> {
+        match self.outcome {
+            None => Some("hostname_unresolved".into()),
+            Some(Err(reason)) => Some(reason.into()),
+            Some(Ok(_)) => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Core {
     cache: Vec<Cached>,
-    resolutions: BTreeMap<String, Vec<IpAddr>>,
+    next_incarnation: u64,
+    resolutions: BTreeMap<SourceKey, ResolutionState>,
 }
 
 impl Core {
@@ -290,13 +375,66 @@ impl Core {
     pub fn remove_interface(&mut self, interface: &str) {
         self.cache
             .retain(|entry| entry.record.interface != interface);
+        self.resolutions.retain(|key, _| key.interface != interface);
     }
 
-    /// Inject a result from the normal system resolver (DNS only). The caller
-    /// must clear/revalidate it on network/session changes and before joining.
-    pub fn set_hostname_resolution(&mut self, hostname: &str, addresses: Vec<IpAddr>) {
+    /// Tickets cover every current, strictly validated hostname source. The
+    /// caller deduplicates completed/in-flight tickets, not hostname strings.
+    pub fn hostname_tickets(&mut self, now_ms: u64) -> Vec<ResolutionTicket> {
+        self.refresh_sources(now_ms);
         self.resolutions
-            .insert(hostname.to_ascii_lowercase(), addresses);
+            .values()
+            .map(|state| state.ticket.clone())
+            .collect()
+    }
+
+    /// Apply an OS resolver answer only to the source incarnation it was
+    /// requested for. Returns false for expired, replaced, retried or stopped
+    /// sources. Resolver failures are fixed reason codes, never OS error text.
+    pub fn set_hostname_resolution(
+        &mut self,
+        ticket: &ResolutionTicket,
+        result: Result<Vec<IpAddr>, HostnameFailure>,
+        now_ms: u64,
+    ) -> bool {
+        self.refresh_sources(now_ms);
+        let Some((key, state)) = self
+            .resolutions
+            .iter_mut()
+            .find(|(_, state)| state.ticket == *ticket)
+        else {
+            return false;
+        };
+        state.outcome = Some(match result {
+            Err(HostnameFailure::Empty) => Err("hostname_empty"),
+            Err(HostnameFailure::LookupFailed) => Err("hostname_lookup_failed"),
+            Err(HostnameFailure::Timeout) => Err("hostname_timeout"),
+            Ok(addresses) if addresses.is_empty() => Err("hostname_empty"),
+            Ok(addresses) if !addresses.iter().copied().all(is_lan_address) => {
+                Err("hostname_non_lan_address")
+            }
+            Ok(addresses) if !addresses.iter().any(|ip| key.addresses.contains(ip)) => {
+                Err("hostname_address_mismatch")
+            }
+            Ok(_) => Ok(now_ms.saturating_add(HOSTNAME_VALIDATION_LEASE_MS)),
+        });
+        true
+    }
+
+    /// Retry precisely the selected UUID + normalized base URL. Rotating all
+    /// its source tickets revokes late answers and any previous verification.
+    pub fn retry_hostname(&mut self, row_id: &str, base_url: &str, now_ms: u64) -> bool {
+        let sources = self.refresh_sources(now_ms);
+        let mut retried = false;
+        for source in sources {
+            if source.key.row_id == row_id && source.key.base_url == base_url {
+                if let Some(state) = self.resolutions.get_mut(&source.key) {
+                    *state = ResolutionState::pending(&source);
+                    retried = true;
+                }
+            }
+        }
+        retried
     }
 
     pub fn clear_hostname_resolutions(&mut self) {
@@ -338,22 +476,48 @@ impl Core {
                 }
             } else if record.ttl != 0 && self.cache.len() < MAX_RECORDS {
                 let expires_at = now_ms.saturating_add(u64::from(record.ttl) * 1000);
+                self.next_incarnation += 1;
                 self.cache.push(Cached {
+                    incarnation: self.next_incarnation,
                     record,
                     received_at: now_ms,
                     expires_at,
                 });
             }
         }
+        self.refresh_sources(now_ms);
     }
 
     fn expire(&mut self, now_ms: u64) {
         self.cache.retain(|entry| entry.expires_at > now_ms);
     }
 
-    pub fn snapshot(&mut self, now_ms: u64) -> Vec<DiscoveryRow> {
+    fn refresh_sources(&mut self, now_ms: u64) -> Vec<ValidSource> {
         self.expire(now_ms);
-        let mut rows: BTreeMap<String, DiscoveryRow> = BTreeMap::new();
+        let sources = self.valid_sources();
+        let valid: BTreeSet<_> = sources
+            .iter()
+            .filter(|source| matches!(source.base.host, BaseHost::Dns(_)))
+            .map(|source| source.key.clone())
+            .collect();
+        self.resolutions.retain(|key, _| valid.contains(key));
+        for source in &sources {
+            if !matches!(source.base.host, BaseHost::Dns(_)) {
+                continue;
+            }
+            let state = self
+                .resolutions
+                .entry(source.key.clone())
+                .or_insert_with(|| ResolutionState::pending(source));
+            if matches!(state.outcome, Some(Ok(expires_at)) if expires_at <= now_ms) {
+                *state = ResolutionState::pending(source);
+            }
+        }
+        sources
+    }
+
+    fn valid_sources(&self) -> Vec<ValidSource> {
+        let mut valid = Vec::new();
         let mut sources = BTreeSet::new();
         for ptr in &self.cache {
             if ptr.record.name != SERVICE_TYPE {
@@ -425,24 +589,50 @@ impl Core {
             {
                 continue;
             }
-            let unavailable_reason = match &base.host {
-                BaseHost::Ip(ip) => {
-                    if !addresses.contains(ip) {
-                        continue;
-                    }
-                    None
+            if let BaseHost::Ip(ip) = &base.host {
+                if !addresses.contains(ip) {
+                    continue;
                 }
-                BaseHost::Dns(host) => match self.resolutions.get(host) {
-                    None => Some("hostname_unresolved".to_owned()),
-                    Some(resolved)
-                        if resolved.is_empty()
-                            || !resolved.iter().copied().all(is_lan_address)
-                            || !resolved.iter().any(|ip| addresses.contains(ip)) =>
-                    {
-                        Some("hostname_address_mismatch".to_owned())
-                    }
-                    Some(_) => None,
+            }
+            let mut incarnations: Vec<_> = self.cache.iter().filter(|entry| {
+                entry.record.interface == interface && (
+                    (entry.record.name == SERVICE_TYPE
+                        && matches!(&entry.record.data, RecordData::Ptr(name) if name == &fullname))
+                    || (entry.record.name == fullname
+                        && matches!(entry.record.data, RecordData::Srv { .. } | RecordData::Txt(_)))
+                    || (entry.record.name == *target
+                        && matches!(entry.record.data, RecordData::A(_) | RecordData::Aaaa(_)))
+                )
+            }).map(|entry| entry.incarnation).collect();
+            incarnations.sort_unstable();
+            valid.push(ValidSource {
+                key: SourceKey {
+                    interface,
+                    fullname,
+                    row_id: metadata.id.clone(),
+                    base_url: base.normalized.clone(),
+                    addresses,
+                    incarnations,
                 },
+                metadata,
+                base,
+            });
+        }
+        valid
+    }
+
+    pub fn snapshot(&mut self, now_ms: u64) -> Vec<DiscoveryRow> {
+        let sources = self.refresh_sources(now_ms);
+        let mut rows: BTreeMap<String, DiscoveryRow> = BTreeMap::new();
+        for source in sources {
+            let ValidSource {
+                key,
+                metadata,
+                base,
+            } = source;
+            let unavailable_reason = match &base.host {
+                BaseHost::Ip(_) => None,
+                BaseHost::Dns(_) => self.resolutions[&key].unavailable_reason(),
             };
             let row = rows
                 .entry(metadata.id.clone())
@@ -453,10 +643,10 @@ impl Core {
                     candidates: Vec::new(),
                 });
             let source = DiscoverySource {
-                fullname,
-                interface,
+                fullname: key.fullname,
+                interface: key.interface,
                 name: metadata.name.clone(),
-                addresses: addresses.into_iter().map(|ip| ip.to_string()).collect(),
+                addresses: key.addresses.into_iter().map(|ip| ip.to_string()).collect(),
             };
             if let Some(candidate) = row
                 .candidates

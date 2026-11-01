@@ -113,14 +113,20 @@ fn apply(core: &mut Core, value: &Value, now: u64) {
         let BaseHost::Dns(host) = normalize_base_url(&metadata.url).unwrap().host else {
             panic!()
         };
-        core.set_hostname_resolution(
-            &host,
-            ips.as_array()
-                .unwrap()
-                .iter()
-                .map(|v| v.as_str().unwrap().parse().unwrap())
-                .collect(),
-        );
+        for ticket in core.hostname_tickets(now) {
+            if ticket.hostname() == host {
+                assert!(core.set_hostname_resolution(
+                    &ticket,
+                    Ok(ips
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|v| v.as_str().unwrap().parse().unwrap())
+                        .collect()),
+                    now,
+                ));
+            }
+        }
     }
 }
 
@@ -429,27 +435,280 @@ fn split_packets_receive_one_second_flush_protection_and_refresh_rescues_rr() {
     );
 }
 
-#[test]
-fn hostname_requires_normal_resolver_all_private_and_at_least_one_match() {
+fn hostname_base() -> Value {
     let mut base = fixture()["base"].clone();
     base["txt"][3] = json!("url=https://books.home.arpa:8080/team/books");
+    base
+}
+
+fn reason(core: &mut Core, now: u64) -> Option<String> {
+    core.snapshot(now)[0].candidates[0]
+        .unavailable_reason
+        .clone()
+}
+
+#[test]
+fn hostname_requires_normal_resolver_all_private_and_at_least_one_match() {
+    let mut core = Core::new();
+    apply(&mut core, &hostname_base(), 0);
+    let ticket = core.hostname_tickets(0).remove(0);
+    assert_eq!(ticket.hostname(), "books.home.arpa");
+    assert_eq!(ticket.base_url(), "https://books.home.arpa:8080/team/books");
+    assert_eq!(reason(&mut core, 0).as_deref(), Some("hostname_unresolved"));
+    let cases = [
+        (Ok(vec![]), Some("hostname_empty")),
+        (Err(HostnameFailure::Empty), Some("hostname_empty")),
+        (
+            Err(HostnameFailure::LookupFailed),
+            Some("hostname_lookup_failed"),
+        ),
+        (Err(HostnameFailure::Timeout), Some("hostname_timeout")),
+        (
+            Ok(vec![
+                "192.168.50.10".parse().unwrap(),
+                "8.8.8.8".parse().unwrap(),
+            ]),
+            Some("hostname_non_lan_address"),
+        ),
+        (
+            Ok(vec!["192.168.50.11".parse().unwrap()]),
+            Some("hostname_address_mismatch"),
+        ),
+        (
+            Ok(vec![
+                "192.168.50.10".parse().unwrap(),
+                "fd00::1".parse().unwrap(),
+            ]),
+            None,
+        ),
+    ];
+    for (result, expected) in cases {
+        assert!(core.set_hostname_resolution(&ticket, result, 0));
+        assert_eq!(reason(&mut core, 0).as_deref(), expected);
+        assert_eq!(
+            core.snapshot(0)[0].candidates[0].joinable,
+            expected.is_none()
+        );
+    }
+    core.clear_hostname_resolutions();
+    assert_eq!(reason(&mut core, 0).as_deref(), Some("hostname_unresolved"));
+    assert!(!core.set_hostname_resolution(&ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+}
+
+#[test]
+fn success_lease_rotates_ticket_without_extending_rr_lifetime() {
+    let mut core = Core::new();
+    apply(&mut core, &hostname_base(), 0);
+    let ticket = core.hostname_tickets(0).remove(0);
+    assert!(core.set_hostname_resolution(&ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 100));
+    assert_eq!(reason(&mut core, 30_099), None);
+    assert_eq!(
+        reason(&mut core, 30_100).as_deref(),
+        Some("hostname_unresolved")
+    );
+    let next = core.hostname_tickets(30_100).remove(0);
+    assert_ne!(ticket, next);
+    assert!(!core.set_hostname_resolution(
+        &ticket,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        30_100
+    ));
+    assert!(core.set_hostname_resolution(&next, Err(HostnameFailure::Timeout), 30_100));
+    assert_eq!(
+        reason(&mut core, 119_999).as_deref(),
+        Some("hostname_timeout")
+    );
+    assert_eq!(core.hostname_tickets(119_999), [next]);
+    assert!(core.hostname_tickets(120_000).is_empty());
+    assert!(core.snapshot(120_000).is_empty());
+}
+
+#[test]
+fn retry_rotates_only_exact_candidate_and_rejects_late_answers() {
+    let base = hostname_base();
+    let mut other = base.clone();
+    other["fullname"] = json!("Proxy._talebook._tcp.local.");
+    other["srv"]["target"] = json!("proxy.local.");
+    other["addresses"] = json!(["192.168.50.11"]);
+    other["txt"][3] = json!("url=https://books.home.arpa:8080/other");
     let mut core = Core::new();
     apply(&mut core, &base, 0);
-    assert!(!core.snapshot(0)[0].candidates[0].joinable);
-    core.set_hostname_resolution(
-        "books.home.arpa",
-        vec!["192.168.50.10".parse().unwrap(), "8.8.8.8".parse().unwrap()],
+    apply(&mut core, &other, 0);
+    let tickets = core.hostname_tickets(0);
+    let ticket = tickets
+        .iter()
+        .find(|ticket| ticket.base_url().ends_with("/team/books"))
+        .unwrap();
+    let other_ticket = tickets
+        .iter()
+        .find(|ticket| ticket.base_url().ends_with("/other"))
+        .unwrap();
+    assert!(core.set_hostname_resolution(ticket, Err(HostnameFailure::LookupFailed), 0));
+    assert!(!core.retry_hostname(
+        ticket.row_id(),
+        "https://books.home.arpa:8080/team/books/",
+        0
+    ));
+    assert!(!core.retry_hostname("different-row", ticket.base_url(), 0));
+    assert!(core.retry_hostname(ticket.row_id(), ticket.base_url(), 0));
+    let next_tickets = core.hostname_tickets(0);
+    assert!(next_tickets.contains(other_ticket));
+    assert!(!next_tickets.contains(ticket));
+    assert!(!core.set_hostname_resolution(ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+    let retried = next_tickets
+        .iter()
+        .find(|next| next.base_url() == ticket.base_url())
+        .unwrap();
+    assert!(core.set_hostname_resolution(retried, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+    assert!(
+        core.snapshot(0)[0]
+            .candidates
+            .iter()
+            .find(|candidate| candidate.base_url == ticket.base_url())
+            .unwrap()
+            .joinable
     );
-    assert!(!core.snapshot(0)[0].candidates[0].joinable);
-    core.set_hostname_resolution("books.home.arpa", vec!["192.168.50.10".parse().unwrap()]);
-    let snapshot = core.snapshot(0);
-    assert!(snapshot[0].candidates[0].joinable);
+}
+
+#[test]
+fn source_resolution_never_authorizes_same_hostname_on_another_interface() {
+    let base = hostname_base();
+    let mut other = base.clone();
+    other["interface"] = json!("lan-b");
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let ticket = core.hostname_tickets(0).remove(0);
+    apply(&mut core, &other, 0);
+    let tickets = core.hostname_tickets(0);
+    assert_eq!(tickets.len(), 2);
+    assert!(core.set_hostname_resolution(&ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+    assert!(core.snapshot(0)[0].candidates[0].joinable);
+    core.remove_interface(base["interface"].as_str().unwrap());
+    assert!(!core.set_hostname_resolution(&ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+    assert_eq!(reason(&mut core, 0).as_deref(), Some("hostname_unresolved"));
+    let remaining = core.hostname_tickets(0).remove(0);
+    assert_ne!(ticket, remaining);
+    assert!(core.set_hostname_resolution(
+        &remaining,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        0
+    ));
+    assert!(core.snapshot(0)[0].candidates[0].joinable);
+}
+
+#[test]
+fn address_rr_change_rotates_ticket_and_does_not_reuse_previous_verification() {
+    let base = hostname_base();
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let ticket = core.hostname_tickets(0).remove(0);
+    assert!(core.set_hostname_resolution(&ticket, Ok(vec!["192.168.50.10".parse().unwrap()]), 0));
+    let mut changed = base.clone();
+    changed["addresses"] = json!(["192.168.50.11"]);
+    apply(&mut core, &changed, 2000);
+    let changed_ticket = core.hostname_tickets(2000).remove(0);
+    assert_ne!(ticket, changed_ticket);
     assert_eq!(
-        snapshot[0].candidates[0].base_url,
-        "https://books.home.arpa:8080/team/books"
+        reason(&mut core, 2000).as_deref(),
+        Some("hostname_unresolved")
     );
-    core.clear_hostname_resolutions();
-    assert!(!core.snapshot(0)[0].candidates[0].joinable);
+    assert!(!core.set_hostname_resolution(
+        &ticket,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        2000
+    ));
+    // The old address expires after its cache-flush grace. That is another
+    // RRset change, and even the ticket for the interim RRset must be rejected.
+    let next = core.hostname_tickets(3000).remove(0);
+    assert_ne!(changed_ticket, next);
+    assert!(!core.set_hostname_resolution(
+        &changed_ticket,
+        Ok(vec!["192.168.50.11".parse().unwrap()]),
+        3000
+    ));
+    assert!(core.set_hostname_resolution(&next, Ok(vec!["192.168.50.11".parse().unwrap()]), 3000));
+    assert!(core.snapshot(3000)[0].candidates[0].joinable);
+}
+
+#[test]
+fn source_expiry_reappearance_clear_and_new_sessions_reject_old_tickets() {
+    let base = hostname_base();
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let first = core.hostname_tickets(0).remove(0);
+    // No intervening snapshot: apply itself must observe expiry before adding
+    // an identical RR again, so byte-identical sources cannot revive tickets.
+    apply(&mut core, &base, 120_000);
+    let second = core.hostname_tickets(120_000).remove(0);
+    assert_ne!(first, second);
+    assert!(!core.set_hostname_resolution(
+        &first,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        120_000
+    ));
+    core.clear();
+    apply(&mut core, &base, 120_000);
+    let third = core.hostname_tickets(120_000).remove(0);
+    assert_ne!(second, third);
+    assert!(!core.set_hostname_resolution(
+        &second,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        120_000
+    ));
+    let mut another_core = Core::new();
+    apply(&mut another_core, &base, 120_000);
+    assert!(!another_core.set_hostname_resolution(
+        &third,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        120_000
+    ));
+}
+
+#[test]
+fn unchanged_rr_refresh_preserves_ticket_but_invalid_metadata_replacement_revokes_it() {
+    let base = hostname_base();
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let ticket = core.hostname_tickets(0).remove(0);
+    apply(&mut core, &base, 10_000);
+    assert_eq!(
+        core.hostname_tickets(10_000).as_slice(),
+        std::slice::from_ref(&ticket)
+    );
+    let mut invalid = records(&base)
+        .into_iter()
+        .find(|record| matches!(record.data, RecordData::Txt(_)))
+        .unwrap();
+    invalid.data = RecordData::Txt(vec![b'x'; 401]);
+    core.apply_batch(vec![invalid], 20_000);
+    assert!(core.hostname_tickets(20_000).is_empty());
+    assert!(!core.set_hostname_resolution(
+        &ticket,
+        Ok(vec!["192.168.50.10".parse().unwrap()]),
+        20_000
+    ));
+}
+
+#[test]
+fn hostname_tickets_require_strict_wire_url_with_200_byte_limit_and_ascii_host() {
+    let prefix = "https://books.home.arpa:8080/";
+    let exact = format!("{prefix}{}", "a".repeat(200 - prefix.len()));
+    assert_eq!(exact.len(), 200);
+    assert!(normalize_base_url(&exact).is_ok());
+    assert!(normalize_base_url(&format!("{exact}a")).is_err());
+    assert!(normalize_base_url("https://bücher.home.arpa:8080").is_err());
+    for url in [
+        format!("{exact}a"),
+        "https://bücher.home.arpa:8080".into(),
+        "https://books.home.arpa:8080/a/../b".into(),
+    ] {
+        let mut base = hostname_base();
+        base["txt"][3] = json!(format!("url={url}"));
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        assert!(core.hostname_tickets(0).is_empty());
+        assert!(core.snapshot(0).is_empty());
+    }
 }
 
 #[test]

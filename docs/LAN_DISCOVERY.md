@@ -17,7 +17,7 @@ connection page remains available, with its existing behavior.
 | --- | --- |
 | `src-tauri/discovery-core` | Strict raw TXT/URL validation, per-record expiry, source/URL/UUID grouping; no network or application state |
 | `vendor/mdns-sd` | Fixed upstream v0.21.6 plus the documented raw-record observer, initial interface allowlist, resource limits and joined shutdown |
-| `src-tauri/discovery-desktop` | Physical Wi-Fi/Ethernet selection, socket ownership, real receive timestamps, network-change invalidation, foreground lease |
+| `src-tauri/discovery-desktop` | Physical Wi-Fi/Ethernet selection, socket ownership, real receive timestamps, bounded normal OS DNS, network-change invalidation, foreground lease |
 | `src-tauri/src/discovery.rs` | Fixed-type IPC, main-window and join-document guards, exact session token ownership |
 | `src/lib/discovery` | Shared base URL expression and page-session controller; no server store/list |
 | `src/components/discovery`, `src/app/join` | Discovery state and candidate display; no save/connect controller |
@@ -53,10 +53,30 @@ unchanged. The IPC accepts no service type, remote address or credentials.
 | OpenHarmony | Explicitly unsupported. Fix an app-owned raw-RR/TTL/interface observer and ArkTS/native bridge against the actual SDK/device; high-level MDNS lost/TCP checks are insufficient. |
 | Web | Explicitly unsupported; manual address entry remains available. Browser tests cover UI, not LAN sockets or OS permission. |
 
-DNS-name URLs retain their hostname and HTTPS scheme. They remain disabled until
-normal resolver results can be verified: all results must be RFC1918/ULA and at
-least one must match a discovered address. No resolver or join integration is
-silently assumed. Literal candidates accept only RFC1918 IPv4 or IPv6 ULA;
+DNS-name URLs retain their hostname, HTTPS scheme and prefix. Only current,
+strictly validated source records may request normal OS resolution. All results
+must be RFC1918/ULA and at least one must match that source's current addresses.
+Empty, failed, timed-out, non-LAN or mismatching answers remain unavailable with
+separate messages; **重新查找** starts a new session to retry. A successful check
+has a 30-second local lease, independent of RR TTL, after which it is rechecked.
+Any necessary RR/source change or expiry revokes its opaque lookup ticket; old
+responses cannot re-enable a removed, replaced or retried source.
+
+OS `getaddrinfo` is not portably abortable. A process-owned pool bounds it to two
+workers and sixteen queued jobs; the two-second logical deadline includes queue
+time. Stop cancels tickets/results and joins the discovery worker/daemon without
+waiting for OS calls. Those at most two OS calls can remain until the system
+resolver returns; retry never spawns replacement threads. More than 64 distinct
+answers is rejected, never truncated and approved. The OS may use DNS TCP, hosts,
+NSS or mDNS as configured; this is DNS resolution, not a connection to the
+advertised Talebook port. No HTTP or credential operation is performed.
+
+`Session::retry_hostname(row_id, base_url)` is a future explicit-action seam:
+it matches a current UUID + canonical URL and revokes/queues a fresh check. Its
+success means queued, not verified. It is not exposed as an arbitrary-host IPC;
+save/connect integration must await the fresh current result and address DNS
+rebinding at the actual connection boundary. No buttons are enabled here.
+Literal candidates accept only RFC1918 IPv4 or IPv6 ULA;
 link-local-only and public-numbered LANs use the manual path.
 
 ## Integration and trust gaps
@@ -66,6 +86,11 @@ buttons. Do not connect candidates to `setServer`. The shared base URL preserves
 `/team/books`; the old welcome/access/store and online-reader path still need a
 coordinated integration. Root records cannot be guessed to belong to `/a` or `/b`.
 The source-isolation changes here do not establish complete prefix support.
+The three shared parser exports and the manual/public/IDNA/legacy migration
+contract are in [LIBRARY_BASE_URL.md](LIBRARY_BASE_URL.md). Shared syntax parsing
+does not apply discovery's ASCII/200-byte/private-address policy to manual
+addresses. Invalid migrated records must be retained for correction by the
+TB-272 list implementation, which has not been integrated by this change.
 
 Existing native HTTP and Range bridges still accept invalid certificates and
 hostnames. This change does not modify that policy or claim strict TLS identity.

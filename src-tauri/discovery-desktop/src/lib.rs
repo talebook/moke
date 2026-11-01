@@ -1,6 +1,8 @@
 //! App-owned Windows/Linux Talebook discovery. No HTTP/TCP probing occurs here.
-//! A session owns its browser, worker and RR cache. Stopping joins both threads.
+//! A session owns its browser, worker and RR cache. Stopping joins both threads;
+//! normal hostname lookups use a separate, bounded process-wide resolver pool.
 mod interfaces;
+mod resolver;
 
 use mdns_sd::{DaemonEvent, RawRecordBatch, RawRecordData, ServiceDaemon};
 use moke_discovery_core::{Core, DiscoveryRow, Record, RecordData};
@@ -111,6 +113,22 @@ impl Session {
         records: mdns_sd::Receiver<RawRecordBatch>,
         monitor: mdns_sd::Receiver<DaemonEvent>,
     ) -> Result<Self, DiscoveryError> {
+        Self::from_daemon_with_resolver(
+            network,
+            daemon,
+            records,
+            monitor,
+            resolver::Scheduler::system(),
+        )
+    }
+
+    fn from_daemon_with_resolver(
+        network: Vec<interfaces::LanAddress>,
+        daemon: ServiceDaemon,
+        records: mdns_sd::Receiver<RawRecordBatch>,
+        monitor: mdns_sd::Receiver<DaemonEvent>,
+        mut resolver: resolver::Scheduler,
+    ) -> Result<Self, DiscoveryError> {
         let browser = match daemon.browse(SERVICE_TYPE) {
             Ok(browser) => browser,
             Err(_) => {
@@ -144,7 +162,14 @@ impl Session {
             .name("moke-discovery".to_owned())
             .spawn(move || {
                 let daemon = thread_owner.lock().unwrap().take().unwrap();
-                let result = run_worker(&thread_shared, &network, &records, &monitor, &browser);
+                let result = run_worker(
+                    &thread_shared,
+                    &network,
+                    &records,
+                    &monitor,
+                    &browser,
+                    &mut resolver,
+                );
                 let shutdown = daemon
                     .shutdown_and_join()
                     .map_err(|_| DiscoveryError::new("backend_failure", "发现资源未能正常释放"));
@@ -212,6 +237,30 @@ impl Session {
             .unwrap_or_else(|p| p.into_inner()) = Instant::now();
     }
 
+    /// Revoke the DNS validation of one *current* discovered hostname URL.
+    /// The row ID and canonical base URL are an exact selector, never an
+    /// arbitrary-host lookup API. Success means queued, not validated. Future
+    /// save/connect code must wait for the replacement ticket's joinable
+    /// snapshot; DNS validation is not HTTP reachability or server identity.
+    pub fn retry_hostname(&self, row_id: &str, base_url: &str) -> Result<(), DiscoveryError> {
+        self.touch();
+        let mut state = self.shared.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.status != DiscoveryStatus::Searching
+            || self.shared.record_liveness.is_disconnected()
+            || !state.core.retry_hostname(
+                row_id,
+                base_url,
+                elapsed_ms(self.shared.epoch, Instant::now()),
+            )
+        {
+            return Err(DiscoveryError::new(
+                "candidate_unavailable",
+                "发现候选已失效，请重新搜索",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn stop(&mut self) -> Result<(), DiscoveryError> {
         self.shared.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
@@ -264,6 +313,7 @@ fn run_worker(
     records: &mdns_sd::Receiver<RawRecordBatch>,
     monitor: &mdns_sd::Receiver<DaemonEvent>,
     browser: &mdns_sd::Receiver<mdns_sd::ServiceEvent>,
+    resolver: &mut resolver::Scheduler,
 ) -> Result<(), DiscoveryError> {
     let mut last_network_check = Instant::now();
     loop {
@@ -312,6 +362,12 @@ fn run_worker(
                 }
                 _ => {}
             }
+        }
+        {
+            let mut state = shared.state.lock().unwrap_or_else(|p| p.into_inner());
+            // Only validated, live RR sources produce resolver tickets. This
+            // also retires expired source/DNS validation incarnations.
+            resolver.tick(&mut state.core, elapsed_ms(shared.epoch, Instant::now()));
         }
         match records.recv_timeout(WORKER_TICK) {
             Ok(batch) => {

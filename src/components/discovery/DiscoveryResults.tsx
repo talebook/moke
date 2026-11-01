@@ -1,5 +1,14 @@
 import type { DiscoveryRow } from '@/lib/discovery/types';
 
+const UNAVAILABLE_TEXT: Record<string, string> = {
+  hostname_unresolved: '此域名尚未通过本机地址解析校验，正在等待解析结果。',
+  hostname_empty: '本机未解析到此域名的地址，可重新查找后重试。',
+  hostname_lookup_failed: '本机域名解析失败，请检查网络后重新查找。',
+  hostname_timeout: '本机域名解析超时，可重新查找后重试。',
+  hostname_non_lan_address: '此域名解析结果包含局域网范围外的地址，暂不能添加。',
+  hostname_address_mismatch: '此域名解析结果与当前广播地址不符，暂不能添加。',
+};
+
 export function DiscoveryResults({ rows }: { rows: DiscoveryRow[] }) {
   if (rows.length === 0) return null;
   return (
@@ -21,7 +30,12 @@ export function DiscoveryResults({ rows }: { rows: DiscoveryRow[] }) {
                 ))}
                 {!candidate.joinable && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {candidate.unavailableReason === 'hostname_unresolved' ? '此域名尚未通过本机地址解析校验。' : '此地址尚不可用于添加。'}
+                    {UNAVAILABLE_TEXT[candidate.unavailableReason ?? ''] ?? '此地址尚不可用于添加。'}
+                  </p>
+                )}
+                {candidate.joinable && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    候选地址符合发现规则，服务器身份仍未验证。
                   </p>
                 )}
                 <button

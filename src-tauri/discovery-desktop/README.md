@@ -17,9 +17,27 @@ to browsing every adapter.
 `moke-discovery-core` output. TXT remains raw until core validation. Each receipt
 is stamped in the socket thread, including unchanged duplicates; the core alone
 maintains per-interface RR lifetime, goodbye and cache-flush state. Neither row
-liveness nor TTL derives from `ServiceResolved`. A DNS-name URL remains disabled
-as `hostname_unresolved`: this crate does not claim OS hostname resolution or
-silently replace Host/SNI with a discovered address.
+liveness nor TTL derives from `ServiceResolved`. Current hostname sources are
+resolved by normal OS `getaddrinfo` (`ToSocketAddrs`); all returned addresses must
+be private/ULA and at least one must match that source's current discovered
+addresses. The hostname, HTTPS scheme and prefix are never replaced.
+
+`resolver.rs` bounds OS calls to a process-owned two-worker/sixteen-job pool.
+The two-second logical deadline includes queueing; timeout, stop or source
+replacement revoke the opaque ticket and ignore late answers. OS calls cannot
+be portably aborted and may outlive a browsing session until the system returns;
+stop joins the discovery worker/daemon without waiting for those process-owned
+calls. Retry cannot accumulate new resolver threads. More than 64 distinct
+answers is rejected rather than truncated. OS-configured DNS may use TCP/NSS/
+hosts/mDNS; no connection to the advertised service port or HTTP request occurs.
+
+Success has a 30-second local validation lease, independent of RR expiry. Failed
+checks remain unavailable until retry or source change. The existing page retry
+restarts discovery. `retry_hostname(row_id, base_url)` is a future restricted
+explicit-action seam: only a current exact UUID+canonical URL can revoke/queue
+new source checks, and `Ok(())` means queued, not verified. The owner must wait
+for the fresh current snapshot before a future action and handle DNS rebinding
+at the real connection boundary. No arbitrary-host IPC was added.
 
 Every snapshot/touch renews a five-second foreground lease. A missed lease,
 explicit stop, Drop, or detected network/interface/address change clears the

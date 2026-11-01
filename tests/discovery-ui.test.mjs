@@ -48,3 +48,27 @@ test('same names with different UUIDs remain separate rows', () => {
 test('no candidates renders no stale list', () => {
   assert.equal(renderToStaticMarkup(createElement(DiscoveryResults, { rows: [] })), '');
 });
+
+test('DNS failures explain retry and a validated candidate does not imply saving or identity trust', () => {
+  const states = [
+    ['hostname_unresolved', '正在等待解析结果'],
+    ['hostname_empty', '未解析到此域名的地址'],
+    ['hostname_lookup_failed', '域名解析失败'],
+    ['hostname_timeout', '域名解析超时'],
+    ['hostname_non_lan_address', '局域网范围外的地址'],
+    ['hostname_address_mismatch', '与当前广播地址不符'],
+    ['unknown_backend_reason', '此地址尚不可用于添加'],
+    [null, '服务器身份仍未验证'],
+  ];
+  for (const [reason, expected] of states) {
+    const html = renderToStaticMarkup(createElement(DiscoveryResults, { rows: [{
+      id: '9f0c663b-8ffd-4e13-92d9-2b68572c08b1', name: '测试书库', conflict: false,
+      candidates: [{ name: '测试书库', baseUrl: 'https://books.home.arpa:8443/team/books',
+        joinable: reason === null, unavailableReason: reason, sources: [] }],
+    }] }));
+    assert.ok(html.includes(expected), String(reason));
+    assert.ok(html.includes('https://books.home.arpa:8443/team/books'));
+    assert.match(html, /disabled=""/);
+    assert.doesNotMatch(html, /href=|onclick=|连接成功|保存成功/i);
+  }
+});
