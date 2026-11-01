@@ -104,7 +104,7 @@ export default function WelcomePage() {
       if (!alive.current || controller.signal.aborted) return;
       if (result.err === 'ok') {
         setShowCaptcha(false);
-        if ('connection' in result && result.connection.phase === 'connected') router.push('/shelf');
+        if ('connection' in result && result.connection?.phase === 'connected') router.push('/shelf');
       } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(result.err)) {
         setError('请完成人机验证后重试。'); setShowCaptcha(true);
       } else setError('访问码验证失败，请检查后重试。');

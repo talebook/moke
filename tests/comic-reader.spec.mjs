@@ -68,7 +68,7 @@ async function installTauriHttpMock(page, { offlineMode = false, mediaType = 'co
       };
       if (path.endsWith('/comic/progress')) return { err: 'ok', progress };
       if (path.endsWith('/progress')) return { err: 'ok', progress: {} };
-      if (path === '/api/welcome') return { err: 'not_invited' };
+      if (path === '/api/welcome') return { err: 'free' };
       if (path === '/api/user/info') {
         return { err: 'ok', sys: { title: 'Moke 测试书库', version: '3.15.0' }, user: { id: 1, username: 'reader', is_login: true, extra: { read_history: [{ id: bookId, title: '漫画测试', state: { read_state: 1 } }] } } };
       }

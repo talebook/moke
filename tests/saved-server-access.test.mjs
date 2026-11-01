@@ -153,6 +153,36 @@ test('saved access wrapper binds real persistence, candidate state and HTTP to o
     assert.equal(posts()[0].init.body.get('captcha_code'), 'string-captcha');
   });
 
+  await t.test('HTTP failure with an ok envelope reports failure instead of silently succeeding', async () => {
+    for (const status of [401, 403, 500, 503]) {
+      reset();
+      await needsAccess(savedA.server.id);
+      fetchHandler = ({ method }) => {
+        assert.equal(method, 'POST');
+        return new Response(JSON.stringify({ err: 'ok', msg: 'fictional upstream failure' }), {
+          status, headers: { 'Content-Type': 'application/json' },
+        });
+      };
+      const result = await submitSavedServerAccess('fictional-code', undefined, new AbortController().signal);
+      assert.equal(result.err, `http.${status}`);
+      assert.equal('connection' in result, false);
+      assert.equal(useServerStore.getState().serverUrl, '');
+      assert.equal(savedServerConnection.getState().code, 'access-required');
+    }
+  });
+
+  await t.test('HTTP failure retains a specific server error without retrying or activating', async () => {
+    reset();
+    await needsAccess(savedA.server.id);
+    fetchHandler = () => new Response(JSON.stringify({ err: 'captcha.invalid', msg: 'fictional captcha failure' }), {
+      status: 403, headers: { 'Content-Type': 'application/json' },
+    });
+    const result = await submitSavedServerAccess('fictional-code', undefined, new AbortController().signal);
+    assert.equal(result.err, 'captcha.invalid');
+    assert.equal(posts().length, 1);
+    assert.equal(useServerStore.getState().serverUrl, '');
+  });
+
   await t.test('aborting during the post-success re-probe cannot activate even if transport responds late', async () => {
     reset();
     await needsAccess(savedA.server.id);

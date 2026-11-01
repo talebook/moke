@@ -69,17 +69,22 @@ export async function submitSavedServerAccess(code: string, captchaData: unknown
   const body = new URLSearchParams({ invite_code: code });
   if (typeof captchaData === 'string') body.set('captcha_code', captchaData);
   else if (captchaData && typeof captchaData === 'object') {
-    for (const [key, value] of Object.entries(captchaData)) body.set(key, String(value));
+    // The entered code wins even if a captcha provider returns the same key.
+    for (const [key, value] of Object.entries(captchaData)) {
+      if (key !== 'invite_code') body.set(key, String(value));
+    }
   }
-  body.set('invite_code', code);
   const response = await request(`${entry.url}/api/welcome`, {
     method: 'POST', credentials: 'include', redirect: 'error', signal,
     body,
     ...{ maxRedirections: 0 },
   }, { requireValidTls: true });
-  const result = await readJsonResponse<{ err: string; msg?: string }>(response);
+  const result = await readJsonResponse<{ err?: unknown; msg?: unknown }>(response);
   if (!stillCurrent()) throw new Error('candidate-changed');
-  if (!response.ok || result.err !== 'ok') return result;
+  const err = typeof result?.err === 'string' ? result.err : '';
+  const msg = typeof result?.msg === 'string' ? result.msg : undefined;
+  if (!response.ok) return { err: err && err !== 'ok' ? err : `http.${response.status}`, msg };
+  if (err !== 'ok') return { err: err || 'server.invalid_response', msg };
   const latest = await readEntry(entry.id);
   if (!stillCurrent() || !latest || latest.status !== 'ready' || latest.entryRevision !== entry.entryRevision || latest.url !== entry.url) throw new Error('candidate-changed');
   const pending = savedServerConnection.connect(latest);
