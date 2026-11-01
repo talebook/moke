@@ -88,10 +88,12 @@ export async function fetchReadingProgress(bookId: string | number, signal?: Abo
   }
 }
 
-export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload): Promise<void> {
+export async function saveReadingProgress(bookId: string | number, progress: ReadingProgressPayload, source?: { serverUrl: string; sessionRevision: number }): Promise<void> {
   if (bookId === SAMPLE_BOOK.bookId) return;
-  const { serverUrl, capabilities } = useServerStore.getState();
-  if (!serverUrl || capabilities.checkedAt && !capabilities.readingProgressApi) return;
+  const session = useServerStore.getState();
+  const { capabilities } = session;
+  const serverUrl = source?.serverUrl ?? session.serverUrl;
+  if (!serverUrl || (!source && capabilities.checkedAt && !capabilities.readingProgressApi)) return;
 
   try {
     const response = await request(`${serverUrl}/api/book/${bookId}/progress`, {
@@ -102,7 +104,8 @@ export async function saveReadingProgress(bookId: string | number, progress: Rea
     });
     await readApiJson<ReadingProgressResponse>(response);
   } catch (error) {
-    markProgressUnsupported(error);
+    const current = useServerStore.getState();
+    if (!source || source.serverUrl === current.serverUrl && source.sessionRevision === current.sessionRevision) markProgressUnsupported(error);
     debugLog('warn', 'reading-progress', `保存阅读进度失败: ${bookId}`, getErrorMessage(error));
   }
 }

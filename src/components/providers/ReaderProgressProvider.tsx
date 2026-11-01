@@ -13,6 +13,8 @@ const SAVE_DELAY_MS = 1200;
 
 export function ReaderProgressProvider({ children }: { children: React.ReactNode }) {
   const serverUrl = useServerStore((s) => s.serverUrl);
+  const savedServerId = useServerStore((s) => s.savedServerId);
+  const sessionRevision = useServerStore((s) => s.sessionRevision);
   const progressSupported = useServerStore((s) => s.capabilities.readingProgressApi);
   const capabilityChecked = useServerStore((s) => Boolean(s.capabilities.checkedAt));
   const pendingRef = useRef(new Map<string, ReadingProgressPayload>());
@@ -21,6 +23,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') return;
     if (!serverUrl) return;
+    if (savedServerId) return; // Managed Reader sources are not integrated yet.
     if (capabilityChecked && !progressSupported) return;
 
     const eventApi = import('@tauri-apps/api/event');
@@ -31,6 +34,8 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
       startAsyncSubscription(async () => {
         const { listen } = await eventApi;
         return listen<Record<string, unknown>>('reader:page:changed', (event) => {
+          const current = useServerStore.getState();
+          if (current.serverUrl !== serverUrl || current.sessionRevision !== sessionRevision || current.savedServerId) return;
           const progress = normalizeReaderProgressEvent(event.payload);
           if (!progress) return;
           if (shouldSuppressAnnotationReaderProgress(serverUrl, progress)) return;
@@ -45,7 +50,7 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
             const latest = pendingRef.current.get(bookId);
             pendingRef.current.delete(bookId);
             timersRef.current.delete(bookId);
-            if (latest) void saveReadingProgress(bookId, latest);
+            if (latest) void saveReadingProgress(bookId, latest, { serverUrl, sessionRevision });
           }, SAVE_DELAY_MS);
 
           timersRef.current.set(bookId, timer);
@@ -63,12 +68,12 @@ export function ReaderProgressProvider({ children }: { children: React.ReactNode
       for (const cancelListener of cancelListeners) cancelListener();
       for (const timer of timersRef.current.values()) clearTimeout(timer);
       for (const [bookId, progress] of pendingRef.current.entries()) {
-        void saveReadingProgress(bookId, progress);
+        void saveReadingProgress(bookId, progress, { serverUrl, sessionRevision });
       }
       timersRef.current.clear();
       pendingRef.current.clear();
     };
-  }, [capabilityChecked, progressSupported, serverUrl]);
+  }, [capabilityChecked, progressSupported, serverUrl, savedServerId, sessionRevision]);
 
   return <>{children}</>;
 }

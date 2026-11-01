@@ -28,8 +28,10 @@ const READ_STATE_CONCURRENCY = 6;
 const READ_STATE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const readStateCache = new Map<string, { value: number; ts: number }>();
+let generation = 0;
 
 export function clearReadStateCache() {
+  generation++;
   readStateCache.clear();
 }
 
@@ -39,6 +41,7 @@ async function fetchReadState(
   bookId: string | number,
 ): Promise<number> {
   const cacheKey = `${serverUrl}/book/${bookId}`;
+  const startedGeneration = generation;
   const cached = readStateCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < READ_STATE_CACHE_TTL_MS) {
     return cached.value;
@@ -57,7 +60,7 @@ async function fetchReadState(
     state = 0;
   }
 
-  readStateCache.set(cacheKey, { value: state, ts: Date.now() });
+  if (generation === startedGeneration) readStateCache.set(cacheKey, { value: state, ts: Date.now() });
   return state;
 }
 

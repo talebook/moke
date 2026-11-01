@@ -74,7 +74,7 @@ async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob>
 export async function request(
   url: string | URL,
   options?: RequestInit,
-  diagnostics?: { expectedStatuses?: readonly number[] },
+  diagnostics?: { expectedStatuses?: readonly number[]; requireValidTls?: boolean },
 ): Promise<Response> {
   const urlStr = url.toString();
   const method = (options?.method || 'GET').toUpperCase();
@@ -97,16 +97,24 @@ export async function request(
   });
 
   let response: Response;
+  const requireValidTls = diagnostics?.requireValidTls || Boolean(useServerStore.getState().savedServerId);
+  const effectiveOptions = requireValidTls ? { ...options, redirect: 'error' as const } : options;
   const startedAt = Date.now();
   try {
     if (isTauriApp) {
       const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http');
-      // Tauri 桌面端：使用插件 fetch。需要显式放宽以兼容自建 Talebook 服务器：
+      // Preserve the old transport settings only for legacy sessions. Saved
+      // candidates/sessions require valid TLS and reject redirects below.
       // - danger.acceptInvalidCerts: 允许自签名 / 内网 HTTPS 证书
       // - maxRedirections: 跟随登录后的重定向（与浏览器行为一致）
-      response = await tauriFetch(urlStr, buildTauriRequestInit(options) as any);
+      const init = buildTauriRequestInit(effectiveOptions);
+      if (requireValidTls) {
+        init.danger = { acceptInvalidCerts: false, acceptInvalidHostnames: false };
+        init.maxRedirections = 0;
+      }
+      response = await tauriFetch(urlStr, init as any);
     } else {
-      response = await fetch(url, options);
+      response = await fetch(url, effectiveOptions);
     }
   } catch (e) {
     const errMsg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
@@ -632,9 +640,9 @@ export async function checkWelcomeRequirement(serverUrl: string): Promise<{ err:
   }
 
   return {
-    err: 'ok',
+    err: data.err === 'free' ? 'ok' : data.err === 'not_invited' ? 'ok' : 'server.invalid_response',
     msg: data.msg,
-    needsAccessCode: false,
+    needsAccessCode: data.err === 'not_invited',
   };
 }
 

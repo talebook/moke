@@ -64,6 +64,7 @@ export function sanitizeOfflineFileName(fileName: string): string {
 }
 
 const inFlightDownloads = new Set<string>();
+export const hasInFlightOfflineDownloads = () => inFlightDownloads.size > 0;
 
 export function beginOfflineDownload(serverUrl: string, bookId: string, format?: string): boolean {
   const key = makeOfflineBookKey(serverUrl, bookId, format);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -13,8 +13,7 @@ interface TalebookResetResponse {
   msg?: string;
 }
 
-async function resetPassword(email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
-  const { serverUrl } = useServerStore.getState();
+async function resetPassword(serverUrl: string, signal: AbortSignal, email: string, username: string, captchaData?: any): Promise<TalebookResetResponse> {
   const body = new URLSearchParams();
   body.append('email', email);
   body.append('username', username);
@@ -33,13 +32,16 @@ async function resetPassword(email: string, username: string, captchaData?: any)
     method: 'POST',
     body,
     credentials: 'include',
+    signal,
   });
-  return response.json();
+  const data = await response.json();
+  if (!response.ok && data.err === 'ok') throw new Error('reset.response_invalid');
+  return data;
 }
 
 export default function ResetPasswordPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl } = useServerStore();
+  const { serverTitle, serverUrl, sessionRevision } = useServerStore();
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,15 +50,41 @@ export default function ResetPasswordPage() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsubscribe = useServerStore.subscribe((current, previous) => {
+      if (current.serverUrl === previous.serverUrl && current.sessionRevision === previous.sessionRevision) return;
+      requestRef.current?.abort();
+      requestRef.current = null;
+      setLoading(false); setShowCaptcha(false); setError(''); setSuccess(false);
+    });
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+      requestRef.current?.abort(); requestRef.current = null;
+    };
+  }, []);
 
   const handleReset = async (captchaData?: any) => {
-    if (!email.trim() || !username.trim()) return;
+    if (!email.trim() || !username.trim() || requestRef.current || !mountedRef.current) return;
+    const session = useServerStore.getState();
+    if (!session.serverUrl) { setError('未找到已确认的服务器，请返回列表连接后重试。'); return; }
+    if (session.serverUrl !== serverUrl || session.sessionRevision !== sessionRevision) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const isCurrent = () => mountedRef.current && requestRef.current === controller && !controller.signal.aborted
+      && useServerStore.getState().serverUrl === session.serverUrl
+      && useServerStore.getState().sessionRevision === session.sessionRevision;
     setLoading(true);
     setError('');
     setSuccess(false);
 
     try {
-      const res = await resetPassword(email, username, captchaData);
+      const res = await resetPassword(session.serverUrl, controller.signal, email, username, captchaData);
+      if (!isCurrent()) return;
 
       if (res.err === 'ok') {
         setShowCaptcha(false);
@@ -69,9 +97,9 @@ export default function ResetPasswordPage() {
         setError(res.msg || '重置失败，请检查邮箱和用户名');
       }
     } catch {
-      setError('无法连接服务器');
+      if (isCurrent()) setError('无法连接服务器');
     } finally {
-      setLoading(false);
+      if (isCurrent()) { requestRef.current = null; setLoading(false); }
     }
   };
 
@@ -133,7 +161,7 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading || !email.trim() || !username.trim()}
+            disabled={loading || !serverUrl || !email.trim() || !username.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50"
           >
             {loading ? '提交中...' : '重置密码'}

@@ -88,21 +88,9 @@ test('MokeApiError 真实错误对象只输出自身 code 和 HTTP 状态', () =
   assert.equal(JSON.stringify(calls).includes('secret-token'), false);
 });
 
-test('welcome 两条失败分支只记录元数据，同时保留服务端文案给用户', () => {
-  assert.match(
-    welcomeSource,
-    /logErrorMetadata\('WelcomePage validateServerConnection failed', result\)/,
-  );
-  assert.match(
-    welcomeSource,
-    /logErrorMetadata\('WelcomePage checkWelcomeRequirement failed', welcome\)/,
-  );
-  assert.doesNotMatch(
-    welcomeSource,
-    /console\.error\('\[WelcomePage\] (?:validateServerConnection|checkWelcomeRequirement) failed:',/,
-  );
-  assert.match(welcomeSource, /setError\(result\.msg \|\| '服务器校验失败'\)/);
-  assert.match(welcomeSource, /setError\(welcome\.msg \|\| '访问码状态检查失败'\)/);
+test('列表连接页使用本地错误文案，不显示或记录服务端原始消息', () => {
+  assert.doesNotMatch(welcomeSource, /setError\((?:result|welcome)\.msg/);
+  assert.doesNotMatch(welcomeSource, /console\.error/);
 
   const calls = [];
   logErrorMetadata(

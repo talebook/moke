@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -15,7 +15,7 @@ interface TalebookLoginResponse {
   msg?: string;
 }
 
-async function login(serverUrl: string, username: string, password: string, captchaData?: any): Promise<TalebookLoginResponse> {
+async function login(serverUrl: string, username: string, password: string, captchaData?: any, signal?: AbortSignal): Promise<TalebookLoginResponse> {
   const body = new URLSearchParams();
   body.append('username', username);
   body.append('password', password);
@@ -34,8 +34,11 @@ async function login(serverUrl: string, username: string, password: string, capt
     method: 'POST',
     body,
     credentials: 'include',
+    signal,
   });
-  return response.json();
+  const data = await response.json();
+  if (!response.ok && data.err === 'ok') throw new Error('login.response_invalid');
+  return data;
 }
 
 export default function LoginPage() {
@@ -46,23 +49,32 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const loginController = useRef<AbortController | null>(null);
+  useEffect(() => () => loginController.current?.abort(), []);
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
-  const { serverUrl } = useServerStore.getState();
+  const { serverUrl, sessionRevision } = useServerStore.getState();
 
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (loading || !username.trim() || !password.trim()) return;
+    const currentSource = useServerStore.getState();
+    if (currentSource.serverUrl !== serverUrl || currentSource.sessionRevision !== sessionRevision) {
+      setError('连接状态已变化，请返回列表重新选择服务器'); return;
+    }
+    if (!useServerStore.getState().serverUrl) { setError('请先从列表连接服务器'); return; }
+    const controller = new AbortController();
+    loginController.current?.abort(); loginController.current = controller;
     setLoading(true);
     setError('');
     let session = useServerStore.getState();
     const isCurrentSession = () => {
       const current = useServerStore.getState();
-      return current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
+      return !controller.signal.aborted && current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
     };
 
     try {
-      const res = await login(session.serverUrl, username, password, captchaData);
+      const res = await login(session.serverUrl, username, password, captchaData, controller.signal);
       if (!isCurrentSession()) return;
 
       if (res.err === 'ok') {

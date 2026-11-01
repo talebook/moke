@@ -15,6 +15,7 @@ import {
 interface CaptchaModalProps {
   isOpen: boolean;
   serverUrl: string;
+  requireValidTls?: boolean;
   onClose: () => void;
   onSuccess: (data: any) => void;
 }
@@ -25,7 +26,7 @@ interface CaptchaConfig extends GeetestCaptchaConfig {
   webCode?: unknown;
 }
 
-export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaModalProps) {
+export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, onClose, onSuccess }: CaptchaModalProps) {
   const [mode, setMode] = useState<'loading' | 'image' | 'geetest' | 'webcode' | 'error'>('loading');
   const [config, setConfig] = useState<CaptchaConfig | null>(null);
 
@@ -80,7 +81,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     setError('');
 
     try {
-      const configRes = await request(`${serverUrl}/api/captcha/config`, { credentials: 'include' });
+      const configRes = await request(`${serverUrl}/api/captcha/config`, { credentials: 'include' }, { requireValidTls });
       const configData = await configRes.json();
       if (requestId !== configRequestIdRef.current) return;
 
@@ -95,7 +96,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       setError(err instanceof Error ? err.message : '网络错误，无法加载验证码');
       setLoading(false);
     }
-  }, [serverUrl]);
+  }, [serverUrl, requireValidTls]);
 
   const cancelImageCaptcha = useCallback(() => {
     imageRequestLifecycle.cancel();
@@ -108,7 +109,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
         const res = await request(`${serverUrl}/api/captcha/image`, {
           credentials: 'include',
           signal,
-        });
+        }, { requireValidTls });
         return res.json();
       },
       {
@@ -117,7 +118,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
         onLoadingChange: setLoading,
       },
     );
-  }, [imageRequestLifecycle, serverUrl]);
+  }, [imageRequestLifecycle, serverUrl, requireValidTls]);
 
   useEffect(() => {
     if (!config) return;
@@ -176,6 +177,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
             const res = await request(
               `${serverUrl}/api/captcha/web_code?provider=${provider}`,
               { credentials: 'include' },
+              { requireValidTls },
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -207,7 +209,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       disposed = true;
       sandboxChannelRef.current = '';
     };
-  }, [cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl]);
+  }, [cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, requireValidTls]);
 
   useEffect(() => {
     if (!isOpen) {
