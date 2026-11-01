@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-discovery-snapshot"
+description = "Enables the moke_discovery_snapshot command without any pre-configured scope."
+commands.allow = ["moke_discovery_snapshot"]
+
+[[permission]]
+identifier = "deny-moke-discovery-snapshot"
+description = "Denies the moke_discovery_snapshot command without any pre-configured scope."
+commands.deny = ["moke_discovery_snapshot"]

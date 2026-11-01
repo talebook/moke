@@ -2673,6 +2673,24 @@
           "markdownDescription": "Enables the moke_delete_downloaded_book_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the moke_discovery_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-discovery-snapshot",
+          "markdownDescription": "Enables the moke_discovery_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_discovery_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-discovery-start",
+          "markdownDescription": "Enables the moke_discovery_start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the moke_discovery_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-moke-discovery-stop",
+          "markdownDescription": "Enables the moke_discovery_stop command without any pre-configured scope."
+        },
+        {
           "description": "Enables the moke_download_storage_stats command without any pre-configured scope.",
           "type": "string",
           "const": "allow-moke-download-storage-stats",
@@ -2941,6 +2959,24 @@
           "type": "string",
           "const": "deny-moke-delete-downloaded-book-file",
           "markdownDescription": "Denies the moke_delete_downloaded_book_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_discovery_snapshot command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-discovery-snapshot",
+          "markdownDescription": "Denies the moke_discovery_snapshot command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_discovery_start command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-discovery-start",
+          "markdownDescription": "Denies the moke_discovery_start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the moke_discovery_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-moke-discovery-stop",
+          "markdownDescription": "Denies the moke_discovery_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the moke_download_storage_stats command without any pre-configured scope.",

@@ -25,6 +25,7 @@ compile_error!("reader-e2e must not be enabled in release builds");
 compile_error!("reader-e2e is supported only by desktop development builds");
 
 mod extensions;
+mod discovery;
 #[cfg(target_env = "ohos")]
 mod ohos_opener;
 
@@ -729,6 +730,9 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
 {
     tauri::generate_handler![
         moke_runtime_platform,
+        discovery::moke_discovery_start,
+        discovery::moke_discovery_snapshot,
+        discovery::moke_discovery_stop,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
         moke_record_downloaded_book,
@@ -832,6 +836,7 @@ pub fn run() {
     // 拓展命令以 "ext_" 为前缀，readest 命令不包含此前缀，
     // 通过命令名分派到对应的 handler，避免 Invoke 被移动两次。
     builder
+        .manage(discovery::DiscoveryState::default())
         .invoke_handler({
             let reader_handler = readestlib::reader_invoke_handler();
             #[cfg(not(target_env = "ohos"))]

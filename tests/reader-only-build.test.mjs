@@ -122,6 +122,9 @@ test('Moke 构建只暴露独立 Readest Reader 页面', () => {
 test('Moke ACL command manifest stays aligned with Reader plus the explicit host surface', () => {
   const mokeHostCommands = [
     'moke_runtime_platform',
+    'moke_discovery_start',
+    'moke_discovery_snapshot',
+    'moke_discovery_stop',
     'moke_navigate',
     'moke_record_downloaded_book',
     'moke_delete_downloaded_book_file',
