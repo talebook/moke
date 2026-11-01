@@ -15,9 +15,10 @@ permissions:
   contents: read
 
 jobs:
+  # Keep Chromium jobs on an OS supported by the pinned Playwright 1.58.2.
   reader-recovery:
     name: Production Reader and login recovery
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       NODE_OPTIONS: --max-old-space-size=4096
@@ -166,7 +167,7 @@ jobs:
 
   mobile-smoke:
     name: Mobile, tablet and desktop page smoke test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -228,7 +229,7 @@ jobs:
 
   native-ui:
     name: Native frontend browser regressions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
