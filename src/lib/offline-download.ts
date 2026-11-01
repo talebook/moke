@@ -43,6 +43,9 @@ async function fetchCoverDataUrl(coverUrl?: string, signal?: AbortSignal): Promi
 
 /** Unified entry: Tauri streams to a resumable file; web stores one Blob in IndexedDB. */
 export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOptions): Promise<void> {
+  // The caller may reuse its task object while cover/network IO awaits. Keep
+  // this download's source and metadata together for its entire lifetime.
+  options = { ...options };
   const revision = useServerStore.getState().sessionRevision;
   const assertSource = () => {
     const current = useServerStore.getState();

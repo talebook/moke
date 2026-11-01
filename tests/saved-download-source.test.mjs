@@ -127,3 +127,33 @@ test('both binary APIs capture their implicit live source synchronously before a
   assert.equal(await new Blob(chunks).text(), 'A captured bytes');
   assert.deepEqual(calls, [`${A}/api/book/41.txt`, `${A}/api/book/42.txt`]);
 });
+
+test('a caller reusing its options while cover IO awaits cannot retarget the source or book', async (t) => {
+  const storageAccesses = rejectOfflineStorage(t);
+  session(A, 30);
+  let releaseCover;
+  let markStarted;
+  const cover = new Promise((resolve) => { releaseCover = resolve; });
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const coverUrl = `${A}/covers/42.jpg`;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls.push(String(url));
+    if (String(url) === coverUrl) { markStarted(); return cover; }
+    // Stop at the real binary transport so this source regression needs no
+    // persistence fixture. A different error would expose failed admission.
+    throw new Error('fixture-binary-stop');
+  });
+  const input = { serverUrl: A, bookId: '42', title: 'Fixture A', format: 'txt', coverUrl };
+  const downloading = downloadAndSaveOfflineBook(input);
+  await started;
+  input.serverUrl = B;
+  input.bookId = '99';
+  input.title = 'Reused task B';
+  input.format = 'epub';
+  releaseCover(new Response(null, { status: 404 }));
+  await assert.rejects(downloading, /fixture-binary-stop/);
+  assert.deepEqual(calls, [coverUrl, `${A}/api/book/42.txt`]);
+  assert.equal(storageAccesses(), 0);
+  assert.equal(useServerStore.getState().serverUrl, A);
+});
