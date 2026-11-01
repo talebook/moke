@@ -1,5 +1,6 @@
 import { retryOnlineRead } from './online-retry.ts';
 import { MokeApiError, readJsonResponse } from './api-core.ts';
+import { isBookLoginBody, isBookLoginResponse, readBookErrorPrefix } from './book-auth.ts';
 
 const EPUB_MIME = 'application/epub+zip';
 const LEGACY_EPUB_MIME = 'application/octet-stream';
@@ -28,6 +29,9 @@ export type OnlineReadingErrorStage =
   | 'bootstrap-mime'
   | 'bootstrap-body'
   | 'bootstrap-contract'
+  | 'legacy-read-status'
+  | 'legacy-read-url'
+  | 'legacy-read-body'
   | 'head-url'
   | 'head-metadata'
   | 'range-url'
@@ -106,7 +110,7 @@ function noRedirectRequest(signal?: AbortSignal): RequestInit {
 
 function errorForStatus(
   status: number,
-  stage: Extract<OnlineReadingErrorStage, 'bootstrap-status' | 'head-status' | 'range-status'>,
+  stage: Extract<OnlineReadingErrorStage, 'bootstrap-status' | 'legacy-read-status' | 'head-status' | 'range-status'>,
 ): OnlineReadingError {
   if (status >= 300 && status < 400) {
     return new OnlineReadingError('online.response_invalid', status, stage);
@@ -195,10 +199,55 @@ function parseCurrentServerOrigin(serverUrl: string): string {
 function requireExactResponseUrl(
   response: Response,
   expectedUrl: string,
-  stage: Extract<OnlineReadingErrorStage, 'bootstrap-url' | 'head-url' | 'range-url'>,
+  stage: Extract<OnlineReadingErrorStage, 'bootstrap-url' | 'legacy-read-url' | 'head-url' | 'range-url'>,
 ): void {
   if (response.redirected || response.url !== expectedUrl) {
     throw new OnlineReadingError('online.response_invalid', response.status, stage);
+  }
+}
+
+function rejectOnlineLoginResponse(
+  response: Response,
+  expectedUrl: string,
+  stage: Extract<OnlineReadingErrorStage, 'bootstrap-status' | 'legacy-read-status' | 'head-status' | 'range-status'>,
+): void {
+  if (!isBookLoginResponse(response, expectedUrl)) return;
+  void safeCancel(response);
+  throw new OnlineReadingError('online.auth_required', response.status, stage);
+}
+
+async function requireLegacyReadPermission(
+  request: RequestLike,
+  serverOrigin: string,
+  bookId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  // Old download endpoints check can_save/ALLOW_GUEST_DOWNLOAD, independently
+  // of can_read/ALLOW_GUEST_READ. A valid download must not bypass /read's
+  // login or permission decision. Never navigate to or execute the server page.
+  const url = `${serverOrigin}/read/${bookId}`;
+  let response: Response;
+  try {
+    response = await request(url, noRedirectRequest(signal));
+  } catch {
+    throw new OnlineReadingError('online.network', undefined, 'legacy-read-status');
+  }
+  rejectOnlineLoginResponse(response, url, 'legacy-read-status');
+  try {
+    requireExactResponseUrl(response, url, 'legacy-read-url');
+  } catch (error) {
+    void safeCancel(response);
+    throw error;
+  }
+  // GET also recognizes a login form served with HTTP 200. Consume only the
+  // bounded prefix and cancel the rest, including on a successful reader page.
+  const prefix = await readBookErrorPrefix(response);
+  if (isBookLoginBody(prefix, 'epub')) {
+    throw new OnlineReadingError('online.auth_required', response.status, 'legacy-read-body');
+  }
+  if (!response.ok) throw errorForStatus(response.status, 'legacy-read-status');
+  if (response.status !== 200 || normalizedMime(response.headers.get('content-type')) !== 'text/html' || !prefix.length) {
+    throw new OnlineReadingError('online.response_invalid', response.status, 'legacy-read-body');
   }
 }
 
@@ -318,6 +367,7 @@ async function resolveTalebookOnlineSourceOnce(
   let bootstrapResponse: Response;
   try {
     bootstrapResponse = await request(bootstrapUrl, noRedirectRequest(signal));
+    rejectOnlineLoginResponse(bootstrapResponse, bootstrapUrl, 'bootstrap-status');
     requireExactResponseUrl(bootstrapResponse, bootstrapUrl, 'bootstrap-url');
     const upgradedUrl = bootstrapHttpsUpgrade(bootstrapResponse, bootstrapUrl);
     if (upgradedUrl) {
@@ -327,6 +377,7 @@ async function resolveTalebookOnlineSourceOnce(
       bootstrapUrl = upgradedUrl;
       serverOrigin = new URL(upgradedUrl).origin;
       bootstrapResponse = await request(bootstrapUrl, noRedirectRequest(signal));
+      rejectOnlineLoginResponse(bootstrapResponse, bootstrapUrl, 'bootstrap-status');
     }
   } catch (error) {
     if (error instanceof OnlineReadingError) throw error;
@@ -345,7 +396,8 @@ async function resolveTalebookOnlineSourceOnce(
         envelope = null;
       }
     } else {
-      await safeCancel(bootstrapResponse);
+      const prefix = await readBookErrorPrefix(bootstrapResponse);
+      if (isBookLoginBody(prefix, 'epub')) throw new OnlineReadingError('online.auth_required', bootstrapResponse.status, 'bootstrap-body');
     }
 
     // Servers before the Readest bootstrap endpoint return an unstructured
@@ -353,6 +405,7 @@ async function resolveTalebookOnlineSourceOnce(
     // only keep it when the real native GET proves exact 206 Range. A newer
     // server's structured book/format error must never take this downgrade.
     if (bootstrapResponse.status === 404 && !envelope?.err) {
+      await requireLegacyReadPermission(request, serverOrigin, bookId, signal);
       source = legacyOnlineSource(serverOrigin, bookId);
     } else {
       throw envelope?.err
@@ -361,7 +414,8 @@ async function resolveTalebookOnlineSourceOnce(
     }
   } else {
     if (bootstrapMime !== 'application/json') {
-      await safeCancel(bootstrapResponse);
+      const prefix = await readBookErrorPrefix(bootstrapResponse);
+      if (isBookLoginBody(prefix, 'epub')) throw new OnlineReadingError('online.auth_required', bootstrapResponse.status, 'bootstrap-body');
       throw new OnlineReadingError(
         'online.response_invalid',
         bootstrapResponse.status,
@@ -398,16 +452,18 @@ async function resolveTalebookOnlineSourceOnce(
   } catch {
     throw new OnlineReadingError('online.network');
   }
+  rejectOnlineLoginResponse(head, source.url, 'head-status');
   requireExactResponseUrl(head, source.url, 'head-url');
 
   let headSize: number | null = null;
   let headEtag: string | null = null;
-  if (head.status === 200) {
-    const headMime = normalizedMime(head.headers.get('content-type'));
-    if (headMime && !sourceAcceptsMime(source, headMime)) {
-      await drainHeadResponse(head);
-      throw new OnlineReadingError('online.mime_invalid', head.status, 'head-metadata');
-    }
+  let headError: OnlineReadingError | null = null;
+  const headMime = normalizedMime(head.headers.get('content-type'));
+  if (head.status === 200 && headMime && !sourceAcceptsMime(source, headMime)) {
+    headError = new OnlineReadingError('online.mime_invalid', head.status, 'head-metadata');
+  } else if (head.status === 403) {
+    headError = errorForStatus(head.status, 'head-status');
+  } else if (head.status === 200) {
     const contentEncoding = head.headers.get('content-encoding');
     const contentLength = head.headers.get('content-length');
     const etag = head.headers.get('etag');
@@ -436,6 +492,9 @@ async function resolveTalebookOnlineSourceOnce(
   }
   await drainHeadResponse(head);
 
+  // HEAD has no error body. An HTML/JSON response or a 403 can conceal
+  // user.need_login, so let the bounded GET inspect the actual challenge.
+  // A successful GET still cannot override the HEAD rejection.
   // HEAD claims are not enough: the original regression advertised byte
   // ranges but the Reader's first GET arrived upstream without Range and got
   // a full 200. Probe one byte through the exact transport Reader will use.
@@ -454,10 +513,11 @@ async function resolveTalebookOnlineSourceOnce(
   } catch {
     throw new OnlineReadingError('online.network');
   }
+  rejectOnlineLoginResponse(probe, source.url, 'range-status');
   requireExactResponseUrl(probe, source.url, 'range-url');
-  if (probe.status === 200) {
-    await safeCancel(probe);
-    throw new OnlineReadingError('online.range_unsupported', probe.status, 'range-status');
+  if (probe.status !== 416 && (!probe.ok || !sourceAcceptsMime(source, probe.headers.get('content-type')))) {
+    const prefix = await readBookErrorPrefix(probe);
+    if (isBookLoginBody(prefix, 'epub')) throw new OnlineReadingError('online.auth_required', probe.status, 'range-status');
   }
   if (probe.status === 416) {
     await safeCancel(probe);
@@ -466,6 +526,14 @@ async function resolveTalebookOnlineSourceOnce(
   if (!probe.ok) {
     await safeCancel(probe);
     throw errorForStatus(probe.status, 'range-status');
+  }
+  if (headError) {
+    await safeCancel(probe);
+    throw headError;
+  }
+  if (probe.status === 200) {
+    await safeCancel(probe);
+    throw new OnlineReadingError('online.range_unsupported', probe.status, 'range-status');
   }
   if (probe.status !== 206) {
     await safeCancel(probe);

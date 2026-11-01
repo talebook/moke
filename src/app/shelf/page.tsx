@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
+import { captureLoginNavigation, isLoginRequiredError } from '@/lib/auth-navigation';
 import { useRouter } from 'next/navigation';
 import { BookOpen, History, Search } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
@@ -319,6 +320,7 @@ export default function ShelfPage() {
     if (id === SAMPLE_BOOK.bookId) return;
     const book = books.find((b) => String(b.id) === id);
     if (!book) return;
+    const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
     if (!beginOfflineDownload(serverUrl, id, format)) {
       toast(`《${book.title}》正在下载中`);
@@ -336,7 +338,12 @@ export default function ShelfPage() {
         format,
       });
       toast(`《${book.title}》已下载`);
-    } catch {
+    } catch (error) {
+      if (isLoginRequiredError(error)) {
+        const href = loginNavigation();
+        if (href) router.push(href);
+        return;
+      }
       toast('下载失败');
     } finally {
       endOfflineDownload(serverUrl, id, format);
@@ -393,6 +400,7 @@ export default function ShelfPage() {
       if (ok > 0) toast(`已移出 ${ok} 本`);
       if (fail > 0) toast(`${fail} 本移出失败`);
     } else if (action === 'download') {
+      const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
       let skipped = 0;
       for (const id of ids) {
         if (id === SAMPLE_BOOK.bookId) continue;
@@ -412,8 +420,15 @@ export default function ShelfPage() {
             format,
           });
           ok++;
-        } catch { fail++; }
-        finally { endOfflineDownload(serverUrl, id, format); }
+        } catch (error) {
+          fail++;
+          if (isLoginRequiredError(error)) {
+            exitBatchMode();
+            const href = loginNavigation();
+            if (href) router.push(href);
+            return { ok, fail };
+          }
+        } finally { endOfflineDownload(serverUrl, id, format); }
       }
       exitBatchMode();
       if (ok > 0) toast(`已下载 ${ok} 本`);

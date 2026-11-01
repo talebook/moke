@@ -1,10 +1,13 @@
 'use client';
 
 import { debugLog } from './debug-log.ts';
+import { MokeApiError } from './api-core.ts';
 import { isSampleBook } from './sample-book-info.ts';
 import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
+  BOOK_HEADER_WINDOW,
   hasEpubCentralDirectory,
+  validateDownloadedBookHeader,
   makeOfflineBookKey,
   makeOfflineRelativePath,
   normalizeOfflineFormat,
@@ -689,16 +692,31 @@ async function openOfflineBookFile(input: {
   return { writer, target, partialTarget, relativePath };
 }
 
-async function validateDiskEpub(target: OfflineFsPath): Promise<boolean> {
+async function validateDiskBook(target: OfflineFsPath, format: string, complete = true): Promise<void> {
   const { open, stat } = await import('@tauri-apps/plugin-fs');
   const size = Number((await stat(target.operationPath, fsPathOptions(target))).size);
-  const length = Math.min(size, EPUB_TAIL_WINDOW);
   const file = await open(target.operationPath, { read: true, ...fsPathOptions(target) });
   try {
-    await file.seek(Math.max(0, size - length), 0);
-    const tail = new Uint8Array(length);
-    const count = await file.read(tail);
-    return hasEpubCentralDirectory(new Blob([tail.subarray(0, count ?? 0)]));
+    const prefix = new Uint8Array(Math.min(size, BOOK_HEADER_WINDOW));
+    let read = 0;
+    while (read < prefix.length) {
+      const count = await file.read(prefix.subarray(read));
+      if (!count) break;
+      read += count;
+    }
+    validateDownloadedBookHeader(prefix.subarray(0, read), format, complete);
+    if (complete && format === 'epub') {
+      const length = Math.min(size, EPUB_TAIL_WINDOW);
+      await file.seek(Math.max(0, size - length), 0);
+      const tail = new Uint8Array(length);
+      let read = 0;
+      while (read < tail.length) {
+        const count = await file.read(tail.subarray(read));
+        if (!count) break;
+        read += count;
+      }
+      if (!(await hasEpubCentralDirectory(new Blob([tail.subarray(0, read)])))) throw new Error('book.epub.invalid');
+    }
   } finally { await file.close(); }
 }
 
@@ -770,6 +788,7 @@ async function replaceOfflineBookFile(partialTarget: OfflineFsPath, target: Offl
 
 export function shouldPreserveOfflinePartial(error: unknown, enabled?: boolean): boolean {
   if (!enabled) return false;
+  if (error instanceof MokeApiError && error.code === 'user.need_login') return true;
   if (error instanceof DOMException && error.name === 'AbortError') return true;
   if (error instanceof TypeError) return true;
   const message = error instanceof Error ? error.message : String(error);
@@ -798,12 +817,17 @@ export async function saveOfflineBookStream(input: {
     target = handle.target;
     partialTarget = handle.partialTarget;
     relativePath = handle.relativePath;
+    // A legacy partial may contain an HTTP error page. Check it before any
+    // new request/append can mix valid book bytes into that error prefix.
+    if (writer.position > 0) await validateDiskBook(partialTarget, format, false);
     const result = await input.write(writer);
     const details = typeof result === 'string' ? { mimeType: result } : result || {};
     const size = details.size ?? writer.position;
     await writer.close();
     writer = null;
-    if (format === 'epub' && !(await validateDiskEpub(partialTarget))) throw new Error('book.epub.invalid');
+    // Inspect the real completed file, including bytes written before a Range
+    // resume, before replacing a previous valid copy or committing its index.
+    await validateDiskBook(partialTarget, format);
     replacement = await replaceOfflineBookFile(partialTarget, target);
     await commitOfflineBookRecord({
       ...input,
@@ -824,10 +848,19 @@ export async function saveOfflineBookStream(input: {
     try { if (writer) await writer.close(); } catch { /* ignore */ }
     if (replacement) {
       try { await replacement.rollback(); } catch { /* preserve backup for manual recovery */ }
-    } else if (partialTarget && !shouldPreserveOfflinePartial(error, input.preservePartialOnFailure)) {
-      try { await removeDiskFile(partialTarget); } catch { /* best effort */ }
+    } else if (partialTarget) {
+      let preserve = shouldPreserveOfflinePartial(error, input.preservePartialOnFailure);
+      if (preserve) {
+        try { await validateDiskBook(partialTarget, format, false); } catch (validationError) {
+          const reason = validationError instanceof Error ? validationError.message : '';
+          if (reason === 'book.download.invalid_response' || reason === 'book.mobi.invalid') preserve = false;
+        }
+      }
+      if (!preserve) {
+        try { await removeDiskFile(partialTarget); } catch { /* best effort */ }
+      }
     }
-    if (error instanceof DOMException || error instanceof TypeError) throw error;
+    if (error instanceof MokeApiError || error instanceof DOMException || error instanceof TypeError) throw error;
     if (error instanceof Error && (error.message.startsWith('book.') || error.message.startsWith('http.'))) throw error;
     debugLog(
       'error',

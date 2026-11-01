@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { request } from '@/lib/api';
+import { isLoginRequiredError } from '@/lib/auth-navigation';
 import { COMIC_FORMAT_MESSAGE, COMIC_OFFLINE_MESSAGE, supportsComicPages, type ReaderBook } from '@/lib/book-reader-policy';
 import { comicErrorMessage, comicProgress, ComicProgressWriter, createComicApi, restoreComicPage, type ComicProgress } from '@/lib/comic-api';
 import { bindComicImages, comicPlaceholder } from '@/lib/comic-images';
@@ -35,11 +36,12 @@ function loadReader(): Promise<ReaderConstructor> {
   return modulePromise;
 }
 
-export function ComicReader({ book, serverUrl, offline, onClose }: {
+export function ComicReader({ book, serverUrl, offline, onClose, onAuthRequired }: {
   book: ReaderBook & { id: string; title: string };
   serverUrl: string;
   offline: boolean;
   onClose: () => void;
+  onAuthRequired?: () => void;
 }) {
   const dialog = useRef<HTMLElement>(null);
   const localProgress = useRef<ComicProgress | undefined>(undefined);
@@ -99,7 +101,12 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
       if (!supportsComicPages(book)) { setError(COMIC_FORMAT_MESSAGE); setLoading(false); return; }
       try {
         const api = createComicApi(request, serverUrl, String(book.id), controller.signal);
-        const [Reader, manifest, progress] = await Promise.all([loadReader(), api.manifest(), api.progress()]);
+        const [Reader, manifest, progress] = await Promise.all([
+          loadReader(), api.manifest(),
+          // Personal progress is optional: only a failed book/page request
+          // should send an initiated reading action to login.
+          api.progress().catch(() => null),
+        ]);
         if (!active() || !host.current) return;
         writer = new ComicProgressWriter(api.save);
         reader = new Reader(host.current, {
@@ -118,9 +125,19 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
           onError: () => { setLoading(false); setNotice('漫画页面无法显示，请重试加载。'); },
         });
         disposeImages = bindComicImages(host.current, index => api.page(manifest, index),
-          e => { setLoading(false); setNotice(comicErrorMessage(e)); },
+          e => {
+            if (!active()) return;
+            setLoading(false);
+            if (isLoginRequiredError(e) && onAuthRequired) { onAuthRequired(); return; }
+            setNotice(comicErrorMessage(e));
+          },
           () => setLoading(false));
-      } catch (e) { if (active()) { setError(comicErrorMessage(e)); setLoading(false); } }
+      } catch (e) {
+        if (!active()) return;
+        setLoading(false);
+        if (isLoginRequiredError(e) && onAuthRequired) { onAuthRequired(); return; }
+        setError(comicErrorMessage(e));
+      }
     };
     void start();
     return () => {
@@ -133,7 +150,7 @@ export function ComicReader({ book, serverUrl, offline, onClose }: {
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus();
     };
-  }, [book, serverUrl, offline, attempt, onClose, eink]);
+  }, [book, serverUrl, offline, attempt, onClose, onAuthRequired, eink]);
 
   return <section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`漫画阅读：${book.title}`} className="moke-comic-reader">
     {/* Pinned third-party CSS is shipped with the standalone reader. */}

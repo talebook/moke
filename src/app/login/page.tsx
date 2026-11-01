@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
 import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { requestAnimatedBack } from '@/lib/native-back';
+import { getSafeLoginReturnTo } from '@/lib/auth-navigation';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
 
 interface TalebookLoginResponse {
@@ -38,8 +39,10 @@ async function login(serverUrl: string, username: string, password: string, capt
   return response.json();
 }
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = getSafeLoginReturnTo(searchParams.get('returnTo'));
   const { invalidateSession, logout, serverTitle, setConnected } = useServerStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -79,7 +82,7 @@ export default function LoginPage() {
 
         safeRemoveLocalStorageItem('moke-auth-token');
         setConnected('', info.user);
-        router.push('/shelf');
+        router.replace(returnTo);
       } else if (res.err === 'user.private.not_valid') {
         router.push('/access');
       } else if (res.err === 'captcha.invalid' || res.err === 'captcha.expired' || res.err === 'captcha.required') {
@@ -190,5 +193,13 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<main className="flex min-h-screen items-center justify-center app-warm-bg" role="status">正在加载登录页面…</main>}>
+      <LoginContent />
+    </Suspense>
   );
 }
