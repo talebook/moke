@@ -64,7 +64,7 @@ function AccessPageInner() {
       if (!isCurrent()) return;
       if (response.ok && res.err === 'ok') {
         setShowCaptcha(false); session.invalidateSession(); router.push('/shelf');
-      } else if (response.ok && ['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(res.err)) {
+      } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(res.err)) {
         setError('请完成人机验证后重试'); setShowCaptcha(true);
       } else { setError('访问码验证失败'); setShowCaptcha(false); }
     } catch { if (isCurrent()) setError('无法连接服务器'); }

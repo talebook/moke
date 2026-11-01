@@ -402,12 +402,16 @@ impl Session {
                 "发现保存已超时，请重新选择",
             ));
         }
-        let fresh_dns = pending.selection.hostname().map(resolver::fresh_lookup);
+        let hostname = pending.selection.hostname();
+        let fresh_dns = hostname.map(resolver::fresh_lookup);
         let dns_checked_at = Instant::now();
         let mut state = self.shared.state.lock().unwrap_or_else(|p| p.into_inner());
         let mut check = || {
             synchronize(&self.shared, &mut state, true)?;
-            if Instant::now() >= pending.expires_at || dns_checked_at.elapsed() >= COMMIT_DNS_LEASE
+            // IP literals have no DNS answer to expire. Their admission and
+            // exact RR source must still survive every final write check.
+            if Instant::now() >= pending.expires_at
+                || (hostname.is_some() && dns_checked_at.elapsed() >= COMMIT_DNS_LEASE)
             {
                 return Err(DiscoveryError::new(
                     "admission_expired",
@@ -752,6 +756,28 @@ mod tests {
                 .code,
             "invalid_admission"
         );
+        session.stop().unwrap();
+    }
+
+    #[test]
+    fn ip_literal_save_can_finish_after_dns_lease_with_live_admission_and_source() {
+        let (mut session, _) = loopback_session(false);
+        seed_candidate(&session);
+        let admission = session
+            .admit(
+                "9f0c663b-8ffd-4e13-92d9-2b68572c08b1",
+                "http://192.168.50.10:8080",
+            )
+            .unwrap();
+        session
+            .commit_admission(&admission.admission_id, |_, _, check| {
+                // Simulate private-file preparation exceeding DNS freshness.
+                // This address has no DNS lookup; the final RR/admission gate
+                // remains authoritative after that preparation.
+                thread::sleep(COMMIT_DNS_LEASE + Duration::from_millis(20));
+                check()
+            })
+            .unwrap();
         session.stop().unwrap();
     }
 
