@@ -21,6 +21,7 @@ const MAX_RECORDS: usize = 4096;
 /// lease, independent of the DNS-SD RR lifetimes.
 pub const HOSTNAME_VALIDATION_LEASE_MS: u64 = 30_000;
 static NEXT_TICKET_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_ADMISSION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RecordData {
@@ -275,6 +276,8 @@ struct Cached {
     record: Record,
     received_at: u64,
     expires_at: u64,
+    /// Keep goodbye records for the display grace, but never admit them.
+    withdrawn: bool,
 }
 
 /// Opaque proof of the current source and its DNS-SD RR incarnation. Results
@@ -318,10 +321,39 @@ struct SourceKey {
     incarnations: Vec<u64>,
 }
 
+/// Opaque selection of one currently joinable source, never just a UUID/URL.
+/// A source change, withdrawal, or new browsing core cannot revive this proof.
+#[derive(Clone, Debug)]
+pub struct CandidateSelection {
+    source: SourceKey,
+    admission_id: u64,
+    name: String,
+    resolution: Option<ResolutionTicket>,
+}
+
+impl CandidateSelection {
+    pub fn base_url(&self) -> &str {
+        &self.source.base_url
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn row_id(&self) -> &str {
+        &self.source.row_id
+    }
+
+    pub fn hostname(&self) -> Option<&str> {
+        self.resolution.as_ref().map(ResolutionTicket::hostname)
+    }
+}
+
 struct ValidSource {
     key: SourceKey,
     metadata: TxtMetadata,
     base: BaseUrl,
+    withdrawn: bool,
 }
 
 struct ResolutionState {
@@ -359,6 +391,7 @@ impl ResolutionState {
 pub struct Core {
     cache: Vec<Cached>,
     next_incarnation: u64,
+    admissions: BTreeMap<SourceKey, u64>,
     resolutions: BTreeMap<SourceKey, ResolutionState>,
 }
 
@@ -369,13 +402,77 @@ impl Core {
 
     pub fn clear(&mut self) {
         self.cache.clear();
+        self.admissions.clear();
         self.resolutions.clear();
     }
 
     pub fn remove_interface(&mut self, interface: &str) {
         self.cache
             .retain(|entry| entry.record.interface != interface);
+        self.admissions.retain(|key, _| key.interface != interface);
         self.resolutions.retain(|key, _| key.interface != interface);
+    }
+
+    /// Capture one current source for an exact row and canonical base URL.
+    /// Hostname candidates require a successful, still-live normal DNS lease.
+    pub fn select_candidate(
+        &mut self,
+        row_id: &str,
+        base_url: &str,
+        now_ms: u64,
+    ) -> Option<CandidateSelection> {
+        let sources = self.refresh_sources(now_ms);
+        sources.into_iter().find_map(|source| {
+            if source.withdrawn || source.key.row_id != row_id || source.key.base_url != base_url {
+                return None;
+            }
+            let resolution = match source.base.host {
+                BaseHost::Ip(_) => None,
+                BaseHost::Dns(_) => {
+                    let state = self.resolutions.get(&source.key)?;
+                    if !matches!(state.outcome, Some(Ok(expires_at)) if expires_at > now_ms) {
+                        return None;
+                    }
+                    Some(state.ticket.clone())
+                }
+            };
+            Some(CandidateSelection {
+                admission_id: *self.admissions.get(&source.key)?,
+                source: source.key,
+                name: source.metadata.name,
+                resolution,
+            })
+        })
+    }
+
+    /// Recheck the exact selection immediately before admission. Hostnames
+    /// additionally require a fresh normal DNS answer; this never renews the
+    /// cached validation lease or authorizes another source of the same URL.
+    pub fn validate_selection(
+        &mut self,
+        selection: &CandidateSelection,
+        fresh_dns: Option<Result<Vec<IpAddr>, HostnameFailure>>,
+        now_ms: u64,
+    ) -> bool {
+        let sources = self.refresh_sources(now_ms);
+        if self.admissions.get(&selection.source) != Some(&selection.admission_id)
+            || !sources
+                .iter()
+                .any(|source| !source.withdrawn && source.key == selection.source)
+        {
+            return false;
+        }
+        let Some(ticket) = &selection.resolution else {
+            return true;
+        };
+        let Some(state) = self.resolutions.get(&selection.source) else {
+            return false;
+        };
+        state.ticket == *ticket
+            && matches!(state.outcome, Some(Ok(expires_at)) if expires_at > now_ms)
+            && fresh_dns.is_some_and(|result| {
+                validate_hostname_answer(&selection.source.addresses, result).is_ok()
+            })
     }
 
     /// Tickets cover every current, strictly validated hostname source. The
@@ -405,19 +502,10 @@ impl Core {
         else {
             return false;
         };
-        state.outcome = Some(match result {
-            Err(HostnameFailure::Empty) => Err("hostname_empty"),
-            Err(HostnameFailure::LookupFailed) => Err("hostname_lookup_failed"),
-            Err(HostnameFailure::Timeout) => Err("hostname_timeout"),
-            Ok(addresses) if addresses.is_empty() => Err("hostname_empty"),
-            Ok(addresses) if !addresses.iter().copied().all(is_lan_address) => {
-                Err("hostname_non_lan_address")
-            }
-            Ok(addresses) if !addresses.iter().any(|ip| key.addresses.contains(ip)) => {
-                Err("hostname_address_mismatch")
-            }
-            Ok(_) => Ok(now_ms.saturating_add(HOSTNAME_VALIDATION_LEASE_MS)),
-        });
+        state.outcome = Some(
+            validate_hostname_answer(&key.addresses, result)
+                .map(|()| now_ms.saturating_add(HOSTNAME_VALIDATION_LEASE_MS)),
+        );
         true
     }
 
@@ -469,10 +557,16 @@ impl Core {
             {
                 if record.ttl == 0 {
                     existing.expires_at = existing.expires_at.min(now_ms.saturating_add(1000));
+                    existing.withdrawn = true;
                 } else {
+                    if existing.withdrawn {
+                        self.next_incarnation += 1;
+                        existing.incarnation = self.next_incarnation;
+                    }
                     existing.received_at = now_ms;
                     existing.expires_at = now_ms.saturating_add(u64::from(record.ttl) * 1000);
                     existing.record = record;
+                    existing.withdrawn = false;
                 }
             } else if record.ttl != 0 && self.cache.len() < MAX_RECORDS {
                 let expires_at = now_ms.saturating_add(u64::from(record.ttl) * 1000);
@@ -482,6 +576,7 @@ impl Core {
                     record,
                     received_at: now_ms,
                     expires_at,
+                    withdrawn: false,
                 });
             }
         }
@@ -495,14 +590,25 @@ impl Core {
     fn refresh_sources(&mut self, now_ms: u64) -> Vec<ValidSource> {
         self.expire(now_ms);
         let sources = self.valid_sources();
+        let admissible: BTreeSet<_> = sources
+            .iter()
+            .filter(|source| !source.withdrawn)
+            .map(|source| source.key.clone())
+            .collect();
+        self.admissions.retain(|key, _| admissible.contains(key));
+        for key in admissible {
+            self.admissions
+                .entry(key)
+                .or_insert_with(|| NEXT_ADMISSION_ID.fetch_add(1, Ordering::Relaxed));
+        }
         let valid: BTreeSet<_> = sources
             .iter()
-            .filter(|source| matches!(source.base.host, BaseHost::Dns(_)))
+            .filter(|source| !source.withdrawn && matches!(source.base.host, BaseHost::Dns(_)))
             .map(|source| source.key.clone())
             .collect();
         self.resolutions.retain(|key, _| valid.contains(key));
         for source in &sources {
-            if !matches!(source.base.host, BaseHost::Dns(_)) {
+            if source.withdrawn || !matches!(source.base.host, BaseHost::Dns(_)) {
                 continue;
             }
             let state = self
@@ -594,7 +700,7 @@ impl Core {
                     continue;
                 }
             }
-            let mut incarnations: Vec<_> = self.cache.iter().filter(|entry| {
+            let source_records: Vec<_> = self.cache.iter().filter(|entry| {
                 entry.record.interface == interface && (
                     (entry.record.name == SERVICE_TYPE
                         && matches!(&entry.record.data, RecordData::Ptr(name) if name == &fullname))
@@ -603,7 +709,12 @@ impl Core {
                     || (entry.record.name == *target
                         && matches!(entry.record.data, RecordData::A(_) | RecordData::Aaaa(_)))
                 )
-            }).map(|entry| entry.incarnation).collect();
+            }).collect();
+            let withdrawn = source_records.iter().any(|entry| entry.withdrawn);
+            let mut incarnations: Vec<_> = source_records
+                .into_iter()
+                .map(|entry| entry.incarnation)
+                .collect();
             incarnations.sort_unstable();
             valid.push(ValidSource {
                 key: SourceKey {
@@ -616,6 +727,7 @@ impl Core {
                 },
                 metadata,
                 base,
+                withdrawn,
             });
         }
         valid
@@ -629,10 +741,12 @@ impl Core {
                 key,
                 metadata,
                 base,
+                withdrawn,
             } = source;
-            let unavailable_reason = match &base.host {
-                BaseHost::Ip(_) => None,
-                BaseHost::Dns(_) => self.resolutions[&key].unavailable_reason(),
+            let unavailable_reason = match (&base.host, withdrawn) {
+                (_, true) => Some("source_withdrawn".into()),
+                (BaseHost::Ip(_), false) => None,
+                (BaseHost::Dns(_), false) => self.resolutions[&key].unavailable_reason(),
             };
             let row = rows
                 .entry(metadata.id.clone())
@@ -689,6 +803,25 @@ impl Core {
             }
         }
         rows.into_values().collect()
+    }
+}
+
+fn validate_hostname_answer(
+    advertised: &BTreeSet<IpAddr>,
+    result: Result<Vec<IpAddr>, HostnameFailure>,
+) -> Result<(), &'static str> {
+    match result {
+        Err(HostnameFailure::Empty) => Err("hostname_empty"),
+        Err(HostnameFailure::LookupFailed) => Err("hostname_lookup_failed"),
+        Err(HostnameFailure::Timeout) => Err("hostname_timeout"),
+        Ok(addresses) if addresses.is_empty() => Err("hostname_empty"),
+        Ok(addresses) if !addresses.iter().copied().all(is_lan_address) => {
+            Err("hostname_non_lan_address")
+        }
+        Ok(addresses) if !addresses.iter().any(|ip| advertised.contains(ip)) => {
+            Err("hostname_address_mismatch")
+        }
+        Ok(_) => Ok(()),
     }
 }
 

@@ -1,5 +1,5 @@
 import { createStore } from 'zustand/vanilla';
-import { SavedServerRepository, type LoadSavedServersResult, type SaveServerInput, type SaveServerResult } from '../saved-server-repository.ts';
+import { SavedServerRepository, type LoadSavedServersResult, type SaveServerInput, type SaveServerResult, type SavedServerWriteAuthorization } from '../saved-server-repository.ts';
 import type { SavedServerRegistry } from '../saved-server-model.ts';
 
 /** S1's list state is intentionally separate from the live connection store. */
@@ -10,7 +10,7 @@ export function createSavedServerStore(repository: SavedServerRepository) {
     busy: boolean;
     error: string | null;
     load(): Promise<LoadSavedServersResult>;
-    saveServer(input: SaveServerInput): Promise<SaveServerResult>;
+    saveServer(input: SaveServerInput, authorization?: SavedServerWriteAuthorization): Promise<SaveServerResult>;
   }>()((set) => ({
     registry: null, busy: false, error: null,
     async load() {
@@ -22,11 +22,11 @@ export function createSavedServerStore(repository: SavedServerRepository) {
         return result;
       } finally { set({ busy: --operations !== 0 }); }
     },
-    async saveServer(input) {
+    async saveServer(input, authorization) {
       operations++;
       set({ busy: true });
       try {
-        const result = await repository.saveServer(input);
+        const result = await repository.saveServer(input, authorization);
         if (result.ok) set({ registry: repository.getSnapshot(), error: null });
         else set({ error: result.outcome === 'storage-failure' || result.outcome === 'needs-edit' ? result.code : result.outcome });
         return result;

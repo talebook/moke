@@ -1,6 +1,7 @@
 import type { DiscoveryRow } from '@/lib/discovery/types';
 
 const UNAVAILABLE_TEXT: Record<string, string> = {
+  source_withdrawn: '此广播来源已撤回，请重新查找可用地址。',
   hostname_unresolved: '此域名尚未通过本机地址解析校验，正在等待解析结果。',
   hostname_empty: '本机未解析到此域名的地址，可重新查找后重试。',
   hostname_lookup_failed: '本机域名解析失败，请检查网络后重新查找。',
@@ -9,7 +10,11 @@ const UNAVAILABLE_TEXT: Record<string, string> = {
   hostname_address_mismatch: '此域名解析结果与当前广播地址不符，暂不能添加。',
 };
 
-export function DiscoveryResults({ rows }: { rows: DiscoveryRow[] }) {
+export function DiscoveryResults({ rows, saving = false, onSave }: {
+  rows: DiscoveryRow[];
+  saving?: boolean;
+  onSave?: (rowId: string, baseUrl: string) => void;
+}) {
   if (rows.length === 0) return null;
   return (
     <ul className="mt-5 space-y-4" aria-label="发现的书库">
@@ -40,9 +45,10 @@ export function DiscoveryResults({ rows }: { rows: DiscoveryRow[] }) {
                 )}
                 <button
                   type="button"
-                  disabled
-                  aria-describedby="discovery-save-unavailable"
-                  className="mt-3 h-9 rounded-xl border border-amber-950/10 px-3 text-xs text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!candidate.joinable || !onSave || saving}
+                  onClick={() => onSave?.(row.id, candidate.baseUrl)}
+                  aria-describedby="discovery-save-status"
+                  className="mt-3 min-h-11 rounded-xl border border-amber-950/10 px-3 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   添加到服务器列表
                 </button>

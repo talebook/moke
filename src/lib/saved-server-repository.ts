@@ -17,7 +17,20 @@ export type SaveServerResult =
   | { ok: false; outcome: 'needs-edit'; code: string; entryId?: string }
   | { ok: false; outcome: 'collision'; entryIds: string[] }
   | { ok: false; outcome: 'entry-in-use' | 'entry-changed' | 'entry-not-found'; entryId: string }
+  | { ok: false; outcome: 'admission-rejected'; code: string }
   | StorageFailure;
+/** The writer must revalidate its authority at its actual commit point. A
+ * preflight callback followed by an ordinary asynchronous storage write is not
+ * sufficient. Production discovery supplies the native compare-and-commit. */
+export interface SavedServerWriteAuthorization {
+  readonly baseUrl: string;
+  commit(value: string, expectedRaw: string | null): Promise<void>;
+}
+/** Only use when the authority guarantees no registry write occurred. */
+export class SavedServerAdmissionRejected extends Error {
+  readonly code: string;
+  constructor(code: string) { super(code); this.code = code; }
+}
 export interface StorageFailure {
   ok: false;
   outcome: 'storage-failure';
@@ -74,12 +87,16 @@ export class SavedServerRepository {
   getSnapshot(): SavedServerRegistry | null { return this.registry ? copy(this.registry) : null; }
   load(): Promise<LoadSavedServersResult> { return this.serial(() => this.loadInside()); }
 
-  saveServer(input: SaveServerInput): Promise<SaveServerResult> {
+  saveServer(input: SaveServerInput, authorization?: SavedServerWriteAuthorization): Promise<SaveServerResult> {
     // Capture caller-owned objects before waiting for the writer queue.
     const command = { ...input, ...(input.target ? { target: { ...input.target } } : {}) };
+    authorization = authorization ? { baseUrl: authorization.baseUrl, commit: authorization.commit.bind(authorization) } : undefined;
     return this.serial<SaveServerResult>(async () => {
       if (this.blocked) return { ...this.blocked, code: 'reload-required' };
       if (!this.registry) {
+        // Loading/migration is an explicit independent operation. A rejected
+        // discovered save must not first create an authority behind its gate.
+        if (authorization) return { ok: false, outcome: 'storage-failure', code: 'reload-required', persistence: 'unchanged', reloadRequired: true };
         const loaded = await this.loadInside();
         if (!loaded.ok) return loaded;
       }
@@ -90,6 +107,9 @@ export class SavedServerRepository {
         catch (error) {
           return { ok: false, outcome: 'needs-edit', code: error instanceof Error ? error.message : 'invalid_base_url',
             ...(command.target ? { entryId: command.target.id } : {}) };
+        }
+        if (authorization && (authorization.baseUrl !== url || command.target)) {
+          return { ok: false, outcome: 'admission-rejected', code: 'candidate-changed' };
         }
         if (command.displayName !== undefined && !validateDisplayName(command.displayName)) {
           return { ok: false, outcome: 'needs-edit', code: 'invalid-display-name' };
@@ -114,6 +134,12 @@ export class SavedServerRepository {
         if (!target && matches.length === 1) {
           if (matches[0].status === 'needs-edit') {
             return { ok: false, outcome: 'needs-edit', code: 'entry-needs-edit', entryId: matches[0].id };
+          }
+          // Duplicate selection still consumes current native authority, but
+          // identical bytes are check-only and must never rename/overwrite.
+          if (authorization) {
+            await authorization.commit(this.raw!, this.raw);
+            await this.assertCurrent();
           }
           return { ok: true, outcome: 'existing', server: copy(matches[0]), persisted: true };
         }
@@ -154,10 +180,11 @@ export class SavedServerRepository {
         next.savedServers = recomputeSavedServerCollisions(next.savedServers);
         const committed = await this.commit(next, this.raw, addressChanged ? async () => {
           if (!this.options.isEntryInUse || await this.options.isEntryInUse(copy(target!))) throw new EntryBecameBusy(target!.id);
-        } : undefined);
+        } : undefined, authorization);
         if (committed) return committed;
         return { ok: true, outcome: target ? 'corrected' : 'created', server: copy(next.savedServers.find((entry) => entry.id === saved.id)!), persisted: true };
       } catch (error) {
+        if (error instanceof SavedServerAdmissionRejected) return { ok: false, outcome: 'admission-rejected', code: error.code };
         if (error instanceof EntryBecameBusy) return { ok: false, outcome: 'entry-in-use', entryId: error.entryId };
         return this.fail(error, false);
       }
@@ -210,7 +237,7 @@ export class SavedServerRepository {
     if (!expectedSources || !sameSources(await this.options.readLegacySources(), expectedSources)) throw new ConfigurationChanged();
   }
 
-  private async commit(next: SavedServerRegistry, expectedRaw: string | null, beforeWrite?: () => Promise<void>): Promise<StorageFailure | null> {
+  private async commit(next: SavedServerRegistry, expectedRaw: string | null, beforeWrite?: () => Promise<void>, authorization?: SavedServerWriteAuthorization): Promise<StorageFailure | null> {
     let writing = false;
     try {
       const encoded = serializeSavedServerRegistry(next);
@@ -226,7 +253,8 @@ export class SavedServerRepository {
       await this.assertCurrent(expectedRaw, next.legacySources);
       writing = true;
       this.pendingWrite = { before: expectedRaw, after: encoded };
-      await this.storage.setItem(SAVED_SERVER_STORAGE_KEY, encoded);
+      if (authorization) await authorization.commit(encoded, expectedRaw);
+      else await this.storage.setItem(SAVED_SERVER_STORAGE_KEY, encoded);
       if (await this.storage.getItem(SAVED_SERVER_STORAGE_KEY) !== encoded) throw new VerificationFailed();
       parseSavedServerRegistry(encoded);
       // A legacy client may have written during the asynchronous commit.
@@ -237,6 +265,10 @@ export class SavedServerRepository {
       this.pendingWrite = null;
       return null;
     } catch (error) {
+      if (error instanceof SavedServerAdmissionRejected) {
+        this.pendingWrite = null;
+        throw error;
+      }
       if (error instanceof EntryBecameBusy) throw error;
       return this.fail(error, writing);
     }

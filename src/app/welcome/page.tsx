@@ -13,6 +13,7 @@ import { UNLOCK_THRESHOLD, useDeveloperStore } from '@/lib/store/developer';
 import { externalLinkClick } from '@/lib/external-link';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { savedServerFocusId } from '@/lib/saved-server-focus';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
@@ -45,6 +46,7 @@ export default function WelcomePage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const alive = useRef(true);
+  const focusedHandoff = useRef(false);
 
   async function reload() {
     setListBusy(true);
@@ -63,6 +65,13 @@ export default function WelcomePage() {
     };
   }, []);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  useEffect(() => {
+    if (!loaded || listBusy || focusedHandoff.current) return;
+    const id = savedServerFocusId(window.location.search, entries);
+    if (!id) return;
+    focusedHandoff.current = true;
+    requestAnimationFrame(() => document.getElementById(`saved-${id}`)?.focus());
+  }, [entries, loaded, listBusy]);
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();

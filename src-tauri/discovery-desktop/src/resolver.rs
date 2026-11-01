@@ -22,7 +22,7 @@ const DEADLINE_MS: u64 = 2_000;
 // that might hide a later public/nonmatching address.
 const MAX_RESULT_ADDRESSES: usize = 64;
 
-type LookupResult = Result<Vec<IpAddr>, HostnameFailure>;
+pub(crate) type LookupResult = Result<Vec<IpAddr>, HostnameFailure>;
 type Lookup = dyn Fn(&str) -> LookupResult + Send + Sync;
 
 struct Job {
@@ -119,6 +119,33 @@ fn system_pool() -> Option<Arc<Pool>> {
             .map(Arc::new)
     })
     .clone()
+}
+
+/// A new OS answer for a selected source, using the same bounded pool as the
+/// browser. Queue time counts toward the deadline; late answers are revoked.
+pub(crate) fn fresh_lookup(hostname: &str) -> LookupResult {
+    let pool = system_pool().ok_or(HostnameFailure::LookupFailed)?;
+    fresh_lookup_with_pool(&pool, hostname, Duration::from_millis(DEADLINE_MS))
+}
+
+fn fresh_lookup_with_pool(pool: &Pool, hostname: &str, timeout: Duration) -> LookupResult {
+    let deadline = Instant::now() + timeout;
+    let canceled = Arc::new(AtomicBool::new(false));
+    let (reply, receiver) = mpsc::sync_channel(1);
+    pool.sender
+        .try_send(Job {
+            hostname: hostname.to_owned(),
+            canceled: canceled.clone(),
+            deadline,
+            reply,
+        })
+        .map_err(|_| HostnameFailure::Timeout)?;
+    let result = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()));
+    canceled.store(true, Ordering::Release);
+    if Instant::now() >= deadline {
+        return Err(HostnameFailure::Timeout);
+    }
+    result.unwrap_or(Err(HostnameFailure::LookupFailed))
 }
 
 struct Task {
@@ -239,6 +266,30 @@ mod tests {
 
     fn seeded_core() -> Core {
         seeded_core_for_url(BASE_URL)
+    }
+
+    #[test]
+    fn explicit_admission_lookup_is_fresh_and_bounded_in_the_shared_pool() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = calls.clone();
+        let pool = Pool::start(Arc::new(move |host| {
+            assert_eq!(host, "books.home.arpa");
+            count.fetch_add(1, Ordering::Relaxed);
+            Ok(vec!["192.168.50.10".parse().unwrap()])
+        }))
+        .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                fresh_lookup_with_pool(&pool, "books.home.arpa", Duration::from_secs(1)).unwrap(),
+                vec!["192.168.50.10".parse::<IpAddr>().unwrap()]
+            );
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            fresh_lookup_with_pool(&pool, "books.home.arpa", Duration::ZERO),
+            Err(HostnameFailure::Timeout)
+        );
+        pool.shutdown();
     }
 
     fn seeded_core_for_url(base_url: &str) -> Core {

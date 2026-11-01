@@ -36,6 +36,8 @@ const APP_ACL_COMMANDS: &[&str] = &[
     "moke_runtime_platform",
     "moke_discovery_start",
     "moke_discovery_snapshot",
+    "moke_discovery_admit",
+    "moke_discovery_commit",
     "moke_discovery_stop",
     "moke_navigate",
     "moke_record_downloaded_book",

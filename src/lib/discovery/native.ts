@@ -1,4 +1,4 @@
-import type { DiscoveryAdapter, DiscoverySnapshot } from './types.ts';
+import type { DiscoveryAdapter, DiscoverySnapshot, DiscoveryAdmission } from './types.ts';
 
 type NativeInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -22,6 +22,14 @@ export function createNativeDiscoveryAdapter(invoke: NativeInvoke = invokeNative
       return invoke('moke_discovery_start', { sessionId });
     },
     snapshot: (sessionId) => invoke<DiscoverySnapshot>('moke_discovery_snapshot', { sessionId }),
+    async admit({ sessionId, rowId, baseUrl }) {
+      if (!startedSessions.has(sessionId)) throw { code: 'stopped' };
+      return invoke<DiscoveryAdmission>('moke_discovery_admit', { sessionId, rowId, baseUrl });
+    },
+    async commit(sessionId, admissionId, expectedRaw, value) {
+      if (!startedSessions.has(sessionId)) throw { code: 'stopped' };
+      await invoke<void>('moke_discovery_commit', { sessionId, admissionId, expectedRaw, value });
+    },
     async stop(sessionId) {
       if (!startedSessions.has(sessionId)) return;
       await invoke('moke_discovery_stop', { sessionId });

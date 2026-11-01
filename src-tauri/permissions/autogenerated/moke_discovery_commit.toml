@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-discovery-commit"
+description = "Enables the moke_discovery_commit command without any pre-configured scope."
+commands.allow = ["moke_discovery_commit"]
+
+[[permission]]
+identifier = "deny-moke-discovery-commit"
+description = "Denies the moke_discovery_commit command without any pre-configured scope."
+commands.deny = ["moke_discovery_commit"]

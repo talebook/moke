@@ -732,6 +732,8 @@ fn moke_invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Se
         moke_runtime_platform,
         discovery::moke_discovery_start,
         discovery::moke_discovery_snapshot,
+        discovery::moke_discovery_admit,
+        discovery::moke_discovery_commit,
         discovery::moke_discovery_stop,
         #[cfg(any(target_env = "ohos", target_os = "android"))]
         moke_navigate,
