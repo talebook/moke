@@ -1,4 +1,6 @@
 import type { ReadingProgressPayload } from './reading-progress';
+import { useServerStore } from './store/server.ts';
+import { markLegacyReaderAttempt } from './reader-source-guard.ts';
 
 export const isSingleWebviewRuntime = (platform: string): boolean =>
   platform === 'ohos' || platform === 'android' || platform === 'ios';
@@ -308,6 +310,8 @@ export async function openEmbeddedReaderHome({
   platformOverride?: string;
   windowFactory?: ReaderHomeWindowFactory;
 }): Promise<void> {
+  if (useServerStore.getState().savedServerId) throw new Error('saved-reader-source-unavailable');
+  markLegacyReaderAttempt();
   const isTauri = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri';
 
   let currentPlatform = 'web';
@@ -444,5 +448,7 @@ export async function openEmbeddedReaderBook(
   navigate: (href: string) => void,
   platformOverride?: string,
 ): Promise<void> {
+  if (useServerStore.getState().savedServerId) throw new Error('saved-reader-source-unavailable');
+  markLegacyReaderAttempt();
   await navigateFullDocument(href, navigate, platformOverride);
 }

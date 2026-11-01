@@ -1,4 +1,7 @@
 'use client';
+import { useServerStore } from '@/lib/store/server';
+import { SAVED_READER_GUARD_MESSAGE } from '@/lib/saved-session-policy';
+import { markLegacyReaderAttempt } from '@/lib/reader-source-guard';
 
 import { COMIC_OFFLINE_MESSAGE, resolveBookReader } from '@/lib/book-reader-policy';
 import type { OfflineBookRecord } from '@/lib/offline-books';
@@ -17,6 +20,8 @@ export async function openOfflineBook(
   record: OfflineBookRecord,
   navigate: (href: string) => void,
 ): Promise<void> {
+  if (useServerStore.getState().savedServerId) throw new Error(SAVED_READER_GUARD_MESSAGE);
+  markLegacyReaderAttempt();
   if (resolveBookReader({ media_type: record.media_type, files: [{ format: record.format }] }, useSettingsStore.getState().readerPreference) === 'comic') {
     throw new Error(COMIC_OFFLINE_MESSAGE);
   }
@@ -60,6 +65,8 @@ export async function openOfflineBook(
 }
 
 export async function openBookWithSystemDefault(recordId: string): Promise<void> {
+  if (useServerStore.getState().savedServerId) throw new Error(SAVED_READER_GUARD_MESSAGE);
+  markLegacyReaderAttempt();
   if (process.env.NEXT_PUBLIC_APP_PLATFORM !== 'tauri') {
     throw new Error('book.offline.desktop_only');
   }

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -11,16 +11,43 @@ import { requestAnimatedBack } from '@/lib/native-back';
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { serverTitle, serverUrl } = useServerStore();
+  const { serverTitle, serverUrl, sessionRevision } = useServerStore();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsubscribe = useServerStore.subscribe((current, previous) => {
+      if (current.serverUrl === previous.serverUrl && current.sessionRevision === previous.sessionRevision) return;
+      requestRef.current?.abort();
+      requestRef.current = null;
+      setLoading(false); setShowCaptcha(false); setError('');
+    });
+    return () => {
+      mountedRef.current = false;
+      unsubscribe();
+      requestRef.current?.abort(); requestRef.current = null;
+    };
+  }, []);
 
   const handleRegister = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password.trim() || requestRef.current || !mountedRef.current) return;
+    const session = useServerStore.getState();
+    if (!session.serverUrl) { setError('未找到已确认的服务器，请返回列表连接后重试。'); return; }
+    // A late captcha callback from the previous render cannot submit its form
+    // to a newly selected server or a different login session.
+    if (session.serverUrl !== serverUrl || session.sessionRevision !== sessionRevision) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const isCurrent = () => mountedRef.current && requestRef.current === controller && !controller.signal.aborted
+      && useServerStore.getState().serverUrl === session.serverUrl
+      && useServerStore.getState().sessionRevision === session.sessionRevision;
     setLoading(true);
     setError('');
     try {
@@ -39,12 +66,15 @@ export default function RegisterPage() {
         }
       }
 
-      const res = await request(`${serverUrl}/api/user/sign_up`, {
+      const res = await request(`${session.serverUrl}/api/user/sign_up`, {
         method: 'POST',
         body,
         credentials: 'include',
+        signal: controller.signal,
       });
       const data = await res.json();
+      if (!isCurrent()) return;
+      if (!res.ok && data.err === 'ok') throw new Error('register.response_invalid');
       if (data.err === 'ok') {
         setShowCaptcha(false);
         router.push('/login');
@@ -55,9 +85,9 @@ export default function RegisterPage() {
         setError(data.msg || '注册失败');
       }
     } catch {
-      setError('无法连接服务器');
+      if (isCurrent()) setError('无法连接服务器');
     } finally {
-      setLoading(false);
+      if (isCurrent()) { requestRef.current = null; setLoading(false); }
     }
   };
 
@@ -98,7 +128,7 @@ export default function RegisterPage() {
             <input type="password" placeholder="请输入密码" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password"
               className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
-          <button type="submit" disabled={loading || !username.trim() || !password.trim()}
+          <button type="submit" disabled={loading || !serverUrl || !username.trim() || !password.trim()}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50">
             {loading ? '注册中...' : '注册'}
           </button>

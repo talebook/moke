@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist, type StateStorage } from 'zustand/middleware';
+import { parseLibraryBaseUrl } from '../discovery/base-url.ts';
 // Relative `.ts` imports keep this store directly executable by the Node test
 // runner; it cannot resolve the application's `@/` alias.
 import {
@@ -29,7 +30,10 @@ export type { ServerCapabilities } from '../server-capabilities.ts';
 // store usable in that case; persistence resumes automatically on platforms
 // where localStorage is available.
 const safeLocalStorage: StateStorage = {
-  getItem: safeGetLocalStorageItem,
+  // Migration inputs remain immutable. Runtime session updates have a separate
+  // owner/key and must never invalidate the saved-list source fingerprint.
+  getItem: (key) => safeGetLocalStorageItem(key) ?? (key === 'moke-active-session-v1'
+    ? safeGetLocalStorageItem('moke-server-storage') : null),
   setItem: safeSetLocalStorageItem,
   removeItem: safeRemoveLocalStorageItem,
 };
@@ -43,6 +47,8 @@ function invalidateCapabilitiesForSession(capabilities: ServerCapabilities): Ser
 }
 
 interface ServerState {
+  savedServerId: string | null;
+  savedEntryRevision: string | null;
   offlineMode: boolean;
   serverUrl: string;
   serverTitle: string;
@@ -56,6 +62,7 @@ interface ServerState {
   user: ReaderInfo | null;
   sessionRevision: number;
   setServer: (protocol: 'http' | 'https', host: string, port: string) => void;
+  activateSavedServer: (entry: { id: string; url: string; entryRevision: string }, expectedSessionRevision: number) => boolean;
   enterOfflineMode: () => void;
   leaveOfflineMode: () => void;
   invalidateSession: () => void;
@@ -77,7 +84,7 @@ interface ServerState {
 function readPersistedServerUrl(): string {
   if (typeof window === 'undefined') return '';
   try {
-    const raw = safeGetLocalStorageItem('moke-server-storage');
+    const raw = safeGetLocalStorageItem('moke-active-session-v1') ?? safeGetLocalStorageItem('moke-server-storage');
     if (!raw) return '';
     const parsed = JSON.parse(raw) as { state?: { serverUrl?: string } };
     return parsed?.state?.serverUrl || '';
@@ -88,7 +95,9 @@ function readPersistedServerUrl(): string {
 
 export const useServerStore = create<ServerState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
+      savedServerId: null,
+      savedEntryRevision: null,
       offlineMode: false,
       serverUrl: readPersistedServerUrl(),
       serverTitle: '',
@@ -101,10 +110,26 @@ export const useServerStore = create<ServerState>()(
       token: '',
       user: null,
       sessionRevision: 0,
+      activateSavedServer: (entry, expectedSessionRevision) => {
+        if (get().sessionRevision !== expectedSessionRevision) return false;
+        const parsed = parseLibraryBaseUrl(entry.url);
+        let activated = false;
+        set((state) => {
+          if (state.sessionRevision !== expectedSessionRevision || parsed.baseUrl !== entry.url) return state;
+          activated = true;
+          return {
+            savedServerId: entry.id, savedEntryRevision: entry.entryRevision,
+            serverUrl: parsed.baseUrl, protocol: parsed.protocol, host: parsed.host, port: parsed.port,
+            offlineMode: false, isConnected: true, token: '', user: null, serverTitle: '',
+            capabilities: DEFAULT_SERVER_CAPABILITIES, sessionRevision: state.sessionRevision + 1,
+          };
+        });
+        return activated;
+      },
       setServer: (protocol, host, port) => {
         const url = `${protocol}://${host}${port ? `:${port}` : ''}`;
         set((state) => ({
-          serverUrl: url, offlineMode: false, protocol, host, port,
+          serverUrl: url, offlineMode: false, protocol, host, port, savedServerId: null, savedEntryRevision: null,
           isConnected: true, token: '', user: null,
           capabilities: DEFAULT_SERVER_CAPABILITIES,
           sessionRevision: state.sessionRevision + 1,
@@ -167,7 +192,7 @@ export const useServerStore = create<ServerState>()(
       },
       disconnect: () => {
         set((state) => ({
-          serverUrl: '', offlineMode: false, serverTitle: '',
+          serverUrl: '', offlineMode: false, serverTitle: '', savedServerId: null, savedEntryRevision: null,
           capabilities: DEFAULT_SERVER_CAPABILITIES,
           protocol: 'http', host: '', port: '8080',
           isConnected: false, token: '', user: null,
@@ -176,7 +201,7 @@ export const useServerStore = create<ServerState>()(
       },
     }),
     {
-      name: 'moke-server-storage',
+      name: 'moke-active-session-v1',
       storage: createJSONStorage(() => safeLocalStorage),
       // 持久化数据里的 hasHydrated 可能被卡住时的旧状态污染（false），
       // merge 时强制为 true；其余字段仍按持久化值恢复。

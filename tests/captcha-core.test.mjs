@@ -252,7 +252,7 @@ test('CaptchaModal cancels image requests on close and provider lifecycle cleanu
   assert.match(captchaModalSource, /if \(!isOpen\) \{\s*cancelImageCaptcha\(\);/);
   assert.match(
     captchaModalSource,
-    /\[cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl\]/,
+    /\[cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, requireValidTls\]/,
   );
 });
 

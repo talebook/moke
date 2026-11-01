@@ -13,7 +13,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!hasHydrated) return;
-    const target = serverUrl || offlineMode ? '/shelf' : '/welcome';
+    const target = '/welcome';
     // On single-WebView runtimes (OHOS), App Router's RSC navigation over the
     // custom scheme can leave this page stuck on its blank loading spinner.
     // Use the native full-document navigation there; fall back to the router.

@@ -1,4 +1,6 @@
 'use client';
+import { SAVED_READER_GUARD_MESSAGE } from '@/lib/saved-session-policy';
+import { markLegacyReaderAttempt } from '@/lib/reader-source-guard';
 
 import { retryOnlineRead } from '@/lib/online-retry';
 import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
@@ -426,6 +428,8 @@ function DetailContent() {
   };
 
   const handleOnlineRead = async () => {
+    if (useServerStore.getState().savedServerId) { setMessage(SAVED_READER_GUARD_MESSAGE); return; }
+    markLegacyReaderAttempt();
     if (!book) return;
     const reader = resolveBookReader(book, useSettingsStore.getState().readerPreference);
     if (reader === 'comic') { setComicOffline(false); setComicOpen(true); return; }
@@ -532,6 +536,8 @@ function DetailContent() {
   };
 
   const handleOfflineRead = async (targetAnnotation?: BookAnnotation) => {
+    if (useServerStore.getState().savedServerId) { setMessage(SAVED_READER_GUARD_MESSAGE); return; }
+    markLegacyReaderAttempt();
     if (!book) return;
     if (resolveBookReader(book, useSettingsStore.getState().readerPreference) === 'comic') {
       if (targetAnnotation) {
