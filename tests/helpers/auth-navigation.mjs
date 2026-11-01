@@ -3,13 +3,16 @@ export const AUTH_SERVER_URL = 'https://auth.books.test';
 /** Fictional native HTTP/filesystem bridge; production application code stays intact. */
 export async function installAuthNavigationMock(page, {
   failure = 'http401', comic = false, pausedDownloads = false, deferFailure = false,
+  legacyHead = null,
+  legacyRead = 'allowed',
 } = {}) {
-  await page.addInitScript(({ serverUrl, failure, comic, pausedDownloads, deferFailure }) => {
+  await page.addInitScript(({ serverUrl, failure, comic, pausedDownloads, deferFailure, legacyHead, legacyRead }) => {
     const requests = new Map();
     const bodies = new Map();
     const files = new Map();
     const handles = new Map();
     const httpRequests = [];
+    const httpRequestDetails = [];
     let nextId = 1;
     let releaseFailure;
     const failureGate = new Promise(resolve => { releaseFailure = resolve; });
@@ -24,8 +27,34 @@ export async function installAuthNavigationMock(page, {
       status: failure === 'http401' ? 401 : failure === 'permission' ? 403 : 200,
       body: { err: failure === 'need_login' ? 'user.need_login' : failure === 'permission' ? 'user.no_permission' : 'http.401', msg: failure === 'permission' ? '没有权限' : '请先登录' },
     });
-    const responseFor = (url) => {
+    const rawResponse = (status, contentType, text) => ({
+      status, body: new TextEncoder().encode(text), headers: [['content-type', contentType]],
+    });
+    const responseFor = (url, method) => {
       const path = new URL(url).pathname;
+      if (legacyHead && /^\/read\/\d+$/.test(path)) {
+        if (legacyRead === 'login') return {
+          ...rawResponse(302, 'text/html', ''), headers: [['location', '/login']],
+        };
+        if (legacyRead === 'permission') return rawResponse(403, 'text/html', 'Forbidden');
+        return rawResponse(200, 'text/html', '<html><body>Reader</body></html>');
+      }
+      if (legacyHead && path.endsWith('/reader-bootstrap')) {
+        return rawResponse(404, 'text/html', '<html><body>Not found</body></html>');
+      }
+      if (legacyHead && /\/api\/book\/\d+\.epub$/.test(path)) {
+        // A real HEAD has no error document to inspect. The Range GET must
+        // distinguish login challenges from ordinary permission failures.
+        if (method === 'HEAD') return rawResponse(
+          legacyHead === 'json403' ? 403 : 200,
+          legacyHead === 'json403' ? 'application/json' : 'text/html',
+          '',
+        );
+        if (failure === 'login_html') return rawResponse(200, 'text/html',
+          '<html><form action="/login"><input type="password"></form></html>');
+        return rawResponse(failure === 'permission' ? 403 : 200, 'application/json',
+          JSON.stringify({ err: failure === 'permission' ? 'user.no_permission' : 'user.need_login' }));
+      }
       let result = { status: 200, body: { err: 'ok' } };
       if (/\/api\/book\/\d+\.(epub|cbz)$/.test(path) || path.endsWith('/reader-bootstrap') || path.endsWith('/comic/pages')) {
         result = failedResponse();
@@ -61,6 +90,7 @@ export async function installAuthNavigationMock(page, {
       return { ...result, body: new TextEncoder().encode(JSON.stringify(result.body)), headers: [['content-type', 'application/json']] };
     };
     window.__AUTH_TEST_REQUESTS__ = httpRequests;
+    window.__AUTH_TEST_REQUEST_DETAILS__ = httpRequestDetails;
     window.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       invoke: async (command, args = {}) => {
@@ -68,12 +98,17 @@ export async function installAuthNavigationMock(page, {
           const id = nextId++;
           requests.set(id, args.clientConfig);
           httpRequests.push(args.clientConfig.url);
+          httpRequestDetails.push({
+            url: args.clientConfig.url,
+            method: (args.clientConfig.method || 'GET').toUpperCase(),
+            range: new Headers(args.clientConfig.headers).get('range'),
+          });
           return id;
         }
         if (command === 'plugin:http|fetch_send') {
-          const url = requests.get(args.rid).url;
+          const { url, method } = requests.get(args.rid);
           if (deferFailure && /\/api\/book\/\d+\.(epub|cbz)$/.test(new URL(url).pathname)) await failureGate;
-          const response = responseFor(url);
+          const response = responseFor(url, (method || 'GET').toUpperCase());
           const rid = nextId++;
           bodies.set(rid, { ...response, sent: false });
           return { status: response.status, statusText: 'Fixture', url, rid, headers: response.headers };
@@ -147,5 +182,5 @@ export async function installAuthNavigationMock(page, {
         format, status: 'paused', progress: 0, downloadedBytes: 0, updatedAt: Date.now(),
       }))));
     }
-  }, { serverUrl: AUTH_SERVER_URL, failure, comic, pausedDownloads, deferFailure });
+  }, { serverUrl: AUTH_SERVER_URL, failure, comic, pausedDownloads, deferFailure, legacyHead, legacyRead });
 }

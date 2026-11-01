@@ -15,6 +15,56 @@ async function countDownloads(page) {
   return page.evaluate(() => window.__AUTH_TEST_REQUESTS__.filter(url => /\/api\/book\/\d+\.(?:epub|cbz)$/.test(new URL(url).pathname)).length);
 }
 
+async function expectLegacyReadProbe(page) {
+  const requests = await page.evaluate(() => window.__AUTH_TEST_REQUEST_DETAILS__
+    .filter(({ url }) => /^(?:\/api\/book\/42(?:\/reader-bootstrap|\.epub)|\/read\/42)$/.test(new URL(url).pathname))
+    .map(({ url, method, range }) => ({ path: new URL(url).pathname, method, range })));
+  expect(requests).toEqual([
+    { path: '/api/book/42/reader-bootstrap', method: 'GET', range: null },
+    { path: '/read/42', method: 'GET', range: null },
+    { path: '/api/book/42.epub', method: 'HEAD', range: null },
+    { path: '/api/book/42.epub', method: 'GET', range: 'bytes=0-0' },
+  ]);
+}
+
+for (const legacyRead of ['login', 'permission']) {
+  test(`legacy read entry ${legacyRead} stops fallback before any download request`, async ({ page }) => {
+    await installAuthNavigationMock(page, { legacyHead: 'html200', legacyRead });
+    await page.goto(`${APP_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click();
+    if (legacyRead === 'login') await expectLogin(page, '/detail?id=42');
+    else {
+      await expect(page.getByText('当前账号没有在线阅读权限', { exact: false })).toBeVisible();
+      await expect(page).toHaveURL(`${APP_URL}/detail?id=42`);
+    }
+    expect(await countDownloads(page)).toBe(0);
+    const paths = await page.evaluate(() => window.__AUTH_TEST_REQUESTS__.map(url => new URL(url).pathname));
+    expect(paths).toContain('/read/42');
+  });
+}
+
+for (const legacyHead of ['html200', 'json403']) {
+  for (const failure of ['need_login', 'login_html']) {
+    test(`legacy online fallback ${legacyHead} HEAD confirms ${failure} before opening login`, async ({ page }) => {
+      await installAuthNavigationMock(page, { legacyHead, failure });
+      await page.goto(`${APP_URL}/detail?id=42`);
+      await page.getByTestId('online-read-action').click();
+      await expectLogin(page, '/detail?id=42');
+      await expectLegacyReadProbe(page);
+    });
+  }
+
+  test(`legacy online fallback ${legacyHead} HEAD keeps a real 403 on the book page`, async ({ page }) => {
+    await installAuthNavigationMock(page, { legacyHead, failure: 'permission' });
+    await page.goto(`${APP_URL}/detail?id=42`);
+    await page.getByTestId('online-read-action').click();
+    await expect(page.getByText('当前账号没有在线阅读权限', { exact: false })).toBeVisible();
+    await expect(page).toHaveURL(`${APP_URL}/detail?id=42`);
+    await expect(page.getByRole('heading', { name: '登录', exact: true })).toHaveCount(0);
+    await expectLegacyReadProbe(page);
+  });
+}
+
 for (const failure of ['http401', 'need_login']) {
   for (const action of ['online', 'download']) {
     test(`detail ${action} opens login for ${failure} and preserves the book`, async ({ page }) => {
