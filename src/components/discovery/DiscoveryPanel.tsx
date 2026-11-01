@@ -8,6 +8,7 @@ import { DiscoveryController } from '@/lib/discovery/controller';
 import { bindDiscoveryLifecycle } from '@/lib/discovery/browser-lifecycle';
 import { createNativeDiscoveryAdapter } from '@/lib/discovery/native';
 import { createDiscoverySaveAdapter } from '@/lib/discovery/save-adapter';
+import { discoverySaveFeedback } from '@/lib/discovery/save-feedback';
 import { savedServerFocusHref } from '@/lib/saved-server-focus';
 import type { DiscoveryState, DiscoveryStatus } from '@/lib/discovery/types';
 import { DiscoveryResults } from './DiscoveryResults';
@@ -34,6 +35,7 @@ export function DiscoveryPanel() {
   const controllerRef = useRef<DiscoveryController | null>(null);
   const saveRef = useRef<ReturnType<typeof createDiscoverySaveAdapter> | null>(null);
   const saveRequest = useRef<AbortController | null>(null);
+  const pausedSave = useRef<AbortController | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -44,7 +46,10 @@ export function DiscoveryPanel() {
     const controller = new DiscoveryController({
       adapter,
       supported,
-      onChange: setState,
+      onChange: (next) => {
+        if (next.status === 'paused' && saveRequest.current) pausedSave.current = saveRequest.current;
+        setState(next);
+      },
     });
     controllerRef.current = controller;
     const cleanup = bindDiscoveryLifecycle(controller, document, window, navigator);
@@ -72,22 +77,17 @@ export function DiscoveryPanel() {
     const result = await saveRef.current(selection, () => controller.isSelectionCurrent(selection), request.signal);
     if (!alive.current) return;
     setSaving(false);
-    // Cancellation cannot roll back a native rename already in flight. Keep
-    // its durable entry, but never navigate on an obsolete request's result.
-    if (request !== saveRequest.current || request.signal.aborted) {
-      setSaveError('保存请求已取消。若已进入写入，请返回服务器列表重新加载核对。');
-      setRequiresReload(true);
-      return;
-    }
-    if (result.ok) router.push(savedServerFocusHref(result.server.id));
-    else if (result.outcome === 'storage-failure') {
-      setRequiresReload(true);
-      setSaveError(result.persistence === 'unknown'
-        ? '保存结果尚未确认。请返回服务器列表重新加载核对，勿重复添加。'
-        : '列表暂不能写入，请返回服务器列表重新加载核对后再试。');
-    } else {
-      setSaveError('候选来源或地址校验未通过，未写入服务器列表。请重新查找后再试。');
-    }
+    // Blur still revokes discovery. A confirmed native write survives that
+    // revocation, while a lost reply still requires reload rather than retry.
+    const feedback = discoverySaveFeedback(result, {
+      cancelled: request !== saveRequest.current || request.signal.aborted,
+      selectionCurrent: controller.isSelectionCurrent(selection),
+      paused: pausedSave.current === request,
+    });
+    if (saveRequest.current === request) saveRequest.current = null;
+    setRequiresReload(feedback.reloadRequired);
+    setSaveError(feedback.message);
+    if (feedback.focusEntryId) router.push(savedServerFocusHref(feedback.focusEntryId));
   }
 
   return (

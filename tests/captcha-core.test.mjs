@@ -249,10 +249,10 @@ test('captcha messages require opaque origin, exact frame source, channel, and m
 test('CaptchaModal cancels image requests on close and provider lifecycle cleanup', () => {
   assert.match(captchaModalSource, /signal,/);
   assert.match(captchaModalSource, /return cancelImageCaptcha;/);
-  assert.match(captchaModalSource, /if \(!isOpen\) \{\s*cancelImageCaptcha\(\);/);
+  assert.match(captchaModalSource, /if \(!isOpen\) \{\s*configControllerRef\.current\?\.abort\(\);\s*cancelImageCaptcha\(\);/);
   assert.match(
     captchaModalSource,
-    /\[cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, requireValidTls\]/,
+    /\[cancelImageCaptcha, config, fetchImageCaptcha, isOpen, mode, serverUrl, captchaRequest\]/,
   );
 });
 

@@ -4,7 +4,13 @@ export type ConnectionEntry = Pick<SavedServer, 'id' | 'url' | 'entryRevision' |
 export type ConnectionPhase = 'idle' | 'connecting' | 'failed' | 'cancelled' | 'connected';
 export type ConnectionCode = '' | 'entry-not-found' | 'entry-changed' | 'entry-unavailable'
   | 'session-changed' | 'source-in-use' | 'read-failed' | 'guard-failed'
-  | 'probe-failed' | 'activation-rejected' | 'access-required' | 'timeout' | 'cancelled';
+  | 'probe-failed' | 'activation-rejected' | 'access-required' | 'timeout' | 'cancelled' | 'authority-uncertain';
+
+export interface ConnectionAttemptContext {
+  attempt: number;
+  sessionRevision: number;
+  signal: AbortSignal;
+}
 
 export interface ServerConnectionState {
   phase: ConnectionPhase;
@@ -22,10 +28,15 @@ export interface ServerConnectionControllerOptions {
   /** Return a fresh authoritative entry; a stale UI list is not sufficient. */
   readEntry: (id: string) => Promise<ConnectionEntry | null>;
   getSessionRevision: () => number;
-  canConnect: (entry: ConnectionEntry) => Promise<boolean>;
-  probe: (entry: ConnectionEntry, signal: AbortSignal) => Promise<{ needsAccessCode: boolean }>;
+  canConnect: (entry: ConnectionEntry, context: ConnectionAttemptContext) => Promise<boolean>;
+  probe: (entry: ConnectionEntry, signal: AbortSignal, context: ConnectionAttemptContext) => Promise<{ needsAccessCode: boolean }>;
   /** Synchronous compare-and-activate; false must leave the live session intact. */
-  activate: (entry: ConnectionEntry, expectedSessionRevision: number) => boolean;
+  activate: (entry: ConnectionEntry, expectedSessionRevision: number, prepared?: unknown) => boolean;
+  /** Native prepares an unacknowledged receipt; Web keeps synchronous activation. */
+  prepareActivation?: (entry: ConnectionEntry, context: ConnectionAttemptContext) => Promise<unknown>;
+  acknowledgeActivation?: (entry: ConnectionEntry, context: ConnectionAttemptContext, prepared: unknown) => Promise<void>;
+  cleanup?: (entry: ConnectionEntry, context: ConnectionAttemptContext, reason: ConnectionCode) => void | Promise<void>;
+  onActivationUncertain?: () => void;
   onState?: (state: ServerConnectionState) => void;
   timeoutMs?: number;
 }
@@ -51,6 +62,7 @@ const MESSAGES: Record<ConnectionCode, string> = {
   'access-required': '该服务器需要访问码。',
   timeout: '连接超时，请重试。',
   cancelled: '连接已取消。',
+  'authority-uncertain': '无法确认原生连接状态。请退出并重新启动应用后，从列表重新连接。',
 };
 
 class ConnectionFailure extends Error {
@@ -67,6 +79,8 @@ interface Attempt {
   promise: Promise<ServerConnectionState>;
   resolve: (state: ServerConnectionState) => void;
   settled: boolean;
+  preparing: boolean;
+  projectedRevision?: number;
 }
 
 function entrySnapshot(entry: ConnectionEntry): ConnectionEntry {
@@ -89,6 +103,15 @@ export function createServerConnectionController(options: ServerConnectionContro
   };
   let sequence = 0;
   let active: Attempt | null = null;
+  let accessAttempt: Attempt | null = null;
+
+  const contextFor = (attempt: Attempt): ConnectionAttemptContext => ({ attempt: attempt.number,
+    sessionRevision: attempt.sessionRevision, signal: attempt.abort.signal });
+  function cleanup(attempt: Attempt, reason: ConnectionCode): void {
+    try { void Promise.resolve(host.cleanup?.(attempt.entry, contextFor(attempt), reason)).catch(() => {}); }
+    catch { /* The native adapter retains its uncertain reservation on failure. */ }
+  }
+  function uncertain(): void { try { host.onActivationUncertain?.(); } catch { /* Fail closed in the adapter. */ } }
 
   function publish(next: ServerConnectionState): void {
     state = { ...next };
@@ -110,6 +133,7 @@ export function createServerConnectionController(options: ServerConnectionContro
     if (attempt.timer !== null) clearTimeout(attempt.timer);
     if (active === attempt) {
       active = null;
+      accessAttempt = result.code === 'access-required' ? attempt : null;
       if (notify) publish(result);
     }
     attempt.resolve({ ...result });
@@ -119,7 +143,7 @@ export function createServerConnectionController(options: ServerConnectionContro
     if (active !== attempt || attempt.settled || attempt.abort.signal.aborted) {
       throw new ConnectionFailure('cancelled');
     }
-    if (host.getSessionRevision() !== attempt.sessionRevision) throw new ConnectionFailure('session-changed');
+    if (host.getSessionRevision() !== (attempt.projectedRevision ?? attempt.sessionRevision)) throw new ConnectionFailure('session-changed');
   }
 
   async function readSelectedEntry(attempt: Attempt): Promise<ConnectionEntry> {
@@ -137,7 +161,7 @@ export function createServerConnectionController(options: ServerConnectionContro
 
   async function checkSource(attempt: Attempt, entry: ConnectionEntry): Promise<void> {
     let allowed: boolean;
-    try { allowed = await host.canConnect(entry); }
+    try { allowed = await host.canConnect(entry, contextFor(attempt)); }
     catch { assertCurrent(attempt); throw new ConnectionFailure('guard-failed'); }
     assertCurrent(attempt);
     if (!allowed) throw new ConnectionFailure('source-in-use');
@@ -149,7 +173,7 @@ export function createServerConnectionController(options: ServerConnectionContro
       const before = await readSelectedEntry(attempt);
       await checkSource(attempt, before);
       let probe: { needsAccessCode: boolean };
-      try { probe = await host.probe(before, attempt.abort.signal); }
+      try { probe = await host.probe(before, attempt.abort.signal, contextFor(attempt)); }
       catch { assertCurrent(attempt); throw new ConnectionFailure('probe-failed'); }
       assertCurrent(attempt);
       const after = await readSelectedEntry(attempt);
@@ -157,16 +181,41 @@ export function createServerConnectionController(options: ServerConnectionContro
       assertCurrent(attempt);
       if (!probe || typeof probe.needsAccessCode !== 'boolean') throw new ConnectionFailure('probe-failed');
       if (probe.needsAccessCode) throw new ConnectionFailure('access-required');
+      let prepared: unknown;
+      if (host.prepareActivation) {
+        attempt.preparing = true;
+        try { prepared = await host.prepareActivation(after, contextFor(attempt)); }
+        catch (error) {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'source-in-use') {
+            throw new ConnectionFailure('source-in-use');
+          }
+          uncertain();
+          throw new ConnectionFailure('authority-uncertain');
+        }
+        assertCurrent(attempt);
+        // An IPC receipt cannot make a subsequently edited local row current.
+        await readSelectedEntry(attempt);
+        await checkSource(attempt, after);
+        assertCurrent(attempt);
+      }
       // No await between the final identity check and the host's synchronous
       // compare-and-activate. The host owns the live session/source reservation.
       let activated: boolean;
-      try { activated = host.activate(after, attempt.sessionRevision); }
+      try { activated = host.activate(after, attempt.sessionRevision, prepared); }
       catch { throw new ConnectionFailure('activation-rejected'); }
       if (activated !== true) throw new ConnectionFailure('activation-rejected');
+      attempt.projectedRevision = host.getSessionRevision();
+      if (host.acknowledgeActivation) {
+        try { await host.acknowledgeActivation(after, contextFor(attempt), prepared); }
+        catch { uncertain(); throw new ConnectionFailure('authority-uncertain'); }
+        try { assertCurrent(attempt); }
+        catch { uncertain(); throw new ConnectionFailure('authority-uncertain'); }
+      }
       finish(attempt, resultFor(attempt, 'connected'));
     } catch (error) {
       if (attempt.settled || active !== attempt) return;
       const code = error instanceof ConnectionFailure ? error.code : 'probe-failed';
+      cleanup(attempt, code);
       finish(attempt, resultFor(attempt, code === 'cancelled' ? 'cancelled' : 'failed', code));
     }
   }
@@ -174,12 +223,19 @@ export function createServerConnectionController(options: ServerConnectionContro
   function connect(entry: ConnectionEntry): Promise<ServerConnectionState> {
     const selected = entrySnapshot(entry);
     const revision = host.getSessionRevision();
+    if (accessAttempt) {
+      accessAttempt.abort.abort();
+      cleanup(accessAttempt, 'cancelled');
+      accessAttempt = null;
+    }
     if (active && active.entry.id === selected.id && active.entry.url === selected.url
       && active.entry.entryRevision === selected.entryRevision && active.entry.status === selected.status
       && active.sessionRevision === revision) return active.promise;
     if (active) {
       const previous = active;
       previous.abort.abort();
+      if (previous.preparing) uncertain();
+      cleanup(previous, 'cancelled');
       // The superseded result settles immediately, but cannot replace the new
       // candidate's state when its transport eventually responds.
       finish(previous, resultFor(previous, 'cancelled', 'cancelled'), false);
@@ -188,13 +244,15 @@ export function createServerConnectionController(options: ServerConnectionContro
     const promise = new Promise<ServerConnectionState>((done) => { resolve = done; });
     const attempt: Attempt = {
       number: ++sequence, entry: selected, sessionRevision: revision, abort: new AbortController(),
-      timer: null, promise, resolve, settled: false,
+      timer: null, promise, resolve, settled: false, preparing: false,
     };
     active = attempt;
     attempt.timer = setTimeout(() => {
       if (active !== attempt || attempt.settled) return;
       attempt.abort.abort();
-      finish(attempt, resultFor(attempt, 'failed', 'timeout'));
+      if (attempt.preparing) uncertain();
+      cleanup(attempt, 'timeout');
+      finish(attempt, resultFor(attempt, 'failed', attempt.preparing ? 'authority-uncertain' : 'timeout'));
     }, timeoutMs);
     publish(resultFor(attempt, 'connecting'));
     void run(attempt);
@@ -206,12 +264,15 @@ export function createServerConnectionController(options: ServerConnectionContro
     connect,
     cancel(expectedAttempt) {
       if (!active && state.code === 'access-required' && (expectedAttempt === undefined || expectedAttempt === state.attempt)) {
+        if (accessAttempt) { accessAttempt.abort.abort(); cleanup(accessAttempt, 'cancelled'); accessAttempt = null; }
         publish({ ...state, phase: 'cancelled', code: 'cancelled', message: MESSAGES.cancelled, needsAccessCode: false, attempt: ++sequence });
       }
       if (active && (expectedAttempt === undefined || expectedAttempt === active.number)) {
         const attempt = active;
         attempt.abort.abort();
-        finish(attempt, resultFor(attempt, 'cancelled', 'cancelled'));
+        if (attempt.preparing) uncertain();
+        cleanup(attempt, 'cancelled');
+        finish(attempt, resultFor(attempt, 'cancelled', attempt.preparing ? 'authority-uncertain' : 'cancelled'));
       }
       return { ...state };
     },

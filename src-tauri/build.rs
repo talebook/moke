@@ -34,6 +34,16 @@ const APP_ACL_COMMANDS: &[&str] = &[
     // command implementations also validate the active document path because
     // the shell and Reader necessarily share the `main` label.
     "moke_runtime_platform",
+    "moke_connection_document",
+    "moke_connection_status",
+    "moke_connection_begin",
+    "moke_connection_check",
+    "moke_connection_dispatch",
+    "moke_connection_settle",
+    "moke_connection_commit",
+    "moke_connection_ack",
+    "moke_connection_cancel",
+    "moke_connection_mark_reader",
     "moke_discovery_start",
     "moke_discovery_snapshot",
     "moke_discovery_admit",

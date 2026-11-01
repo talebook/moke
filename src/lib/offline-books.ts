@@ -538,6 +538,8 @@ export async function syncOfflineDownloadState(serverUrl: string, bookId: string
     credentials: 'include',
     body: JSON.stringify({ download: downloaded ? 1 : 0 }),
   });
+  const { drainResponseBodyQuietly } = await import('./api-core.ts');
+  await drainResponseBodyQuietly(response);
   if (!response.ok) throw new Error(`http.${response.status}`);
 }
 

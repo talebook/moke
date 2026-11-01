@@ -132,14 +132,33 @@ fn fresh_lookup_with_pool(pool: &Pool, hostname: &str, timeout: Duration) -> Loo
     let deadline = Instant::now() + timeout;
     let canceled = Arc::new(AtomicBool::new(false));
     let (reply, receiver) = mpsc::sync_channel(1);
-    pool.sender
-        .try_send(Job {
-            hostname: hostname.to_owned(),
-            canceled: canceled.clone(),
-            deadline,
-            reply,
-        })
-        .map_err(|_| HostnameFailure::Timeout)?;
+    let mut job = Job {
+        hostname: hostname.to_owned(),
+        canceled: canceled.clone(),
+        deadline,
+        reply,
+    };
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            canceled.store(true, Ordering::Release);
+            return Err(HostnameFailure::Timeout);
+        }
+        match pool.sender.try_send(job) {
+            Ok(()) => break,
+            Err(mpsc::TrySendError::Full(pending)) => {
+                // Keep one job and the original deadline. A browsing burst
+                // cannot turn a temporary full queue into an instant timeout,
+                // nor create another worker or unbounded queue.
+                job = pending;
+                thread::sleep(remaining.min(Duration::from_millis(2)));
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                canceled.store(true, Ordering::Release);
+                return Err(HostnameFailure::LookupFailed);
+            }
+        }
+    }
     let result = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()));
     canceled.store(true, Ordering::Release);
     if Instant::now() >= deadline {
@@ -288,6 +307,84 @@ mod tests {
         assert_eq!(
             fresh_lookup_with_pool(&pool, "books.home.arpa", Duration::ZERO),
             Err(HostnameFailure::Timeout)
+        );
+        pool.shutdown();
+    }
+
+    #[test]
+    fn fresh_lookup_waits_for_queue_capacity_within_its_original_deadline() {
+        let (started, observed) = mpsc::channel();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let lookup_gate = gate.clone();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let lookup_calls = calls.clone();
+        let pool = Arc::new(
+            Pool::start(Arc::new(move |_| {
+                lookup_calls.fetch_add(1, Ordering::Relaxed);
+                started.send(()).unwrap();
+                let (lock, wake) = &*lookup_gate;
+                let mut released = lock.lock().unwrap();
+                while !*released {
+                    released = wake.wait(released).unwrap();
+                }
+                Ok(vec!["192.168.50.10".parse().unwrap()])
+            }))
+            .unwrap(),
+        );
+        let queued_canceled = Arc::new(AtomicBool::new(false));
+        let job = || {
+            let (reply, _) = mpsc::sync_channel(1);
+            Job {
+                hostname: "books.home.arpa".to_owned(),
+                canceled: queued_canceled.clone(),
+                deadline: Instant::now() + Duration::from_secs(10),
+                reply,
+            }
+        };
+        for _ in 0..WORKERS {
+            pool.sender.try_send(job()).unwrap();
+            observed.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        for _ in 0..QUEUE_CAPACITY {
+            pool.sender.try_send(job()).unwrap();
+        }
+
+        let timeout = Duration::from_millis(30);
+        let began = Instant::now();
+        let expired = fresh_lookup_with_pool(&pool, "expired.home.arpa", timeout);
+        let waited = began.elapsed();
+        let waiting_pool = pool.clone();
+        let waiting = thread::spawn(move || {
+            fresh_lookup_with_pool(&waiting_pool, "books.home.arpa", Duration::from_secs(1))
+        });
+        thread::sleep(Duration::from_millis(20));
+        let remained_queued = !waiting.is_finished();
+        queued_canceled.store(true, Ordering::Release);
+        let (lock, wake) = &*gate;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+        let result = waiting.join().unwrap();
+        Arc::try_unwrap(pool).ok().unwrap().shutdown();
+
+        assert_eq!(expired, Err(HostnameFailure::Timeout));
+        assert!(waited >= timeout, "queue wait must use the lookup budget");
+        assert!(remained_queued, "a full queue is not an immediate failure");
+        assert_eq!(result, Ok(vec!["192.168.50.10".parse().unwrap()]));
+        // The timed-out unsent job and canceled browsing jobs never resolve.
+        assert_eq!(calls.load(Ordering::Relaxed), WORKERS + 1);
+    }
+
+    #[test]
+    fn fresh_lookup_reports_disconnected_pool_without_waiting_for_deadline() {
+        let (sender, receiver) = mpsc::sync_channel(QUEUE_CAPACITY);
+        drop(receiver);
+        let pool = Pool {
+            sender,
+            _workers: Vec::new(),
+        };
+        assert_eq!(
+            fresh_lookup_with_pool(&pool, "books.home.arpa", Duration::from_secs(1)),
+            Err(HostnameFailure::LookupFailed)
         );
         pool.shutdown();
     }

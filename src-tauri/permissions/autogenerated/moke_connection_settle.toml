@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-connection-settle"
+description = "Enables the moke_connection_settle command without any pre-configured scope."
+commands.allow = ["moke_connection_settle"]
+
+[[permission]]
+identifier = "deny-moke-connection-settle"
+description = "Denies the moke_connection_settle command without any pre-configured scope."
+commands.deny = ["moke_connection_settle"]
