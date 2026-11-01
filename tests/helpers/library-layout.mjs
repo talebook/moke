@@ -18,7 +18,7 @@ export async function installLibraryLayoutMock(page, {
     '/api/book/nav': { err: 'ok', navs },
     '/api/network/sources': { err: 'ok', items: [] },
     '/api/user/info': { err: 'ok', user: { id: 1, is_login: true, username: 'layout-test', extra: {} }, sys: { title: '布局测试书库' } },
-    '/api/welcome': { err: 'not_invited' },
+    '/api/welcome': { err: 'free' },
   };
   await page.route(`${LAYOUT_SERVER_URL}/**`, (route) => route.fulfill({
     json: payloads[new URL(route.request().url()).pathname] || { err: 'ok' },

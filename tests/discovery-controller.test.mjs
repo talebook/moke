@@ -15,6 +15,29 @@ const row = {
   candidates: [{ name: '<img src=x>', baseUrl: 'http://192.168.50.10:8080', joinable: true, unavailableReason: null, sources: [] }],
 };
 
+test('a selected row is only a selector and loses currency on removal, pause or a new session', async () => {
+  const f = fixture();
+  f.setSnapshot({ status: 'searching', rows: [row] });
+  f.controller.start();
+  await flush();
+  const selected = f.controller.select(row.id, row.candidates[0].baseUrl);
+  assert.equal(f.controller.isSelectionCurrent(selected), true);
+  assert.equal(f.controller.select('unknown', row.candidates[0].baseUrl), null);
+  f.setSnapshot({ status: 'searching', rows: [] });
+  await f.advance(1000);
+  assert.equal(f.controller.isSelectionCurrent(selected), false);
+  f.setSnapshot({ status: 'searching', rows: [row] });
+  await f.advance(1000);
+  f.controller.retry();
+  await flush();
+  assert.equal(f.controller.isSelectionCurrent(selected), false);
+  const next = f.controller.select(row.id, row.candidates[0].baseUrl);
+  assert.notEqual(next.sessionId, selected.sessionId);
+  f.controller.setVisible(false);
+  assert.equal(f.controller.isSelectionCurrent(next), false);
+  f.controller.dispose();
+});
+
 function fixture(overrides = {}) {
   const calls = { start: [], snapshot: [], stop: [] };
   const states = [];

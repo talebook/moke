@@ -53,6 +53,18 @@ export class DiscoveryController {
     return this.state;
   }
 
+  select(rowId: string, baseUrl: string) {
+    if (this.disposed || !this.sessionId || this.state.status !== 'searching') return null;
+    const candidate = this.state.rows.find((row) => row.id === rowId)?.candidates
+      .find((item) => item.baseUrl === baseUrl && item.joinable);
+    return candidate ? { sessionId: this.sessionId, generation: this.generation, rowId, baseUrl } : null;
+  }
+
+  isSelectionCurrent(selection: import('./types.ts').DiscoverySelection): boolean {
+    return this.isCurrent(selection.generation, selection.sessionId)
+      && this.select(selection.rowId, selection.baseUrl) !== null;
+  }
+
   start(): void {
     if (this.disposed) return;
     this.cancelSession();

@@ -2,6 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createNativeDiscoveryAdapter } from '../src/lib/discovery/native.ts';
 
+test('native admission and commit are bound to a started session and exact selector/bytes', async () => {
+  const calls = [];
+  const admission = { admissionId: 'opaque-native-handle', baseUrl: 'https://books.home.arpa/team/books', name: 'Fixture' };
+  const adapter = createNativeDiscoveryAdapter(async (command, args) => {
+    calls.push({ command, args });
+    return command === 'moke_runtime_platform' ? 'linux' : admission;
+  });
+  const selection = { sessionId: 'fixture-session', generation: 2, rowId: 'public-id', baseUrl: admission.baseUrl };
+  await assert.rejects(adapter.admit(selection), (error) => error.code === 'stopped');
+  await adapter.start(selection.sessionId);
+  assert.deepEqual(await adapter.admit(selection), admission);
+  await adapter.commit(selection.sessionId, admission.admissionId, 'before', 'after');
+  assert.deepEqual(calls.slice(-2), [
+    { command: 'moke_discovery_admit', args: { sessionId: selection.sessionId, rowId: selection.rowId, baseUrl: selection.baseUrl } },
+    { command: 'moke_discovery_commit', args: { sessionId: selection.sessionId, admissionId: admission.admissionId, expectedRaw: 'before', value: 'after' } },
+  ]);
+  await adapter.stop(selection.sessionId);
+  await assert.rejects(adapter.commit(selection.sessionId, admission.admissionId, 'before', 'after'), (error) => error.code === 'stopped');
+});
+
 test('only app-reported Windows and Linux may enter native discovery IPC', async () => {
   for (const platform of ['windows', 'linux']) {
     const calls = [];

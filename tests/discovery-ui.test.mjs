@@ -16,6 +16,17 @@ const compiledModule = { exports: {} };
 new Function('require', 'module', 'exports', compiled)(createRequire(import.meta.url), compiledModule, compiledModule.exports);
 const { DiscoveryResults } = compiledModule.exports;
 
+test('only joinable rows with an available save adapter are enabled and a pending save disables all', () => {
+  const rows = [{ id: 'public-id', name: 'Fixture', conflict: false, candidates: [
+    { name: 'Ready', baseUrl: 'http://192.168.50.10', joinable: true, sources: [] },
+    { name: 'Pending', baseUrl: 'http://192.168.50.11', joinable: false, sources: [] },
+  ] }];
+  const render = (props) => renderToStaticMarkup(createElement(DiscoveryResults, { rows, ...props }));
+  assert.equal((render({}).match(/disabled=""/g) ?? []).length, 2);
+  assert.equal((render({ onSave() {} }).match(/disabled=""/g) ?? []).length, 1);
+  assert.equal((render({ onSave() {}, saving: true }).match(/disabled=""/g) ?? []).length, 2);
+});
+
 test('candidate names remain text and every URL and conflicting source name is visible', () => {
   const candidates = [
     { name: '<img src=x>', baseUrl: 'https://books.home.arpa:8443/team/books', joinable: false, unavailableReason: 'hostname_unresolved', sources: [{ fullname: 'a', interface: 'lan-a', addresses: ['192.168.50.10'], name: '<script>alert(1)</script>' }] },

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-discovery-admit"
+description = "Enables the moke_discovery_admit command without any pre-configured scope."
+commands.allow = ["moke_discovery_admit"]
+
+[[permission]]
+identifier = "deny-moke-discovery-admit"
+description = "Denies the moke_discovery_admit command without any pre-configured scope."
+commands.deny = ["moke_discovery_admit"]

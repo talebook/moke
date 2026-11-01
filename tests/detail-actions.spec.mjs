@@ -42,7 +42,7 @@ async function installTauriHttpMock(page, { offlineMode = false } = {}) {
           },
         };
       }
-      if (path === '/api/welcome') return { err: 'not_invited' };
+      if (path === '/api/welcome') return { err: 'free' };
       if (path === '/api/user/info') {
         return { err: 'user.need_login', sys: { title: 'Moke 测试书库', version: '3.15.0' } };
       }

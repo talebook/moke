@@ -799,3 +799,386 @@ fn malformed_txt_replacement_cannot_leave_old_valid_mapping_clickable() {
         assert!(core.snapshot(21_000).is_empty());
     }
 }
+
+fn select_first(core: &mut Core, now_ms: u64) -> CandidateSelection {
+    let rows = core.snapshot(now_ms);
+    core.select_candidate(&rows[0].id, &rows[0].candidates[0].base_url, now_ms)
+        .unwrap()
+}
+
+fn resolve_all(core: &mut Core, now_ms: u64) {
+    for ticket in core.hostname_tickets(now_ms) {
+        assert!(core.set_hostname_resolution(
+            &ticket,
+            Ok(vec!["192.168.50.10".parse().unwrap()]),
+            now_ms,
+        ));
+    }
+}
+
+fn fresh_match() -> Option<Result<Vec<IpAddr>, HostnameFailure>> {
+    Some(Ok(vec!["192.168.50.10".parse().unwrap()]))
+}
+
+#[test]
+fn selection_preserves_canonical_full_base_and_requires_exact_row_and_url() {
+    let mut base = fixture()["base"].clone();
+    base["txt"][3] = json!("url=HTTP://192.168.50.10:8080/team/books/");
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let selection = select_first(&mut core, 0);
+    assert_eq!(selection.base_url(), "http://192.168.50.10:8080/team/books");
+    assert_eq!(selection.name(), "家中书库");
+    assert_eq!(selection.row_id(), "9f0c663b-8ffd-4e13-92d9-2b68572c08b1");
+    assert_eq!(selection.hostname(), None);
+    assert!(core.validate_selection(&selection, None, 0));
+    assert!(core
+        .select_candidate("other-row", selection.base_url(), 0)
+        .is_none());
+    for other_url in [
+        "http://192.168.50.10:8080",
+        "http://192.168.50.10:8080/team/other",
+        "http://192.168.50.10:8080/team/books/",
+    ] {
+        assert!(core
+            .select_candidate(selection.row_id(), other_url, 0)
+            .is_none());
+    }
+}
+
+#[test]
+fn hostname_selection_requires_live_verification_and_a_fresh_private_matching_answer() {
+    let mut core = Core::new();
+    apply(&mut core, &hostname_base(), 0);
+    let row = core.snapshot(0).remove(0);
+    let base = &row.candidates[0].base_url;
+    assert!(core.select_candidate(&row.id, base, 0).is_none());
+    let ticket = core.hostname_tickets(0).remove(0);
+    assert!(core.set_hostname_resolution(&ticket, Err(HostnameFailure::Timeout), 0));
+    assert!(core.select_candidate(&row.id, base, 0).is_none());
+    resolve_all(&mut core, 100);
+    let selection = select_first(&mut core, 100);
+    assert_eq!(selection.hostname(), Some("books.home.arpa"));
+    assert_eq!(
+        selection.base_url(),
+        "https://books.home.arpa:8080/team/books"
+    );
+    for rejected in [
+        None,
+        Some(Err(HostnameFailure::Empty)),
+        Some(Err(HostnameFailure::LookupFailed)),
+        Some(Err(HostnameFailure::Timeout)),
+        Some(Ok(vec![])),
+        Some(Ok(vec!["192.168.50.11".parse().unwrap()])),
+        Some(Ok(vec![
+            "192.168.50.10".parse().unwrap(),
+            "8.8.8.8".parse().unwrap(),
+        ])),
+        Some(Ok(vec![
+            "192.168.50.10".parse().unwrap(),
+            "fe80::1".parse().unwrap(),
+        ])),
+    ] {
+        assert!(!core.validate_selection(&selection, rejected, 100));
+    }
+    assert!(core.validate_selection(&selection, fresh_match(), 100));
+    assert!(core.validate_selection(
+        &selection,
+        Some(Ok(vec![
+            "fd00::1".parse().unwrap(),
+            "192.168.50.10".parse().unwrap(),
+        ])),
+        100,
+    ));
+    assert!(core.set_hostname_resolution(&ticket, Err(HostnameFailure::Timeout), 100));
+    assert!(!core.validate_selection(&selection, fresh_match(), 100));
+    assert!(core.select_candidate(&row.id, base, 100).is_none());
+    resolve_all(&mut core, 100);
+    // Fresh admission validation cannot extend the original DNS lease.
+    assert!(core.validate_selection(&selection, fresh_match(), 30_099));
+    assert!(!core.validate_selection(&selection, fresh_match(), 30_100));
+}
+
+#[test]
+fn selection_observes_each_required_rr_expiry_without_an_intervening_snapshot() {
+    for kind in ["ptr", "srv", "txt", "address"] {
+        let mut base = fixture()["base"].clone();
+        base["ttl"][kind] = json!(2);
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        let selection = select_first(&mut core, 0);
+        assert!(core.validate_selection(&selection, None, 1999), "{kind}");
+        assert!(!core.validate_selection(&selection, None, 2000), "{kind}");
+        apply(&mut core, &base, 2000);
+        assert!(!core.validate_selection(&selection, None, 2000), "{kind}");
+        let next = select_first(&mut core, 2000);
+        assert!(core.validate_selection(&next, None, 2000), "{kind}");
+    }
+}
+
+#[test]
+fn each_goodbye_immediately_revokes_selection_and_positive_refresh_cannot_revive_it() {
+    for hostname in [false, true] {
+        for record_kind in ["ptr", "srv", "txt", "a", "aaaa"] {
+            let mut base = if hostname {
+                hostname_base()
+            } else {
+                fixture()["base"].clone()
+            };
+            base["addresses"] = json!(["192.168.50.10", "fd00::1"]);
+            let mut core = Core::new();
+            apply(&mut core, &base, 0);
+            resolve_all(&mut core, 0);
+            let ticket = core.hostname_tickets(0).into_iter().next();
+            let selection = select_first(&mut core, 0);
+            let positive = records(&base)
+                .into_iter()
+                .find(|record| {
+                    matches!(
+                        (record_kind, &record.data),
+                        ("ptr", RecordData::Ptr(_))
+                            | ("srv", RecordData::Srv { .. })
+                            | ("txt", RecordData::Txt(_))
+                            | ("a", RecordData::A(_))
+                            | ("aaaa", RecordData::Aaaa(_))
+                    )
+                })
+                .unwrap();
+            let mut goodbye = positive.clone();
+            goodbye.ttl = 0;
+            core.apply_batch(vec![goodbye.clone()], 1000);
+            assert!(!core.validate_selection(&selection, fresh_match(), 1000));
+            assert!(core
+                .select_candidate(selection.row_id(), selection.base_url(), 1000)
+                .is_none());
+            assert!(core.hostname_tickets(1000).is_empty());
+            let rows = core.snapshot(1000);
+            assert_eq!(rows.len(), 1, "the display grace remains");
+            assert!(!rows[0].candidates[0].joinable);
+            assert_eq!(
+                rows[0].candidates[0].unavailable_reason.as_deref(),
+                Some("source_withdrawn")
+            );
+            if let Some(ticket) = &ticket {
+                assert!(!core.set_hostname_resolution(
+                    ticket,
+                    Ok(vec!["192.168.50.10".parse().unwrap()]),
+                    1000,
+                ));
+            }
+            core.apply_batch(vec![positive], 1001);
+            assert!(!core.validate_selection(&selection, fresh_match(), 1001));
+            if let Some(ticket) = ticket {
+                let next = core.hostname_tickets(1001).remove(0);
+                assert_ne!(ticket, next);
+                assert!(core
+                    .select_candidate(selection.row_id(), selection.base_url(), 1001)
+                    .is_none());
+                assert!(!core.set_hostname_resolution(
+                    &ticket,
+                    Ok(vec!["192.168.50.10".parse().unwrap()]),
+                    1001,
+                ));
+                resolve_all(&mut core, 1001);
+            }
+            let next = select_first(&mut core, 1001);
+            assert!(core.validate_selection(&next, fresh_match(), 1001));
+            assert!(!core.validate_selection(&selection, fresh_match(), 1001));
+            // Repeated withdrawals retain the original grace deadline.
+            core.apply_batch(vec![goodbye.clone()], 2000);
+            core.apply_batch(vec![goodbye], 2500);
+            assert!(core
+                .snapshot(3000)
+                .iter()
+                .all(|row| row
+                    .candidates
+                    .iter()
+                    .all(|candidate| candidate.unavailable_reason.as_deref()
+                        != Some("source_withdrawn"))));
+            assert!(!core.validate_selection(&next, fresh_match(), 3000));
+        }
+    }
+}
+
+#[test]
+fn same_batch_goodbye_and_identical_positive_records_cannot_revive_old_selection() {
+    for base in [fixture()["base"].clone(), hostname_base()] {
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        resolve_all(&mut core, 0);
+        let selection = select_first(&mut core, 0);
+        let ticket = core.hostname_tickets(0).into_iter().next();
+        let positive = records(&base);
+        let goodbye: Vec<_> = positive
+            .iter()
+            .cloned()
+            .map(|mut record| {
+                record.ttl = 0;
+                record
+            })
+            .collect();
+        // No source refresh between the withdrawal and the positive answer:
+        // the RR incarnation itself must still rotate before the final refresh.
+        core.apply_batch(goodbye.iter().chain(&positive).cloned().collect(), 1000);
+        assert!(!core.validate_selection(&selection, fresh_match(), 1000));
+        if let Some(ticket) = ticket {
+            assert!(!core.set_hostname_resolution(
+                &ticket,
+                Ok(vec!["192.168.50.10".parse().unwrap()]),
+                1000,
+            ));
+            assert!(core
+                .select_candidate(selection.row_id(), selection.base_url(), 1000)
+                .is_none());
+            resolve_all(&mut core, 1000);
+        }
+        let next = select_first(&mut core, 1000);
+        assert!(core.validate_selection(&next, fresh_match(), 1000));
+        core.apply_batch(positive.into_iter().chain(goodbye).collect(), 2000);
+        assert!(!core.validate_selection(&next, fresh_match(), 2000));
+        assert!(core
+            .select_candidate(next.row_id(), next.base_url(), 2000)
+            .is_none());
+    }
+}
+
+#[test]
+fn ip_source_returning_to_identical_key_after_address_expiry_does_not_revive_selection() {
+    let base = fixture()["base"].clone();
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    let selection = select_first(&mut core, 0);
+    let mut temporary = records(&base)
+        .into_iter()
+        .find(|record| matches!(record.data, RecordData::A(_)))
+        .unwrap();
+    temporary.data = RecordData::A("192.168.50.11".parse().unwrap());
+    temporary.ttl = 1;
+    temporary.cache_flush = false;
+    core.apply_batch(vec![temporary], 1000);
+    assert!(!core.validate_selection(&selection, None, 1000));
+    let expanded = select_first(&mut core, 1000);
+    assert!(core.validate_selection(&expanded, None, 1999));
+    assert!(!core.validate_selection(&expanded, None, 2000));
+    assert!(!core.validate_selection(&selection, None, 2000));
+    let restored = select_first(&mut core, 2000);
+    assert!(core.validate_selection(&restored, None, 2000));
+}
+
+#[test]
+fn unchanged_positive_refresh_preserves_ip_and_hostname_selections() {
+    for base in [fixture()["base"].clone(), hostname_base()] {
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        resolve_all(&mut core, 0);
+        let selection = select_first(&mut core, 0);
+        apply(&mut core, &base, 10_000);
+        assert!(core.validate_selection(&selection, fresh_match(), 10_000));
+    }
+}
+
+#[test]
+fn selection_never_falls_back_to_same_candidate_on_another_interface_or_core() {
+    for base in [fixture()["base"].clone(), hostname_base()] {
+        let mut other = base.clone();
+        other["interface"] = json!("lan-b");
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        resolve_all(&mut core, 0);
+        let selection = select_first(&mut core, 0);
+        // Identical input order also makes the per-core RR incarnation values
+        // identical, so only the core-specific admission generation separates
+        // these IP selections (hostnames additionally have unique DNS tickets).
+        let mut identical_core = Core::new();
+        apply(&mut identical_core, &base, 0);
+        resolve_all(&mut identical_core, 0);
+        assert!(!identical_core.validate_selection(&selection, fresh_match(), 0));
+        apply(&mut core, &other, 0);
+        resolve_all(&mut core, 0);
+        assert!(core.validate_selection(&selection, fresh_match(), 0));
+        core.remove_interface(base["interface"].as_str().unwrap());
+        assert!(!core.validate_selection(&selection, fresh_match(), 0));
+        let remaining = select_first(&mut core, 0);
+        assert!(core.validate_selection(&remaining, fresh_match(), 0));
+        let mut another_core = Core::new();
+        apply(&mut another_core, &other, 0);
+        resolve_all(&mut another_core, 0);
+        assert!(!another_core.validate_selection(&remaining, fresh_match(), 0));
+        core.clear();
+        apply(&mut core, &other, 0);
+        resolve_all(&mut core, 0);
+        assert!(!core.validate_selection(&remaining, fresh_match(), 0));
+        let restored = select_first(&mut core, 0);
+        assert!(core.validate_selection(&restored, fresh_match(), 0));
+    }
+}
+
+#[test]
+fn hostname_retry_clear_and_lease_rotation_revoke_selection_permanently() {
+    for action in ["retry", "clear", "lease"] {
+        let mut core = Core::new();
+        apply(&mut core, &hostname_base(), 0);
+        resolve_all(&mut core, 0);
+        let selection = select_first(&mut core, 0);
+        let now = match action {
+            "retry" => {
+                assert!(core.retry_hostname(selection.row_id(), selection.base_url(), 1));
+                1
+            }
+            "clear" => {
+                core.clear_hostname_resolutions();
+                1
+            }
+            "lease" => HOSTNAME_VALIDATION_LEASE_MS,
+            _ => unreachable!(),
+        };
+        assert!(!core.validate_selection(&selection, fresh_match(), now));
+        resolve_all(&mut core, now);
+        assert!(!core.validate_selection(&selection, fresh_match(), now));
+        let next = select_first(&mut core, now);
+        assert!(core.validate_selection(&next, fresh_match(), now));
+    }
+}
+
+#[test]
+fn source_rr_replacement_revokes_selection_before_and_after_flush_grace() {
+    let base = fixture()["base"].clone();
+    for kind in ["srv", "txt", "address"] {
+        let mut core = Core::new();
+        apply(&mut core, &base, 0);
+        let selection = select_first(&mut core, 0);
+        let mut changed = base.clone();
+        match kind {
+            "srv" => changed["srv"]["target"] = json!("replacement.local."),
+            "txt" => changed["txt"][2] = json!("name=renamed library"),
+            "address" => changed["addresses"] = json!(["192.168.50.10", "192.168.50.11"]),
+            _ => unreachable!(),
+        }
+        apply(&mut core, &changed, 2000);
+        assert!(!core.validate_selection(&selection, None, 2000), "{kind}");
+        assert!(!core.validate_selection(&selection, None, 3000), "{kind}");
+        let next = select_first(&mut core, 3000);
+        assert!(core.validate_selection(&next, None, 3000), "{kind}");
+    }
+}
+
+#[test]
+fn fresh_hostname_answers_are_bound_to_selected_source_not_merged_candidate() {
+    let base = hostname_base();
+    let mut other = base.clone();
+    other["interface"] = json!("lan-b");
+    other["addresses"] = json!(["192.168.50.11"]);
+    other["txt"][2] = json!("name=another library");
+    let mut core = Core::new();
+    apply(&mut core, &base, 0);
+    resolve_all(&mut core, 0);
+    let selection = select_first(&mut core, 0);
+    apply(&mut core, &other, 0);
+    assert_eq!(selection.name(), "家中书库");
+    assert!(!core.validate_selection(
+        &selection,
+        Some(Ok(vec!["192.168.50.11".parse().unwrap()])),
+        0,
+    ));
+    assert!(core.validate_selection(&selection, fresh_match(), 0));
+}

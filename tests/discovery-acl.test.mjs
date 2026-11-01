@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const commands = ['start', 'snapshot', 'stop'].map((action) => `moke_discovery_${action}`);
+const commands = ['start', 'snapshot', 'admit', 'commit', 'stop'].map((action) => `moke_discovery_${action}`);
 
 test('discovery commands are declared and granted only to the main host', () => {
   const build = read('src-tauri/build.rs');
@@ -25,14 +25,25 @@ test('discovery commands are declared and granted only to the main host', () => 
   }
 });
 
-test('discovery IPC requires a join document and never accepts service types or addresses', () => {
+test('discovery IPC requires a join document and never accepts arbitrary lookup targets or file paths', () => {
   const ipc = read('src-tauri/src/discovery.rs');
   assert.match(ipc, /webview\.label\(\) != "main"/);
   assert.match(ipc, /super::require_moke_shell\(webview\)/);
   assert.match(ipc, /matches!\(path, "\/join" \| "\/join\/" \| "\/join\.html"\)/);
   assert.match(ipc, /id\.get_version_num\(\) == 4/);
   assert.match(ipc, /current\.id == session_id/);
-  assert.equal((ipc.match(/require_owner\(&webview, &session_id, true\)/g) || []).length, 2);
+  assert.equal((ipc.match(/require_owner\(&webview, &session_id, true\)/g) || []).length, 6);
   assert.match(ipc, /require_owner\(&webview, &session_id, false\)/);
   assert.doesNotMatch(ipc, /server_url:\s*String|service_type:\s*String|reqwest|plugin_http|set_server/);
+  assert.match(ipc, /\.session\s*\.admit\(&row_id, &base_url\)/);
+  assert.match(ipc, /app\s*\.path\(\)\s*\.app_config_dir\(\)/);
+  assert.doesNotMatch(ipc, /(?:file_path|directory|hostname):\s*String/);
+  for (const action of ['start', 'stop']) {
+    const command = ipc.split(`pub async fn moke_discovery_${action}(`)[1].split('#[tauri::command]')[0];
+    const revoke = action === 'start' ? 'let (generation, stop) =' : 'revoke_before_wait(';
+    assert.ok(command.indexOf(revoke) >= 0 && command.indexOf(revoke) < command.indexOf('let mut owned = state'), `${action} revokes before waiting for session ownership`);
+  }
+  const writer = read('src-tauri/src/discovery_registry.rs');
+  assert.match(writer, /const FILE_NAME: &str = "moke-saved-servers-v2\.json"/);
+  assert.match(writer, /app_config\.join\("server-registry"\)/);
 });

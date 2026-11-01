@@ -7,6 +7,7 @@ import { useServerStore } from '@/lib/store/server';
 import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
+import { logErrorMetadata } from '@/lib/api-log';
 
 const PUBLIC_PATHS = ['/', '/welcome', '/join', '/login', '/register', '/access', '/privacy', '/settings/developer'];
 
@@ -62,7 +63,12 @@ export function ServerProvider({ children }: { children: React.ReactNode }) {
       try {
         const welcome = await checkWelcomeRequirement(discoveryServerUrl);
         if (!isCurrentSession()) return;
-        if (welcome.err !== 'ok') return;
+        if (welcome.err !== 'ok') {
+          // An unknown welcome result is not permission to synchronize auth or
+          // capabilities. Keep the prior snapshot and record a safe diagnostic.
+          logErrorMetadata('ServerProvider welcome check failed', welcome);
+          return;
+        }
         if (welcome.needsAccessCode) {
           console.log('[ServerProvider] needs access code, redirecting to /access');
           router.replace('/access');

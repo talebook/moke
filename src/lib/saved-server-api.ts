@@ -1,5 +1,5 @@
 import { normalizeLibraryBaseUrl } from './discovery/base-url.ts';
-import { SavedServerRepository, SAVED_SERVER_STORAGE_KEY, type SaveServerInput, type SaveServerResult as RepositorySaveResult } from './saved-server-repository.ts';
+import { SavedServerRepository, SAVED_SERVER_STORAGE_KEY, type SaveServerInput, type SaveServerResult as RepositorySaveResult, type SavedServerWriteAuthorization } from './saved-server-repository.ts';
 import { createSavedServerStorage, readLegacyNativeSources } from './saved-server-storage.ts';
 import { createSavedServerStore } from './store/saved-servers.ts';
 import type { SavedServer, LegacyServerSources } from './saved-server-model.ts';
@@ -25,6 +25,10 @@ export function createSavedServerApi(repository: SavedServerRepository) {
     },
     async saveServer(input: SaveServerInput): Promise<SaveServerResult> {
       const result = await store.getState().saveServer(input);
+      return result.ok ? { ...result, server: view(result.server) } : result;
+    },
+    async saveAuthorizedServer(input: Pick<SaveServerInput, 'rawBaseUrl' | 'displayName'>, authorization: SavedServerWriteAuthorization): Promise<SaveServerResult> {
+      const result = await store.getState().saveServer(input, authorization);
       return result.ok ? { ...result, server: view(result.server) } : result;
     },
     getSavedServersSnapshot() {
@@ -76,4 +80,5 @@ function api() {
 }
 export const loadSavedServers = () => api().loadSavedServers();
 export const saveServer = (input: SaveServerInput) => api().saveServer(input);
+export const saveAuthorizedServer = (input: Pick<SaveServerInput, 'rawBaseUrl' | 'displayName'>, authorization: SavedServerWriteAuthorization) => api().saveAuthorizedServer(input, authorization);
 export const getSavedServersSnapshot = () => api().getSavedServersSnapshot();

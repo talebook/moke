@@ -142,6 +142,8 @@
     "allow-moke-runtime-platform",
     "allow-moke-discovery-start",
     "allow-moke-discovery-snapshot",
+    "allow-moke-discovery-admit",
+    "allow-moke-discovery-commit",
     "allow-moke-discovery-stop",
     "allow-moke-record-downloaded-book",
     "allow-moke-delete-downloaded-book-file",

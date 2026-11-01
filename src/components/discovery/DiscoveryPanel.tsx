@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ArrowLeft, Radio, RefreshCw } from 'lucide-react';
 import { DiscoveryController } from '@/lib/discovery/controller';
 import { bindDiscoveryLifecycle } from '@/lib/discovery/browser-lifecycle';
 import { createNativeDiscoveryAdapter } from '@/lib/discovery/native';
+import { createDiscoverySaveAdapter } from '@/lib/discovery/save-adapter';
+import { savedServerFocusHref } from '@/lib/saved-server-focus';
 import type { DiscoveryState, DiscoveryStatus } from '@/lib/discovery/types';
 import { DiscoveryResults } from './DiscoveryResults';
 
@@ -20,32 +23,78 @@ const STATUS_TEXT: Record<DiscoveryStatus, string> = {
 };
 
 export function DiscoveryPanel() {
+  const router = useRouter();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [requiresReload, setRequiresReload] = useState(false);
   const [state, setState] = useState<DiscoveryState>({
     status: process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? 'searching' : 'unsupported',
     rows: [],
   });
   const controllerRef = useRef<DiscoveryController | null>(null);
+  const saveRef = useRef<ReturnType<typeof createDiscoverySaveAdapter> | null>(null);
+  const saveRequest = useRef<AbortController | null>(null);
+  const alive = useRef(true);
 
   useEffect(() => {
+    alive.current = true;
     const supported = process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' && '__TAURI_INTERNALS__' in window;
+    const adapter = createNativeDiscoveryAdapter();
+    saveRef.current = createDiscoverySaveAdapter(adapter);
     const controller = new DiscoveryController({
-      adapter: createNativeDiscoveryAdapter(),
+      adapter,
       supported,
       onChange: setState,
     });
     controllerRef.current = controller;
     const cleanup = bindDiscoveryLifecycle(controller, document, window, navigator);
     return () => {
+      alive.current = false;
+      saveRequest.current?.abort();
+      saveRef.current = null;
       controllerRef.current = null;
       cleanup();
     };
   }, []);
 
+  async function save(rowId: string, baseUrl: string) {
+    if (saving || requiresReload) return;
+    const controller = controllerRef.current;
+    const selection = controller?.select(rowId, baseUrl);
+    if (!controller || !selection || !saveRef.current) {
+      setSaveError('此候选已失效，请重新查找。');
+      return;
+    }
+    const request = new AbortController();
+    saveRequest.current = request;
+    setSaving(true);
+    setSaveError('');
+    const result = await saveRef.current(selection, () => controller.isSelectionCurrent(selection), request.signal);
+    if (!alive.current) return;
+    setSaving(false);
+    // Cancellation cannot roll back a native rename already in flight. Keep
+    // its durable entry, but never navigate on an obsolete request's result.
+    if (request !== saveRequest.current || request.signal.aborted) {
+      setSaveError('保存请求已取消。若已进入写入，请返回服务器列表重新加载核对。');
+      setRequiresReload(true);
+      return;
+    }
+    if (result.ok) router.push(savedServerFocusHref(result.server.id));
+    else if (result.outcome === 'storage-failure') {
+      setRequiresReload(true);
+      setSaveError(result.persistence === 'unknown'
+        ? '保存结果尚未确认。请返回服务器列表重新加载核对，勿重复添加。'
+        : '列表暂不能写入，请返回服务器列表重新加载核对后再试。');
+    } else {
+      setSaveError('候选来源或地址校验未通过，未写入服务器列表。请重新查找后再试。');
+    }
+  }
+
   return (
     <main className="min-h-screen app-warm-bg px-6 py-10 md:px-10">
       <div className="mx-auto w-full max-w-2xl">
         <Link href="/welcome" className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground">
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> 返回连接页
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> 返回服务器列表
         </Link>
         <section className="app-glass rounded-[28px] p-6 md:p-8" aria-labelledby="discovery-heading">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -59,7 +108,7 @@ export function DiscoveryPanel() {
             {state.status !== 'unsupported' && (
               <button
                 type="button"
-                onClick={() => controllerRef.current?.retry()}
+                onClick={() => { saveRequest.current?.abort(); controllerRef.current?.retry(); }}
                 className="inline-flex h-10 items-center gap-2 rounded-2xl border border-amber-950/10 bg-white/65 px-4 text-sm text-foreground disabled:opacity-50"
                 disabled={state.status === 'paused'}
                 data-dom-id="btn-retry-discovery"
@@ -73,10 +122,10 @@ export function DiscoveryPanel() {
             {STATUS_TEXT[state.status]}
           </p>
 
-          <DiscoveryResults rows={state.rows} />
+          <DiscoveryResults rows={state.rows} saving={saving} onSave={!requiresReload && state.status === 'searching' ? save : undefined} />
 
-          <p id="discovery-save-unavailable" className="mt-5 text-sm leading-relaxed text-muted-foreground">
-            添加入口尚未就绪。发现结果暂不能保存到服务器列表。
+          <p id="discovery-save-status" className="mt-5 text-sm leading-relaxed text-muted-foreground" role="status" aria-live="polite">
+            {saveError || (saving ? '正在重新校验来源并核实保存结果…' : '添加只保存到服务器列表，不会连接。保存前会再次校验当前来源和地址。')}
           </p>
           <Link href="/welcome" className="mt-5 inline-flex h-11 items-center justify-center rounded-2xl bg-primary px-5 text-sm font-medium text-primary-foreground" data-dom-id="btn-manual-discovery-entry">
             手动输入服务器地址

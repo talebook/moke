@@ -35,10 +35,25 @@ export interface DiscoveryState {
   status: DiscoveryStatus;
   rows: DiscoveryRow[];
 }
+/** A selector is untrusted input. Only native session/cache admission can
+ * authorize it, and only native compare-and-commit can perform its write. */
+export interface DiscoverySelection {
+  sessionId: string;
+  generation: number;
+  rowId: string;
+  baseUrl: string;
+}
+export interface DiscoveryAdmission {
+  admissionId: string;
+  baseUrl: string;
+  name: string;
+}
 
 /** Only these fixed commands cross IPC; no URL, service type or scan range is accepted. */
 export interface DiscoveryAdapter {
   start(sessionId: string): Promise<unknown>;
   snapshot(sessionId: string): Promise<DiscoverySnapshot>;
   stop(sessionId: string): Promise<unknown>;
+  admit?(selection: DiscoverySelection): Promise<DiscoveryAdmission>;
+  commit?(sessionId: string, admissionId: string, expectedRaw: string | null, value: string): Promise<void>;
 }

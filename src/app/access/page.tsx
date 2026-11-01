@@ -20,35 +20,58 @@ function AccessPageInner() {
   const [showCaptcha, setShowCaptcha] = useState(false);
 
   // A URL query or old localStorage value cannot select an authentication target.
-  useEffect(() => () => requestRef.current?.abort(), [serverUrl, sessionRevision]);
+  useEffect(() => {
+    setLoading(false); setError(''); setShowCaptcha(false);
+    return () => {
+      const pending = requestRef.current;
+      requestRef.current = null;
+      pending?.abort();
+    };
+  }, [serverUrl, sessionRevision]);
 
   const handleVerify = async (captchaData?: any) => {
-    if (loading || !code.trim()) return;
+    if (loading || requestRef.current || !code.trim()) return;
     const session = useServerStore.getState();
     try { parseLibraryBaseUrl(session.serverUrl); }
     catch { setError('未找到已确认的服务器，请返回列表重新连接。'); return; }
     const controller = new AbortController();
-    requestRef.current?.abort(); requestRef.current = controller;
-    const timer = setTimeout(() => controller.abort(), 15000);
-    const isCurrent = () => !controller.signal.aborted && useServerStore.getState().serverUrl === session.serverUrl
+    requestRef.current = controller;
+    const ownsRequest = () => requestRef.current === controller && useServerStore.getState().serverUrl === session.serverUrl
       && useServerStore.getState().sessionRevision === session.sessionRevision;
+    const isCurrent = () => ownsRequest() && !controller.signal.aborted;
+    const timer = setTimeout(() => {
+      controller.abort();
+      // A native transport may ignore abort. The UI deadline must still settle
+      // this request, without allowing a late response to navigate or clear a retry.
+      if (ownsRequest()) {
+        requestRef.current = null;
+        setError('验证超时，请重试。'); setLoading(false);
+      }
+    }, 15000);
     setLoading(true); setError('');
     try {
       const body = new URLSearchParams({ invite_code: code });
       if (typeof captchaData === 'string') body.set('captcha_code', captchaData);
-      else if (captchaData) for (const [key, value] of Object.entries(captchaData)) body.set(key, String(value));
+      else if (captchaData) for (const [key, value] of Object.entries(captchaData)) {
+        // Captcha metadata must not replace the entered access code.
+        if (key !== 'invite_code') body.set(key, String(value));
+      }
       const response = await request(`${session.serverUrl}/api/welcome`, {
         method: 'POST', body, credentials: 'include', signal: controller.signal, redirect: 'error',
+        ...{ maxRedirections: 0 },
       });
       const res = await readJsonResponse<{ err: string; msg?: string }>(response);
       if (!isCurrent()) return;
       if (response.ok && res.err === 'ok') {
         setShowCaptcha(false); session.invalidateSession(); router.push('/shelf');
-      } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(res.err)) {
+      } else if (response.ok && ['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(res.err)) {
         setError('请完成人机验证后重试'); setShowCaptcha(true);
       } else { setError('访问码验证失败'); setShowCaptcha(false); }
     } catch { if (isCurrent()) setError('无法连接服务器'); }
-    finally { clearTimeout(timer); if (requestRef.current === controller) setLoading(false); }
+    finally {
+      clearTimeout(timer);
+      if (requestRef.current === controller) { requestRef.current = null; setLoading(false); }
+    }
   };
 
   return (
@@ -69,7 +92,7 @@ function AccessPageInner() {
         <p className="text-sm text-center mt-2 mb-8 text-muted-foreground">请输入访问码以继续</p>
 
         {error && (
-          <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">{error}</div>
+          <div role="alert" className="bg-destructive/10 border border-destructive/30 text-destructive text-sm rounded-lg p-3 mb-4">{error}</div>
         )}
 
         <form onSubmit={(e) => { e.preventDefault(); handleVerify(); }} className="flex flex-col gap-4">
