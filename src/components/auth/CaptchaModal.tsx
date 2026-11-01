@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
 import { cancelResponseBodyQuietly } from '@/lib/api-core';
+import { nativeConnectionErrorMessage } from '@/lib/native-connection';
 import {
   buildCaptchaSandboxDocument,
   buildGeetestSandboxDocument,
@@ -44,7 +45,9 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
   const [sandboxDocument, setSandboxDocument] = useState('');
   const configRequestIdRef = useRef(0);
   const successHandledRef = useRef(false);
-  const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle());
+  const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle(
+    (error) => nativeConnectionErrorMessage(error, '网络错误，无法加载验证码'),
+  ));
   const configControllerRef = useRef<AbortController | null>(null);
   const captchaRequest = useCallback((url: string, init?: RequestInit) => requestCaptcha
     ? requestCaptcha(url, init) : request(url, init, { requireValidTls }), [requestCaptcha, requireValidTls]);
@@ -101,7 +104,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
     } catch (err) {
       if (requestId !== configRequestIdRef.current) return;
       setMode('error');
-      setError(err instanceof Error ? err.message : '网络错误，无法加载验证码');
+      setError(nativeConnectionErrorMessage(err, err instanceof Error ? err.message : '网络错误，无法加载验证码'));
       setLoading(false);
     }
   }, [serverUrl, captchaRequest]);

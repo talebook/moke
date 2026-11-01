@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { NativeConnectionError, nativeConnectionErrorMessage } from '../src/lib/native-connection.ts';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -38,6 +39,20 @@ function createImageCaptchaState() {
   };
   return { state, callbacks };
 }
+
+test('image captcha keeps confirmed busy and uncertain authority feedback distinct from network errors', async () => {
+  const lifecycle = createImageCaptchaRequestLifecycle((error) => nativeConnectionErrorMessage(error, '网络错误，无法加载验证码'));
+  for (const [error, expected] of [
+    [new NativeConnectionError('source_busy'), /前一请求仍在结束/],
+    [new NativeConnectionError('ipc_unknown', true), /重新启动/],
+    [new Error('private failure'), /网络错误/],
+  ]) {
+    const f = createImageCaptchaState();
+    await lifecycle.load(async () => { throw error; }, f.callbacks);
+    assert.match(f.state.error, expected);
+    assert.equal(f.state.loading, false);
+  }
+});
 
 test('closing during an image request aborts it and ignores a late success', async () => {
   const lifecycle = createImageCaptchaRequestLifecycle();

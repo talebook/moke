@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServerConnectionController } from '../src/lib/server-connection-controller.ts';
+import { NativeConnectionError } from '../src/lib/native-connection.ts';
 
 const A = { id: 'a', url: 'https://books.example:8443/team/books', entryRevision: 'a-1', status: 'ready' };
 const B = { id: 'b', url: 'https://books.example:8443/other/books', entryRevision: 'b-1', status: 'ready' };
@@ -27,6 +28,44 @@ function setup(overrides = {}) {
   });
   return { controller, entries, activated, probed, states, setRevision: (value) => { revision = value; } };
 }
+
+test('confirmed native busy preserves the selected source and requires a fresh explicit retry', async () => {
+  let busy = true;
+  const f = setup({ canConnect: async () => {
+    if (busy) throw new NativeConnectionError('source_busy');
+    return true;
+  } });
+  const rejected = await f.controller.connect(A);
+  assert.equal(rejected.code, 'source-busy');
+  assert.equal(rejected.url, A.url);
+  assert.equal(rejected.entryId, A.id);
+  assert.match(rejected.message, /前一请求仍在结束/);
+  assert.equal(f.probed.length, 0);
+  assert.equal(f.activated.length, 0);
+  busy = false;
+  await Promise.resolve();
+  assert.equal(f.probed.length, 0, 'readiness changes must not replay the operation');
+  assert.equal((await f.controller.connect(A)).phase, 'connected');
+  assert.equal(f.probed.length, 1);
+});
+
+test('native probe busy, source conflicts and unknown authority remain distinct', async () => {
+  for (const [error, code] of [
+    [new NativeConnectionError('source_busy'), 'source-busy'],
+    [new NativeConnectionError('same_hostname_conflict'), 'source-in-use'],
+    [new NativeConnectionError('ipc_unknown', true), 'authority-uncertain'],
+    [Object.assign(new Error('private native failure'), { code: 'authority-uncertain' }), 'authority-uncertain'],
+    [Object.assign(new Error('source_busy'), { code: 'source-in-use', nativeCode: 'source_busy' }), 'probe-failed'],
+  ]) {
+    let calls = 0;
+    const f = setup({ probe: async () => { calls++; throw error; } });
+    const result = await f.controller.connect(A);
+    assert.equal(result.code, code);
+    assert.equal(calls, 1);
+    assert.equal(f.activated.length, 0);
+    assert.doesNotMatch(result.message, /private native failure/);
+  }
+});
 
 test('successful selection carries the exact complete base and expected session through both guards', async () => {
   const reads = [];

@@ -1,9 +1,10 @@
 import type { SavedServer } from './saved-server-model.ts';
+import { isNativeSourceBusy, NativeConnectionError } from './native-connection.ts';
 
 export type ConnectionEntry = Pick<SavedServer, 'id' | 'url' | 'entryRevision' | 'status'>;
 export type ConnectionPhase = 'idle' | 'connecting' | 'failed' | 'cancelled' | 'connected';
 export type ConnectionCode = '' | 'entry-not-found' | 'entry-changed' | 'entry-unavailable'
-  | 'session-changed' | 'source-in-use' | 'read-failed' | 'guard-failed'
+  | 'session-changed' | 'source-in-use' | 'source-busy' | 'read-failed' | 'guard-failed'
   | 'probe-failed' | 'activation-rejected' | 'access-required' | 'timeout' | 'cancelled' | 'authority-uncertain';
 
 export interface ConnectionAttemptContext {
@@ -55,19 +56,26 @@ const MESSAGES: Record<ConnectionCode, string> = {
   'entry-unavailable': '请先更正服务器条目或处理地址冲突。',
   'session-changed': '连接或登录状态已更改，请重试。',
   'source-in-use': '当前状态暂不允许连接，请稍后重试。',
+  'source-busy': '前一请求仍在结束，请稍后重试。',
   'read-failed': '无法确认已保存的服务器，请重新加载列表。',
   'guard-failed': '无法确认当前连接状态，请稍后重试。',
   'probe-failed': '连接失败，请检查服务器地址和网络后重试。',
   'activation-rejected': '连接未被确认，请重试。',
   'access-required': '该服务器需要访问码。',
   timeout: '连接超时，请重试。',
-  cancelled: '连接已取消。',
+  cancelled: '连接操作已取消；前一请求可能仍在结束，请稍后重试。',
   'authority-uncertain': '无法确认原生连接状态。请退出并重新启动应用后，从列表重新连接。',
 };
 
 class ConnectionFailure extends Error {
   readonly code: ConnectionCode;
   constructor(code: ConnectionCode) { super(code); this.code = code; }
+}
+
+function nativeFailureCode(error: unknown): ConnectionCode | undefined {
+  if (isNativeSourceBusy(error)) return 'source-busy';
+  if (error && typeof error === 'object' && 'code' in error && error.code === 'authority-uncertain') return 'authority-uncertain';
+  if (error instanceof NativeConnectionError) return 'source-in-use';
 }
 
 interface Attempt {
@@ -162,7 +170,7 @@ export function createServerConnectionController(options: ServerConnectionContro
   async function checkSource(attempt: Attempt, entry: ConnectionEntry): Promise<void> {
     let allowed: boolean;
     try { allowed = await host.canConnect(entry, contextFor(attempt)); }
-    catch { assertCurrent(attempt); throw new ConnectionFailure('guard-failed'); }
+    catch (error) { assertCurrent(attempt); throw new ConnectionFailure(nativeFailureCode(error) ?? 'guard-failed'); }
     assertCurrent(attempt);
     if (!allowed) throw new ConnectionFailure('source-in-use');
   }
@@ -174,7 +182,7 @@ export function createServerConnectionController(options: ServerConnectionContro
       await checkSource(attempt, before);
       let probe: { needsAccessCode: boolean };
       try { probe = await host.probe(before, attempt.abort.signal, contextFor(attempt)); }
-      catch { assertCurrent(attempt); throw new ConnectionFailure('probe-failed'); }
+      catch (error) { assertCurrent(attempt); throw new ConnectionFailure(nativeFailureCode(error) ?? 'probe-failed'); }
       assertCurrent(attempt);
       const after = await readSelectedEntry(attempt);
       await checkSource(attempt, after);
@@ -186,6 +194,7 @@ export function createServerConnectionController(options: ServerConnectionContro
         attempt.preparing = true;
         try { prepared = await host.prepareActivation(after, contextFor(attempt)); }
         catch (error) {
+          if (isNativeSourceBusy(error)) throw new ConnectionFailure('source-busy');
           if (error && typeof error === 'object' && 'code' in error && error.code === 'source-in-use') {
             throw new ConnectionFailure('source-in-use');
           }

@@ -8,6 +8,7 @@ import { parseLibraryBaseUrl } from '@/lib/discovery/base-url';
 import { useServerStore } from '@/lib/store/server';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { requestAnimatedBack } from '@/lib/native-back';
+import { isNativeConnectionRuntime, nativeConnectionErrorMessage } from '@/lib/native-connection';
 
 
 function AccessPageInner() {
@@ -44,8 +45,12 @@ function AccessPageInner() {
       // A native transport may ignore abort. The UI deadline must still settle
       // this request, without allowing a late response to navigate or clear a retry.
       if (ownsRequest()) {
-        requestRef.current = null;
-        setError('验证超时，请重试。'); setLoading(false);
+        if (isNativeConnectionRuntime()) {
+          setError('验证超时，正在结束前一请求。确认结果前请勿重复提交。');
+        } else {
+          requestRef.current = null;
+          setError('验证超时，请重试。'); setLoading(false);
+        }
       }
     }, 15000);
     setLoading(true); setError('');
@@ -67,7 +72,8 @@ function AccessPageInner() {
       } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(res.err)) {
         setError('请完成人机验证后重试'); setShowCaptcha(true);
       } else { setError('访问码验证失败'); setShowCaptcha(false); }
-    } catch { if (isCurrent()) setError('无法连接服务器'); }
+    } catch (error) { if (ownsRequest()) setError(nativeConnectionErrorMessage(error,
+      controller.signal.aborted ? '验证已取消，未确认验证结果；请重新确认连接状态。' : '无法连接服务器')); }
     finally {
       clearTimeout(timer);
       if (requestRef.current === controller) { requestRef.current = null; setLoading(false); }

@@ -9,6 +9,7 @@ import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { requestAnimatedBack } from '@/lib/native-back';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
+import { nativeConnectionErrorMessage } from '@/lib/native-connection';
 
 interface TalebookLoginResponse {
   err: string;
@@ -103,7 +104,7 @@ export default function LoginPage() {
     } catch (loginError) {
       if (!isCurrentSession()) return;
       console.error('[LoginPage] login flow failed:', loginError);
-      setError('无法连接服务器');
+      setError(nativeConnectionErrorMessage(loginError, '无法连接服务器'));
     } finally {
       setLoading(false);
     }

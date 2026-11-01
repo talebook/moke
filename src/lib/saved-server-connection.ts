@@ -9,7 +9,7 @@ import { listOfflineDownloadSnapshots } from './offline-download-manager.ts';
 import { clearReadStateCache } from './reading-state.ts';
 import { probeSavedServer } from './connection-probe.ts';
 import { hasLegacyReaderAttempt } from './reader-source-guard.ts';
-import { nativeConnection, isNativeConnectionRuntime } from './native-connection.ts';
+import { nativeConnection, isNativeConnectionRuntime, NativeConnectionError } from './native-connection.ts';
 
 export const connectionState = createStore<{ state: ServerConnectionState | null }>(() => ({ state: null }));
 
@@ -90,7 +90,18 @@ export const savedServerConnection = createServerConnectionController({
 });
 
 /** Access code belongs to the exact failed candidate, never to the live store. */
+const accessSubmissions = new Set<number>();
+function assertNoAccessSubmission(attempt: number): void {
+  if (accessSubmissions.has(attempt)) throw new NativeConnectionError('operation_busy');
+}
 export async function submitSavedServerAccess(code: string, captchaData: unknown, signal: AbortSignal) {
+  const attempt = savedServerConnection.getState().attempt;
+  assertNoAccessSubmission(attempt);
+  accessSubmissions.add(attempt);
+  try { return await performSavedServerAccess(code, captchaData, signal); }
+  finally { accessSubmissions.delete(attempt); }
+}
+async function performSavedServerAccess(code: string, captchaData: unknown, signal: AbortSignal) {
   const candidate = savedServerConnection.getState();
   if (candidate.code !== 'access-required' || !candidate.entryId) throw new Error('candidate-unavailable');
   const revision = useServerStore.getState().sessionRevision;
@@ -142,10 +153,14 @@ export async function submitSavedServerAccess(code: string, captchaData: unknown
  * Every refresh is a new explicit check of the same ready local entry. */
 export async function requestSavedServerCaptcha(url: string, init: RequestInit = {}): Promise<Response> {
   const candidate = savedServerConnection.getState();
+  // A refresh may supersede a captcha GET, but may never retire the permit of
+  // an already dispatched access-code mutation in order to obtain a new one.
+  assertNoAccessSubmission(candidate.attempt);
   if (candidate.code !== 'access-required' || !candidate.entryId || init.signal?.aborted) throw new Error('candidate-unavailable');
   const revision = useServerStore.getState().sessionRevision;
   if (revision !== candidate.sessionRevision) throw new Error('candidate-changed');
   const entry = await readEntry(candidate.entryId);
+  assertNoAccessSubmission(candidate.attempt);
   const current = () => !init.signal?.aborted && useServerStore.getState().sessionRevision === revision
     && savedServerConnection.getState().attempt === candidate.attempt && savedServerConnection.getState().code === 'access-required';
   if (!current() || !entry || entry.status !== 'ready' || entry.url !== candidate.url || entry.entryRevision !== candidate.entryRevision
@@ -153,8 +168,10 @@ export async function requestSavedServerCaptcha(url: string, init: RequestInit =
     throw new Error('candidate-changed');
   }
   const nativeLease = isNativeConnectionRuntime() ? await nativeConnection.renewCandidate(candidate.attempt, entry) : undefined;
+  assertNoAccessSubmission(candidate.attempt);
   if (!current()) throw new Error('candidate-changed');
   const { request } = await import('./api.ts');
+  assertNoAccessSubmission(candidate.attempt);
   if (!current()) throw new Error('candidate-changed');
   return request(url, { ...init, credentials: 'include', redirect: 'error' }, { requireValidTls: true, nativeLease });
 }

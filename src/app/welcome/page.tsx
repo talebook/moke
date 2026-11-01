@@ -14,7 +14,7 @@ import { externalLinkClick } from '@/lib/external-link';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { savedServerFocusId } from '@/lib/saved-server-focus';
-import { nativeConnection, isNativeConnectionRuntime } from '@/lib/native-connection';
+import { nativeConnection, isNativeConnectionRuntime, nativeConnectionErrorMessage } from '@/lib/native-connection';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
@@ -119,8 +119,9 @@ export default function WelcomePage() {
       } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(result.err)) {
         setError('请完成人机验证后重试。'); setShowCaptcha(true);
       } else setError('访问码验证失败，请检查后重试。');
-    } catch {
-      if (alive.current) setError(controller.signal.aborted ? '验证已取消或超时，请重试。' : '无法确认该条目和访问码，请重新选择服务器。');
+    } catch (error) {
+      if (alive.current) setError(nativeConnectionErrorMessage(error,
+        controller.signal.aborted ? '验证已取消或超时，未确认验证结果；请重新确认连接状态。' : '无法确认该条目和访问码，请重新选择服务器。'));
     } finally {
       clearTimeout(timer); if (alive.current) setVerifying(false);
     }

@@ -118,6 +118,7 @@ export async function request(
       }
       let ticket: NativeDispatch | undefined;
       response = await nativeHttpRequest(urlStr, init, {
+        registerCancellation(cancel) { return nativeConnection.registerCancellation(nativeLease!, cancel); },
         async dispatch() { ticket = await nativeConnection.dispatch(nativeLease!, urlStr, method); },
         assertCurrent() { if (!ticket) throw new Error('native-dispatch-unavailable'); nativeConnection.assertDispatchCurrent(ticket); },
         async settle() { if (ticket) await nativeConnection.settle(ticket); },

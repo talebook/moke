@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { parseLibraryBaseUrl } from '../src/lib/discovery/base-url.ts';
 import { readJsonResponse } from '../src/lib/api-core.ts';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '../src/lib/server-session.ts';
+import { NativeConnectionError, nativeConnectionErrorMessage } from '../src/lib/native-connection.ts';
 
 function deferred() {
   let resolve;
@@ -95,7 +96,7 @@ function fakeClock() {
     },
   };
 }
-function accessFixture(request) {
+function accessFixture(request, nativeRuntime = false) {
   let session;
   let invalidations = 0;
   session = { serverUrl: 'https://access.invalid/a', sessionRevision: 1,
@@ -111,6 +112,7 @@ function accessFixture(request) {
     '@/lib/store/server': { useServerStore: store },
     '@/components/auth/CaptchaModal': { CaptchaModal: 'test-captcha' },
     '@/lib/native-back': { requestAnimatedBack() {} },
+    '@/lib/native-connection': { isNativeConnectionRuntime: () => nativeRuntime, nativeConnectionErrorMessage },
   });
   const inner = harness.exports.default().props.children.type;
   const render = () => harness.render(inner);
@@ -175,6 +177,33 @@ test('source changes and unmount suppress old timeout messages and late success'
     await flush();
     assert.deepEqual(fixture.navigation, []);
     assert.equal(fixture.harness.writesAfterUnmount, 0);
+  } finally { globalThis.setTimeout = previousSetTimeout; globalThis.clearTimeout = previousClearTimeout; }
+});
+
+test('native access timeout waits for the transport outcome without replaying the mutation', async () => {
+  const previousSetTimeout = globalThis.setTimeout;
+  const previousClearTimeout = globalThis.clearTimeout;
+  const clock = fakeClock();
+  globalThis.setTimeout = clock.setTimeout;
+  globalThis.clearTimeout = clock.clearTimeout;
+  try {
+    const pending = deferred();
+    let calls = 0;
+    const fixture = accessFixture(() => { calls++; return pending.promise; }, true);
+    const submitButton = () => find(fixture.render(), (node) => node.type === 'button' && node.props.type === 'submit');
+    fixture.submit();
+    clock.expire();
+    assert.match(find(fixture.render(), (node) => node.props.role === 'alert').props.children, /正在结束前一请求/);
+    assert.equal(submitButton().props.disabled, true);
+    fixture.submit();
+    assert.equal(calls, 1);
+    pending.resolve(Promise.reject(new NativeConnectionError('http_completion_unknown', true)));
+    await flush();
+    assert.match(find(fixture.render(), (node) => node.props.role === 'alert').props.children, /重新启动/);
+    assert.equal(find(fixture.render(), (node) => node.type === 'input').props.value, 'entered-fixture-code');
+    assert.deepEqual(fixture.navigation, []);
+    assert.equal(fixture.invalidations, 0);
+    fixture.harness.unmount();
   } finally { globalThis.setTimeout = previousSetTimeout; globalThis.clearTimeout = previousClearTimeout; }
 });
 
