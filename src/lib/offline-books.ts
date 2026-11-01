@@ -1,6 +1,7 @@
 'use client';
 
 import { debugLog } from './debug-log.ts';
+import { normalizeLibraryBaseUrl } from './discovery/base-url.ts';
 import { isSampleBook } from './sample-book-info.ts';
 import { withSampleBookOperation, invalidateSampleBookImports } from './sample-book-coordination.ts';
 import {
@@ -41,12 +42,18 @@ export interface OfflineBookRecord {
 interface OfflineMediaTypeRecord { id: string; media_type: string }
 
 // Metadata shares the existing keyPath store so old database versions need no
-// migration. It is never exposed as a downloaded book. Origin normalization
-// matches the native index's server identity (e.g. an explicit default port).
+// migration. It is never exposed as a downloaded book. Keep the complete base
+// URL: two libraries can share an origin while using different path prefixes.
+function offlineServerIdentity(serverUrl: string): string {
+  try { return normalizeLibraryBaseUrl(serverUrl); } catch {
+    // Preserve app-owned sample and legacy identifiers without guessing a
+    // different library's prefix for records that only contain an origin.
+    return serverUrl.replace(/\/+$/, '');
+  }
+}
+
 function mediaTypeKey(serverUrl: string, bookId: string): string {
-  let server = serverUrl.replace(/\/+$/, '');
-  try { server = new URL(serverUrl).origin; } catch { /* legacy server value */ }
-  return `media-type::${makeOfflineBookKey(server, bookId)}`;
+  return `media-type::${makeOfflineBookKey(offlineServerIdentity(serverUrl), bookId)}`;
 }
 
 function isBookRecord(record: OfflineBookRecord | OfflineMediaTypeRecord): record is OfflineBookRecord {
@@ -212,13 +219,7 @@ function needsIndexedRecovery(indexed: OfflineBookRecord | undefined, recovered:
 }
 
 function sameServer(left: string, right: string): boolean {
-  if (left === right) return true;
-  try {
-    const origin = new URL(left).origin;
-    return origin !== 'null' && origin === new URL(right).origin;
-  } catch {
-    return left.replace(/\/+$/, '') === right.replace(/\/+$/, '');
-  }
+  return offlineServerIdentity(left) === offlineServerIdentity(right);
 }
 
 
@@ -329,7 +330,8 @@ async function readOfflineBook(
       && sameServer(record.serverUrl, serverUrl)
       && (!wantedFormat || formatFromRecord(record) === wantedFormat)
     )) ?? (indexedRecord
-      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName)
+      ? nativeRecords.find((record) => record.fileName === indexedRecord.fileName
+        && record.bookId === bookId && sameServer(record.serverUrl, serverUrl))
       : undefined);
     if (!nativeRecord) return null;
 
@@ -373,9 +375,7 @@ interface OfflineRecoverySnapshot {
 }
 
 function offlineBookMutationKey(serverUrl: string, bookId: string): string {
-  let server = serverUrl.replace(/\/+$/, '');
-  try { server = new URL(serverUrl).origin; } catch { /* legacy server value */ }
-  return makeOfflineBookKey(server, bookId);
+  return makeOfflineBookKey(offlineServerIdentity(serverUrl), bookId);
 }
 
 function captureOfflineRecovery(mutation?: OfflineBookMutation): OfflineRecoverySnapshot {

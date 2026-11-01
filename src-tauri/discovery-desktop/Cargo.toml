@@ -1,0 +1,18 @@
+[package]
+name = "moke-discovery-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+publish = false
+
+[dependencies]
+mdns-sd = { path = "../../vendor/mdns-sd", default-features = false, features = ["logging"] }
+moke-discovery-core = { path = "../discovery-core" }
+if-addrs = "0.15"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+
+[dev-dependencies]
+socket2 = "0.6"
