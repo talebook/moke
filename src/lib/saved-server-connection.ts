@@ -18,7 +18,7 @@ async function readEntry(id: string): Promise<SavedServerView | null> {
   return loaded.savedServers.find((entry) => entry.id === id) ?? null;
 }
 
-export async function canConnectSavedServer(entry: ConnectionEntry): Promise<boolean> {
+function isSourceAvailable(entry: ConnectionEntry): boolean {
   // Window enumeration cannot rule out an earlier IPC dispatch which creates
   // its Reader late (including across a host reload). Native connection needs
   // the authoritative host/Reader lease, not an assumed empty enumeration.
@@ -33,6 +33,7 @@ export async function canConnectSavedServer(entry: ConnectionEntry): Promise<boo
   }
   return true;
 }
+export async function canConnectSavedServer(entry: ConnectionEntry): Promise<boolean> { return isSourceAvailable(entry); }
 
 export const savedServerConnection = createServerConnectionController({
   readEntry,
@@ -43,6 +44,8 @@ export const savedServerConnection = createServerConnectionController({
     return probeSavedServer((url, init) => request(url, init, { requireValidTls: true }), entry.url, signal);
   },
   activate(entry, expectedRevision) {
+    // No await between this last occupancy check and the store mutation.
+    if (!isSourceAvailable(entry)) return false;
     const activated = useServerStore.getState().activateSavedServer(entry, expectedRevision);
     if (activated) clearReadStateCache();
     return activated;

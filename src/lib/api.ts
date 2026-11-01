@@ -676,9 +676,9 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
 export async function downloadBookBlob(
   bookId: string | number,
   format = 'epub',
-  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal },
+  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal; serverUrl?: string },
 ): Promise<Blob> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options?.serverUrl ?? useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
   try {
@@ -762,6 +762,7 @@ export async function streamBookDownload(
   bookId: string | number,
   format = 'epub',
   options: {
+    serverUrl?: string;
     write: (chunk: Uint8Array) => Promise<void>;
     onProgress?: (progress: number) => void;
     onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
@@ -772,7 +773,7 @@ export async function streamBookDownload(
     validateEpub?: boolean;
   },
 ): Promise<{ mimeType: string; size: number; sourceSignature?: string; resumed: boolean }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options.serverUrl ?? useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
   const requestedOffset = Math.max(0, options.resumeFrom || 0);
   const headers = new Headers();

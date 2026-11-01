@@ -4,6 +4,7 @@ import { downloadBookBlob, request, streamBookDownload } from '@/lib/api';
 import { beginOfflineDownload, endOfflineDownload } from '@/lib/offline-book-core';
 import { saveOfflineBook, saveOfflineBookStream } from '@/lib/offline-books';
 import { useSettingsStore } from '@/lib/store/settings';
+import { useServerStore } from '@/lib/store/server';
 
 export { beginOfflineDownload, endOfflineDownload };
 
@@ -42,8 +43,17 @@ async function fetchCoverDataUrl(coverUrl?: string, signal?: AbortSignal): Promi
 
 /** Unified entry: Tauri streams to a resumable file; web stores one Blob in IndexedDB. */
 export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOptions): Promise<void> {
+  const revision = useServerStore.getState().sessionRevision;
+  const assertSource = () => {
+    const current = useServerStore.getState();
+    if (current.serverUrl !== options.serverUrl || current.sessionRevision !== revision) {
+      throw new Error('连接已改变，请返回原书库后重试下载。');
+    }
+  };
+  assertSource();
   const format = options.format.toLowerCase();
   const coverDataUrl = await fetchCoverDataUrl(options.coverUrl, options.signal);
+  assertSource();
   if (process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri') {
     const downloadDirectory = useSettingsStore.getState().downloadDirectory;
     await saveOfflineBookStream({
@@ -61,6 +71,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
       resume: options.resume,
       preservePartialOnFailure: options.preservePartialOnFailure,
       write: async (writer) => streamBookDownload(options.bookId, format, {
+        serverUrl: options.serverUrl,
         write: (chunk) => writer.write(chunk),
         onProgress: options.onProgress,
         onTransfer: options.onTransfer,
@@ -74,6 +85,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
   }
 
   const blob = await downloadBookBlob(options.bookId, format, {
+    serverUrl: options.serverUrl,
     onProgress: options.onProgress,
     signal: options.signal,
   });

@@ -67,7 +67,11 @@ successful saved-list writes. Old-client source changes still fail closed in S1.
   restart acceptance.
 - A legacy Reader attempt reserves its source for the rest of this host runtime,
   including awaits and unknown dispatch. It is not released by a timeout.
-  Outstanding offline downloads also block selecting a different connection.
+  Outstanding offline downloads also block selecting a different connection,
+  with a final synchronous occupancy check immediately before activation.
+  Download/retry jobs check their captured base/session before starting and
+  after cover IO; binary transfers receive that frozen base explicitly, so an
+  old A job cannot fetch B bytes and label them as belonging to A.
 - Different complete bases on the same hostname cannot be switched directly in
   this stage. Browser/native cookie jars do not partition by port or library
   prefix. No cookie jar/account isolation has been added or proven.
