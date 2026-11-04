@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNativeConnectionAuthority } from '../src/lib/native-connection.ts';
+import { createNativeConnectionAuthority, NativeConnectionError, isNativeSourceBusy, nativeConnectionErrorMessage } from '../src/lib/native-connection.ts';
 import { nativeHttpRequest } from '../src/lib/native-http.ts';
 
 const A = { id: 'saved-a', entryRevision: 'revision-a', url: 'https://a.example:8443/team/books', status: 'ready' };
@@ -135,7 +135,7 @@ test('revoke after registration returned but before the transport continuation i
 
 /** The real TS authority uses this deterministic IPC stand-in. These tests do
  * not establish Rust/Tauri dispatch, platform support, TLS or remote identity. */
-function fixture() {
+function fixture(options) {
   const calls = [];
   const before = {};
   const after = {};
@@ -202,17 +202,17 @@ function fixture() {
           host.grant = null;
           host.epoch++;
           result = snapshot();
-          return result;
+        } else {
+          if (host.receipt?.attemptToken === args.attemptToken) throw { code: 'needs_restart' };
+          if (host.grant?.attemptToken === args.attemptToken) host.grant = null;
+          result = snapshot();
         }
-        if (host.receipt?.attemptToken === args.attemptToken) throw { code: 'needs_restart' };
-        if (host.grant?.attemptToken === args.attemptToken) host.grant = null;
-        result = snapshot();
       } else if (command === 'moke_connection_status') result = snapshot();
       else assert.fail(`Unexpected fixture command ${command}`);
     }
     return after[command] ? after[command](result, args) : result;
   };
-  const authority = createNativeConnectionAuthority(invoke);
+  const authority = createNativeConnectionAuthority(invoke, options);
   return { authority, calls, before, after, entries, host, count: (command) => calls.filter((call) => call.command === command).length };
 }
 
@@ -411,4 +411,203 @@ test('backend unsupported remains a source rejection and never falls back to bar
   assert.equal(f.count('moke_connection_document'), 1);
   assert.equal(f.count('moke_connection_begin'), 0);
   assert.equal(f.count('moke_connection_dispatch'), 0);
+});
+
+test('busy renewal retains only the selection and an explicit retry obtains a fresh grant after exact settlement', async () => {
+  const f = fixture();
+  const ctx = context(1);
+  await f.authority.check(A, ctx);
+  const old = f.authority.candidateLease(ctx.attempt, A);
+  const ticket = await f.authority.dispatch(old, `${A.url}/api/captcha/image`, 'GET');
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('source-in-use', 'source_busy'));
+  assert.equal(f.host.grant, null);
+  assert.equal(f.host.pending.size, 1);
+  assert.throws(() => f.authority.candidateLease(ctx.attempt, A), codeIs('source-in-use', 'invalid_attempt'));
+  await assert.rejects(f.authority.dispatch(old, `${A.url}/api/welcome`, 'POST'), codeIs('source-in-use', 'invalid_lease'));
+  await assert.rejects(f.authority.prepare(A, ctx), codeIs('source-in-use', 'invalid_attempt'));
+  const begins = f.count('moke_connection_begin');
+  await f.authority.settle(ticket);
+  assert.equal(f.count('moke_connection_begin'), begins, 'settlement never automatically retries a selection');
+  const fresh = await f.authority.renewCandidate(ctx.attempt, A);
+  assert.notEqual(fresh.leaseToken, old.leaseToken);
+  assert.equal(fresh.baseUrl, old.baseUrl);
+  await assert.rejects(f.authority.dispatch(old, `${A.url}/api/welcome`, 'POST'), codeIs('source-in-use', 'invalid_lease'));
+  const current = await f.authority.dispatch(fresh, `${A.url}/api/welcome`, 'POST');
+  await f.authority.settle(current);
+});
+
+test('a cancelled selection cannot recreate its retired grant, including a late begin response', async () => {
+  const f = fixture();
+  const ctx = context(1);
+  await f.authority.check(A, ctx);
+  const old = f.authority.candidateLease(ctx.attempt, A);
+  const created = deferred();
+  const release = deferred();
+  f.after.moke_connection_begin = async (result) => { created.resolve(); await release.promise; return result; };
+  const renewal = f.authority.renewCandidate(ctx.attempt, A);
+  await created.promise;
+  const cancelled = f.authority.cancel(ctx.attempt);
+  release.resolve();
+  await assert.rejects(renewal, codeIs('source-in-use', 'invalid_attempt'));
+  await cancelled;
+  assert.equal(f.host.grant, null);
+  assert.throws(() => f.authority.candidateLease(ctx.attempt, A), codeIs('source-in-use', 'invalid_attempt'));
+  const begins = f.count('moke_connection_begin');
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('source-in-use', 'invalid_attempt'));
+  await assert.rejects(f.authority.dispatch(old, `${A.url}/api/welcome`, 'GET'), codeIs('source-in-use', 'invalid_lease'));
+  assert.equal(f.count('moke_connection_begin'), begins);
+});
+
+test('overlapping renewals are rejected rather than queueing or sharing a mutation permit', async () => {
+  const f = fixture();
+  const ctx = context(1);
+  await f.authority.check(A, ctx);
+  const cancellation = deferred();
+  const arrived = deferred();
+  f.before.moke_connection_cancel = async () => { arrived.resolve(); await cancellation.promise; };
+  const first = f.authority.renewCandidate(ctx.attempt, A);
+  await arrived.promise;
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('source-in-use', 'operation_busy'));
+  assert.throws(() => f.authority.candidateLease(ctx.attempt, A), codeIs('source-in-use', 'invalid_attempt'));
+  cancellation.resolve();
+  const fresh = await first;
+  assert.equal(fresh.leaseToken, f.host.grant.attemptToken);
+  assert.equal(f.count('moke_connection_begin'), 2);
+  assert.equal(f.count('moke_connection_dispatch'), 0);
+});
+
+test('logical context abort deletes a busy retry intent but a row change cannot turn it into another source', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  const ctx = { attempt: 1, sessionRevision: 7, signal: controller.signal };
+  await f.authority.check(A, ctx);
+  const old = f.authority.candidateLease(ctx.attempt, A);
+  const pending = await f.authority.dispatch(old, `${A.url}/api/captcha/image`, 'GET');
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('source-in-use', 'source_busy'));
+  const count = f.count('moke_connection_begin');
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, { ...A, entryRevision: 'changed' }),
+    codeIs('source-in-use', 'invalid_attempt'));
+  controller.abort();
+  await f.authority.settle(pending);
+  await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('source-in-use', 'invalid_attempt'));
+  assert.equal(f.count('moke_connection_begin'), count);
+});
+
+test('reentrant cancellation callbacks do not send duplicate host revocations', async () => {
+  const f = fixture();
+  const ctx = context(1);
+  await f.authority.check(A, ctx);
+  const lease = f.authority.candidateLease(ctx.attempt, A);
+  let reentrant;
+  const unregister = f.authority.registerCancellation(lease, () => { reentrant = f.authority.cancel(ctx.attempt); });
+  await f.authority.cancel(ctx.attempt);
+  await reentrant;
+  assert.equal(f.count('moke_connection_cancel'), 1);
+  unregister();
+});
+
+test('retiring a candidate cancels only its own registered transports after disabling its permit', async () => {
+  const f = fixture();
+  await activate(f);
+  const leaseA = f.authority.activeLease();
+  let cancelledA = 0;
+  const unregisterA = f.authority.registerCancellation(leaseA, () => { cancelledA++; });
+  const ctxB = context(2);
+  await f.authority.check(B, ctxB);
+  const leaseB = f.authority.candidateLease(ctxB.attempt, B);
+  const pendingB = await f.authority.dispatch(leaseB, `${B.url}/api/captcha/image`, 'GET');
+  let cancelledB = 0;
+  const unregisterB = f.authority.registerCancellation(leaseB, () => {
+    cancelledB++;
+    assert.throws(() => f.authority.registerCancellation(leaseB, () => {}), codeIs('source-in-use', 'invalid_lease'));
+  });
+  await f.authority.cancel(ctxB.attempt);
+  assert.equal(cancelledA, 0);
+  assert.equal(cancelledB, 1);
+  assert.equal(f.host.pending.size, 1, 'transport cancellation is not ticket settlement');
+  await f.authority.settle(pendingB);
+  unregisterB();
+  f.authority.invalidateActive();
+  assert.equal(cancelledA, 1);
+  unregisterA();
+});
+
+test('cancellation registration covers a revoked lease while native dispatch registration is still awaiting its reply', async () => {
+  const f = fixture();
+  await activate(f);
+  const lease = f.authority.activeLease();
+  const registered = deferred();
+  const release = deferred();
+  f.after.moke_connection_dispatch = async (result) => { registered.resolve(); await release.promise; return result; };
+  let cancelled = 0;
+  const unregister = f.authority.registerCancellation(lease, () => { cancelled++; });
+  const dispatching = f.authority.dispatch(lease, `${A.url}/api/user/info`, 'GET');
+  await registered.promise;
+  f.authority.invalidateActive();
+  assert.equal(cancelled, 1);
+  assert.equal(f.host.pending.size, 1);
+  release.resolve();
+  await assert.rejects(dispatching, codeIs('source-in-use', 'invalid_lease'));
+  assert.equal(f.host.pending.size, 0, 'only the unused, known reservation is settled');
+  unregister();
+});
+
+test('only typed confirmed source_busy receives its retry message and unknown transport errors use fixed text', () => {
+  const busy = new NativeConnectionError('source_busy');
+  assert.equal(isNativeSourceBusy(busy), true);
+  assert.equal(isNativeSourceBusy({ code: 'source-in-use', nativeCode: 'source_busy' }), false);
+  assert.equal(isNativeSourceBusy(new NativeConnectionError('same_hostname_conflict')), false);
+  assert.match(nativeConnectionErrorMessage(busy, 'fallback'), /前一请求仍在结束/);
+  assert.equal(nativeConnectionErrorMessage({ code: 'authority-uncertain', message: 'secret' }, 'fallback'),
+    '原生连接状态未确认，请退出并重新启动应用。');
+  assert.equal(nativeConnectionErrorMessage(new Error('source_busy'), 'fallback'), 'fallback');
+});
+
+test('control IPC deadlines bound silent begin/check/cancel/revoke replies without recreating authority', async () => {
+  for (const lost of ['begin', 'check', 'cancel', 'revoke']) {
+    const f = fixture({ controlTimeoutMs: 20 });
+    const ctx = context(1);
+    const pending = deferred();
+    let operation;
+    if (lost === 'begin') {
+      f.after.moke_connection_begin = () => pending.promise;
+      operation = f.authority.check(A, ctx);
+    } else if (lost === 'check') {
+      f.after.moke_connection_check = () => pending.promise;
+      operation = f.authority.check(A, ctx);
+    } else {
+      if (lost === 'revoke') await activate(f, A, ctx);
+      else await f.authority.check(A, ctx);
+      f.after.moke_connection_cancel = () => pending.promise;
+      if (lost === 'revoke') {
+        f.authority.invalidateActive();
+        operation = f.authority.check(B, context(2));
+      } else operation = f.authority.renewCandidate(ctx.attempt, A);
+    }
+    await assert.rejects(operation, codeIs('authority-uncertain', 'ipc_timeout'), lost);
+    assert.equal(f.authority.state.getState().phase, 'needs_restart', lost);
+    assert.equal(f.authority.isActive(), false, lost);
+    const calls = f.calls.length;
+    pending.resolve(lost === 'begin' || lost === 'check' ? structuredClone(f.host.grant) : {});
+    await Promise.resolve(); await Promise.resolve();
+    await assert.rejects(f.authority.check(A, ctx), codeIs('authority-uncertain'), lost);
+    await assert.rejects(f.authority.renewCandidate(ctx.attempt, A), codeIs('authority-uncertain'), lost);
+    assert.throws(() => f.authority.candidateLease(ctx.attempt, A), codeIs('authority-uncertain'), lost);
+    assert.equal(f.calls.length, calls, 'late control reply never retries or restores a grant');
+    assert.equal(f.count('moke_connection_dispatch'), 0);
+  }
+});
+
+test('control timeout never clears pending when settle reply is lost after the host accepts it', async () => {
+  const f = fixture({ controlTimeoutMs: 20 });
+  await activate(f);
+  const lease = f.authority.activeLease();
+  const ticket = await f.authority.dispatch(lease, `${A.url}/api/user/info`, 'GET');
+  f.after.moke_connection_settle = () => new Promise(() => {});
+  await assert.rejects(f.authority.settle(ticket), codeIs('authority-uncertain', 'ipc_timeout'));
+  assert.equal(f.host.pending.size, 0, 'the host may already have completed despite the missing ACK');
+  assert.equal(f.authority.state.getState().phase, 'needs_restart');
+  const begins = f.count('moke_connection_begin');
+  await assert.rejects(f.authority.check(B, context(2)), codeIs('authority-uncertain'));
+  assert.equal(f.count('moke_connection_begin'), begins);
 });

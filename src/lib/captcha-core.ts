@@ -37,7 +37,9 @@ interface ActiveImageCaptchaRequest {
  * because a platform fetch may still settle after cancellation, so callback
  * delivery is also guarded by the active request identity.
  */
-export function createImageCaptchaRequestLifecycle(): ImageCaptchaRequestLifecycle {
+export function createImageCaptchaRequestLifecycle(
+  errorMessage: (error: unknown) => string = () => '网络错误，无法加载验证码',
+): ImageCaptchaRequestLifecycle {
   let activeRequest: ActiveImageCaptchaRequest | null = null;
 
   const cancel = () => {
@@ -74,10 +76,10 @@ export function createImageCaptchaRequestLifecycle(): ImageCaptchaRequestLifecyc
     let payload: unknown;
     try {
       payload = await requestImage(request.controller.signal);
-    } catch {
+    } catch (error) {
       if (!isCurrent()) return;
       try {
-        callbacks.onError('网络错误，无法加载验证码');
+        callbacks.onError(errorMessage(error));
       } finally {
         finish();
       }

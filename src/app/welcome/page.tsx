@@ -14,7 +14,7 @@ import { externalLinkClick } from '@/lib/external-link';
 import { APP_VERSION } from '@/lib/app-version';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { savedServerFocusId } from '@/lib/saved-server-focus';
-import { nativeConnection, isNativeConnectionRuntime } from '@/lib/native-connection';
+import { nativeConnection, isNativeConnectionRuntime, nativeConnectionErrorMessage } from '@/lib/native-connection';
 
 const DEMO_LIBRARY_URL = 'https://demo.talebook.org';
 const COPY_FEEDBACK_DURATION_MS = 2000;
@@ -42,6 +42,7 @@ export default function WelcomePage() {
   const [showCaptcha, setShowCaptcha] = useState(false);
   const [demoLinkCopied, setDemoLinkCopied] = useState(false);
   const accessController = useRef<AbortController | null>(null);
+  const accessCodeRef = useRef<HTMLInputElement>(null);
   const versionClicksRef = useRef(0);
   const versionClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,8 +120,9 @@ export default function WelcomePage() {
       } else if (['captcha.invalid', 'captcha.expired', 'captcha.required'].includes(result.err)) {
         setError('请完成人机验证后重试。'); setShowCaptcha(true);
       } else setError('访问码验证失败，请检查后重试。');
-    } catch {
-      if (alive.current) setError(controller.signal.aborted ? '验证已取消或超时，请重试。' : '无法确认该条目和访问码，请重新选择服务器。');
+    } catch (error) {
+      if (alive.current) setError(nativeConnectionErrorMessage(error,
+        controller.signal.aborted ? '验证已取消或超时，未确认验证结果；请重新确认连接状态。' : '无法确认该条目和访问码，请重新选择服务器。'));
     } finally {
       clearTimeout(timer); if (alive.current) setVerifying(false);
     }
@@ -172,7 +174,7 @@ export default function WelcomePage() {
             {connection.code === 'source-in-use' && <p className="mt-2 text-muted-foreground">请先结束下载。原生连接仅开放已验证的 Linux 路径；同主机或共享 Cookie 域的书库切换仍受限。阅读器或既有认证来源不明时，需独立干净配置或明确来源迁移，已保存条目会保留。</p>}
             {connecting && <button type="button" className={`${button} mt-3`} onClick={() => savedServerConnection.cancel()}>取消连接</button>}
             {connection.needsAccessCode && <form className="mt-3 space-y-3" onSubmit={(e) => { e.preventDefault(); void verifyAccess(); }}>
-              <label className="block" htmlFor="candidate-access">该书库的访问码</label><input id="candidate-access" className={field} autoComplete="off" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} disabled={verifying} />
+              <label className="block" htmlFor="candidate-access">该书库的访问码</label><input ref={accessCodeRef} id="candidate-access" className={field} autoComplete="off" value={accessCode} onChange={(e) => setAccessCode(e.target.value)} disabled={verifying} />
               <button type="submit" className={button} disabled={verifying || !accessCode.trim()}>{verifying ? '验证中…' : '验证并连接'}</button>
               <button type="button" className={`${button} ml-2`} onClick={() => { accessController.current?.abort(); savedServerConnection.cancel(); setAccessCode(''); setShowCaptcha(false); }}>取消验证</button>
             </form>}
@@ -190,7 +192,7 @@ export default function WelcomePage() {
         </section>
         <div className="flex items-center justify-center gap-4 mt-6 text-xs text-muted-foreground"><button type="button" onClick={handleVersionClick} className="rounded px-1 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">{APP_VERSION}</button><a href="https://github.com/talebook/moke" onClick={externalLinkClick('https://github.com/talebook/moke')} rel="noopener noreferrer" className="hover:underline">GitHub</a></div>
       </div>
-      <CaptchaModal isOpen={showCaptcha && Boolean(connection?.needsAccessCode)} serverUrl={connection?.url || ''} requireValidTls requestCaptcha={requestSavedServerCaptcha} onClose={() => setShowCaptcha(false)} onSuccess={(data) => void verifyAccess(data)} />
+      <CaptchaModal isOpen={showCaptcha && Boolean(connection?.needsAccessCode)} serverUrl={connection?.url || ''} requireValidTls requestCaptcha={requestSavedServerCaptcha} submitting={verifying} submissionError={error} returnFocusRef={accessCodeRef} onClose={() => setShowCaptcha(false)} onSuccess={verifyAccess} />
     </main>
   );
 }

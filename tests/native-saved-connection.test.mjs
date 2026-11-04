@@ -410,6 +410,107 @@ test('saved native servers traverse actual JS storage, controller, API and HTTP 
       .some((event) => event.args.leaseToken === oldToken || event.args.leaseToken === challengeToken), false);
   });
 
+  await t.test('captcha refresh keeps its logical selection after cancellation ACK and busy begin until an explicit retry', async () => {
+    assert.equal((await savedServerConnection.connect(a)).phase, 'connected');
+    f.host.accessRequired.add(BASE_B);
+    const needsCode = await savedServerConnection.connect(b);
+    assert.equal(needsCode.code, 'access-required');
+    const previous = captureServerProjection();
+    const started = deferred();
+    const finished = deferred();
+    f.host.readBlock = { url: `${BASE_B}/api/captcha/image`, started, finished };
+    const operation = new AbortController();
+    const image = await requestSavedServerCaptcha(`${BASE_B}/api/captcha/image`, { signal: operation.signal });
+    const reading = image.json();
+    const readResult = reading.then((value) => ({ value }), (error) => ({ error }));
+    await started.promise;
+    const old = nativeConnection.candidateLease(needsCode.attempt, b);
+    operation.abort();
+    const beforeRefresh = f.httpCalls().length;
+    await assert.rejects(requestSavedServerCaptcha(`${BASE_B}/api/captcha/config`),
+      (error) => error.nativeCode === 'source_busy');
+    assert.equal(f.host.grant, null);
+    assert.equal(f.host.pending.size, 1);
+    assert.equal(f.httpCalls().length, beforeRefresh);
+    assert.equal(savedServerConnection.getState().attempt, needsCode.attempt);
+    assert.equal(savedServerConnection.getState().code, 'access-required');
+    assert.throws(() => nativeConnection.candidateLease(needsCode.attempt, b),
+      (error) => error.nativeCode === 'invalid_attempt');
+    finished.resolve();
+    assert.ok((await readResult).error, 'the API must not return a cancelled captcha as useful JSON');
+    assert.equal(f.host.pending.size, 0);
+    assert.equal(f.httpCalls().length, beforeRefresh, 'native termination never automatically replays refresh or POST');
+    const retry = await requestSavedServerCaptcha(`${BASE_B}/api/captcha/config`);
+    assert.equal((await retry.json()).err, 'ok');
+    assert.notEqual(f.host.grant.attemptToken, old.leaseToken);
+    await assert.rejects(nativeConnection.dispatch(old, `${BASE_B}/api/welcome`, 'POST'),
+      (error) => error.nativeCode === 'invalid_lease');
+    assert.deepEqual(captureServerProjection(), previous);
+    assert.equal(f.host.active.baseUrl, BASE_A);
+    assert.equal(f.host.pending.size, 0);
+    savedServerConnection.cancel(needsCode.attempt);
+    await nativeConnection.cancel(needsCode.attempt);
+  });
+
+  await t.test('captcha refresh and duplicate submission cannot retire an in-flight access mutation', async () => {
+    const needsCode = await savedServerConnection.connect(b);
+    assert.equal(needsCode.code, 'access-required');
+    const started = deferred();
+    const finished = deferred();
+    f.host.readBlock = { url: `${BASE_B}/api/welcome`, started, finished };
+    const submitting = submitSavedServerAccess('injected-valid-code', undefined, new AbortController().signal);
+    await started.promise;
+    const before = f.events.length;
+    await assert.rejects(requestSavedServerCaptcha(`${BASE_B}/api/captcha/image`),
+      (error) => error.nativeCode === 'operation_busy');
+    await assert.rejects(submitSavedServerAccess('injected-valid-code', undefined, new AbortController().signal),
+      (error) => error.nativeCode === 'operation_busy');
+    assert.equal(f.events.length, before, 'overlapping UI operations do not cancel or mint authority');
+    finished.resolve();
+    assert.equal((await submitting).err, 'captcha.required');
+    const retry = await requestSavedServerCaptcha(`${BASE_B}/api/captcha/config`);
+    assert.equal((await retry.json()).err, 'ok');
+    savedServerConnection.cancel(needsCode.attempt);
+    await nativeConnection.cancel(needsCode.attempt);
+    f.host.accessRequired.delete(BASE_B);
+  });
+
+  await t.test('a captcha readEntry continuation cannot renew after a later access mutation acquires the operation', async (subtest) => {
+    f.host.accessRequired.add(BASE_B);
+    const needsCode = await savedServerConnection.connect(b);
+    assert.equal(needsCode.code, 'access-required');
+    const { SavedServerRepository } = await import('../src/lib/saved-server-repository.ts');
+    const originalLoad = SavedServerRepository.prototype.load;
+    const entryRead = deferred();
+    const resumeEntryRead = deferred();
+    let pauseNextLoad = true;
+    subtest.mock.method(SavedServerRepository.prototype, 'load', function () {
+      const loading = originalLoad.call(this);
+      if (!pauseNextLoad) return loading;
+      pauseNextLoad = false;
+      // Hold only the completed read's caller continuation. The real registry
+      // queue has finished, so the later submission can read the same row.
+      return loading.then(async (result) => { entryRead.resolve(); await resumeEntryRead.promise; return result; });
+    });
+    const refreshing = requestSavedServerCaptcha(`${BASE_B}/api/captcha/image`);
+    const refreshResult = refreshing.then((value) => ({ value }), (error) => ({ error }));
+    await entryRead.promise;
+    const postRead = deferred();
+    const finishPost = deferred();
+    f.host.readBlock = { url: `${BASE_B}/api/welcome`, started: postRead, finished: finishPost };
+    const submitting = submitSavedServerAccess('injected-valid-code', undefined, new AbortController().signal);
+    await postRead.promise;
+    const beforeResume = f.events.length;
+    resumeEntryRead.resolve();
+    assert.equal((await refreshResult).error.nativeCode, 'operation_busy');
+    assert.equal(f.events.length, beforeResume, 'stale refresh must not revoke the already dispatched POST');
+    finishPost.resolve();
+    assert.equal((await submitting).err, 'captcha.required');
+    savedServerConnection.cancel(needsCode.attempt);
+    await nativeConnection.cancel(needsCode.attempt);
+    f.host.accessRequired.delete(BASE_B);
+  });
+
   await t.test('lost B acknowledgement restores A projection and permanently closes native request permission', async () => {
     assert.equal((await savedServerConnection.connect(a)).phase, 'connected');
     useServerStore.getState().setConnected('injected-a-token', { id: 'user-a', username: 'a', name: 'A', email: '', avatar: '', admin: false, permission: '' });

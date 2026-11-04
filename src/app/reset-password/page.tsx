@@ -51,6 +51,7 @@ export default function ResetPasswordPage() {
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -150,6 +151,7 @@ export default function ResetPasswordPage() {
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">用户名</label>
             <input
+              ref={usernameRef}
               type="text"
               placeholder="请输入用户名"
               value={username}
@@ -182,6 +184,9 @@ export default function ResetPasswordPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          submitting={loading}
+          submissionError={error}
+          returnFocusRef={usernameRef}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleReset(data)}
         />

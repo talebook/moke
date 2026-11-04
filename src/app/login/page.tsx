@@ -9,6 +9,7 @@ import { fetchCurrentUser, request } from '@/lib/api';
 import { CaptchaModal } from '@/components/auth/CaptchaModal';
 import { requestAnimatedBack } from '@/lib/native-back';
 import { safeRemoveLocalStorageItem } from '@/lib/browser-storage';
+import { nativeConnectionErrorMessage } from '@/lib/native-connection';
 
 interface TalebookLoginResponse {
   err: string;
@@ -50,6 +51,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const loginController = useRef<AbortController | null>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => loginController.current?.abort(), []);
   
   // Captcha state
@@ -103,7 +105,7 @@ export default function LoginPage() {
     } catch (loginError) {
       if (!isCurrentSession()) return;
       console.error('[LoginPage] login flow failed:', loginError);
-      setError('无法连接服务器');
+      setError(nativeConnectionErrorMessage(loginError, '无法连接服务器'));
     } finally {
       setLoading(false);
     }
@@ -136,6 +138,7 @@ export default function LoginPage() {
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">用户名</label>
             <input
+              ref={usernameRef}
               type="text"
               placeholder="请输入用户名"
               value={username}
@@ -196,6 +199,9 @@ export default function LoginPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          submitting={loading}
+          submissionError={error}
+          returnFocusRef={usernameRef}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleLogin(data)}
         />
