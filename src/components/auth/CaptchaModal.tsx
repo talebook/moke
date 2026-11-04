@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId, type RefObject } from 'react';
 import { X, RefreshCw } from 'lucide-react';
 import { request } from '@/lib/api';
 import { cancelResponseBodyQuietly } from '@/lib/api-core';
@@ -19,8 +19,11 @@ interface CaptchaModalProps {
   serverUrl: string;
   requireValidTls?: boolean;
   requestCaptcha?: (url: string, init?: RequestInit) => Promise<Response>;
+  submitting?: boolean;
+  submissionError?: string;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
-  onSuccess: (data: any) => void;
+  onSuccess: (data: any) => Promise<void>;
 }
 
 interface CaptchaConfig extends GeetestCaptchaConfig {
@@ -29,7 +32,7 @@ interface CaptchaConfig extends GeetestCaptchaConfig {
   webCode?: unknown;
 }
 
-export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, requestCaptcha, onClose, onSuccess }: CaptchaModalProps) {
+export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, requestCaptcha, submitting = false, submissionError = '', returnFocusRef, onClose, onSuccess }: CaptchaModalProps) {
   const [mode, setMode] = useState<'loading' | 'image' | 'geetest' | 'webcode' | 'error'>('loading');
   const [config, setConfig] = useState<CaptchaConfig | null>(null);
 
@@ -38,13 +41,22 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [handlingSuccess, setHandlingSuccess] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
 
   // Remote captcha scripts live only in this opaque-origin sandbox frame.
   const captchaFrameRef = useRef<HTMLIFrameElement>(null);
   const sandboxChannelRef = useRef('');
+  const sandboxGenerationRef = useRef(0);
   const [sandboxDocument, setSandboxDocument] = useState('');
   const configRequestIdRef = useRef(0);
   const successHandledRef = useRef(false);
+  const challengeGenerationRef = useRef(0);
+  const successAttemptRef = useRef<object | null>(null);
+  const parentSubmittingRef = useRef(submitting);
+  useEffect(() => { parentSubmittingRef.current = submitting; }, [submitting]);
   const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle(
     (error) => nativeConnectionErrorMessage(error, '网络错误，无法加载验证码'),
   ));
@@ -52,14 +64,49 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
   const captchaRequest = useCallback((url: string, init?: RequestInit) => requestCaptcha
     ? requestCaptcha(url, init) : request(url, init, { requireValidTls }), [requestCaptcha, requireValidTls]);
 
-  const completeCaptcha = useCallback((data: any) => {
-    if (successHandledRef.current) return;
+  const completeCaptcha = useCallback(async (data: any, generation = challengeGenerationRef.current) => {
+    if (!isOpen || submitting || loading || successAttemptRef.current || successHandledRef.current
+      || generation !== challengeGenerationRef.current) return;
+    const attempt = {};
+    successAttemptRef.current = attempt;
     successHandledRef.current = true;
-    onSuccess(data);
-  }, [onSuccess]);
+    setHandlingSuccess(true);
+    try {
+      // The parent resolves only after its request has ended. A response does
+      // not re-arm this challenge; only a fresh human edit or refresh does.
+      await onSuccess(data);
+    } catch (error) {
+      if (successAttemptRef.current === attempt) {
+        setError(nativeConnectionErrorMessage(error, '无法确认验证结果，请重试。'));
+      }
+    } finally {
+      // A late completion from a closed modal cannot unlock a newer attempt.
+      if (successAttemptRef.current === attempt) {
+        successAttemptRef.current = null;
+        setHandlingSuccess(false);
+      }
+    }
+  }, [isOpen, loading, onSuccess, submitting]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const trigger = returnFocusRef?.current ?? document.activeElement;
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected && !trigger.matches(':disabled')) trigger.focus();
+    };
+  }, [isOpen, returnFocusRef]);
+
+  useEffect(() => {
+    if (isOpen && mode === 'image' && !loading) inputRef.current?.focus();
+  }, [isOpen, loading, mode]);
 
   useEffect(() => {
     const handleSandboxMessage = (event: MessageEvent) => {
+      if (!isOpen || !sandboxChannelRef.current) return;
       const message = parseCaptchaSandboxMessage(
         event,
         captchaFrameRef.current?.contentWindow,
@@ -68,7 +115,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
       if (!message) return;
 
       if (message.type === 'success') {
-        completeCaptcha(message.payload);
+        void completeCaptcha(message.payload, sandboxGenerationRef.current);
         return;
       }
 
@@ -81,9 +128,16 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
 
     window.addEventListener('message', handleSandboxMessage);
     return () => window.removeEventListener('message', handleSandboxMessage);
-  }, [completeCaptcha]);
+  }, [completeCaptcha, isOpen]);
 
   const loadCaptcha = useCallback(async () => {
+    if (successAttemptRef.current || parentSubmittingRef.current) return;
+    challengeGenerationRef.current += 1;
+    successHandledRef.current = false;
+    // Retire the previous frame immediately, before configuration HTTP starts.
+    // A queued callback from that challenge must not submit during refresh.
+    sandboxChannelRef.current = '';
+    setSandboxDocument('');
     const requestId = ++configRequestIdRef.current;
     configControllerRef.current?.abort();
     const controller = new AbortController();
@@ -101,6 +155,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
       }
 
       setConfig(configData.config as CaptchaConfig);
+      setLoading(false);
     } catch (err) {
       if (requestId !== configRequestIdRef.current) return;
       setMode('error');
@@ -114,6 +169,10 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
   }, [imageRequestLifecycle]);
 
   const fetchImageCaptcha = useCallback(() => {
+    if (successAttemptRef.current || parentSubmittingRef.current) return;
+    challengeGenerationRef.current += 1;
+    successHandledRef.current = false;
+    setCode('');
     setError('');
     return imageRequestLifecycle.load(
       async (signal) => {
@@ -161,6 +220,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
       try {
         const channel = createCaptchaSandboxChannel();
         sandboxChannelRef.current = channel;
+        sandboxGenerationRef.current = challengeGenerationRef.current;
         setSandboxDocument(buildGeetestSandboxDocument(config, channel));
       } catch (err) {
         setMode('error');
@@ -205,6 +265,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
 
           const channel = createCaptchaSandboxChannel();
           sandboxChannelRef.current = channel;
+          sandboxGenerationRef.current = challengeGenerationRef.current;
           setSandboxDocument(buildCaptchaSandboxDocument(html, channel));
         } catch (err) {
           if (disposed) return;
@@ -228,6 +289,9 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
       configControllerRef.current?.abort();
       cancelImageCaptcha();
       configRequestIdRef.current += 1;
+      challengeGenerationRef.current += 1;
+      successAttemptRef.current = null;
+      setHandlingSuccess(false);
       sandboxChannelRef.current = '';
       setSandboxDocument('');
       setConfig(null);
@@ -239,13 +303,26 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
     setImage('');
     setError('');
     successHandledRef.current = false;
+    successAttemptRef.current = null;
+    setHandlingSuccess(false);
     setMode('loading');
     setConfig(null);
     void loadCaptcha();
-    return () => { configControllerRef.current?.abort(); };
+    return () => {
+      configControllerRef.current?.abort();
+      challengeGenerationRef.current += 1;
+      successAttemptRef.current = null;
+      sandboxChannelRef.current = '';
+    };
   }, [cancelImageCaptcha, isOpen, loadCaptcha]);
 
   if (!isOpen) return null;
+
+  const busy = submitting || handlingSuccess;
+  const challengeGeneration = challengeGenerationRef.current;
+  const close = () => {
+    if (!submitting && !successAttemptRef.current) onClose();
+  };
 
   const handleImageSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,7 +330,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
       setError('请输入验证码');
       return;
     }
-    completeCaptcha(code.trim());
+    void completeCaptcha(code.trim(), challengeGeneration);
   };
 
   const sandboxFrame = sandboxDocument ? (
@@ -272,20 +349,47 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-[320px] mx-4 rounded-xl p-6 bg-card border border-border shadow-lg">
+    <dialog
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onCancel={(event) => { event.preventDefault(); close(); }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return;
+        const dialog = event.currentTarget;
+        const controls = [...dialog.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], iframe, [tabindex]')]
+          .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = document.activeElement;
+        // Native modal inertness blocks the background. Explicit wrapping also
+        // prevents a Tab at either edge from moving focus to the browser/body.
+        if (!first) { event.preventDefault(); dialog.focus(); }
+        else if (event.shiftKey && (active === first || active === dialog)) {
+          event.preventDefault(); last.focus();
+        } else if (!event.shiftKey && (active === last || active === dialog)) {
+          event.preventDefault(); first.focus();
+        }
+      }}
+      className="max-h-[calc(100%-2rem)] w-[calc(100%-2rem)] max-w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-lg backdrop:bg-background/60 backdrop:backdrop-blur-sm"
+    >
+      <div className="relative p-6">
         <button
-          onClick={onClose}
+          type="button"
+          aria-label="关闭安全验证"
+          onClick={close}
+          disabled={busy}
           className="absolute right-4 top-4 text-muted-foreground hover:text-foreground transition-colors z-10"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <h2 className="text-lg font-bold text-foreground mb-4">安全验证</h2>
+        <h2 id={titleId} className="text-lg font-bold text-foreground mb-4">安全验证</h2>
 
-        {error && (
-          <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-2 mb-4 text-center">
-            {error}
+        {(error || submissionError) && (
+          <div role="alert" className="bg-destructive/10 text-destructive text-sm rounded-lg p-2 mb-4 text-center">
+            {error || submissionError}
           </div>
         )}
 
@@ -303,7 +407,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
                 {loading ? (
                   <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                 ) : image ? (
-                  <img src={image} alt="验证码" className="w-full h-full object-cover cursor-pointer" onClick={fetchImageCaptcha} />
+                  <img src={image} alt="验证码" className="w-full h-full object-cover cursor-pointer" onClick={() => { if (!busy && !loading) void fetchImageCaptcha(); }} />
                 ) : (
                   <span className="text-xs text-muted-foreground">加载失败</span>
                 )}
@@ -312,7 +416,7 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
               <button
                 type="button"
                 onClick={fetchImageCaptcha}
-                disabled={loading}
+                disabled={loading || busy}
                 className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted"
                 title="刷新验证码"
               >
@@ -322,10 +426,16 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
 
             <div>
               <input
+                ref={inputRef}
                 type="text"
+                aria-label="图片验证码"
                 placeholder="请输入图片中的字符"
                 value={code}
-                onChange={(e) => setCode(e.target.value)}
+                onChange={(e) => {
+                  if (!successAttemptRef.current && !submitting) successHandledRef.current = false;
+                  setCode(e.target.value);
+                }}
+                disabled={busy}
                 className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
               />
@@ -333,10 +443,10 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
 
             <button
               type="submit"
-              disabled={!code.trim() || loading}
+              disabled={!code.trim() || loading || busy}
               className="w-full h-11 rounded-lg bg-primary text-primary-foreground font-medium transition hover:opacity-90 active:opacity-80 disabled:opacity-50 mt-2"
             >
-              确认
+              {busy ? '验证中…' : '确认'}
             </button>
           </form>
         )}
@@ -357,13 +467,21 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
               type="button"
               onClick={() => {
                 // 这个按钮仅作为降级/测试使用，实际由沙箱内的 JS 调用回调。
-                completeCaptcha({ provider: config?.provider || 'webcode', fallback: true });
+                void completeCaptcha({ provider: config?.provider || 'webcode', fallback: true }, challengeGeneration);
               }}
+              disabled={busy}
               className="w-full h-11 rounded-lg border border-primary text-primary font-medium transition hover:bg-primary/5 active:bg-primary/10"
             >
               我已完成验证
             </button>
           </div>
+        )}
+
+        {(mode === 'geetest' || mode === 'webcode') && (
+          <button type="button" onClick={loadCaptcha} disabled={busy || loading}
+            className="mt-3 w-full min-h-11 rounded-lg border border-border text-sm hover:bg-muted disabled:opacity-50">
+            刷新验证码
+          </button>
         )}
 
         {mode === 'error' && (
@@ -378,6 +496,6 @@ export function CaptchaModal({ isOpen, serverUrl, requireValidTls = false, reque
           </div>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }

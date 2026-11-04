@@ -26,7 +26,7 @@ const unknownMutation = () => Object.assign(new Error('此操作可能已改变�
   nativeCode: 'http_mutation_result_unknown',
 });
 
-type Timing = { deadlineMs?: number; cancellationGraceMs?: number };
+export type NativeHttpTiming = { deadlineMs?: number; idleMs?: number; cancellationGraceMs?: number };
 
 /**
  * Uses the installed plugin-http transport and cookie jar, while retaining the
@@ -38,14 +38,16 @@ export async function nativeHttpRequest(
   options: RequestInit & { maxRedirections?: number; connectTimeout?: number; proxy?: unknown; danger?: unknown },
   lifecycle: Lifecycle,
   invokeOverride?: Invoke,
-  timing: Timing = {},
+  timing: NativeHttpTiming = {},
 ): Promise<Response> {
   const { maxRedirections, connectTimeout, proxy, danger, ...init } = options;
   const callerSignal = init.signal;
   if (callerSignal?.aborted) throw abortError();
   const deadlineMs = timing.deadlineMs ?? 30_000;
+  const idleMs = timing.idleMs;
   const cancellationGraceMs = timing.cancellationGraceMs ?? 5_000;
-  if (![deadlineMs, cancellationGraceMs].every((value) => Number.isFinite(value) && value > 0 && value <= 2_147_483_647)) {
+  if (![deadlineMs, cancellationGraceMs, ...(idleMs === undefined ? [] : [idleMs])]
+    .every((value) => Number.isFinite(value) && value > 0 && value <= 2_147_483_647)) {
     throw new Error('Invalid native HTTP deadline.');
   }
 
@@ -74,6 +76,7 @@ export async function nativeHttpRequest(
   let streamFinished = false;
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
   let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
   let unregisterCancellation: (() => void) | undefined;
   let rejectBoundary!: (error: unknown) => void;
@@ -84,6 +87,7 @@ export async function nativeHttpRequest(
   const cancellationError = () => signal.reason ?? abortError();
   const finishControls = () => {
     clearTimeout(deadlineTimer);
+    clearTimeout(idleTimer);
     clearTimeout(cancellationTimer);
     callerSignal?.removeEventListener('abort', cancel);
     signal.removeEventListener('abort', onAbort);
@@ -171,6 +175,13 @@ export async function nativeHttpRequest(
     }
   }
   function cancel() { controller.abort(abortError()); }
+  function noteProgress() {
+    if (idleMs === undefined || signal.aborted || unknown) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      controller.abort(new DOMException('Native HTTP request made no progress.', 'TimeoutError'));
+    }, idleMs);
+  }
 
   // A revoke may synchronously call cancel while registering. Install the
   // listener first and bind this handle before the first dispatch await.
@@ -181,6 +192,7 @@ export async function nativeHttpRequest(
   deadlineTimer = setTimeout(() => {
     controller.abort(new DOMException('Native HTTP request timed out.', 'TimeoutError'));
   }, deadlineMs);
+  noteProgress();
   if (callerSignal?.aborted) cancel();
   if (signal.aborted) {
     finishControls();
@@ -255,6 +267,7 @@ export async function nativeHttpRequest(
       await cancelBody();
       throw cancellationError();
     }
+    noteProgress();
 
     const nullBody = request.method === 'HEAD' || [101, 103, 204, 205, 304].includes(metadata.status);
     if (nullBody) {
@@ -275,6 +288,9 @@ export async function nativeHttpRequest(
               throw new Error('Invalid native HTTP body frame.');
             }
             if (flag === 1) nativeBodyFinished = true;
+            // Empty keepalive frames and merely requesting a read are not
+            // transfer progress. The absolute deadline is never extended.
+            if (bytes.length > 1) noteProgress();
             return bytes;
           });
         pendingRead = read;

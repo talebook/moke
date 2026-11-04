@@ -51,6 +51,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const loginController = useRef<AbortController | null>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => loginController.current?.abort(), []);
   
   // Captcha state
@@ -137,6 +138,7 @@ export default function LoginPage() {
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">用户名</label>
             <input
+              ref={usernameRef}
               type="text"
               placeholder="请输入用户名"
               value={username}
@@ -197,6 +199,9 @@ export default function LoginPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          submitting={loading}
+          submissionError={error}
+          returnFocusRef={usernameRef}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleLogin(data)}
         />

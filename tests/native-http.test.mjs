@@ -594,3 +594,125 @@ test('a rejected cancellation registration cannot dispatch HTTP or settle an unr
   assert.deepEqual(f.counts, { dispatch: 0, settle: 0, uncertain: 0 });
   assert.deepEqual(f.events, []);
 });
+
+const transferTiming = { deadlineMs: 100, idleMs: 30, cancellationGraceMs: 5 };
+
+test('transfer progress refreshes idle time but never extends the finite total budget', async (t) => {
+  const advance = enableClock(t);
+  let read = deferred();
+  const f = fixture({
+    'plugin:http|fetch_read_body': () => read.promise,
+    'plugin:http|fetch_cancel_body': async () => { read.resolve([1]); },
+  });
+  const response = await nativeHttpRequest(url, {}, f.lifecycle, f.invoke, transferTiming);
+  const failed = assert.rejects(response.text(), { name: 'TimeoutError' });
+  await tick();
+  for (let index = 0; index < 4; index++) {
+    await advance(20);
+    const previous = read;
+    read = deferred();
+    previous.resolve(frame('progress'));
+    await tick();
+    assert.equal(f.counts.settle, 0);
+  }
+  await advance(20);
+  await failed;
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 1, uncertain: 0 });
+});
+
+test('transfer idle budget bounds headers and awaits actual send cancellation before settlement', async (t) => {
+  const advance = enableClock(t);
+  const send = deferred();
+  const f = fixture({
+    'plugin:http|fetch_send': () => send.promise,
+    'plugin:http|fetch_cancel': async () => { send.reject('Request canceled'); },
+  });
+  const failed = assert.rejects(nativeHttpRequest(url, {}, f.lifecycle, f.invoke, transferTiming), { name: 'TimeoutError' });
+  await tick();
+  await advance(30);
+  await failed;
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 1, uncertain: 0 });
+  assert.equal(f.events.filter((event) => event.command === 'plugin:http|fetch_send').length, 1);
+});
+
+test('transfer idle budget also covers an unconsumed body and still awaits the original settlement ACK', async (t) => {
+  const advance = enableClock(t);
+  const ack = deferred();
+  const f = fixture();
+  f.lifecycle.settle = async () => { f.counts.settle++; await ack.promise; };
+  const response = await nativeHttpRequest(url, {}, f.lifecycle, f.invoke, transferTiming);
+  await advance(30);
+  assert.equal(f.events.filter((event) => event.command === 'plugin:http|fetch_read_body').length, 0);
+  assert.equal(f.counts.settle, 1);
+  const failed = assert.rejects(response.text(), { name: 'TimeoutError' });
+  ack.resolve();
+  await failed;
+  await advance(100);
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 1, uncertain: 0 });
+});
+
+test('empty transfer frames do not renew the no-progress budget', async (t) => {
+  const advance = enableClock(t);
+  let read = deferred();
+  const f = fixture({
+    'plugin:http|fetch_read_body': () => read.promise,
+    'plugin:http|fetch_cancel_body': async () => { read.resolve([1]); },
+  });
+  const response = await nativeHttpRequest(url, {}, f.lifecycle, f.invoke, transferTiming);
+  const failed = assert.rejects(response.text(), { name: 'TimeoutError' });
+  await tick();
+  await advance(20);
+  const previous = read;
+  read = deferred();
+  previous.resolve([0]);
+  await tick();
+  await advance(10);
+  await failed;
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 1, uncertain: 0 });
+});
+
+test('transfer idle cancellation cannot release a still-pending read and remains unknown after its late EOF', async (t) => {
+  const advance = enableClock(t);
+  const read = deferred();
+  const f = fixture({ 'plugin:http|fetch_read_body': () => read.promise });
+  const response = await nativeHttpRequest(url, {}, f.lifecycle, f.invoke, transferTiming);
+  const failed = assert.rejects(response.text(), { code: 'authority-uncertain' });
+  await tick();
+  await advance(30);
+  assert.equal(f.counts.settle, 0);
+  await advance(5);
+  await failed;
+  read.resolve([1]);
+  await tick();
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 0, uncertain: 1 });
+});
+
+test('ordinary API requests keep their total deadline even while bytes are progressing', async (t) => {
+  const advance = enableClock(t);
+  let read = deferred();
+  const f = fixture({
+    'plugin:http|fetch_read_body': () => read.promise,
+    'plugin:http|fetch_cancel_body': async () => { read.resolve([1]); },
+  });
+  const response = await nativeHttpRequest(url, {}, f.lifecycle, f.invoke, shortTiming);
+  const failed = assert.rejects(response.text(), { name: 'TimeoutError' });
+  await tick();
+  await advance(20);
+  const previous = read;
+  read = deferred();
+  previous.resolve(frame('progress'));
+  await tick();
+  await advance(10);
+  await failed;
+  assert.deepEqual(f.counts, { dispatch: 1, settle: 1, uncertain: 0 });
+});
+
+test('invalid idle and total budgets cannot disable bounds or dispatch native HTTP', async () => {
+  for (const key of ['deadlineMs', 'idleMs']) {
+    for (const value of [0, -1, NaN, Infinity, 2_147_483_648]) {
+      const f = fixture();
+      await assert.rejects(nativeHttpRequest(url, {}, f.lifecycle, f.invoke, { [key]: value }), /Invalid native HTTP deadline/);
+      assert.deepEqual(f.events, []);
+    }
+  }
+});

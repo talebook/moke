@@ -27,10 +27,16 @@ import {
 } from '@/lib/server-session';
 import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
 import { nativeConnection, type NativeRequestLease, type NativeDispatch } from './native-connection.ts';
+import type { NativeHttpTiming } from './native-http.ts';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
 const isTauriApp = appPlatform === 'tauri';
+
+// Book transfers may progress for much longer than ordinary API requests.
+// Bound the entire native transfer to two hours, and require headers/data at
+// least every 30 seconds (including while a consumer is not reading).
+const BOOK_DOWNLOAD_NATIVE_TIMING: NativeHttpTiming = { deadlineMs: 2 * 60 * 60 * 1000, idleMs: 30_000 };
 
 function isRequestCancelled(error: unknown): boolean {
   if (error instanceof DOMException && error.name === 'AbortError') return true;
@@ -75,7 +81,8 @@ async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob>
 export async function request(
   url: string | URL,
   options?: RequestInit,
-  diagnostics?: { expectedStatuses?: readonly number[]; requireValidTls?: boolean; nativeLease?: NativeRequestLease },
+  diagnostics?: { expectedStatuses?: readonly number[]; requireValidTls?: boolean; nativeLease?: NativeRequestLease;
+    nativeTiming?: NativeHttpTiming },
 ): Promise<Response> {
   const urlStr = url.toString();
   const method = (options?.method || 'GET').toUpperCase();
@@ -123,7 +130,7 @@ export async function request(
         assertCurrent() { if (!ticket) throw new Error('native-dispatch-unavailable'); nativeConnection.assertDispatchCurrent(ticket); },
         async settle() { if (ticket) await nativeConnection.settle(ticket); },
         uncertain: () => nativeConnection.markUncertain(),
-      });
+      }, undefined, diagnostics?.nativeTiming);
     } else {
       response = await fetch(url, effectiveOptions);
     }
@@ -702,7 +709,7 @@ export async function downloadBookBlob(
             signal: options?.signal,
           } as any)
         : { credentials: 'include', signal: options?.signal }),
-    });
+    }, { nativeTiming: BOOK_DOWNLOAD_NATIVE_TIMING });
 
     if (!response.ok) {
       await cancelResponseBodyQuietly(response);
@@ -803,7 +810,7 @@ export async function streamBookDownload(
           } as any)
         : { credentials: 'include', signal: options.signal, headers: requestHeaders }),
     },
-    requestHeaders.has('Range') ? { expectedStatuses: [416] } : undefined,
+    { nativeTiming: BOOK_DOWNLOAD_NATIVE_TIMING, ...(requestHeaders.has('Range') ? { expectedStatuses: [416] } : {}) },
   );
   let response = await fetchDownload(headers);
   let contentRange = parseContentRange(response.headers.get('content-range'));

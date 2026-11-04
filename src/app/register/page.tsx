@@ -19,6 +19,7 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -115,7 +116,7 @@ export default function RegisterPage() {
         <form onSubmit={(e) => { e.preventDefault(); handleRegister(); }} className="flex flex-col gap-4">
           <div>
             <label className="block text-sm mb-1.5 font-medium text-foreground">用户名</label>
-            <input type="text" placeholder="请输入用户名" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username"
+            <input ref={usernameRef} type="text" placeholder="请输入用户名" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username"
               className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           </div>
           <div>
@@ -144,6 +145,9 @@ export default function RegisterPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          submitting={loading}
+          submissionError={error}
+          returnFocusRef={usernameRef}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleRegister(data)}
         />

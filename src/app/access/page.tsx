@@ -15,6 +15,7 @@ function AccessPageInner() {
   const router = useRouter();
   const { serverUrl, sessionRevision } = useServerStore();
   const requestRef = useRef<AbortController | null>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -102,7 +103,7 @@ function AccessPageInner() {
         )}
 
         <form onSubmit={(e) => { e.preventDefault(); handleVerify(); }} className="flex flex-col gap-4">
-          <input type="text" placeholder="请输入访问码" value={code} onChange={(e) => setCode(e.target.value)}
+          <input ref={codeRef} type="text" placeholder="请输入访问码" value={code} onChange={(e) => setCode(e.target.value)}
             className="w-full h-11 px-4 rounded-2xl bg-white/65 border border-amber-950/10 shadow-sm text-foreground text-sm text-center outline-none transition-shadow duration-150 focus:ring-2 focus:ring-ring" />
           <button type="submit" disabled={loading || !code.trim() || !serverUrl}
             className="w-full h-11 rounded-2xl bg-primary shadow-lg shadow-primary/15 text-primary-foreground text-base font-semibold cursor-pointer transition hover:opacity-90 active:opacity-80 mt-2 disabled:opacity-50">
@@ -114,6 +115,9 @@ function AccessPageInner() {
       <CaptchaModal
         isOpen={showCaptcha}
         serverUrl={serverUrl}
+        submitting={loading}
+        submissionError={error}
+        returnFocusRef={codeRef}
         onClose={() => setShowCaptcha(false)}
         onSuccess={(data: any) => handleVerify(data)}
       />
