@@ -22,4 +22,5 @@ export interface Sponsor {
 export const sponsors: Sponsor[] = [
   { id: 'jinhai', name: '金海先生', amount: '¥20' },
   { id: 'qiancheng', name: '千成', amount: '¥10' },
+  { id: 'lt', name: 'LT', amount: '¥10' },
 ];

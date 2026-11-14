@@ -8,12 +8,13 @@ import { sponsors } from '../src/app/about/sponsors.ts';
 const root = path.resolve(import.meta.dirname, '..');
 const pageSource = readFileSync(path.join(root, 'src', 'app', 'about', 'page.tsx'), 'utf8');
 
-test('赞助名单首批包含金海先生与千成', () => {
+test('赞助名单包含金海先生、千成与 LT', () => {
   assert.deepEqual(
     sponsors.map(({ name, amount }) => ({ name, amount })),
     [
       { name: '金海先生', amount: '¥20' },
       { name: '千成', amount: '¥10' },
+      { name: 'LT', amount: '¥10' },
     ],
   );
 });
