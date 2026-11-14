@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AlertTriangle, FolderOpen, HardDrive, Pause, Play, Trash2, X } from 'lucide-react';
 import { DesktopLayout } from '@/components/layout/DesktopLayout';
 import { request } from '@/lib/api';
@@ -33,6 +34,8 @@ import {
   type OfflineBookFreshnessResult,
 } from '@/lib/offline-book-stale';
 import { useServerStore } from '@/lib/store/server';
+import { captureLoginNavigation, isLoginRequiredError } from '@/lib/auth-navigation';
+import { offlineDownloadErrorMessage } from '@/lib/offline-download-error';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useToast } from '@/lib/toast';
 
@@ -66,6 +69,7 @@ function statusLabel(status: OfflineDownloadStatus): string {
 }
 
 export default function DownloadsPage() {
+  const router = useRouter();
   const serverUrl = useServerStore((state) => state.serverUrl);
   const downloadDirectory = useSettingsStore((state) => state.downloadDirectory);
   const toast = useToast((state) => state.show);
@@ -142,30 +146,43 @@ export default function DownloadsPage() {
   const visible = tab === 'all' ? items : items.filter((item) => item.status === tab);
   const usedBytes = calculateOfflineDownloadUsedBytes(items);
 
-  const start = useCallback((item: OfflineDownloadItem) => {
-    if (!item.serverUrl || !item.bookId || !item.title || !item.format) return;
+  const start = useCallback(async (
+    item: OfflineDownloadItem,
+    loginNavigation = captureLoginNavigation(item.serverUrl || '', useServerStore.getState),
+  ): Promise<boolean> => {
+    if (!item.serverUrl || !item.bookId || !item.title || !item.format) return true;
     const key = makeOfflineBookKey(item.serverUrl, item.bookId, item.format);
     const canResume = shouldResumeOfflineDownload(process.env.NEXT_PUBLIC_APP_PLATFORM, item.status);
-    void startOfflineDownload({
-      key,
-      metadata: {
-        serverUrl: item.serverUrl,
-        bookId: item.bookId,
-        title: item.title,
-        media_type: item.media_type,
-        format: item.format,
-        downloadedBytes: canResume ? item.downloadedBytes : 0,
-        totalBytes: item.totalBytes,
-      },
-      run: (onProgress, signal, onTransfer) => downloadAndSaveOfflineBook({
-        serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, media_type: item.media_type, format: item.format!,
-        onProgress, onTransfer, signal, resume: canResume, preservePartialOnFailure: true,
-      }),
-      onCancel: () => removeOfflinePartial({
-        serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!, downloadDirectory,
-      }),
-    }).catch(() => { /* the terminal event refreshes this page */ });
-  }, [downloadDirectory]);
+    try {
+      await startOfflineDownload({
+        key,
+        metadata: {
+          serverUrl: item.serverUrl,
+          bookId: item.bookId,
+          title: item.title,
+          media_type: item.media_type,
+          format: item.format,
+          downloadedBytes: canResume ? item.downloadedBytes : 0,
+          totalBytes: item.totalBytes,
+        },
+        run: (onProgress, signal, onTransfer) => downloadAndSaveOfflineBook({
+          serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, media_type: item.media_type, format: item.format!,
+          onProgress, onTransfer, signal, resume: canResume, preservePartialOnFailure: true,
+        }),
+        onCancel: () => removeOfflinePartial({
+          serverUrl: item.serverUrl!, bookId: item.bookId!, title: item.title!, format: item.format!, downloadDirectory,
+        }),
+      });
+    } catch (error) {
+      if (isLoginRequiredError(error)) {
+        const href = loginNavigation();
+        if (href) router.push(href);
+        return false;
+      }
+      // The terminal event refreshes ordinary failed downloads.
+    }
+    return true;
+  }, [downloadDirectory, router]);
 
   const cancel = useCallback(async (item: OfflineDownloadItem) => {
     cancelOfflineDownload(item.key);
@@ -200,10 +217,13 @@ export default function DownloadsPage() {
   };
 
   const applyBatch = async (action: 'pause' | 'resume' | 'cancel' | 'delete') => {
+    const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
     const targets = items.filter((item) => selected.has(item.key));
     for (const item of targets) {
       if (action === 'pause') pauseOfflineDownload(item.key);
-      if (action === 'resume' && (item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled')) start(item);
+      if (action === 'resume' && (item.status === 'paused' || item.status === 'failed' || item.status === 'cancelled')) {
+        if (!await start(item, loginNavigation)) break;
+      }
       if (action === 'cancel') await cancel(item);
       if (action === 'delete' && item.status === 'completed') await remove(item);
     }
@@ -279,7 +299,7 @@ export default function DownloadsPage() {
                           <span>{item.progress}%</span>
                           <span>{formatBytes(item.downloadedBytes)} / {item.totalBytes ? formatBytes(item.totalBytes) : '未知大小'}</span>
                           {item.status === 'downloading' && <><span>{formatBytes(item.speedBytesPerSecond)}/s</span><span>剩余 {formatEta(item.etaSeconds)}</span></>}
-                          {Boolean(item.error) && <span className="text-destructive">{String(item.error)}</span>}
+                          {Boolean(item.error) && <span className="text-destructive">{offlineDownloadErrorMessage(item.error, process.env.NEXT_PUBLIC_APP_PLATFORM === 'tauri' ? 'tauri' : 'web')}</span>}
                         </div>
                       </>
                     ) : (

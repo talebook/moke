@@ -16,7 +16,9 @@ import {
   resolveAppPlatform,
 } from '@/lib/api-core';
 import {
+  BOOK_HEADER_WINDOW,
   classifyOfflineRangeResponse,
+  validateDownloadedBookHeader,
   hasEpubCentralDirectory,
   parseContentRange,
 } from '@/lib/offline-book-core';
@@ -26,6 +28,7 @@ import {
   type UserInfoResponse,
 } from '@/lib/server-session';
 import { discoverGeneralServerCapabilities } from '@/lib/server-capabilities';
+import { bookLoginRequiredError, isBookLoginBody, isBookLoginResponse, readBookErrorPrefix } from '@/lib/book-auth';
 export { getErrorMessage, MokeApiError, readApiJson, readJsonResponse } from '@/lib/api-core';
 
 const appPlatform = resolveAppPlatform(process.env.NEXT_PUBLIC_APP_PLATFORM);
@@ -46,11 +49,16 @@ function logBinaryTransferFailure(
   response: Response,
   error: unknown,
   receivedBytes: number,
+  responseOffset = 0,
 ): void {
   debugLog('error', 'download', `✗ GET ${url} 响应正文读取失败`, {
     status: response.status,
-    receivedBytes,
+    // Both received/expected count the current HTTP response. Keep the full
+    // local position separate when this response resumes an existing file.
+    receivedBytes: Math.max(0, receivedBytes - responseOffset),
     expectedBytes: Number(response.headers.get('content-length') || 0),
+    resumeOffset: responseOffset,
+    fileReceivedBytes: receivedBytes,
     contentRange: response.headers.get('content-range'),
     contentEncoding: response.headers.get('content-encoding'),
     error: binaryTransferErrorDetail(error),
@@ -64,7 +72,31 @@ function logOfflineWriteFailure(error: unknown, receivedBytes: number): void {
   });
 }
 
-async function validateDownloadedBook(blob: Blob, format: string): Promise<Blob> {
+function checkBookAuthentication(prefix: Uint8Array, format: string, status: number): void {
+  if (isBookLoginBody(prefix, format)) throw bookLoginRequiredError(status);
+}
+
+async function checkBookResponseAuthentication(response: Response, url: string, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    void cancelResponseBodyQuietly(response);
+    throw new DOMException('Download cancelled', 'AbortError');
+  }
+  if (isBookLoginResponse(response, url)) {
+    void cancelResponseBodyQuietly(response);
+    throw bookLoginRequiredError(response.status);
+  }
+  // A range reset owns disposal of its 416 response. Other error documents
+  // can carry a login business code even when their HTTP status is 403.
+  if (!response.ok && response.status !== 416) {
+    // This is an error document, including when the requested book is TXT/JSON.
+    checkBookAuthentication(await readBookErrorPrefix(response), 'epub', response.status);
+  }
+}
+
+async function validateDownloadedBook(blob: Blob, format: string, status: number): Promise<Blob> {
+  const prefix = new Uint8Array(await blob.slice(0, BOOK_HEADER_WINDOW).arrayBuffer());
+  checkBookAuthentication(prefix, format, status);
+  validateDownloadedBookHeader(prefix, format);
   if (format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(blob))) {
     throw new Error('book.epub.invalid');
   }
@@ -668,9 +700,9 @@ export async function submitWelcomeCode(code: string, captchaData?: any): Promis
 export async function downloadBookBlob(
   bookId: string | number,
   format = 'epub',
-  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal },
+  options?: { onProgress?: (progress: number) => void; signal?: AbortSignal; serverUrl?: string },
 ): Promise<Blob> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options?.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
 
   try {
@@ -685,6 +717,7 @@ export async function downloadBookBlob(
         : { credentials: 'include', signal: options?.signal }),
     });
 
+    await checkBookResponseAuthentication(response, url, options?.signal);
     if (!response.ok) {
       throw new Error(`http.${response.status}`);
     }
@@ -693,22 +726,44 @@ export async function downloadBookBlob(
     const reader = response.body?.getReader();
 
     if (!reader) {
-      const blob = await response.blob();
+      let blob: Blob;
+      try { blob = await response.blob(); } catch (error) {
+        if (isRequestCancelled(error)) throw error;
+        logBinaryTransferFailure(url, response, error, 0);
+        throw new Error('book.download.transfer_failed');
+      }
       options?.onProgress?.(99);
-      return validateDownloadedBook(blob, format);
+      await validateDownloadedBook(blob, format, response.status);
+      if (total > 0 && blob.size !== total) throw new Error('book.download.incomplete');
+      return blob;
     }
 
     const chunks: Uint8Array[] = [];
     let received = 0;
+    let prefix: Uint8Array = new Uint8Array();
 
     while (true) {
-      const { done, value } = await reader.read();
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try { result = await reader.read(); } catch (error) {
+        if (isRequestCancelled(error)) throw error;
+        checkBookAuthentication(prefix, format, response.status);
+        validateDownloadedBookHeader(prefix, format, false);
+        logBinaryTransferFailure(url, response, error, received);
+        throw new Error('book.download.transfer_failed');
+      }
+      const { done, value } = result;
 
       if (done) break;
       if (!value) continue;
 
       chunks.push(value);
       received += value.length;
+      if (prefix.length < BOOK_HEADER_WINDOW) {
+        const next = new Uint8Array(Math.min(BOOK_HEADER_WINDOW, prefix.length + value.length));
+        next.set(prefix);
+        next.set(value.subarray(0, next.length - prefix.length), prefix.length);
+        prefix = next;
+      }
 
       if (total > 0) {
         options?.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
@@ -717,12 +772,14 @@ export async function downloadBookBlob(
 
     options?.onProgress?.(99);
 
-    return validateDownloadedBook(new Blob(chunks as BlobPart[], {
+    const blob = await validateDownloadedBook(new Blob(chunks as BlobPart[], {
       type: response.headers.get('content-type') || 'application/octet-stream',
-    }), format);
+    }), format, response.status);
+    if (total > 0 && received !== total) throw new Error('book.download.incomplete');
+    return blob;
   } catch (error) {
-    const reason = error instanceof Error ? error.message : '';
-    throw new Error(reason || 'network.error');
+    if (error instanceof Error) throw error;
+    throw new Error('network.error');
   }
 }
 
@@ -748,7 +805,7 @@ function keepTailBytes(tail: Uint8Array, chunk: Uint8Array, windowSize: number):
   return result;
 }
 
-/** 流式下载：把响应体逐块交给 write()，仅保留文件尾部用于 EPUB 校验，
+/** 流式下载：把响应体逐块交给 write()，仅保留有限首部及 EPUB 尾部用于校验，
  *  避免把整本书累积在内存中（大书/低内存设备 OOM）。 */
 export async function streamBookDownload(
   bookId: string | number,
@@ -759,12 +816,13 @@ export async function streamBookDownload(
     onTransfer?: (receivedBytes: number, totalBytes: number | null) => void;
     signal?: AbortSignal;
     resumeFrom?: number;
+    serverUrl?: string;
     onRangeReset?: () => Promise<void>;
     /** Tauri validates the completed on-disk tail, including bytes from an earlier range. */
     validateEpub?: boolean;
   },
 ): Promise<{ mimeType: string; size: number; sourceSignature?: string; resumed: boolean }> {
-  const { serverUrl } = (await import('@/lib/store/server')).useServerStore.getState();
+  const serverUrl = options.serverUrl ?? (await import('@/lib/store/server')).useServerStore.getState().serverUrl;
   const url = `${serverUrl}/api/book/${bookId}.${format}`;
   const requestedOffset = Math.max(0, options.resumeFrom || 0);
   const headers = new Headers();
@@ -785,6 +843,7 @@ export async function streamBookDownload(
     requestHeaders.has('Range') ? { expectedStatuses: [416] } : undefined,
   );
   let response = await fetchDownload(headers);
+  await checkBookResponseAuthentication(response, url, options.signal);
   let contentRange = parseContentRange(response.headers.get('content-range'));
   let rangeMode = classifyOfflineRangeResponse(requestedOffset, response.status, contentRange);
   if (!response.ok && rangeMode !== 'retry-full') throw new Error(`http.${response.status}`);
@@ -796,6 +855,7 @@ export async function streamBookDownload(
     }
     await options.onRangeReset?.();
     response = await fetchDownload(new Headers());
+    await checkBookResponseAuthentication(response, url, options.signal);
     if (!response.ok) throw new Error(`http.${response.status}`);
     contentRange = parseContentRange(response.headers.get('content-range'));
     rangeMode = classifyOfflineRangeResponse(0, response.status, contentRange);
@@ -814,10 +874,15 @@ export async function streamBookDownload(
     try {
       blob = await response.blob();
     } catch (error) {
-      logBinaryTransferFailure(url, response, error, 0);
+      logBinaryTransferFailure(url, response, error, received, resumed ? requestedOffset : 0);
       throw new Error('book.download.transfer_failed');
     }
 
+    if (!resumed) {
+      const prefix = new Uint8Array(await blob.slice(0, BOOK_HEADER_WINDOW).arrayBuffer());
+      checkBookAuthentication(prefix, format, response.status);
+      validateDownloadedBookHeader(prefix, format);
+    }
     try {
       await options.write(new Uint8Array(await blob.arrayBuffer()));
     } catch (error) {
@@ -835,13 +900,18 @@ export async function streamBookDownload(
   }
 
   let tail: Uint8Array = new Uint8Array(0);
+  let prefix: Uint8Array = new Uint8Array(0);
   while (true) {
     let result: ReadableStreamReadResult<Uint8Array>;
     try {
       result = await reader.read();
     } catch (error) {
       if (isRequestCancelled(error)) throw error;
-      logBinaryTransferFailure(url, response, error, received);
+      if (!resumed) {
+        checkBookAuthentication(prefix, format, response.status);
+        validateDownloadedBookHeader(prefix, format, false);
+      }
+      logBinaryTransferFailure(url, response, error, received, resumed ? requestedOffset : 0);
       throw new Error('book.download.transfer_failed');
     }
 
@@ -849,6 +919,12 @@ export async function streamBookDownload(
     if (done) break;
     if (!value) continue;
 
+    if (!resumed && prefix.length < BOOK_HEADER_WINDOW) {
+      const next = new Uint8Array(Math.min(BOOK_HEADER_WINDOW, prefix.length + value.length));
+      next.set(prefix);
+      next.set(value.subarray(0, next.length - prefix.length), prefix.length);
+      prefix = next;
+    }
     try {
       await options.write(value);
     } catch (error) {
@@ -866,6 +942,10 @@ export async function streamBookDownload(
     if (total && total > 0) options.onProgress?.(Math.min(99, Math.round((received / total) * 100)));
   }
   options.onProgress?.(99);
+  if (!resumed) {
+    checkBookAuthentication(prefix, format, response.status);
+    validateDownloadedBookHeader(prefix, format);
+  }
   if (total != null && received !== total) throw new Error('book.download.incomplete');
   if (options.validateEpub !== false && format.toLowerCase() === 'epub' && !(await hasEpubCentralDirectory(new Blob([tail])))) {
     throw new Error('book.epub.invalid');

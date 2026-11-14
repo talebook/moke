@@ -61,6 +61,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
       resume: options.resume,
       preservePartialOnFailure: options.preservePartialOnFailure,
       write: async (writer) => streamBookDownload(options.bookId, format, {
+        serverUrl: options.serverUrl,
         write: (chunk) => writer.write(chunk),
         onProgress: options.onProgress,
         onTransfer: options.onTransfer,
@@ -74,6 +75,7 @@ export async function downloadAndSaveOfflineBook(options: DownloadOfflineBookOpt
   }
 
   const blob = await downloadBookBlob(options.bookId, format, {
+    serverUrl: options.serverUrl,
     onProgress: options.onProgress,
     signal: options.signal,
   });

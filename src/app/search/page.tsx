@@ -2,6 +2,7 @@
 
 import { Suspense, useState, useEffect, useMemo, useRef } from 'react';
 import { useServerStore } from '@/lib/store/server';
+import { captureLoginNavigation, isLoginRequiredError } from '@/lib/auth-navigation';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
@@ -232,6 +233,7 @@ function SearchContent() {
     if (id === SAMPLE_BOOK.bookId) return;
     const book = results.find((b) => String(b.id) === id);
     if (!book) return;
+    const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
     const format = (book.files?.[0]?.format || 'epub').toLowerCase();
     if (!beginOfflineDownload(serverUrl, id, format)) {
       toast(`《${book.title}》正在下载中`);
@@ -249,7 +251,12 @@ function SearchContent() {
         format,
       });
       toast(`《${book.title}》已下载`);
-    } catch {
+    } catch (error) {
+      if (isLoginRequiredError(error)) {
+        const href = loginNavigation();
+        if (href) router.push(href);
+        return;
+      }
       toast('下载失败');
     } finally {
       endOfflineDownload(serverUrl, id, format);
@@ -334,6 +341,7 @@ function SearchContent() {
       if (ok > 0) toast(`已加入 ${ok} 本到书架`);
       if (fail > 0) toast(`${fail} 本加入失败`);
     } else if (action === 'download') {
+      const loginNavigation = captureLoginNavigation(serverUrl, useServerStore.getState);
       let skipped = 0;
       for (const id of ids) {
         if (id === SAMPLE_BOOK.bookId) continue;
@@ -353,8 +361,15 @@ function SearchContent() {
             format,
           });
           ok++;
-        } catch { fail++; }
-        finally { endOfflineDownload(serverUrl, id, format); }
+        } catch (error) {
+          fail++;
+          if (isLoginRequiredError(error)) {
+            exitBatchMode();
+            const href = loginNavigation();
+            if (href) router.push(href);
+            return { ok, fail };
+          }
+        } finally { endOfflineDownload(serverUrl, id, format); }
       }
       exitBatchMode();
       if (ok > 0) toast(`已下载 ${ok} 本`);

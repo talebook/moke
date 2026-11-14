@@ -822,7 +822,8 @@ test('Tauri 自定义下载目录继续使用已授权的绝对路径', async ()
   });
 
   for (const { command, args } of calls.filter(({ command }) => command.startsWith('plugin:fs|'))) {
-    if (command === 'plugin:fs|write') continue;
+    // Handle-based operations carry a resource id rather than a path.
+    if (['plugin:fs|write', 'plugin:fs|read', 'plugin:fs|seek'].includes(command)) continue;
     if (command === 'plugin:fs|rename') {
       assert.match(args.oldPath, /^\/storage\/emulated\/0\/Moke\//);
       assert.match(args.newPath, /^\/storage\/emulated\/0\/Moke\//);
@@ -1089,4 +1090,269 @@ test('classification persists without a downloaded row and newer refresh wins ov
     fileName: 'book.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']) });
   assert.equal((await getOfflineBook('https://a.example', '42', 'pdf')).media_type, 'ebook');
   assert.equal(indexedDB.records.get('https://a.example::42::pdf').media_type, 'ebook');
+});
+
+
+// Exercise the actual plugin-fs JS protocol against a byte-addressed fake disk,
+// rather than returning a valid EPUB independently of what was written.
+function installByteAddressedOfflineStore() {
+  const state = installTauriOfflineStore('/app-data', true);
+  const files = new Map();
+  const handles = new Map();
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  let nextRid = 100;
+  window.__TAURI_INTERNALS__.invoke = async (command, args = {}) => {
+    if (!command.startsWith('plugin:fs|') && command !== 'plugin:resources|close') return invoke(command, args);
+    state.calls.push({ command, args });
+    const handle = handles.get(args.rid);
+    if (command === 'plugin:fs|mkdir') return null;
+    if (command === 'plugin:fs|exists') return files.has(args.path);
+    if (command === 'plugin:fs|stat') {
+      if (!files.has(args.path)) throw new Error('Not found');
+      return { size: files.get(args.path).length, mtime: null, atime: null, birthtime: null };
+    }
+    if (command === 'plugin:fs|open') {
+      if (args.options.truncate) files.set(args.path, new Uint8Array());
+      if (!files.has(args.path)) {
+        if (!args.options.create) throw new Error('Not found');
+        files.set(args.path, new Uint8Array());
+      }
+      const rid = nextRid++;
+      handles.set(rid, { path: args.path, offset: 0 });
+      return rid;
+    }
+    if (command === 'plugin:fs|seek') return (handle.offset = args.offset);
+    if (command === 'plugin:fs|ftruncate') {
+      files.set(handle.path, files.get(handle.path).slice(0, args.len));
+      return null;
+    }
+    if (command === 'plugin:fs|write') {
+      const previous = files.get(handle.path);
+      const next = new Uint8Array(Math.max(previous.length, handle.offset + args.data.length));
+      next.set(previous);
+      next.set(args.data, handle.offset);
+      files.set(handle.path, next);
+      handle.offset += args.data.length;
+      return args.data.length;
+    }
+    if (command === 'plugin:fs|read') {
+      const data = files.get(handle.path).slice(handle.offset, handle.offset + Math.min(args.len, 17));
+      handle.offset += data.length;
+      const response = new Uint8Array(data.length + 8);
+      response.set(data);
+      new DataView(response.buffer).setBigUint64(data.length, BigInt(data.length));
+      return response;
+    }
+    if (command === 'plugin:resources|close') { handles.delete(args.rid); return null; }
+    if (command === 'plugin:fs|remove') { files.delete(args.path); return null; }
+    if (command === 'plugin:fs|rename') {
+      assert.ok(files.has(args.oldPath));
+      files.set(args.newPath, files.get(args.oldPath));
+      files.delete(args.oldPath);
+      return null;
+    }
+    throw new Error(`Unexpected Tauri file command: ${command}`);
+  };
+  return { ...state, files };
+}
+
+function downloadedMobi() {
+  const bytes = new Uint8Array(128);
+  bytes.set(new TextEncoder().encode('BOOKMOBI'), 60);
+  return bytes;
+}
+
+const diskBook = {
+  serverUrl: 'https://guard.test', bookId: 'guard', title: 'Book', fileName: 'Book.azw3',
+  mimeType: 'application/octet-stream', format: 'azw3',
+};
+const diskBookPath = makeOfflineRelativePath(diskBook.serverUrl, diskBook.bookId, diskBook.format, diskBook.fileName);
+
+for (const badContent of ['<!doctype html><html>Please login</html>', '{"err":"user.need_login","msg":"请先登录"}']) {
+  test('错误下载不替换已有有效副本，也不保留为可续传文件: ' + badContent.slice(0, 15), async () => {
+    const { files, indexedDB, recordedBooks } = installByteAddressedOfflineStore();
+    const valid = downloadedMobi();
+    await saveOfflineBookStream({ ...diskBook, write: async writer => { await writer.write(valid); } });
+    const recordBefore = { ...indexedDB.records.get(makeOfflineBookKey(diskBook.serverUrl, diskBook.bookId, 'azw3')) };
+    await assert.rejects(saveOfflineBookStream({ ...diskBook, preservePartialOnFailure: true,
+      write: async writer => { await writer.write(new TextEncoder().encode(badContent)); },
+    }), /book.download.invalid_response/);
+    assert.deepEqual(files.get(diskBookPath), valid);
+    assert.equal(files.has(diskBookPath + '.part'), false);
+    assert.deepEqual(indexedDB.records.get(recordBefore.id), recordBefore);
+    assert.equal(recordedBooks.length, 1);
+  });
+}
+
+test('追加前拒绝 HTML part，即使真正的 MOBI 剩余字节会补回合法签名', async () => {
+  const { files, indexedDB, recordedBooks } = installByteAddressedOfflineStore();
+  const partial = new TextEncoder().encode('<!doctype html><html>Please login</html>');
+  files.set(diskBookPath + '.part', partial);
+  let writes = 0;
+  await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+    write: async writer => { writes++; await writer.write(downloadedMobi().slice(partial.length)); },
+  }), /book\.(?:download.invalid_response|mobi.invalid)/);
+  assert.equal(writes, 0, 'reject the old error prefix before requesting or appending any new bytes');
+  assert.equal(files.has(diskBookPath + '.part'), false);
+  assert.equal(files.has(diskBookPath), false);
+  assert.equal(recordedBooks.length, 0);
+  assert.equal(indexedDB.records.has(makeOfflineBookKey(diskBook.serverUrl, diskBook.bookId, 'azw3')), false);
+});
+
+test('短 JSON 登录错误 part 在 MOBI 续传补回合法签名前就被清理', async () => {
+  const { files, recordedBooks } = installByteAddressedOfflineStore();
+  const partial = new TextEncoder().encode('{"err":"user.need_login"}');
+  files.set(diskBookPath + '.part', partial);
+  let writes = 0;
+  await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+    write: async writer => { writes++; await writer.write(downloadedMobi().slice(partial.length)); },
+  }), /book.download.invalid_response/);
+  assert.equal(writes, 0);
+  assert.equal(files.has(diskBookPath + '.part'), false);
+  assert.equal(files.has(diskBookPath), false);
+  assert.equal(recordedBooks.length, 0);
+});
+
+function downloadedPdf() {
+  let source = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, body] of [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>',
+  ].entries()) {
+    offsets.push(source.length);
+    source += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  }
+  const xref = source.length;
+  source += 'xref\n0 4\n0000000000 65535 f \n';
+  for (const offset of offsets.slice(1)) source += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  source += `trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(source);
+}
+
+for (const [format, bytes] of [
+  ['epub', new Uint8Array(readFileSync(new URL('../public/samples/moke-sample.epub', import.meta.url)))],
+  ['pdf', downloadedPdf()],
+]) {
+  test(`HTML 错误前缀不能凭有效 ${format.toUpperCase()} 余部登记，也不替换旧有效副本`, async () => {
+    const { files, indexedDB, recordedBooks } = installByteAddressedOfflineStore();
+    const book = { ...diskBook, format, fileName: `Book.${format}` };
+    const path = makeOfflineRelativePath(book.serverUrl, book.bookId, format, book.fileName);
+    await saveOfflineBookStream({ ...book, write: async writer => { await writer.write(bytes); } });
+    const recordBefore = { ...indexedDB.records.get(makeOfflineBookKey(book.serverUrl, book.bookId, format)) };
+    const partial = new TextEncoder().encode('<!doctype html><html>Please login</html>');
+    files.set(path + '.part', partial);
+    let writes = 0;
+    await assert.rejects(saveOfflineBookStream({ ...book, resume: true, preservePartialOnFailure: true,
+      write: async writer => { writes++; await writer.write(bytes.slice(partial.length)); },
+    }), /book.download.invalid_response/);
+    assert.equal(writes, 0);
+    assert.deepEqual(files.get(path), bytes);
+    assert.equal(files.has(path + '.part'), false);
+    assert.deepEqual(indexedDB.records.get(recordBefore.id), recordBefore);
+    assert.equal(recordedBooks.length, 1);
+  });
+
+  test(`完成的 HTML 与 ${format.toUpperCase()} 混合正文仍需拒绝，不受二进制或 EOCD 干扰`, async () => {
+    const { files, recordedBooks } = installByteAddressedOfflineStore();
+    const book = { ...diskBook, format, fileName: `Book.${format}` };
+    const path = makeOfflineRelativePath(book.serverUrl, book.bookId, format, book.fileName);
+    await saveOfflineBookStream({ ...book, write: async writer => { await writer.write(bytes); } });
+    const prefix = new TextEncoder().encode('<?xml version="1.0"?><html>login</html>');
+    const mixed = new Uint8Array(prefix.length + 1 + bytes.length);
+    mixed.set(prefix);
+    // NUL and the complete real EPUB (including EOCD) used to disable the
+    // whole-window plain-text gate, allowing the error page to be registered.
+    mixed.set(bytes, prefix.length + 1);
+    await assert.rejects(saveOfflineBookStream({ ...book, preservePartialOnFailure: true,
+      write: async writer => { await writer.write(mixed); },
+    }), /book.download.invalid_response/);
+    assert.deepEqual(files.get(path), bytes);
+    assert.equal(files.has(path + '.part'), false);
+    assert.equal(recordedBooks.length, 1);
+  });
+}
+
+test('纯可打印 JSON 风格 MOBI 题名的短 part 由后续完整头判定', async () => {
+  const { files } = installByteAddressedOfflineStore();
+  const bytes = new Uint8Array(128).fill(32);
+  bytes.set(new TextEncoder().encode('{"title":"Book"}'));
+  bytes.set(new TextEncoder().encode('BOOKMOBI'), 60);
+  files.set(diskBookPath + '.part', bytes.slice(0, 20));
+  await saveOfflineBookStream({ ...diskBook, resume: true, write: async writer => {
+    assert.equal(writer.position, 20);
+    await writer.write(bytes.slice(20));
+  } });
+  assert.deepEqual(files.get(diskBookPath), bytes);
+});
+
+test('正常 MOBI 续传拼合首部，短 read 也能完成首部校验', async () => {
+  const { files, recordedBooks } = installByteAddressedOfflineStore();
+  const bytes = downloadedMobi();
+  files.set(diskBookPath + '.part', bytes.slice(0, 32));
+  await saveOfflineBookStream({ ...diskBook, resume: true, write: async writer => {
+    assert.equal(writer.position, 32);
+    await writer.write(bytes.slice(32));
+  } });
+  assert.deepEqual(files.get(diskBookPath), bytes);
+  assert.equal(recordedBooks.length, 1);
+});
+
+test('传输中断只保留有效 partial，旧错误首段不继续保留', async () => {
+  for (const [partial, preserve] of [[downloadedMobi().slice(0, 70), true], [new TextEncoder().encode('{"err":"user.need_login"}'.padEnd(80)), false]]) {
+    const { files, recordedBooks } = installByteAddressedOfflineStore();
+    files.set(diskBookPath + '.part', partial);
+    let writes = 0;
+    await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+      write: async () => { writes++; throw new Error('book.download.incomplete'); },
+    }), preserve ? /book.download.incomplete/ : /book.download.invalid_response/);
+    assert.equal(writes, preserve ? 1 : 0);
+    assert.equal(files.has(diskBookPath + '.part'), preserve);
+    assert.equal(recordedBooks.length, 0);
+  }
+});
+
+test('登录失效保留有效续传文件，并原样向主动操作返回认证错误', async () => {
+  const { MokeApiError } = await import('../src/lib/api-core.ts');
+  const { files, recordedBooks } = installByteAddressedOfflineStore();
+  const partial = downloadedMobi().slice(0, 70);
+  files.set(diskBookPath + '.part', partial);
+  const needLogin = new MokeApiError('请先登录', 'user.need_login', 401);
+  await assert.rejects(saveOfflineBookStream({ ...diskBook, resume: true, preservePartialOnFailure: true,
+    write: async () => { throw needLogin; },
+  }), error => error === needLogin);
+  assert.deepEqual(files.get(diskBookPath + '.part'), partial);
+  assert.equal(recordedBooks.length, 0);
+});
+
+
+test('封面等待期间切换服务器，书籍下载仍使用任务捕获的原服务器', async t => {
+  installWebOfflineStore();
+  const { useServerStore } = await import('../src/lib/store/server.ts');
+  const { downloadAndSaveOfflineBook } = await import('../src/lib/offline-download.ts');
+  const coverPending = Promise.withResolvers();
+  const coverStarted = Promise.withResolvers();
+  const calls = [];
+  useServerStore.setState({ serverUrl: 'https://original.test' });
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    if (url === 'https://original.test/cover') {
+      coverStarted.resolve();
+      return coverPending.promise;
+    }
+    assert.equal(url, 'https://original.test/api/book/1.pdf');
+    return new Response('%PDF-1.7 example');
+  });
+  const downloading = downloadAndSaveOfflineBook({
+    serverUrl: 'https://original.test', bookId: '1', title: 'Book', format: 'pdf',
+    coverUrl: 'https://original.test/cover',
+  });
+  await coverStarted.promise;
+  useServerStore.setState({ serverUrl: 'https://other.test' });
+  coverPending.resolve(new Response('', { status: 404 }));
+  await downloading;
+  assert.deepEqual(calls, ['https://original.test/cover', 'https://original.test/api/book/1.pdf']);
+  assert.ok(await getOfflineBook('https://original.test', '1', 'pdf'));
+  assert.equal(await getOfflineBook('https://other.test', '1', 'pdf'), null);
 });
