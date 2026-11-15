@@ -1,0 +1,16 @@
+[package]
+name = "moke-discovery-core"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+description = "Pure, record-driven Talebook DNS-SD validation and cache"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+url = "2"
+uuid = "1"
+
+[dev-dependencies]
+serde_json = "1"
+
+[workspace]

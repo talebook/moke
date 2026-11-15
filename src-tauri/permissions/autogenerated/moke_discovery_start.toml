@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-moke-discovery-start"
+description = "Enables the moke_discovery_start command without any pre-configured scope."
+commands.allow = ["moke_discovery_start"]
+
+[[permission]]
+identifier = "deny-moke-discovery-start"
+description = "Denies the moke_discovery_start command without any pre-configured scope."
+commands.deny = ["moke_discovery_start"]

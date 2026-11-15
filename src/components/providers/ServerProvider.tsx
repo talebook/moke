@@ -8,7 +8,7 @@ import { getServerDiscoveryInputs } from '@/lib/server-capabilities';
 import { navigateFullDocument } from '@/lib/moke-reader';
 import { isServerCapabilitiesFresh, resolveUserAfterSync } from '@/lib/server-session';
 
-const PUBLIC_PATHS = ['/welcome', '/login', '/register', '/access', '/privacy', '/settings/developer'];
+const PUBLIC_PATHS = ['/welcome', '/join', '/login', '/register', '/access', '/privacy', '/settings/developer'];
 
 export function ServerProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();

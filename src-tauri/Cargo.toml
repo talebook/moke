@@ -58,6 +58,9 @@ tiny_http = "0.12"
 httparse = "1.10"
 tungstenite = "0.24"
 
+[target.'cfg(any(target_os = "windows", all(target_os = "linux", not(target_env = "ohos"))))'.dependencies]
+moke-discovery-desktop = { path = "discovery-desktop" }
+
 # Plugins that depend on native Linux libraries (gtk/x11)
 # and cannot cross-compile to OHOS.
 [target.'cfg(not(target_env = "ohos"))'.dependencies]

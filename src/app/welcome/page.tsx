@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { BookOpen, Check, Copy } from 'lucide-react';
 import { checkWelcomeRequirement, validateServerConnection } from '@/lib/api';
 import { logErrorMetadata } from '@/lib/api-log';
@@ -186,6 +187,14 @@ export default function WelcomePage() {
             >
               {loading ? '连接中...' : '连接'}
             </button>
+
+            <Link
+              href="/join"
+              prefetch={false}
+              className="mt-3 flex min-h-11 items-center justify-center rounded-2xl border border-amber-950/10 bg-white/50 px-4 text-sm font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              加入服务器 · 局域网发现
+            </Link>
 
             <div className="flex items-center my-5">
               <div className="flex-1 border-t border-border"></div>

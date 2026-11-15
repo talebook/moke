@@ -1090,3 +1090,127 @@ test('classification persists without a downloaded row and newer refresh wins ov
   assert.equal((await getOfflineBook('https://a.example', '42', 'pdf')).media_type, 'ebook');
   assert.equal(indexedDB.records.get('https://a.example::42::pdf').media_type, 'ebook');
 });
+
+test('same-origin library prefixes isolate classification, listing, shelf updates and deletion', async (t) => {
+  const store = installWebOfflineStore();
+  const root = 'https://books.test';
+  const first = `${root}/a`;
+  const second = `${root}/b`;
+  const input = { bookId: '42', title: 'Shared title', format: 'pdf',
+    fileName: 'same.pdf', mimeType: 'application/pdf', blob: new Blob(['pdf']), inShelf: true };
+  // Old origin-only metadata belongs to the root library, never a guessed prefix.
+  await cacheOfflineMediaType(root, '42', 'comic');
+  await cacheOfflineMediaType(first, '42', 'ebook');
+  for (const serverUrl of [root, first, second]) await saveOfflineBook({ ...input, serverUrl });
+  assert.equal((await getOfflineBook(first, '42', 'pdf')).media_type, 'ebook');
+  assert.equal((await getOfflineBook(second, '42', 'pdf')).media_type, undefined);
+  assert.equal((await getOfflineBook(root, '42', 'pdf')).media_type, 'comic');
+
+  await cacheOfflineMediaType('https://BOOKS.test:443/a/', '42', 'comic');
+  assert.equal(store.records.get(`${first}::42::pdf`).media_type, 'comic');
+  assert.equal(store.records.get(`${second}::42::pdf`).media_type, undefined);
+  assert.equal(store.records.get(`media-type::${first}::42`).media_type, 'comic');
+  for (const serverUrl of [root, first, second]) {
+    assert.deepEqual((await listOfflineBooks(`${serverUrl}/`)).map(row => row.serverUrl), [serverUrl]);
+  }
+
+  await setOfflineBookShelfState('https://books.test:443/a/', '42', false);
+  assert.equal(store.records.get(`${first}::42::pdf`).inShelf, false);
+  assert.equal(store.records.get(`${second}::42::pdf`).inShelf, true);
+  assert.equal(store.records.get(`${root}::42::pdf`).inShelf, true);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    requests.push(String(url));
+    return new Response('{"err":"ok"}');
+  });
+  await deleteOfflineBook(first, '42');
+  assert.deepEqual(await listOfflineBooks(first), []);
+  assert.equal((await listOfflineBooks(second)).length, 1);
+  assert.equal((await listOfflineBooks(root)).length, 1);
+  assert.deepEqual(requests, [`${first}/api/book/42/readstate`]);
+});
+
+for (const foreignServer of ['https://books.test', 'https://books.test/b']) {
+  test(`native recovery cannot assign ${foreignServer} to another prefix by matching its filename`, async () => {
+    installSampleCoordination();
+    const indexedDB = createFakeIndexedDb();
+    const ownServer = 'https://books.test/a';
+    const ownId = `${ownServer}::42::pdf`;
+    indexedDB.records.set(ownId, { id: ownId, serverUrl: ownServer, bookId: '42', format: 'pdf',
+      title: 'Own book', fileName: 'same.pdf', mimeType: 'application/pdf', updatedAt: 123 });
+    process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+    globalThis.window = { indexedDB, __TAURI_INTERNALS__: {
+      invoke: async command => {
+        assert.equal(command, 'moke_list_downloaded_books');
+        return [{ id: `${foreignServer}::42::pdf`, serverUrl: foreignServer, bookId: '42',
+          title: 'Foreign book', fileName: 'same.pdf', mimeType: 'application/pdf',
+          updatedAt: 123, filePath: '/data/foreign/same.pdf' }];
+      },
+    } };
+    assert.equal(await getOfflineBook(ownServer, '42', 'pdf'), null);
+    assert.equal(indexedDB.records.get(ownId).title, 'Own book');
+    assert.deepEqual(await listOfflineBooks(ownServer), []);
+    assert.equal((await listOfflineBooks(foreignServer))[0].serverUrl, foreignServer);
+  });
+}
+
+test('native prefix recovery merges only its own classification, including normalized aliases', async () => {
+  installSampleCoordination();
+  const indexedDB = createFakeIndexedDb();
+  process.env.NEXT_PUBLIC_APP_PLATFORM = 'tauri';
+  const native = ['', '/a', '/b'].map(prefix => ({
+    id: `https://books.test${prefix}::42::pdf`, serverUrl: `https://books.test:443${prefix}/`,
+    bookId: '42', title: 'Recovered book', fileName: 'same.pdf', mimeType: 'application/pdf',
+    updatedAt: 123, filePath: `/data${prefix}/same.pdf`,
+  }));
+  globalThis.window = { indexedDB, __TAURI_INTERNALS__: {
+    invoke: async command => {
+      assert.equal(command, 'moke_list_downloaded_books');
+      return native;
+    },
+  } };
+  await cacheOfflineMediaType('https://books.test', '42', 'unknown');
+  await cacheOfflineMediaType('https://books.test/a', '42', 'comic');
+  await cacheOfflineMediaType('https://books.test/b', '42', 'ebook');
+  for (const [prefix, expected] of [['', 'unknown'], ['/a', 'comic'], ['/b', 'ebook']]) {
+    const recovered = await getOfflineBook(`https://books.test${prefix}`, '42', 'pdf');
+    assert.equal(recovered.media_type, expected);
+    assert.equal(recovered.filePath, `/data${prefix}/same.pdf`);
+    assert.equal((await listOfflineBooks(`https://books.test${prefix}`)).length, 1);
+  }
+});
+
+test('a pending native shelf mutation does not serialize another library prefix', async () => {
+  const { indexedDB, recordedBooks } = installTauriOfflineStore('/data', true);
+  for (const prefix of ['/a', '/b']) {
+    recordedBooks.push({ id: `https://books.test${prefix}::42::pdf`, serverUrl: `https://books.test${prefix}`,
+      bookId: '42', title: 'Book', fileName: 'same.pdf', mimeType: 'application/pdf',
+      relativePath: `books${prefix}/same.pdf`, updatedAt: 123, inShelf: true });
+  }
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  let secondEntered = false;
+  const original = window.__TAURI_INTERNALS__.invoke;
+  window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+    if (command !== 'moke_record_downloaded_book') return original(command, args);
+    if (args.book.serverUrl.endsWith('/a')) {
+      entered.resolve();
+      await release.promise;
+    } else secondEntered = true;
+    const index = recordedBooks.findIndex(row => row.id === args.book.id);
+    recordedBooks[index] = args.book;
+  };
+  const updatingFirst = setOfflineBookShelfState('https://books.test/a', '42', false);
+  await entered.promise;
+  const updatingSecond = setOfflineBookShelfState('https://books.test:443/b/', '42', false);
+  try {
+    for (let index = 0; index < 8; index++) await new Promise(resolve => setImmediate(resolve));
+    assert.equal(secondEntered, true, 'an unrelated prefix must be able to complete while /a is pending');
+    await updatingSecond;
+    assert.equal(indexedDB.records.get('https://books.test/b::42::pdf').inShelf, false);
+  } finally {
+    release.resolve();
+    await Promise.all([updatingFirst, updatingSecond]);
+  }
+  assert.equal(indexedDB.records.get('https://books.test/a::42::pdf').inShelf, false);
+});
