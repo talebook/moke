@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -49,10 +49,12 @@ export default function LoginPage() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const loginPending = useRef(false);
   const { serverUrl } = useServerStore.getState();
 
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password.trim() || loginPending.current) return;
+    loginPending.current = true;
     setLoading(true);
     setError('');
     let session = useServerStore.getState();
@@ -93,6 +95,7 @@ export default function LoginPage() {
       console.error('[LoginPage] login flow failed:', loginError);
       setError('无法连接服务器');
     } finally {
+      loginPending.current = false;
       setLoading(false);
     }
   };
@@ -184,6 +187,7 @@ export default function LoginPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          verificationError={error}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleLogin(data)}
         />

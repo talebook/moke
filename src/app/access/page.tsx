@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
 import { submitWelcomeCode } from '@/lib/api';
@@ -18,6 +18,7 @@ function AccessPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const verificationPending = useRef(false);
 
   // 从 URL query 恢复 serverUrl（welcome 页跳转时带过来），
   // 这是跨页传递最可靠的方式，不受 release WebView 下 persist 不稳定的影响
@@ -62,7 +63,7 @@ function AccessPageInner() {
   }, [searchParams]);
 
   const handleVerify = async (captchaData?: any) => {
-    if (!code.trim()) return;
+    if (!code.trim() || verificationPending.current) return;
 
     // 守卫：确保有 serverUrl，否则请求会发往相对路径导致网络异常
     let effectiveUrl = useServerStore.getState().serverUrl;
@@ -98,6 +99,7 @@ function AccessPageInner() {
       return;
     }
 
+    verificationPending.current = true;
     setLoading(true);
     setError('');
     try {
@@ -117,7 +119,7 @@ function AccessPageInner() {
       console.error('[AccessPage] submit error:', e);
       setError('无法连接服务器');
     }
-    finally { setLoading(false); }
+    finally { verificationPending.current = false; setLoading(false); }
   };
 
   return (
@@ -154,6 +156,7 @@ function AccessPageInner() {
       <CaptchaModal
         isOpen={showCaptcha}
         serverUrl={serverUrl}
+        verificationError={error}
         onClose={() => setShowCaptcha(false)}
         onSuccess={(data: any) => handleVerify(data)}
       />
