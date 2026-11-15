@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { KeyRound } from 'lucide-react';
 import { submitWelcomeCode } from '@/lib/api';
@@ -18,6 +18,19 @@ function AccessPageInner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const verificationPending = useRef(false);
+  const verificationLifecycle = useRef({ active: false, generation: 0 });
+
+  useEffect(() => {
+    const lifecycle = verificationLifecycle.current;
+    lifecycle.active = true;
+    verificationPending.current = false;
+    setLoading(false);
+    return () => {
+      lifecycle.active = false;
+      lifecycle.generation += 1;
+    };
+  }, []);
 
   // 从 URL query 恢复 serverUrl（welcome 页跳转时带过来），
   // 这是跨页传递最可靠的方式，不受 release WebView 下 persist 不稳定的影响
@@ -62,7 +75,7 @@ function AccessPageInner() {
   }, [searchParams]);
 
   const handleVerify = async (captchaData?: any) => {
-    if (!code.trim()) return;
+    if (!verificationLifecycle.current.active || !code.trim() || verificationPending.current) return;
 
     // 守卫：确保有 serverUrl，否则请求会发往相对路径导致网络异常
     let effectiveUrl = useServerStore.getState().serverUrl;
@@ -98,10 +111,21 @@ function AccessPageInner() {
       return;
     }
 
+    verificationPending.current = true;
+    const generation = ++verificationLifecycle.current.generation;
+    const session = useServerStore.getState();
+    const isCurrentAttempt = () => verificationLifecycle.current.active
+      && verificationLifecycle.current.generation === generation;
+    const isCurrentSession = () => {
+      const current = useServerStore.getState();
+      return isCurrentAttempt() && current.serverUrl === session.serverUrl
+        && current.sessionRevision === session.sessionRevision;
+    };
     setLoading(true);
     setError('');
     try {
       const res = await submitWelcomeCode(code, captchaData);
+      if (!isCurrentSession()) return;
       if (res.err === 'ok') {
         setShowCaptcha(false);
         // 验证成功后进入书架主页，而不是 router.back()（那会退回 welcome 连接页）
@@ -114,10 +138,16 @@ function AccessPageInner() {
         setShowCaptcha(false);
       }
     } catch (e) {
+      if (!isCurrentSession()) return;
       console.error('[AccessPage] submit error:', e);
       setError('无法连接服务器');
     }
-    finally { setLoading(false); }
+    finally {
+      if (isCurrentAttempt()) {
+        verificationPending.current = false;
+        setLoading(false);
+      }
+    }
   };
 
   return (
@@ -154,6 +184,7 @@ function AccessPageInner() {
       <CaptchaModal
         isOpen={showCaptcha}
         serverUrl={serverUrl}
+        verificationError={error}
         onClose={() => setShowCaptcha(false)}
         onSuccess={(data: any) => handleVerify(data)}
       />

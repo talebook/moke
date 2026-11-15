@@ -11,7 +11,9 @@ const CAPTCHA_SANDBOX_MESSAGE_KIND = 'moke-captcha-sandbox-v1';
 
 export type CaptchaSandboxMessage =
   | { type: 'success'; payload: unknown }
-  | { type: 'error'; payload: unknown };
+  | { type: 'error'; payload: unknown }
+  | { type: 'dismiss'; payload: null }
+  | { type: 'focus'; payload: 'forward' | 'backward' };
 
 export interface ImageCaptchaRequestCallbacks {
   onImage: (image: string) => void;
@@ -179,16 +181,21 @@ export function parseCaptchaSandboxMessage(
   expectedSource: unknown,
   expectedChannel: string,
 ): CaptchaSandboxMessage | null {
-  if (!expectedSource || event.source !== expectedSource || event.origin !== CAPTCHA_SANDBOX_ORIGIN) {
+  if (!expectedSource || !expectedChannel || event.source !== expectedSource || event.origin !== CAPTCHA_SANDBOX_ORIGIN) {
     return null;
   }
 
   if (!event.data || typeof event.data !== 'object') return null;
   const data = event.data as Record<string, unknown>;
   if (data.kind !== CAPTCHA_SANDBOX_MESSAGE_KIND || data.channel !== expectedChannel) return null;
-  if (data.type !== 'success' && data.type !== 'error') return null;
-
-  return { type: data.type, payload: data.payload };
+  if (data.type === 'success' || data.type === 'error') {
+    return { type: data.type, payload: data.payload };
+  }
+  if (data.type === 'dismiss' && data.payload === null) return { type: 'dismiss', payload: null };
+  if (data.type === 'focus' && (data.payload === 'forward' || data.payload === 'backward')) {
+    return { type: 'focus', payload: data.payload };
+  }
+  return null;
 }
 
 function serializeForInlineScript(value: unknown): string {
@@ -230,6 +237,32 @@ function buildCaptchaBridge(channel: string): string {
     'error',
     typeof error === 'string' ? error : '验证码验证失败',
   );
+
+  // Key events do not bubble across the opaque document boundary. Only ask
+  // the current host dialog to dismiss or move to an adjacent host control;
+  // never accept a selector, URL or authentication action from a key event.
+  window.addEventListener('keydown', (event) => {
+    if (!event.isTrusted) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      send('dismiss', null);
+      return;
+    }
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
+    const controls = Array.from(document.querySelectorAll(
+      'button, input, select, textarea, a[href], [tabindex], [contenteditable="true"]',
+    )).filter((control) => control.tabIndex >= 0 && !control.matches(':disabled')
+      && !control.closest('[inert]') && control.getClientRects().length > 0
+      && getComputedStyle(control).visibility === 'visible');
+    controls.sort((a, b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
+    const active = document.activeElement;
+    if (!controls.length || !controls.includes(active)
+      || (event.shiftKey && active === controls[0])
+      || (!event.shiftKey && active === controls[controls.length - 1])) {
+      event.preventDefault();
+      send('focus', event.shiftKey ? 'backward' : 'forward');
+    }
+  }, true);
 })();
 </script>`;
 }
@@ -237,7 +270,7 @@ function buildCaptchaBridge(channel: string): string {
 /**
  * The supplied body is deliberately not sanitized: captcha provider scripts
  * need to run, but they run only in the opaque-origin sandbox frame. The
- * trusted bridge is installed first and exposes just success/error messages.
+ * trusted bridge is installed first and exposes result and keyboard messages.
  */
 export function buildCaptchaSandboxDocument(bodyHtml: string, channel: string): string {
   return `<!doctype html>

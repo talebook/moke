@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { BookOpen, Eye, EyeOff } from 'lucide-react';
 import { useServerStore } from '@/lib/store/server';
@@ -49,16 +49,33 @@ export default function LoginPage() {
   
   // Captcha state
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const loginPending = useRef(false);
+  const loginLifecycle = useRef({ active: false, generation: 0 });
   const { serverUrl } = useServerStore.getState();
 
+  useEffect(() => {
+    const lifecycle = loginLifecycle.current;
+    lifecycle.active = true;
+    loginPending.current = false;
+    setLoading(false);
+    return () => {
+      lifecycle.active = false;
+      lifecycle.generation += 1;
+    };
+  }, []);
+
   const handleLogin = async (captchaData?: any) => {
-    if (!username.trim() || !password.trim()) return;
+    if (!loginLifecycle.current.active || !username.trim() || !password.trim() || loginPending.current) return;
+    loginPending.current = true;
+    const generation = ++loginLifecycle.current.generation;
+    const isCurrentAttempt = () => loginLifecycle.current.active
+      && loginLifecycle.current.generation === generation;
     setLoading(true);
     setError('');
     let session = useServerStore.getState();
     const isCurrentSession = () => {
       const current = useServerStore.getState();
-      return current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
+      return isCurrentAttempt() && current.serverUrl === session.serverUrl && current.sessionRevision === session.sessionRevision;
     };
 
     try {
@@ -93,7 +110,10 @@ export default function LoginPage() {
       console.error('[LoginPage] login flow failed:', loginError);
       setError('无法连接服务器');
     } finally {
-      setLoading(false);
+      if (isCurrentAttempt()) {
+        loginPending.current = false;
+        setLoading(false);
+      }
     }
   };
 
@@ -184,6 +204,7 @@ export default function LoginPage() {
         <CaptchaModal
           isOpen={showCaptcha}
           serverUrl={serverUrl}
+          verificationError={error}
           onClose={() => setShowCaptcha(false)}
           onSuccess={(data) => handleLogin(data)}
         />

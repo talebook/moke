@@ -16,7 +16,8 @@ interface CaptchaModalProps {
   isOpen: boolean;
   serverUrl: string;
   onClose: () => void;
-  onSuccess: (data: any) => void;
+  onSuccess: (data: any) => void | Promise<void>;
+  verificationError?: string;
 }
 
 interface CaptchaConfig extends GeetestCaptchaConfig {
@@ -25,7 +26,7 @@ interface CaptchaConfig extends GeetestCaptchaConfig {
   webCode?: unknown;
 }
 
-export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaModalProps) {
+export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificationError }: CaptchaModalProps) {
   const [mode, setMode] = useState<'loading' | 'image' | 'geetest' | 'webcode' | 'error'>('loading');
   const [config, setConfig] = useState<CaptchaConfig | null>(null);
 
@@ -34,6 +35,23 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const codeInput = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const closeCallback = useRef(onClose);
+  useEffect(() => { closeCallback.current = onClose; }, [onClose]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    // The initiating request can disable its submit button before this modal
+    // opens. Preserve the last focused control before that browser blur.
+    const rememberTrigger = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && event.target !== document.body) triggerRef.current = event.target;
+    };
+    document.addEventListener('focusin', rememberTrigger);
+    return () => document.removeEventListener('focusin', rememberTrigger);
+  }, [isOpen]);
 
   // Remote captcha scripts live only in this opaque-origin sandbox frame.
   const captchaFrameRef = useRef<HTMLIFrameElement>(null);
@@ -43,11 +61,37 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   const successHandledRef = useRef(false);
   const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle());
 
-  const completeCaptcha = useCallback((data: any) => {
+  const closeCaptcha = useCallback(() => {
     if (successHandledRef.current) return;
+    // Revoke the document before React removes it: an already queued result
+    // from that frame must not submit between a dismiss event and the commit.
+    sandboxChannelRef.current = '';
+    configRequestIdRef.current += 1;
+    closeCallback.current();
+  }, []);
+
+  const completeCaptcha = useCallback(async (data: any) => {
+    if (successHandledRef.current || loading) return;
+    const requestId = configRequestIdRef.current;
     successHandledRef.current = true;
-    onSuccess(data);
-  }, [onSuccess]);
+    setSubmitting(true);
+    try { await onSuccess(data); }
+    catch (failure) {
+      if (requestId === configRequestIdRef.current) setError(failure instanceof Error ? failure.message : '验证失败，请重试');
+    }
+    finally {
+      if (requestId === configRequestIdRef.current) {
+        successHandledRef.current = false;
+        setSubmitting(false);
+      }
+    }
+  }, [onSuccess, loading]);
+
+  useEffect(() => {
+    // Rejected submissions must restore focus after React enables the input.
+    // Calling focus in finally still sees the disabled DOM from the request.
+    if (isOpen && mode === 'image' && !submitting) codeInput.current?.focus({ preventScroll: true });
+  }, [isOpen, mode, submitting]);
 
   useEffect(() => {
     const handleSandboxMessage = (event: MessageEvent) => {
@@ -57,6 +101,25 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
         sandboxChannelRef.current,
       );
       if (!message) return;
+
+      if (message.type === 'dismiss' || message.type === 'focus') {
+        const dialog = dialogRef.current;
+        const frame = captchaFrameRef.current;
+        // A queued message from an unfocused, replaced or closed document must
+        // not affect a dialog. The channel and WindowProxy are checked above.
+        if (!isOpen || !dialog?.open || !frame || document.activeElement !== frame) return;
+        if (message.type === 'dismiss') {
+          closeCaptcha();
+        } else {
+          const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), iframe, [tabindex="0"]',
+          )).filter((control) => control.getClientRects().length > 0);
+          const index = controls.indexOf(frame);
+          const offset = message.payload === 'backward' ? -1 : 1;
+          (controls[(index + offset + controls.length) % controls.length] ?? dialog).focus();
+        }
+        return;
+      }
 
       if (message.type === 'success') {
         completeCaptcha(message.payload);
@@ -72,7 +135,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
     window.addEventListener('message', handleSandboxMessage);
     return () => window.removeEventListener('message', handleSandboxMessage);
-  }, [completeCaptcha]);
+  }, [closeCaptcha, completeCaptcha, isOpen]);
 
   const loadCaptcha = useCallback(async () => {
     const requestId = ++configRequestIdRef.current;
@@ -89,6 +152,9 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
       }
 
       setConfig(configData.config as CaptchaConfig);
+      // Image challenges start their own loading lifecycle. Other providers
+      // must also leave configuration loading before their result can submit.
+      setLoading(false);
     } catch (err) {
       if (requestId !== configRequestIdRef.current) return;
       setMode('error');
@@ -102,6 +168,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   }, [imageRequestLifecycle]);
 
   const fetchImageCaptcha = useCallback(() => {
+    if (successHandledRef.current) return;
     setError('');
     return imageRequestLifecycle.load(
       async (signal) => {
@@ -224,10 +291,46 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
     setImage('');
     setError('');
     successHandledRef.current = false;
+    setSubmitting(false);
     setMode('loading');
     setConfig(null);
     void loadCaptcha();
+    return () => {
+      configRequestIdRef.current += 1;
+      sandboxChannelRef.current = '';
+    };
   }, [cancelImageCaptcha, isOpen, loadCaptcha]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!isOpen || !dialog) return;
+    const trigger = triggerRef.current ?? document.activeElement;
+    if (!dialog.open) dialog.showModal();
+    (codeInput.current ?? dialog).focus({ preventScroll: true });
+    // Native modal top layer isolates the background. Explicitly wrap Tab as
+    // well so focus never visits browser chrome/BODY at either end.
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), iframe, [tabindex="0"]',
+      )).filter((control) => control.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); dialog.focus(); }
+      else if (!dialog.contains(document.activeElement) || document.activeElement === dialog
+        || (event.shiftKey && document.activeElement === first)
+        || (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    };
+    document.addEventListener('keydown', containFocus);
+    return () => {
+      document.removeEventListener('keydown', containFocus);
+      if (dialog.open) dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected && !trigger.matches(':disabled')) trigger.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -242,6 +345,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
   const sandboxFrame = sandboxDocument ? (
     <iframe
+      key={sandboxDocument}
       ref={captchaFrameRef}
       title={mode === 'geetest' ? '极验验证码' : '第三方验证码'}
       sandbox="allow-scripts"
@@ -256,10 +360,14 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-[320px] mx-4 rounded-xl p-6 bg-card border border-border shadow-lg">
+    <dialog ref={dialogRef} tabIndex={-1} aria-modal="true" aria-label="安全验证"
+      className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-[320px] border-0 bg-transparent p-0 text-foreground backdrop:bg-background/60 backdrop:backdrop-blur-sm"
+      onCancel={(event) => { event.preventDefault(); closeCaptcha(); }}>
+      <div className="relative w-full rounded-xl p-6 bg-card border border-border shadow-lg">
         <button
-          onClick={onClose}
+          onClick={closeCaptcha}
+          disabled={submitting}
+          aria-label="关闭安全验证"
           className="absolute right-4 top-4 text-muted-foreground hover:text-foreground transition-colors z-10"
         >
           <X className="w-5 h-5" />
@@ -267,9 +375,9 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
         <h2 className="text-lg font-bold text-foreground mb-4">安全验证</h2>
 
-        {error && (
+        {(error || verificationError) && (
           <div className="bg-destructive/10 text-destructive text-sm rounded-lg p-2 mb-4 text-center">
-            {error}
+            {error || verificationError}
           </div>
         )}
 
@@ -296,7 +404,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
               <button
                 type="button"
                 onClick={fetchImageCaptcha}
-                disabled={loading}
+                disabled={loading || submitting}
                 className="p-2 text-muted-foreground hover:text-foreground transition-colors rounded-md hover:bg-muted"
                 title="刷新验证码"
               >
@@ -306,9 +414,11 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
             <div>
               <input
+                ref={codeInput}
                 type="text"
                 placeholder="请输入图片中的字符"
                 value={code}
+                disabled={submitting}
                 onChange={(e) => setCode(e.target.value)}
                 className="w-full h-11 px-4 rounded-lg bg-muted border border-border text-foreground text-sm outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
@@ -317,7 +427,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
 
             <button
               type="submit"
-              disabled={!code.trim() || loading}
+              disabled={!code.trim() || loading || submitting}
               className="w-full h-11 rounded-lg bg-primary text-primary-foreground font-medium transition hover:opacity-90 active:opacity-80 disabled:opacity-50 mt-2"
             >
               确认
@@ -362,6 +472,6 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess }: CaptchaM
           </div>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }

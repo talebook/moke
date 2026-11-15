@@ -246,6 +246,25 @@ test('captcha messages require opaque origin, exact frame source, channel, and m
   );
 });
 
+test('keyboard commands retain frame identity and accept only bounded focus and dismiss payloads', () => {
+  const source = {};
+  const event = (type, payload) => ({ origin: 'null', source, data: {
+    kind: 'moke-captcha-sandbox-v1', channel: 'current-document', type, payload,
+  } });
+  for (const [type, payload] of [['dismiss', null], ['focus', 'forward'], ['focus', 'backward']]) {
+    assert.deepEqual(parseCaptchaSandboxMessage(event(type, payload), source, 'current-document'), { type, payload });
+    assert.equal(parseCaptchaSandboxMessage(event(type, payload), {}, 'current-document'), null);
+    assert.equal(parseCaptchaSandboxMessage(event(type, payload), source, 'old-document'), null);
+    assert.equal(parseCaptchaSandboxMessage({ ...event(type, payload), origin: 'https://library.test' }, source, 'current-document'), null);
+  }
+  for (const [type, payload] of [['dismiss', 'anything'], ['focus', '#login'], ['focus', { selector: 'body' }]]) {
+    assert.equal(parseCaptchaSandboxMessage(event(type, payload), source, 'current-document'), null);
+  }
+  const empty = event('dismiss', null);
+  empty.data.channel = '';
+  assert.equal(parseCaptchaSandboxMessage(empty, source, ''), null);
+});
+
 test('CaptchaModal cancels image requests on close and provider lifecycle cleanup', () => {
   assert.match(captchaModalSource, /signal,/);
   assert.match(captchaModalSource, /return cancelImageCaptcha;/);
