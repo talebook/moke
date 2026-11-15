@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { deferred, fillAuthPage, installCaptchaFixture, openAuthChallenge } from './helpers/captcha-fixture.mjs';
 
 import {
   buildCaptchaSandboxDocument,
@@ -317,5 +318,216 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       expect(probe.errors).toEqual([]);
       expect(probe.failures).toEqual([]);
     });
+  });
+}
+
+for (const provider of ['webcode', 'geetest']) {
+  test(`${provider}: closing revokes queued results before the frame is removed`, async ({ page }, info) => {
+    const probe = await installCaptchaFixture(page, { provider });
+    const dialog = await openAuthChallenge(page, 'access');
+    const solve = dialog.frameLocator('iframe').getByRole('button');
+    await expect(solve).toBeVisible(); await solve.focus();
+    const channel = await dialog.locator('iframe').evaluate((frame) => JSON.parse(/const channel = ("[^"]+")/.exec(frame.srcdoc)[1]));
+    await solve.evaluate((_, current) => {
+      parent.postMessage({ kind: 'moke-captcha-sandbox-v1', channel: current, type: 'dismiss', payload: null }, '*');
+      parent.postMessage({ kind: 'moke-captcha-sandbox-v1', channel: current, type: 'success', payload: { answer: 'correct' } }, '*');
+    }, channel);
+    await expect(dialog).toBeHidden();
+    await page.getByRole('button', { name: '确认', exact: true }).click();
+    await expect(dialog.frameLocator('iframe').getByRole('button')).toBeVisible();
+    expect(probe.posts).toHaveLength(2);
+    await attachProbe(info, page, probe);
+    expect(probe.errors).toEqual([]); expect(probe.failures).toEqual([]);
+  });
+}
+
+async function enterAuthFromPreviousPage(page, path, probe) {
+  const previous = `${authBase}/${path === 'access' ? 'login' : 'library'}`;
+  await page.goto(previous);
+  if (path === 'login') {
+    // Let the previous library's own capability probe finish before taking a
+    // session snapshot. Its normal completion is unrelated to this login.
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('moke-server-storage')).state.capabilities?.checkedAt)).toBeTruthy();
+    await page.getByRole('link', { name: '登录', exact: true }).click();
+  }
+  else {
+    probe.plans.push({ json: { err: 'user.private.not_valid' } });
+    await (await fillAuthPage(page, 'login')).click();
+    await expect(page).toHaveURL(`${authBase}/access`);
+  }
+  await (await fillAuthPage(page, path)).click();
+  await expect(page.getByPlaceholder('请输入图片中的字符')).toBeVisible();
+  return previous;
+}
+
+async function releasePost(page, gate) {
+  const response = page.waitForResponse((res) => res.request().method() === 'POST' && res.url().startsWith('http://library.test/'));
+  gate.resolve();
+  await (await response).finished();
+}
+
+async function attachProbe(info, page, probe) {
+  await info.attach('lifecycle-observations.json', { body: JSON.stringify({
+    url: page.url(), posts: probe.posts, errors: probe.errors, failures: probe.failures, console: probe.console,
+  }, null, 2), contentType: 'application/json' });
+}
+
+for (const path of ['access', 'login']) {
+  for (const result of ['ok', 'captcha.invalid', 'transport']) {
+    test(`${path}: real Back ignores late ${result} without changing the current session`, async ({ page }, info) => {
+      const probe = await installCaptchaFixture(page);
+      const previous = await enterAuthFromPreviousPage(page, path, probe);
+      const gate = deferred();
+      probe.plans.push({ gate, abort: result === 'transport', json: { err: result, msg: 'Stale verification result' } });
+      const before = probe.posts.length;
+      await page.getByPlaceholder('请输入图片中的字符').fill('correct');
+      await page.getByPlaceholder('请输入图片中的字符').press('Enter');
+      await expect.poll(() => probe.posts.length).toBe(before + 1);
+      await page.goBack();
+      await expect(page).toHaveURL(previous);
+      const session = await page.evaluate(() => localStorage.getItem('moke-server-storage'));
+      if (result === 'transport') {
+        const failed = page.waitForEvent('requestfailed', (request) => request.method() === 'POST' && request.url().startsWith('http://library.test/'));
+        gate.resolve(); await failed;
+      } else await releasePost(page, gate);
+      const navigated = await page.waitForURL(`${authBase}/shelf`, { timeout: 1000 }).then(() => true, () => false);
+      expect(navigated).toBe(false);
+      await expect(page).toHaveURL(previous);
+      expect(await page.evaluate(() => localStorage.getItem('moke-server-storage'))).toBe(session);
+      await expect(page.getByRole('dialog', { name: '安全验证' })).toBeHidden();
+      await page.screenshot({ path: info.outputPath('back-preserved.png') });
+      await attachProbe(info, page, probe);
+      expect(probe.errors).toEqual([]);
+      expect(probe.failures).toHaveLength(result === 'transport' ? 1 : 0);
+      if (result !== 'transport') expect(probe.console.filter((entry) => entry.type === 'error')).toEqual([]);
+      expect(probe.console.filter((entry) => /\[(AccessPage|LoginPage)\]/.test(entry.text))).toEqual([]);
+    });
+  }
+
+  test(`${path}: old completion cannot unlock a new verification after Back and Forward`, async ({ page }, info) => {
+    const probe = await installCaptchaFixture(page);
+    const previous = await enterAuthFromPreviousPage(page, path, probe);
+    const old = deferred();
+    probe.plans.push({ gate: old, json: { err: 'captcha.invalid', msg: 'Old failure' } });
+    const input = page.getByPlaceholder('请输入图片中的字符');
+    const oldCount = probe.posts.length;
+    await input.fill('wrong'); await input.press('Enter');
+    await expect.poll(() => probe.posts.length).toBe(oldCount + 1);
+    await page.goBack(); await expect(page).toHaveURL(previous);
+    await page.goForward(); await expect(page).toHaveURL(`${authBase}/${path}`);
+    const dialog = page.getByRole('dialog', { name: '安全验证' });
+    if (!await dialog.isVisible()) await (await fillAuthPage(page, path)).click();
+    await expect(input).toBeEnabled();
+    const current = deferred();
+    probe.plans.push({ gate: current, json: { err: 'captcha.invalid', msg: 'Current failure' } });
+    const count = probe.posts.length;
+    await input.fill('current'); await input.press('Enter');
+    await expect.poll(() => probe.posts.length).toBe(count + 1);
+    await releasePost(page, old);
+    await expect(input).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: '关闭安全验证' })).toBeDisabled();
+    await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Old failure')).toHaveCount(0);
+    await releasePost(page, current);
+    await expect(dialog.getByText('Current failure')).toBeVisible();
+    await expect(input).toBeEnabled();
+    expect(probe.posts).toHaveLength(count + 1);
+    await attachProbe(info, page, probe);
+    expect(probe.errors).toEqual([]);
+  });
+}
+
+for (const abort of [false, true]) {
+  test(`login: Back during user info ignores late ${abort ? 'failure' : 'success'}`, async ({ page }, info) => {
+    const probe = await installCaptchaFixture(page);
+    // Use a public previous page here: a protected library is entitled to
+    // synchronize its own user after sign-in has already reached the server.
+    const previous = `${authBase}/register`;
+    await page.goto(previous);
+    await page.getByRole('link', { name: '登录', exact: true }).click();
+    await (await fillAuthPage(page, 'login')).click();
+    await expect(page.getByPlaceholder('请输入图片中的字符')).toBeVisible();
+    const gate = deferred();
+    probe.infoPlans.push({ gate, abort });
+    const before = probe.infos;
+    await page.getByPlaceholder('请输入图片中的字符').fill('correct');
+    await page.getByPlaceholder('请输入图片中的字符').press('Enter');
+    await expect.poll(() => probe.infos).toBe(before + 1);
+    await page.goBack(); await expect(page).toHaveURL(previous);
+    const session = await page.evaluate(() => localStorage.getItem('moke-server-storage'));
+    gate.resolve();
+    const navigated = await page.waitForURL(`${authBase}/shelf`, { timeout: 1000 }).then(() => true, () => false);
+    expect(navigated).toBe(false);
+    expect(await page.evaluate(() => localStorage.getItem('moke-server-storage'))).toBe(session);
+    await attachProbe(info, page, probe);
+    expect(probe.errors).toEqual([]);
+    expect(probe.failures).toHaveLength(abort ? 1 : 0);
+    // A deliberate transport failure can log in the request layer, but the
+    // inactive login page must not report a new failure or log out the session.
+    expect(probe.console.filter((entry) => entry.text.includes('[LoginPage]'))).toEqual([]);
+  });
+}
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test.describe(`opaque keyboard ${viewport.width}`, () => {
+    test.use({ viewport });
+    for (const provider of ['webcode', 'geetest']) {
+      test(`${provider}: iframe Tab boundaries, Escape, pending and stale messages`, async ({ page }, info) => {
+        const probe = await installCaptchaFixture(page, { provider });
+        let dialog = await openAuthChallenge(page, 'login');
+        const trigger = page.getByRole('button', { name: '登录', exact: true });
+        const solve = () => dialog.frameLocator('iframe').getByRole('button', { name: provider === 'geetest' ? 'SDK challenge' : 'Solve fixture' });
+        await expect(solve()).toBeVisible();
+        const channel = await dialog.locator('iframe').evaluate((frame) => JSON.parse(/const channel = ("[^"]+")/.exec(frame.srcdoc)[1]));
+        const focus = [];
+        for (const key of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+          if (!focus.length) await solve().focus();
+          await page.keyboard.press(key);
+          await expect.poll(() => page.evaluate(() => document.querySelector('dialog').contains(document.activeElement))).toBe(true);
+          focus.push({ key, ...await page.evaluate(() => ({ tag: document.activeElement.tagName, inDialog: document.querySelector('dialog').contains(document.activeElement) })) });
+        }
+        await solve().evaluate(() => {
+          const extra = document.createElement('button'); extra.textContent = 'Extra frame control'; document.body.appendChild(extra);
+        });
+        await solve().focus(); await page.keyboard.press('Tab');
+        await expect(dialog.frameLocator('iframe').getByRole('button', { name: 'Extra frame control' })).toBeFocused();
+        await page.keyboard.press('Shift+Tab'); await expect(solve()).toBeFocused();
+        await page.keyboard.press('Shift+Tab');
+        await expect(dialog.getByRole('button', { name: '关闭安全验证' })).toBeFocused();
+        // A native modal still prevents programmatic focus on its background.
+        await trigger.evaluate((element) => element.focus());
+        expect(await page.evaluate(() => document.querySelector('dialog').contains(document.activeElement))).toBe(true);
+        await solve().focus(); await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden(); await expect(trigger).toBeFocused();
+        await trigger.click(); dialog = page.getByRole('dialog', { name: '安全验证' });
+        await expect(solve()).toBeVisible(); await solve().focus();
+        const currentChannel = await dialog.locator('iframe').evaluate((frame) => JSON.parse(/const channel = ("[^"]+")/.exec(frame.srcdoc)[1]));
+        expect(currentChannel).not.toBe(channel);
+        // Exercise the actual current frame with an old/wrong channel, and
+        // the right channel from a wrong WindowProxy. No command may act.
+        await solve().evaluate((_, oldChannel) => {
+          for (const type of ['success', 'dismiss', 'focus']) parent.postMessage({ kind: 'moke-captcha-sandbox-v1', channel: oldChannel, type, payload: type === 'dismiss' ? null : 'forward' }, '*');
+        }, channel);
+        await page.evaluate((current) => window.postMessage({ kind: 'moke-captcha-sandbox-v1', channel: current, type: 'dismiss', payload: null }, '*'), currentChannel);
+        await solve().focus(); await page.keyboard.press('Shift+Tab');
+        await expect(dialog.getByRole('button', { name: '关闭安全验证' })).toBeFocused();
+        await expect(dialog).toBeVisible(); expect(probe.posts).toHaveLength(2);
+        const gate = deferred();
+        probe.plans.push({ gate, json: { err: 'captcha.invalid', msg: 'Fixture rejected challenge' } });
+        await solve().click(); await expect.poll(() => probe.posts.length).toBe(3);
+        await expect(dialog.getByRole('button', { name: '关闭安全验证' })).toBeDisabled();
+        await solve().focus(); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
+        await releasePost(page, gate);
+        await expect(dialog.getByText('Fixture rejected challenge')).toBeVisible();
+        await expect(dialog.getByRole('button', { name: '关闭安全验证' })).toBeEnabled();
+        await info.attach('frame-focus.json', { body: JSON.stringify(focus), contentType: 'application/json' });
+        await page.screenshot({ path: info.outputPath('iframe-keyboard.png') });
+        await solve().click(); await expect(page).toHaveURL(`${authBase}/shelf`);
+        expect(probe.posts).toHaveLength(4);
+        await attachProbe(info, page, probe);
+        expect(probe.errors).toEqual([]); expect(probe.failures).toEqual([]);
+        expect(probe.console.filter((entry) => entry.type === 'error')).toEqual([]);
+      });
+    }
   });
 }

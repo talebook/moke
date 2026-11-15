@@ -61,15 +61,29 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
   const successHandledRef = useRef(false);
   const [imageRequestLifecycle] = useState(() => createImageCaptchaRequestLifecycle());
 
+  const closeCaptcha = useCallback(() => {
+    if (successHandledRef.current) return;
+    // Revoke the document before React removes it: an already queued result
+    // from that frame must not submit between a dismiss event and the commit.
+    sandboxChannelRef.current = '';
+    configRequestIdRef.current += 1;
+    closeCallback.current();
+  }, []);
+
   const completeCaptcha = useCallback(async (data: any) => {
     if (successHandledRef.current || loading) return;
+    const requestId = configRequestIdRef.current;
     successHandledRef.current = true;
     setSubmitting(true);
     try { await onSuccess(data); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : '验证失败，请重试'); }
+    catch (failure) {
+      if (requestId === configRequestIdRef.current) setError(failure instanceof Error ? failure.message : '验证失败，请重试');
+    }
     finally {
-      successHandledRef.current = false;
-      setSubmitting(false);
+      if (requestId === configRequestIdRef.current) {
+        successHandledRef.current = false;
+        setSubmitting(false);
+      }
     }
   }, [onSuccess, loading]);
 
@@ -88,6 +102,25 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
       );
       if (!message) return;
 
+      if (message.type === 'dismiss' || message.type === 'focus') {
+        const dialog = dialogRef.current;
+        const frame = captchaFrameRef.current;
+        // A queued message from an unfocused, replaced or closed document must
+        // not affect a dialog. The channel and WindowProxy are checked above.
+        if (!isOpen || !dialog?.open || !frame || document.activeElement !== frame) return;
+        if (message.type === 'dismiss') {
+          closeCaptcha();
+        } else {
+          const controls = Array.from(dialog.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), iframe, [tabindex="0"]',
+          )).filter((control) => control.getClientRects().length > 0);
+          const index = controls.indexOf(frame);
+          const offset = message.payload === 'backward' ? -1 : 1;
+          (controls[(index + offset + controls.length) % controls.length] ?? dialog).focus();
+        }
+        return;
+      }
+
       if (message.type === 'success') {
         completeCaptcha(message.payload);
         return;
@@ -102,7 +135,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
 
     window.addEventListener('message', handleSandboxMessage);
     return () => window.removeEventListener('message', handleSandboxMessage);
-  }, [completeCaptcha]);
+  }, [closeCaptcha, completeCaptcha, isOpen]);
 
   const loadCaptcha = useCallback(async () => {
     const requestId = ++configRequestIdRef.current;
@@ -258,9 +291,14 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
     setImage('');
     setError('');
     successHandledRef.current = false;
+    setSubmitting(false);
     setMode('loading');
     setConfig(null);
     void loadCaptcha();
+    return () => {
+      configRequestIdRef.current += 1;
+      sandboxChannelRef.current = '';
+    };
   }, [cancelImageCaptcha, isOpen, loadCaptcha]);
 
   useEffect(() => {
@@ -307,6 +345,7 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
 
   const sandboxFrame = sandboxDocument ? (
     <iframe
+      key={sandboxDocument}
       ref={captchaFrameRef}
       title={mode === 'geetest' ? '极验验证码' : '第三方验证码'}
       sandbox="allow-scripts"
@@ -323,10 +362,10 @@ export function CaptchaModal({ isOpen, serverUrl, onClose, onSuccess, verificati
   return (
     <dialog ref={dialogRef} tabIndex={-1} aria-modal="true" aria-label="安全验证"
       className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-[320px] border-0 bg-transparent p-0 text-foreground backdrop:bg-background/60 backdrop:backdrop-blur-sm"
-      onCancel={(event) => { event.preventDefault(); if (!successHandledRef.current) closeCallback.current(); }}>
+      onCancel={(event) => { event.preventDefault(); closeCaptcha(); }}>
       <div className="relative w-full rounded-xl p-6 bg-card border border-border shadow-lg">
         <button
-          onClick={onClose}
+          onClick={closeCaptcha}
           disabled={submitting}
           aria-label="关闭安全验证"
           className="absolute right-4 top-4 text-muted-foreground hover:text-foreground transition-colors z-10"
